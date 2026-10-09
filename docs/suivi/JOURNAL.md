@@ -2,6 +2,13 @@
 
 Une entrée par tâche terminée ou décision prise, la plus récente en haut.
 
+## 09/10/2026 — R1 du reset fusionné dans `backend` (L0-04, L0-06)
+
+- **Livré (dev-backend, 3 allers-retours) :** `common`, `identity`, `catalog`, UUID, migrations régénérées ; 235 tests verts sans `.env` ni `DEBUG` (relancés par le chef de projet), `migrate` sur base vierge et `makemigrations --check` OK. Relecture et ré-audit sécurité : OK, aucun bloquant.
+- **Décisions :** limite de connexion par couple identifiant+IP avec délai croissant (pas de plafond par identifiant seul, pour éviter le verrouillage d'un tiers) ; OTP 3/h par numéro+IP et 10/jour par numéro ; `NUM_PROXIES` obligatoire hors DEBUG (`common.E001`) : à fixer à 1 derrière Nginx ; `backend/scratch/` supprimé.
+- **Contrat pour le front (F1) :** réponses 429 avec `Retry-After`, endpoints logout/logout-all, KYC `download_url`, liste d'entreprises paginée à clés restreintes, commune cohérente avec la ville.
+- **Points ouverts :** téléphone vendeur public (L0-10a, avec R2), ré-encodage des images d'annonces `.webp` (R2), vérification e-mail, cache partagé de production (DatabaseCache), alerte de bourrage distribué, `NUM_PROXIES` à mentionner à devops, 46 dossiers temporaires de tests anciens à purger. Prochaine étape : R2.
+
 ## 09/10/2026 — Vague 1 : ADR 0002 et audit du front
 
 - **Décision (chef de projet, sur délégation de l'utilisateur) :** réinitialisation des migrations (L0-05). ADR 0002 rédigé par architecte-technique et accepté. Choix retenus : noms d'API conservés jusqu'à L0-11 ; `Deal` et Trust Score portés transitoirement dans `reviews` jusqu'à L0-07 ; app `platform` (vérifier la collision de nom dès R1) ; UUID v4 (à revoir en F-01) ; les fichiers `db.sqlite3` et `media/` de dev sont renommés, jamais supprimés.

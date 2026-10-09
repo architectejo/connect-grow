@@ -16,8 +16,8 @@ MODERATOR_PERMISSIONS = {
     'moderation.sanction': ['view', 'add'],
     'catalog.forbiddenitem': ['view'],
     'identity.kycdocument': ['view', 'review'],  # review : décider et télécharger, jamais éditer à la main
-    'identity.user': ['view'],
-    'reviews.review': ['view', 'change'],
+    'identity.user': ['view'],  # expose e-mail et téléphone dans l'admin : finalité KYC, à valider LEG-PRV
+    'reviews.review': ['view', 'change'],  # masquer un avis ; l'admin ne laisse modifier que is_hidden
     'marketplace.offer': ['view'],
 }
 

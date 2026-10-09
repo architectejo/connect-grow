@@ -160,7 +160,8 @@ class DomainBoundariesTests(SimpleTestCase):
                     self.assertNotIn(
                         type(field), (GenericForeignKey,), f'{label}.{model.__name__}.{field.name} : clé générique',
                     )
-                    if field.is_relation and (field.concrete or field.many_to_many) and not field.auto_created                             and field.related_model is not None:
+                    if (field.is_relation and (field.concrete or field.many_to_many) and not field.auto_created
+                            and field.related_model is not None):
                         target = field.related_model._meta.app_label
                         if target == label or target == 'auth':
                             continue
@@ -377,4 +378,3 @@ class CrontabTests(SimpleTestCase):
         from django.core.management import get_commands
 
         self.assertEqual(set(self.scheduled()) - set(get_commands()), set())
-

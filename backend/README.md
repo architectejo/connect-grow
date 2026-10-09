@@ -95,3 +95,9 @@ Anciens noms (reset R3) : `purge_trash`, `expire_posts`, `cleanup_otp_codes`, `r
 
 `setup_roles` (idempotent, lancé au démarrage du conteneur) recale les groupes `Modérateur` et `Administrateur` exactement sur les tables de `moderation/management/commands/setup_roles.py` (moindre privilège : pas d'accès aux messages, notifications, OTP ni à `payments`). Il échoue si une permission listée n'existe pas.
 
+### Droits de modération et données personnelles
+
+- L'API `/api/moderation/` exige les droits Django portés par les groupes (`moderation.view_report`, `change_report`, `view_sanction`, `add_sanction`) : un compte `is_staff` sans groupe n'a aucun accès. Suspension, bannissement et leur levée : administrateur seulement. Un signalement est ouvert à tout utilisateur connecté (10 par heure) mais sa réponse reste minimale pour lui.
+- **Consigne** : ne jamais écrire de donnée personnelle (e-mail, téléphone, adresse, pièce d'identité) dans les notes de décision, les motifs de sanction (`reason`), les descriptions de signalement ni les `details` du journal d'audit. Ces textes sont libres, conservés et lus par le personnel.
+- Le groupe Modérateur a `identity.user view` : l'admin Django lui montre l'e-mail et le téléphone des comptes. Finalité : instruction des vérifications KYC et des signalements. **À valider avec LEG-PRV** (et durée de conservation du journal et des signalements, question ouverte).
+- Le Modérateur a `reviews.review change` uniquement pour masquer ou réafficher un avis : `ReviewAdmin` rend tous les autres champs en lecture seule pour lui (seul un super-administrateur réécrit un avis).

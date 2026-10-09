@@ -55,7 +55,7 @@ On réinitialise toutes les migrations en une seule opération, en passant à la
 | `interactions.Notification` | `notifications` | Inchangé hors UUID. |
 | `moderation.Report`, `Sanction`, `AuditLog` | `moderation` | `target_type/target_id` ; `Sanction.related_offer_id`. `Appeal` viendra avec L1. |
 | `payments.Transaction` | `payments` (gelée) | `offer_id` UUID ; refonte en L1-12. |
-| — (nouveau) | `platform` | `OutboxEvent`, `FeatureFlag` (L0-16 ; les interrupteurs de L0-13 et L0-14 s'y appuient). Chemin `apps.platform`, label `platform` ; vérifier l'absence de collision avec le module standard `platform` (pas d'`apps/` dans `sys.path`). |
+| — (nouveau) | `platform` | `OutboxEvent`, `FeatureFlag` (L0-16 ; les interrupteurs de L0-13 et L0-14 s'y appuient). Chemin `apps.platform`, label `platform` ; vérifier l'absence de collision avec le module standard `platform` (pas d'`apps/` dans `sys.path`). **Note (ADR 0003) : renommée `apps.platform_core`, label `platform_core`, pour supprimer tout risque de collision.** |
 | — (nouveau) | `common` | Classe abstraite UUID + horodatages, utilitaires ; ce n'est pas un domaine, ne porte aucun modèle concret. |
 
 Modules `profiles`, `social`, `promotion`, `events`, `subscriptions`, `campaigns`, `jobs`, `tenders` : non créés ici, ajoutés par leurs stories (une app vide n'apporte rien).
@@ -96,7 +96,7 @@ Règle : **une seule branche et un seul agent touchent les modèles pendant la r
 | 0 | Pose du tag `pre-reset-migrations`, sauvegarde `db.sqlite3` hors dépôt | chef de projet / dev-backend | — | — |
 | 1 | **L0-04** Suppression du code mort restant (`backend/scratch/`, résidus des apps non installées, références mortes ; `connecte-plus-hub/` relève de L0-03, `docker-compose.mysql.yml`/`mysql-init` de L0-02) | dev-backend | 0 | L0-17, front |
 | 2 | **Reset R1** : `apps/common`, `identity`, `catalog` (+ `seed_catalog`), `AUTH_USER_MODEL`, UUID. Inclut **L0-06**. | dev-backend | 1 | L0-16 (voir 3) |
-| 3 | **L0-16** App `platform` : `OutboxEvent` (UUID, `event_type`, `aggregate_id`, `payload` JSON, `status`, `created_at`, `published_at`, `attempts`), `FeatureFlag`, `services.publish_event()`, commande `dispatch_outbox`, tests. Ne dépend que de `common` (livré au début de R1) ; ne touche que `apps/platform` et une ligne de `INSTALLED_APPS`. | dev-backend (2e instance) | `common` de R1 | R1 puis R2 |
+| 3 | **L0-16** App `platform` (devenue `platform_core`, ADR 0003) : `OutboxEvent` (UUID, `event_type`, `aggregate_id`, `payload` JSON, `status`, `created_at`, `published_at`, `attempts`), `FeatureFlag`, `services.publish_event()`, commande `dispatch_outbox`, tests. Ne dépend que de `common` (livré au début de R1) ; ne touche que `apps/platform` et une ligne de `INSTALLED_APPS`. | dev-backend (2e instance) | `common` de R1 | R1 puis R2 |
 | 4 | **Reset R2** : `marketplace` (Offer, **L0-12** : `is_deleted`, `Post`→`Offer`), `visibility`, `reviews` (avec `Deal` transitoire), `notifications`, `messaging`. Suppression de `reputation`, `ranking`, `interactions`, `accounts`, `marketplace` d'origine. Découplage par services. | dev-backend | R1 | L0-16, F1 |
 | 5 | **Reset R3** : `moderation` (`target_type/id`), `payments` (gelée), commandes cron, `setup_roles`, ~~import-linter~~ (non retenu, voir notes R3), régénération finale des `0001`, `makemigrations --check`, suite de tests complète sur base vierge. | dev-backend | R2 | L0-16, F1 |
 | F1 | Front : ids en chaînes UUID, aucune autre modification de contrat. | dev-frontend | contrat R1 figé (début) | R1 à R3 |

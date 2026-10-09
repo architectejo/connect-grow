@@ -34,6 +34,14 @@ _FORCED_ENV = {
     'PROFILE_IMAGE_QUALITY': '85',
     'PROFILE_IMAGE_MAX_MB': '5',
     'PROFILE_IMAGE_MAX_PIXELS': '16000000',
+    # Outbox : diffusion explicite dans les tests (apps.platform_core.testing.dispatch_outbox_now).
+    'OUTBOX_INLINE_DISPATCH': 'False',
+    'OUTBOX_MAX_ATTEMPTS': '8',
+    'OUTBOX_LOCK_TIMEOUT_SECONDS': '300',
+    'OUTBOX_BACKOFF_BASE_SECONDS': '30',
+    'OUTBOX_BACKOFF_MAX_SECONDS': '3600',
+    'OUTBOX_RETENTION_DAYS': '7',
+    'OUTBOX_DEAD_RETENTION_DAYS': '90',
 }
 os.environ.update(_FORCED_ENV)
 

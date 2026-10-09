@@ -138,7 +138,7 @@ class PermissionDefaultsTests(TestCase):
 # Tous les domaines (ADR 0002, R3) : aucun n'échappe au contrôle de découplage. Un nouveau module
 # doit être ajouté ici ; `test_every_installed_domain_is_covered` le rappelle.
 ALL_DOMAINS = {'catalog', 'identity', 'marketplace', 'visibility', 'reviews', 'messaging', 'notifications',
-               'moderation', 'payments'}
+               'moderation', 'payments', 'platform_core'}
 DECOUPLED_APPS = tuple(sorted(ALL_DOMAINS))
 APPS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -360,7 +360,7 @@ class TestStorageCleanupTests(SimpleTestCase):
 # Tâches planifiées de la V1 (CDC 5.6) : une ligne de backend/cron/crontab chacune.
 SCHEDULED_COMMANDS = {
     'purge_offer_trash', 'expire_offers', 'lift_expired_sanctions',
-    'purge_otp_codes', 'refresh_daily_contacts', 'purge_offer_views',
+    'purge_otp_codes', 'refresh_daily_contacts', 'purge_offer_views', 'dispatch_outbox', 'purge_outbox',
 }
 
 

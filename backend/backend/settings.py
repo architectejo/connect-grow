@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     # Applications locales. `identity` précède `catalog` (ForbiddenItem.added_by -> utilisateur) :
     # l'ordre garde un seul 0001_initial par app à la génération des migrations.
     'apps.common',
+    'apps.platform_core',
     'apps.identity',
     'apps.catalog',
     'apps.visibility',
@@ -293,3 +294,16 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = 200
 
 # Cookie signé qui identifie un visiteur anonyme pour le comptage des vues (apps.marketplace).
 ANON_VIEW_COOKIE_MAX_AGE = 365 * 86400
+
+# --- Outbox des événements de domaine (ADR 0003) ---
+# Diffusion immédiate après validation de la transaction émettrice ; le cron `dispatch_outbox`
+# (chaque minute) reste le filet de sécurité. Désactivée sous settings_test.
+OUTBOX_INLINE_DISPATCH = os.getenv('OUTBOX_INLINE_DISPATCH', 'True') == 'True'
+OUTBOX_MAX_ATTEMPTS = int(os.getenv('OUTBOX_MAX_ATTEMPTS', '8'))
+OUTBOX_LOCK_TIMEOUT_SECONDS = int(os.getenv('OUTBOX_LOCK_TIMEOUT_SECONDS', '300'))
+OUTBOX_BACKOFF_BASE_SECONDS = int(os.getenv('OUTBOX_BACKOFF_BASE_SECONDS', '30'))
+OUTBOX_BACKOFF_MAX_SECONDS = int(os.getenv('OUTBOX_BACKOFF_MAX_SECONDS', '3600'))
+OUTBOX_MAX_PAYLOAD_BYTES = 16 * 1024
+# Rétention courte : certaines charges utiles contiennent des données personnelles (message de contact).
+OUTBOX_RETENTION_DAYS = int(os.getenv('OUTBOX_RETENTION_DAYS', '7'))
+OUTBOX_DEAD_RETENTION_DAYS = int(os.getenv('OUTBOX_DEAD_RETENTION_DAYS', '90'))

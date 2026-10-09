@@ -71,10 +71,32 @@ Un domaine par app dans `apps/` ; clés UUID (`common.models.BaseModel`) ; aucun
 | `notifications` | notifications |
 | `moderation` | signalements, sanctions, journal d'audit (`record_audit`) ; cibles par `target_type` + `target_id` |
 | `payments` | gelé (L0-13), refonte en L1-12 |
+| `platform_core` | outbox des événements de domaine (`OutboxEvent`, `OutboxDelivery`), registre d'abonnés, diffusion et purge ; ne dépend que de `common` |
 
 **Contrôle des frontières.** `common.tests.DomainBoundariesTests` (analyse `ast`, `common/boundaries.py`) tourne dans `manage.py test apps` et dans la CI : aucun import de modèle d'un autre domaine (imports directs, relatifs, `get_model`, `import_string`), aucune clé étrangère ou many-to-many hors utilisateur, aucune clé générique, aucune dépendance de migration entre domaines hors `identity`. Tout nouveau domaine doit être ajouté à `ALL_DOMAINS` dans ce fichier de tests (un test le rappelle). `import-linter` n'est pas utilisé : il ne voit pas les chargements dynamiques et n'apporte rien de plus.
 
 **Cibles de modération.** `moderation` résout `target_type` (`offer`, `user`, `review`, `message`) via `get_report_labels(ids)` du `services.py` de chaque domaine (registre `TARGET_RESOLVERS`). Un nouveau type signalable ajoute une entrée à ce registre et cette fonction à son domaine.
+
+## Événements de domaine (outbox, ADR 0003)
+
+Un domaine ne modifie pas un autre domaine : il écrit son changement **et** un événement (`platform_core.services.publish_event`, refusé hors `transaction.atomic()`) dans la même transaction. Les abonnés (`apps/<domaine>/events.py`, enregistrés par `AppConfig.ready()`) sont appelés ensuite par `dispatch_outbox`, avec reprise (attente 30 s x 2^n, plafonnée à 1 h, 8 tentatives puis `dead`), exactement une fois par abonné. La diffusion est aussi tentée tout de suite après validation de la transaction (`OUTBOX_INLINE_DISPATCH`, vrai par défaut, faux en test) ; le cron est le filet de sécurité.
+
+| Type d'événement | Émetteur | Abonnés | Contenu de la charge utile |
+|---|---|---|---|
+| `marketplace.contact_recorded` | marketplace | `messaging.open_contact_conversation`, `notifications.notify_contact` | identifiants (contact, offre, vendeur, expéditeur) et titre public de l'offre ; ni message ni nom |
+| `marketplace.exchange_proposed` | marketplace | `messaging.open_exchange_conversation`, `notifications.notify_exchange` | idem (`proposal_id`) |
+| `marketplace.offer_expiring_soon` | marketplace | `notifications.notify_offer_expiration` | offre, titre, vendeur, échéance |
+| `visibility.offer_viewed` | visibility | `marketplace.sync_offer_views` | offre, date |
+| `visibility.offer_shared` | visibility | `marketplace.sync_offer_shares` | offre, date |
+| `reviews.review_posted` | reviews | `notifications.notify_review_posted` | identifiants, nom de l'auteur, titre de l'offre, extrait (données publiques de l'avis) |
+| `reviews.review_replied` | reviews | `notifications.notify_review_reply` | identifiants, nom du répondant, titre de l'offre |
+| `reviews.crossed_reviews_detected` | reviews | `moderation.file_crossed_reviews_report` | avis, deux comptes, nombre d'affaires, fenêtre |
+
+Ajouter un événement : déclarer le type dans `platform_core/catalog.py`, publier avec `publish_event('<domaine>.<fait>', ...)` (type littéral), écrire l'abonné idempotent dans `events.py` du domaine récepteur (il n'appelle que des `services.py`). Un contrôle Django (`platform_core.E001`/`E002`) et des tests de frontières vérifient le catalogue, les émetteurs et les abonnés. Le `name` d'un abonné est stocké en base : ne jamais le renommer sans migration.
+
+Exploitation : `python manage.py dispatch_outbox --stats` (décomptes ; code de sortie 1 s'il existe une livraison `dead`), `--requeue <id|dead>` (relance journalisée dans l'AuditLog, comme l'action « Relancer » de l'admin Django, qui n'affiche pas les charges utiles). `purge_outbox` supprime les événements traités après 7 jours (`OUTBOX_RETENTION_DAYS`) et en échec définitif après 90 jours (`OUTBOX_DEAD_RETENTION_DAYS`). En test, utiliser `apps.platform_core.testing.dispatch_outbox_now()` pour diffuser de façon synchrone.
+
+Les totaux `views_count` et `shares_count` d'une offre sont recalculés à la source (compteurs journaliers de `visibility`) : la valeur `shares_count` renvoyée par l'endpoint de partage est « au mieux » (à jour dans le cas normal, sinon le total précédent).
 
 ## Tâches planifiées (cron)
 
@@ -88,6 +110,8 @@ Déclarées dans `cron/crontab` (conteneur `cron`) ; chacune est une commande de
 | `purge_offer_views` | visibility | quotidienne, 02:20 | purge les vues uniques anciennes |
 | `purge_otp_codes` | identity | horaire | supprime les OTP expirés |
 | `refresh_daily_contacts` | marketplace | horaire (:05) | recalcule les contacts du jour pour les graphiques |
+| `dispatch_outbox` | platform_core | chaque minute | diffuse les événements de domaine aux abonnés |
+| `purge_outbox` | platform_core | quotidienne, 02:30 | supprime les anciens événements (7 j traités, 90 j en échec) |
 
 Anciens noms (reset R3) : `purge_trash`, `expire_posts`, `cleanup_otp_codes`, `refresh_dashboard_aggregates`.
 

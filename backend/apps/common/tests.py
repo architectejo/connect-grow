@@ -1,52 +1,96 @@
 import os
+import re
 import subprocess
 import sys
 
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase
+from django.urls import Resolver404, URLResolver, get_resolver, resolve
+from rest_framework.permissions import AllowAny
 from rest_framework.test import APIClient
 
-# Endpoints qui DOIVENT rester publics (anonyme : ni 401 ni 403). Si l'un devient privé
-# par erreur (p. ex. oubli de AllowAny avec le refus par défaut), ce test échoue.
-PUBLIC_ENDPOINTS = [
-    ('get', '/api/marketplace/cities/'),
-    ('get', '/api/marketplace/communes/'),
-    ('get', '/api/marketplace/categories/'),
-    ('get', '/api/marketplace/posts/'),
-    ('get', '/api/moderation/forbidden-items/'),
-    ('get', '/api/interactions/reviews/'),
-    ('get', '/api/accounts/businesses/'),
-    ('post', '/api/accounts/register/'),
-    ('post', '/api/accounts/login/'),
-    ('post', '/api/accounts/token/refresh/'),
-    ('post', '/api/accounts/otp/request/'),
-    ('post', '/api/accounts/password-reset/confirm/'),
-]
+# Routes (méthode, gabarit d'URL) volontairement publiques : tout le reste doit refuser un
+# anonyme. Une vue qui devient publique par erreur (AllowAny ajouté) OU privée par erreur
+# (AllowAny oublié avec le refus par défaut) fait échouer test_every_route_..., qui parcourt
+# TOUTES les routes via get_resolver().
+EXPECTED_PUBLIC = {
+    ('get', 'api/marketplace/cities/'),
+    ('get', 'api/marketplace/cities/<pk>/'),
+    ('get', 'api/marketplace/communes/'),
+    ('get', 'api/marketplace/communes/<pk>/'),
+    ('get', 'api/marketplace/categories/'),
+    ('get', 'api/marketplace/categories/<pk>/'),
+    ('get', 'api/marketplace/posts/'),
+    ('get', 'api/marketplace/posts/<pk>/'),
+    ('get', 'api/moderation/forbidden-items/'),
+    ('get', 'api/moderation/forbidden-items/<pk>/'),
+    ('get', 'api/interactions/reviews/'),
+    ('get', 'api/interactions/reviews/<pk>/'),
+    ('get', 'api/accounts/businesses/'),
+    ('post', 'api/accounts/register/'),
+    ('post', 'api/accounts/login/'),
+    ('post', 'api/accounts/token/refresh/'),
+    ('post', 'api/accounts/otp/request/'),
+    ('post', 'api/accounts/password-reset/confirm/'),
+}
 
-# Endpoints qui DOIVENT refuser un anonyme (401).
-PRIVATE_ENDPOINTS = [
-    ('get', '/api/accounts/me/'),
-    ('post', '/api/accounts/change-password/'),
-    ('post', '/api/accounts/logout/'),
-    ('post', '/api/accounts/logout-all/'),
-    ('get', '/api/accounts/kyc/documents/'),
-    ('get', '/api/accounts/kyc/review-queue/'),
-    ('get', '/api/marketplace/favorites/'),
-    ('get', '/api/marketplace/posts/trash/'),
-    ('get', '/api/marketplace/stats/dashboard/'),
-    ('post', '/api/marketplace/posts/'),
-    ('get', '/api/interactions/notifications/'),
-    ('get', '/api/interactions/conversations/'),
-    ('get', '/api/interactions/messages/'),
-    ('post', '/api/interactions/contacts/'),
-    ('post', '/api/interactions/reviews/'),
-    ('get', '/api/reputation/deals/'),
-    ('get', '/api/moderation/reports/'),
-    ('get', '/api/moderation/sanctions/'),
-    ('get', '/api/moderation/dashboard/'),
-    ('post', '/api/moderation/forbidden-items/'),
-    ('get', '/api/payments/'),
-]
+# Routes qui doivent figurer dans le parcours (garde contre un parcours qui raterait des vues).
+MUST_BE_WALKED = {
+    'api/accounts/kyc/documents/<pk>/',
+    'api/accounts/kyc/documents/<pk>/decision/',
+    'api/accounts/kyc/documents/<pk>/download/',
+    'api/marketplace/posts/<pk>/pause/',
+    'api/marketplace/posts/<pk>/soft_delete/',
+    'api/marketplace/posts/<pk>/favorite/',
+    'api/marketplace/posts/recalculate_all_scores/',
+    'api/marketplace/posts/trash/',
+    'api/moderation/reports/<pk>/claim/',
+}
+
+SAMPLE_VALUES = ('1', '8f0f5a52-3c6e-4a49-9d44-0d8a3d5f1c11')
+
+
+def walk_routes(patterns=None, prefix=''):
+    """(gabarit, callback) de toutes les routes, sans l'admin ni les suffixes de format."""
+    patterns = get_resolver().url_patterns if patterns is None else patterns
+    for entry in patterns:
+        text = prefix + str(entry.pattern)
+        if isinstance(entry, URLResolver):
+            yield from walk_routes(entry.url_patterns, text)
+            continue
+        template = text.replace('^', '').replace('$', '').replace('\\Z', '')
+        template = re.sub(r'\(\?P<(\w+)>[^)]*\)', r'<\1>', template)
+        template = re.sub(r'<\w+:(\w+)>', r'<\1>', template)
+        if 'format' in template or template.startswith(('admin/', 'static/')):
+            continue
+        yield template, entry.callback
+
+
+def concrete_url(template, callback):
+    """URL réelle : paramètres remplacés par la valeur d'exemple qui résout vers cette vue."""
+    for sample in SAMPLE_VALUES:
+        url = '/' + re.sub(r'<\w+>', sample, template)
+        try:
+            if resolve(url).func is callback:
+                return url
+        except Resolver404:
+            continue
+    raise AssertionError(f"Aucune URL d'exemple ne résout {template}")
+
+
+def allowed_methods(callback):
+    actions = getattr(callback, 'actions', None)
+    if actions:  # ViewSet : méthode HTTP -> action
+        return {method: action for method, action in actions.items()}
+    view_class = callback.cls
+    return {m: None for m in view_class.http_method_names if m != 'options' and hasattr(view_class, m)}
+
+
+def declares_allow_any(callback, action):
+    view = callback.cls(**getattr(callback, 'initkwargs', {}))
+    view.action = action
+    view.request = None
+    return any(isinstance(permission, AllowAny) for permission in view.get_permissions())
 
 
 class PermissionDefaultsTests(TestCase):
@@ -55,24 +99,24 @@ class PermissionDefaultsTests(TestCase):
             settings.REST_FRAMEWORK['DEFAULT_PERMISSION_CLASSES'], ['rest_framework.permissions.IsAuthenticated'],
         )
 
-    def test_expected_public_endpoints_stay_public(self):
-        client = APIClient()
-        for method, url in PUBLIC_ENDPOINTS:
-            response = getattr(client, method)(url, {}, format='json') if method == 'post' else client.get(url)
-            self.assertNotIn(response.status_code, (401, 403), f"{method.upper()} {url} est devenu privé")
-
-    def test_expected_private_endpoints_refuse_anonymous(self):
-        client = APIClient()
-        for method, url in PRIVATE_ENDPOINTS:
-            response = getattr(client, method)(url, {}, format='json') if method == 'post' else client.get(url)
-            self.assertIn(response.status_code, (401, 403, 404), f"{method.upper()} {url}")
-            self.assertNotEqual(response.status_code, 200, f"{method.upper()} {url} est public")
-        # Les routes existantes (hors /api/payments/, vide) répondent bien 401 et non 404.
-        for method, url in PRIVATE_ENDPOINTS:
-            if url == '/api/payments/':
-                continue
-            response = getattr(client, method)(url, {}, format='json') if method == 'post' else client.get(url)
-            self.assertEqual(response.status_code, 401, f"{method.upper()} {url}")
+    def test_every_route_refuses_anonymous_unless_explicitly_public(self):
+        client = APIClient(raise_request_exception=False)
+        walked, public_seen = set(), set()
+        for template, callback in walk_routes():
+            walked.add(template)
+            url = concrete_url(template, callback)
+            for method, action in allowed_methods(callback).items():
+                response = getattr(client, method)(url, {}, format='json')
+                label = f"{method.upper()} {template}"
+                if declares_allow_any(callback, action):
+                    public_seen.add((method, template))
+                    self.assertIn((method, template), EXPECTED_PUBLIC, f"{label} est public sans être attendu")
+                    self.assertNotIn(response.status_code, (401, 403), f"{label} est devenu privé")
+                else:
+                    self.assertIn(response.status_code, (401, 403), f"{label} accepte un anonyme ({response.status_code})")
+        self.assertEqual(EXPECTED_PUBLIC - public_seen, set(), "Routes publiques attendues introuvables")
+        self.assertEqual(MUST_BE_WALKED - walked, set(), "Routes absentes du parcours")
+        self.assertGreater(len(walked), 60)
 
 
 class SecretKeySettingsTests(SimpleTestCase):

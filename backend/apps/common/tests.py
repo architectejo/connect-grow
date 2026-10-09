@@ -354,3 +354,27 @@ class TestStorageCleanupTests(SimpleTestCase):
         self.assertTrue(str(settings.MEDIA_ROOT).startswith(tmp))
         self.assertTrue(str(settings.KYC_PRIVATE_ROOT).startswith(tmp))
         self.assertIn('connecteplus-tests-', str(settings.MEDIA_ROOT))
+
+
+# Tâches planifiées de la V1 (CDC 5.6) : une ligne de backend/cron/crontab chacune.
+SCHEDULED_COMMANDS = {
+    'purge_offer_trash', 'expire_offers', 'lift_expired_sanctions',
+    'purge_otp_codes', 'refresh_daily_contacts', 'purge_offer_views',
+}
+
+
+class CrontabTests(SimpleTestCase):
+    def scheduled(self):
+        path = os.path.join(os.path.dirname(APPS_DIR), 'cron', 'crontab')
+        with open(path, encoding='utf-8') as handle:
+            return re.findall(r'manage\.py (\w+)', handle.read())
+
+    def test_crontab_schedules_exactly_the_expected_commands_once(self):
+        scheduled = self.scheduled()
+        self.assertEqual(sorted(scheduled), sorted(SCHEDULED_COMMANDS))
+
+    def test_every_scheduled_command_exists(self):
+        from django.core.management import get_commands
+
+        self.assertEqual(set(self.scheduled()) - set(get_commands()), set())
+

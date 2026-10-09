@@ -54,3 +54,44 @@ proxy_set_header X-Forwarded-Proto $scheme;
 - **Taille des envois** : Django borne le corps hors fichiers (`DATA_UPLOAD_MAX_MEMORY_SIZE`, 1 Mo par défaut, réglable par `DATA_UPLOAD_MAX_MEMORY_KB`), le nombre de fichiers par requête (`DATA_UPLOAD_MAX_NUMBER_FILES = 10`) et chaque image (`PROFILE_IMAGE_MAX_MB`, `PROFILE_IMAGE_MAX_PIXELS`, 16 Mpx, mêmes plafonds pour les photos d'offres). Nginx doit aussi borner le corps total avant Django : `client_max_body_size 12m;` (8 photos de 5 Mo ne passent pas d'un seul envoi : le plafond protège le serveur, les photos s'envoient en plusieurs requêtes).
 - **Vues uniques** : la commande `purge_offer_views` (quotidienne, voir `cron/crontab`) supprime les vues uniques plus anciennes que la durée réglée dans le back-office (Paramètres de visibilité, 2 jours par défaut ; durée définitive à fixer avec LEG-PRV).
 - **Fuseau** : `TIME_ZONE = 'Africa/Kinshasa'`, `USE_TZ = True`. Les dates JSON portent le décalage (`+01:00`).
+
+## Structure des modules (ADR 0002)
+
+Un domaine par app dans `apps/` ; clés UUID (`common.models.BaseModel`) ; aucune clé étrangère entre domaines (sauf vers l'utilisateur) ; un domaine lit un autre uniquement par son `services.py`.
+
+| Module | Contenu |
+|---|---|
+| `common` | classe abstraite UUID, pagination, utilitaires, contrôle des frontières (pas de modèle concret) |
+| `identity` | utilisateur, OTP, fiche entreprise (transitoire), pièces KYC, sessions |
+| `catalog` | villes, communes, catégories, produits interdits (référentiels configurables) |
+| `marketplace` | offres, photos, favoris, contacts, propositions d'échange |
+| `visibility` | compteurs journaliers, vues uniques, réglages du classement |
+| `reviews` | avis ; `Deal` et Trust Score transitoires (retrait : L0-07) |
+| `messaging` | conversations et messages |
+| `notifications` | notifications |
+| `moderation` | signalements, sanctions, journal d'audit (`record_audit`) ; cibles par `target_type` + `target_id` |
+| `payments` | gelé (L0-13), refonte en L1-12 |
+
+**Contrôle des frontières.** `common.tests.DomainBoundariesTests` (analyse `ast`, `common/boundaries.py`) tourne dans `manage.py test apps` et dans la CI : aucun import de modèle d'un autre domaine (imports directs, relatifs, `get_model`, `import_string`), aucune clé étrangère ou many-to-many hors utilisateur, aucune clé générique, aucune dépendance de migration entre domaines hors `identity`. Tout nouveau domaine doit être ajouté à `ALL_DOMAINS` dans ce fichier de tests (un test le rappelle). `import-linter` n'est pas utilisé : il ne voit pas les chargements dynamiques et n'apporte rien de plus.
+
+**Cibles de modération.** `moderation` résout `target_type` (`offer`, `user`, `review`, `message`) via `get_report_labels(ids)` du `services.py` de chaque domaine (registre `TARGET_RESOLVERS`). Un nouveau type signalable ajoute une entrée à ce registre et cette fonction à son domaine.
+
+## Tâches planifiées (cron)
+
+Déclarées dans `cron/crontab` (conteneur `cron`) ; chacune est une commande de gestion testée. Hors Docker, les lancer à la main ou par le cron de la machine.
+
+| Commande | Module | Fréquence | Rôle |
+|---|---|---|---|
+| `purge_offer_trash` | marketplace | quotidienne, 02:00 | supprime définitivement les offres en corbeille depuis plus de N jours |
+| `expire_offers` | marketplace | quotidienne, 02:05 | expire les offres échues, notifie les échéances proches |
+| `lift_expired_sanctions` | moderation | quotidienne, 02:10 | lève les suspensions arrivées à échéance (journalisé) |
+| `purge_offer_views` | visibility | quotidienne, 02:20 | purge les vues uniques anciennes |
+| `purge_otp_codes` | identity | horaire | supprime les OTP expirés |
+| `refresh_daily_contacts` | marketplace | horaire (:05) | recalcule les contacts du jour pour les graphiques |
+
+Anciens noms (reset R3) : `purge_trash`, `expire_posts`, `cleanup_otp_codes`, `refresh_dashboard_aggregates`.
+
+## Rôles
+
+`setup_roles` (idempotent, lancé au démarrage du conteneur) recale les groupes `Modérateur` et `Administrateur` exactement sur les tables de `moderation/management/commands/setup_roles.py` (moindre privilège : pas d'accès aux messages, notifications, OTP ni à `payments`). Il échoue si une permission listée n'existe pas.
+

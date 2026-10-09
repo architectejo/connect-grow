@@ -286,9 +286,9 @@ class OfferDecouplingTests(ModerationTestBase):
         from apps.reviews.models import Review
 
         review = Review.objects.create(user=self.reporter, reviewed_user=self.seller, content='Avis assez long.', rating=3)
-        first = services.file_automatic_report(review, services.REASON_CROSSED_REVIEWS, 'x')
+        first = services.file_automatic_report('review', review.pk, services.REASON_CROSSED_REVIEWS, 'x')
         self.assertIsNotNone(first)
-        self.assertIsNone(services.file_automatic_report(review, services.REASON_CROSSED_REVIEWS, 'x'))
+        self.assertIsNone(services.file_automatic_report('review', review.pk, services.REASON_CROSSED_REVIEWS, 'x'))
 
     def test_dashboard_counts_active_offers(self):
         self.client.force_authenticate(self.admin)

@@ -1,7 +1,8 @@
 """CDC 3.7 / 3.8 : le Trust Score d'un utilisateur est recalculé à chaque avis créé, modifié
 ou retiré, puis répercuté sur le score de visibilité de ses offres actives (facteur T).
-Signaux sur un modèle du même domaine ; les effets sur les autres domaines passent par leurs
-`services.py` (transitoire : retiré par L0-07)."""
+Signaux sur un modèle du même domaine ; le recalcul du Trust Score reste synchrone et passe par
+les `services.py` des autres domaines (transitoire : retiré par L0-07). Les autres effets
+(notification, signalement automatique) sont des événements de domaine (ADR 0003)."""
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
@@ -29,7 +30,7 @@ def on_review_saved(sender, instance, created, **kwargs):
     if instance.reviewed_user_id and (created or getattr(instance, '_trust_dirty', True)):
         services.recompute_trust_score(instance.reviewed_user_id)
     if created:
-        services.check_crossed_reviews(instance)
+        services.check_crossed_reviews(instance)  # publie un événement dans sa propre transaction
 
 
 @receiver(post_delete, sender=Review)

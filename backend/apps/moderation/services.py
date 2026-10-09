@@ -91,16 +91,16 @@ def resolve_labels_for_reports(reports) -> dict:
     return labels
 
 
-def file_automatic_report(target, reason, description=''):
-    """Dépose dans la file de modération un signalement émis par le système (sans auteur).
-    Un seul signalement par cible et par motif : renvoie None s'il existe déjà."""
-    target_type = target._meta.model_name
+def file_automatic_report(target_type, target_id, reason, description=''):
+    """Dépose dans la file de modération un signalement émis par le système (sans auteur), pour
+    une cible désignée par (`target_type`, `target_id`) : aucune instance d'un autre domaine.
+    Un seul signalement par cible et par motif : renvoie None s'il existe déjà (idempotent)."""
     if target_type not in AUTOMATIC_TARGET_TYPES:
         raise ValueError(f"Type de cible non pris en charge pour un signalement automatique : {target_type}")
-    if Report.objects.filter(target_type=target_type, target_id=target.pk, reason=reason).exists():
+    if Report.objects.filter(target_type=target_type, target_id=target_id, reason=reason).exists():
         return None
     return Report.objects.create(
-        target_type=target_type, target_id=target.pk, reporter=None, reason=reason, description=description,
+        target_type=target_type, target_id=target_id, reporter=None, reason=reason, description=description,
     )
 
 

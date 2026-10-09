@@ -12,6 +12,7 @@ from apps.marketplace.models import ContactEvent, Offer
 from apps.marketplace.tests import make_test_image
 from apps.moderation.models import Report
 from apps.notifications.models import Notification
+from apps.platform_core.testing import dispatch_outbox_now
 
 from .models import Deal, Review, TrustScoreSettings
 
@@ -82,7 +83,8 @@ class ReviewCreationGateTests(ReviewsTestBase):
             'id', 'post', 'deal', 'user_id', 'user_name', 'reviewed_user_id', 'content', 'rating',
             'reply_content', 'reply_at', 'created_at', 'is_post_owner', 'can_edit',
         })
-        # L'évalué est prévenu.
+        # L'évalué est prévenu, à la diffusion de l'événement.
+        dispatch_outbox_now()
         self.assertEqual(Notification.objects.get(user=self.seller).notification_type, 'COMMENT')
 
     def test_stranger_to_the_deal_cannot_review(self):
@@ -193,6 +195,7 @@ class ReviewReplyTests(ReviewsTestBase):
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['reply_content'], 'Merci pour votre confiance !')
+        dispatch_outbox_now()
         self.assertEqual(Notification.objects.get(user=self.buyer).notification_type, 'SYSTEM')
 
     def test_stranger_cannot_reply(self):
@@ -426,19 +429,23 @@ class CrossedReviewsDetectionTests(ReviewsTestBase):
 
     def test_three_mutual_deals_trigger_a_report(self):
         last_review = self.exchange_reviews(3)
+        dispatch_outbox_now()
         self.assertTrue(self.reports().filter(target_id=last_review.id).exists())
         self.assertIsNone(self.reports().first().reporter)
 
     def test_two_mutual_deals_do_not_trigger_a_report(self):
         self.exchange_reviews(2)
+        dispatch_outbox_now()
         self.assertFalse(self.reports().exists())
 
     def test_a_review_is_reported_only_once(self):
         from . import services
 
         last_review = self.exchange_reviews(3)
+        dispatch_outbox_now()
         count = self.reports().count()
         services.check_crossed_reviews(last_review)
+        dispatch_outbox_now()
         self.assertEqual(self.reports().count(), count)
 
 

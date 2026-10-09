@@ -23,6 +23,9 @@ _TYPES = (
     EventType('marketplace.exchange_proposed'),
     EventType('visibility.offer_viewed'),
     EventType('visibility.offer_shared'),
+    EventType('reviews.review_posted'),
+    EventType('reviews.review_replied'),
+    EventType('reviews.crossed_reviews_detected'),
 )
 
 EVENT_TYPES = {t.name: t for t in _TYPES}

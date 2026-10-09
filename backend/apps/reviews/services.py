@@ -1,18 +1,20 @@
 """Interface publique du domaine `reviews` et logique métier des avis (CDC 3.7).
 
 Dépendances sortantes, toutes par `services.py` : marketplace (offres), identity (cache du
-Trust Score), notifications, moderation (signalement automatique). Aucune n'importe un
+Trust Score, transitoire), moderation (journal d'audit). Les notifications et le signalement
+automatique passent par des événements de domaine (outbox, ADR 0003). Aucune n'importe un
 modèle d'un autre domaine.
 """
 from datetime import timedelta
 
+from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.identity import services as identity_services
 from apps.marketplace import services as marketplace_services
 from apps.moderation import services as moderation_services
-from apps.notifications import services as notification_services
+from apps.platform_core.services import publish_event
 
 from .models import Deal, Review, ReviewDailyCount, TrustScoreSettings
 
@@ -68,13 +70,14 @@ def check_crossed_reviews(review: Review) -> None:
         ).values_list('deal_id', flat=True)
     )
     if len(deal_ids) >= CROSSED_REVIEWS_THRESHOLD:
-        moderation_services.file_automatic_report(
-            review, moderation_services.REASON_CROSSED_REVIEWS,
-            description=(
-                f"Avis croisés répétés détectés entre les utilisateurs {user_a} et {user_b} "
-                f"({len(deal_ids)} affaires distinctes sur {CROSSED_REVIEWS_WINDOW_DAYS} jours)."
-            ),
-        )
+        with transaction.atomic():
+            publish_event(
+                'reviews.crossed_reviews_detected', aggregate_type='review', aggregate_id=review.pk,
+                payload={
+                    'review_id': str(review.pk), 'user_a': str(user_a), 'user_b': str(user_b),
+                    'deals_count': len(deal_ids), 'window_days': CROSSED_REVIEWS_WINDOW_DAYS,
+                },
+            )
 
 
 # --- Création d'un avis ---------------------------------------------------------------
@@ -132,34 +135,44 @@ def _offer_title(offer):
     return offer.title if offer else "une annonce supprimée"
 
 
-def notify_review_created(review: Review, author) -> None:
+def publish_review_posted(review: Review, author) -> None:
+    """Publie `reviews.review_posted` (à appeler dans la transaction de création de l'avis) : la
+    personne évaluée est notifiée à la diffusion. Le nom de l'auteur, le titre de l'annonce et
+    l'extrait sont des données déjà publiques avec l'avis."""
+    if not review.reviewed_user_id:
+        return
     offer = marketplace_services.get_offer(review.offer_id) if review.offer_id else None
-    notification_services.notify(
-        user_id=review.reviewed_user_id,
-        notification_type=notification_services.COMMENT,
-        title=f"Nouvel avis sur {_offer_title(offer)}",
-        content=f"{author.full_name} a laissé un avis : {review.content[:50]}...",
-        link=f"/post/{review.offer_id}" if offer else '',
+    publish_event(
+        'reviews.review_posted', aggregate_type='review', aggregate_id=review.pk,
+        payload={
+            'review_id': str(review.pk), 'reviewed_user_id': str(review.reviewed_user_id),
+            'author_id': str(author.pk), 'author_name': author.full_name,
+            'offer_id': str(review.offer_id) if offer else None,
+            'offer_title': _offer_title(offer), 'excerpt': review.content[:50],
+        },
     )
 
 
 def reply_to_review(review: Review, replier, content: str) -> Review:
-    """Réponse publique de la personne évaluée ; l'auteur de l'avis en est prévenu."""
-    # Mise à jour conditionnelle : la réponse ne s'écrit qu'une fois, même en cas de requêtes simultanées.
-    written = Review.objects.filter(pk=review.pk).filter(Q(reply_content__isnull=True) | Q(reply_content='')).update(
-        reply_content=content, reply_at=timezone.now(), updated_at=timezone.now(),
-    )
-    if not written:
-        raise ReviewError("Vous avez déjà répondu à cet avis.")
-    review.refresh_from_db()
+    """Réponse publique de la personne évaluée ; l'auteur de l'avis en est prévenu (événement
+    `reviews.review_replied`, publié dans la même transaction que la réponse)."""
     offer = marketplace_services.get_offer(review.offer_id) if review.offer_id else None
-    notification_services.notify(
-        user_id=review.user_id,
-        notification_type=notification_services.SYSTEM,
-        title="Réponse à votre avis",
-        content=f"{replier.full_name} a répondu à votre avis sur {_offer_title(offer)}",
-        link=f"/post/{review.offer_id}" if offer else '',
-    )
+    with transaction.atomic():
+        # Mise à jour conditionnelle : la réponse ne s'écrit qu'une fois, même en cas de requêtes simultanées.
+        written = Review.objects.filter(pk=review.pk).filter(
+            Q(reply_content__isnull=True) | Q(reply_content=''),
+        ).update(reply_content=content, reply_at=timezone.now(), updated_at=timezone.now())
+        if not written:
+            raise ReviewError("Vous avez déjà répondu à cet avis.")
+        publish_event(
+            'reviews.review_replied', aggregate_type='review', aggregate_id=review.pk,
+            payload={
+                'review_id': str(review.pk), 'review_author_id': str(review.user_id),
+                'replier_name': replier.full_name, 'offer_id': str(review.offer_id) if offer else None,
+                'offer_title': _offer_title(offer),
+            },
+        )
+    review.refresh_from_db()
     return review
 
 

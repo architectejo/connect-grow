@@ -49,11 +49,11 @@ class ReviewViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
             with transaction.atomic():
                 services.reserve_daily_slot(self.request.user)
                 review = serializer.save(user=self.request.user)
+                services.publish_review_posted(review, self.request.user)
         except services.ReviewError as exc:
             raise ValidationError(exc.message)
         except IntegrityError:
             raise ValidationError("Vous avez déjà laissé un avis pour cette affaire.")
-        services.notify_review_created(review, self.request.user)
 
     def perform_destroy(self, instance):
         if instance.user_id != self.request.user.id:

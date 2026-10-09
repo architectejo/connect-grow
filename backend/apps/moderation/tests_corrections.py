@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib import admin
 from django.core.cache import cache
 from django.test import RequestFactory, override_settings
@@ -226,10 +228,10 @@ class AutomaticReportTypesTests(ModerationTestBase):
 
     def test_automatic_report_refuses_a_type_without_resolver(self):
         with self.assertRaises(ValueError):
-            services.file_automatic_report(self.moderator.groups.first(), services.REASON_CROSSED_REVIEWS)
+            services.file_automatic_report('group', uuid.uuid4(), services.REASON_CROSSED_REVIEWS)
 
     def test_automatic_report_on_a_review_is_resolvable(self):
         review = Review.objects.create(user=self.reporter, reviewed_user=self.seller, content='Avis assez long.', rating=3)
-        report = services.file_automatic_report(review, services.REASON_CROSSED_REVIEWS, 'x')
+        report = services.file_automatic_report('review', review.pk, services.REASON_CROSSED_REVIEWS, 'x')
         self.assertIn(report.target_type, services.TARGET_RESOLVERS)
         self.assertIsNotNone(services.resolve_target(report.target_type, report.target_id))

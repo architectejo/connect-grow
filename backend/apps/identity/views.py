@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Q
 from django.http import FileResponse
 from django.utils import timezone
 from rest_framework import generics, permissions, status
@@ -6,8 +7,10 @@ from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 from rest_framework.response import Response
 
+from apps.common.pagination import StandardPagination
+
 from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
-from .serializers import KycDocumentSerializer, UserSerializer
+from .serializers import KycDocumentSerializer, PublicBusinessSerializer, UserSerializer
 from .sms import send_otp_sms
 
 class RegisterView(generics.CreateAPIView):
@@ -44,25 +47,28 @@ class ChangePasswordView(APIView):
 
 class BusinessListView(generics.ListAPIView):
     """
-    Vue publique pour lister toutes les entreprises inscrites sur la plateforme.
+    Vue publique : liste paginée des entreprises actives. Ne renvoie que la fiche
+    publique (PublicBusinessSerializer) : aucune donnée de contact ni d'identité.
     """
     permission_classes = [permissions.AllowAny]
-    serializer_class = UserSerializer # On peut utiliser UserSerializer ou un plus léger
+    serializer_class = PublicBusinessSerializer
+    pagination_class = StandardPagination
 
     def get_queryset(self):
-        from django.db.models import Q
-        # On ne récupère que les utilisateurs de type ENTREPRISE
         queryset = (
-            User.objects.filter(user_type='ENTREPRISE')
+            User.objects.filter(
+                user_type='ENTREPRISE', is_active=True, business_profile__isnull=False,
+            )
             .select_related('business_profile')
             .prefetch_related('business_profile__category_links')
+            .order_by('business_profile__business_name', 'id')
         )
 
         search = self.request.query_params.get('search')
         if search:
+            # Nom commercial et description seulement : jamais le nom de la personne.
             queryset = queryset.filter(
                 Q(business_profile__business_name__icontains=search) |
-                Q(full_name__icontains=search) |
                 Q(business_profile__bio__icontains=search)
             )
 

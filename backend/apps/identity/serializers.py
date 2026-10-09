@@ -26,11 +26,62 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
         return value
 
 
+class CityCommuneNamesMixin:
+    """Noms de ville et de commune lus par lot dans le catalogue (plus de jointure ORM)."""
+
+    CATALOG_CONTEXT_KEY = 'identity_catalog'
+
+    @classmethod
+    def preload(cls, users, context):
+        context[cls.CATALOG_CONTEXT_KEY] = {
+            'cities': catalog_services.get_cities_by_ids(u.city_id for u in users if u.city_id),
+            'communes': catalog_services.get_communes_by_ids(u.commune_id for u in users if u.commune_id),
+        }
+
+    def _catalog(self, obj):
+        cache = self.context.get(self.CATALOG_CONTEXT_KEY)
+        if cache is None:
+            self.preload([obj], self.context)
+            cache = self.context[self.CATALOG_CONTEXT_KEY]
+        return cache
+
+    def get_ville_name(self, obj):
+        city = self._catalog(obj)['cities'].get(obj.city_id)
+        return city.name if city else None
+
+    def get_commune_name(self, obj):
+        commune = self._catalog(obj)['communes'].get(obj.commune_id)
+        return commune.name if commune else None
+
+
 class UserListSerializer(PreloadingListSerializer):
     pass
 
 
-class UserSerializer(serializers.ModelSerializer):
+class PublicBusinessSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
+    """Fiche publique d'une entreprise : liste blanche stricte (règle 10).
+    Jamais d'e-mail, de téléphone, de NIF ni de date d'inscription."""
+
+    business_name = serializers.CharField(source='business_profile.business_name', read_only=True)
+    logo = serializers.ImageField(source='business_profile.logo', read_only=True)
+    bio = serializers.CharField(source='business_profile.bio', read_only=True)
+    categories = serializers.ListField(
+        child=serializers.UUIDField(), source='business_profile.category_ids', read_only=True,
+    )
+    is_verified = serializers.BooleanField(source='business_profile.is_verified', read_only=True)
+    ville_name = serializers.SerializerMethodField()
+    commune_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'business_name', 'logo', 'bio', 'categories', 'ville_name', 'commune_name', 'is_verified',
+        ]
+        read_only_fields = fields
+        list_serializer_class = UserListSerializer
+
+
+class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
     # Inclusion du profil entreprise (imbriqué)
     business_profile = BusinessProfileSerializer(required=False)
     # Clés JSON `ville` / `commune` conservées (UUID du domaine catalog).
@@ -66,31 +117,6 @@ class UserSerializer(serializers.ModelSerializer):
             'phone_verified': {'read_only': True},
         }
         list_serializer_class = UserListSerializer
-
-    # Noms de ville et de commune : lus par lot dans le catalogue (plus de jointure ORM).
-    CATALOG_CONTEXT_KEY = 'identity_catalog'
-
-    @classmethod
-    def preload(cls, users, context):
-        context[cls.CATALOG_CONTEXT_KEY] = {
-            'cities': catalog_services.get_cities_by_ids(u.city_id for u in users if u.city_id),
-            'communes': catalog_services.get_communes_by_ids(u.commune_id for u in users if u.commune_id),
-        }
-
-    def _catalog(self, obj):
-        cache = self.context.get(self.CATALOG_CONTEXT_KEY)
-        if cache is None:
-            self.preload([obj], self.context)
-            cache = self.context[self.CATALOG_CONTEXT_KEY]
-        return cache
-
-    def get_ville_name(self, obj):
-        city = self._catalog(obj)['cities'].get(obj.city_id)
-        return city.name if city else None
-
-    def get_commune_name(self, obj):
-        commune = self._catalog(obj)['communes'].get(obj.commune_id)
-        return commune.name if commune else None
 
     def validate_ville(self, value):
         if value is not None and not catalog_services.city_exists(value):

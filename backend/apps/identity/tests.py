@@ -286,10 +286,10 @@ class UuidAndCatalogReferenceTests(APITestCase):
             )
             profile = BusinessProfile.objects.create(user=user, business_name=f'Boutique {i}')
             profile.set_category_ids([self.category.id])
-        with self.assertNumQueries(4):  # utilisateurs, catégories, villes, communes : indépendant du nombre de profils
+        with self.assertNumQueries(5):  # total, utilisateurs, catégories, villes, communes : indépendant du nombre de profils
             response = self.client.get(reverse('business_list'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data[0]['ville_name'], 'Kinshasa')
+        self.assertEqual(response.data['results'][0]['ville_name'], 'Kinshasa')
 
     def test_kyc_urls_use_uuid(self):
         admin = User.objects.create_user(email='admin@example.com', password='x', full_name='Admin', is_staff=True)
@@ -303,3 +303,53 @@ class UuidAndCatalogReferenceTests(APITestCase):
             self.client.post('/api/accounts/kyc/documents/1/decision/', {'decision': 'VALIDE'}).status_code,
             status.HTTP_404_NOT_FOUND,
         )
+
+
+class PublicBusinessListTests(APITestCase):
+    """Règle 10 : la liste publique des entreprises n'expose aucune donnée personnelle."""
+
+    FORBIDDEN_KEYS = {
+        'email', 'phone', 'phone_verified', 'date_joined', 'nif', 'full_name', 'password',
+        'ville', 'commune', 'business_profile', 'user_type', 'photo', 'trust_score',
+    }
+
+    def make_business(self, n, **extra):
+        user = User.objects.create_user(
+            email=f'biz{n}@example.com', phone=f'+24381000000{n}', password='x',
+            full_name=f'Personne Privée {n}', user_type='ENTREPRISE', **extra,
+        )
+        BusinessProfile.objects.create(user=user, business_name=f'Boutique {n}', bio='Vente de pagnes', nif='A123456')
+        return user
+
+    def test_only_whitelisted_keys_are_exposed(self):
+        self.make_business(1)
+        response = self.client.get(reverse('business_list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        item = response.data['results'][0]
+        self.assertEqual(
+            set(item),
+            {'id', 'business_name', 'logo', 'bio', 'categories', 'ville_name', 'commune_name', 'is_verified'},
+        )
+        self.assertFalse(self.FORBIDDEN_KEYS & set(item))
+        raw = response.content.decode()
+        for secret in ('biz1@example.com', '+243810000001', 'A123456', 'Personne Privée'):
+            self.assertNotIn(secret, raw)
+
+    def test_inactive_users_and_profileless_users_are_hidden(self):
+        banned = self.make_business(1)
+        banned.is_active = False
+        banned.save(update_fields=['is_active'])
+        User.objects.create_user(email='noprofile@example.com', password='x', full_name='X', user_type='ENTREPRISE')
+        self.make_business(2)
+        names = [i['business_name'] for i in self.client.get(reverse('business_list')).data['results']]
+        self.assertEqual(names, ['Boutique 2'])
+
+    def test_list_is_paginated_and_search_ignores_personal_name(self):
+        for n in range(1, 4):
+            self.make_business(n)
+        data = self.client.get(reverse('business_list'), {'page_size': 2}).data
+        self.assertEqual((data['count'], len(data['results'])), (3, 2))
+        self.assertIsNotNone(data['next'])
+        self.assertEqual(self.client.get(reverse('business_list'), {'search': 'Boutique 2'}).data['count'], 1)
+        # Le nom de la personne n'est pas indexé par la recherche publique.
+        self.assertEqual(self.client.get(reverse('business_list'), {'search': 'Privée'}).data['count'], 0)

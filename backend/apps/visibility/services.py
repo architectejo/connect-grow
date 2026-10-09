@@ -118,36 +118,36 @@ def get_ranking_settings() -> RankingSettings:
     return RankingSettings.get_solo()
 
 
+def get_proximity_weights() -> tuple:
+    """Coefficients de proximité D (même commune, même ville, défaut), lus en base. Appliqués à
+    la lecture (tri) par le domaine `marketplace`."""
+    row = get_ranking_settings()
+    return row.proximity_same_commune, row.proximity_same_city, row.proximity_default
+
+
 def compute_score(
-    *, views, likes, comments, shares, created_at: datetime, trust_score: float,
+    *, views, favorites, contacts, shares, created_at: datetime,
     settings_row: Optional[RankingSettings] = None, now: Optional[datetime] = None,
 ) -> float:
-    """CDC 3.8 : visibility_score = E . T . R . (1 + b)
+    """CDC 3.5 : score organique stocké = E x R (P = 1 ; D est appliqué à la lecture).
 
-    - E, engagement : 1 + ln(1 + w_v.vues + w_l.likes + w_c.commentaires + w_s.partages)
-    - T, confiance : 0,8 + 0,4 . (TrustScore / 5), borné à [trust_factor_min, trust_factor_max]
-      (retiré par L0-07 / L0-08)
-    - R, récence : e^(-λ . âge_heures), avec une demi-vie paramétrable (72 h par défaut)
-    - b, Boost : 0 tant que la promotion payante (lot 1) n'existe pas
+    - E, engagement : 1 + ln(1 + w_vues.vues + w_favoris.favoris + w_contacts.contacts + w_partages.partages) ;
+    - R, récence : 0,5 ** (âge_heures / demi-vie), demi-vie réglable (72 h par défaut).
 
-    R est calculé au moment de l'appel ; aucun traitement de fond n'est requis."""
+    Aucun terme de note, de confiance ni de promotion (règles 4 et 5). Toutes les pondérations
+    viennent de `RankingSettings`. R est calculé au moment de l'appel."""
     row = settings_row or get_ranking_settings()
     now = now or timezone.now()
 
     engagement_raw = (
-        row.weight_views * views + row.weight_likes * likes
-        + row.weight_comments * comments + row.weight_shares * shares
+        row.weight_views * views + row.weight_favorites * favorites
+        + row.weight_contacts * contacts + row.weight_shares * shares
     )
     engagement = 1 + math.log(1 + engagement_raw)
 
-    trust_factor = 0.8 + 0.4 * (trust_score / 5.0)
-    trust_factor = max(row.trust_factor_min, min(row.trust_factor_max, trust_factor))
-
-    age_hours = (now - created_at).total_seconds() / 3600
-    recency = math.exp(-(math.log(2) / row.recency_half_life_hours) * age_hours)
-
-    boost = 0
-    return engagement * trust_factor * recency * (1 + boost)
+    age_hours = max((now - created_at).total_seconds() / 3600, 0.0)
+    recency = 0.5 ** (age_hours / row.recency_half_life_hours)
+    return engagement * recency
 
 
 def trending_offer_ids(offer_ids: Iterable, today: Optional[date] = None) -> set:

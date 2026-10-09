@@ -56,29 +56,158 @@ class RecordViewTests(VisibilityTestBase):
 
 
 class ComputeScoreTests(VisibilityTestBase):
+    def score(self, **overrides):
+        now = overrides.pop('now', timezone.now())
+        values = dict(views=0, favorites=0, contacts=0, shares=0, created_at=now, now=now)
+        values.update(overrides)
+        return services.compute_score(**values)
+
     def test_score_grows_with_engagement_and_decays_with_age(self):
         now = timezone.now()
-        base = dict(likes=0, comments=0, shares=0, trust_score=3.5, now=now)
-        fresh = services.compute_score(views=0, created_at=now, **base)
-        engaged = services.compute_score(views=50, created_at=now, **base)
-        old = services.compute_score(views=0, created_at=now - timedelta(hours=72), **base)
+        fresh = self.score(now=now)
+        engaged = self.score(now=now, views=50)
+        old = self.score(now=now, created_at=now - timedelta(hours=72))
         self.assertGreater(engaged, fresh)
         self.assertAlmostEqual(old, fresh / 2, places=6)  # demi-vie de 72 h par défaut
 
-    def test_trust_factor_is_bounded_by_settings(self):
+    def test_engagement_is_one_without_interaction_and_recency_is_half_at_the_half_life(self):
+        now = timezone.now()
+        self.assertAlmostEqual(self.score(now=now), 1.0)
+        self.assertAlmostEqual(self.score(now=now, created_at=now - timedelta(hours=72)), 0.5)
+        row = RankingSettings.get_solo()
+        row.recency_half_life_hours = 24
+        row.save()
+        self.assertAlmostEqual(self.score(now=now, created_at=now - timedelta(hours=72)), 0.125)
+
+    def test_weights_come_from_the_settings(self):
+        import math
+
         now = timezone.now()
         row = RankingSettings.get_solo()
-        score = services.compute_score(views=0, likes=0, comments=0, shares=0, created_at=now, trust_score=0, now=now)
-        self.assertAlmostEqual(score, row.trust_factor_min)
-        row.trust_factor_max = 1.0
+        self.assertEqual(
+            (row.weight_views, row.weight_favorites, row.weight_contacts, row.weight_shares), (1, 3, 5, 8),
+        )
+        self.assertAlmostEqual(self.score(now=now, views=1), 1 + math.log(2))
+        self.assertAlmostEqual(self.score(now=now, favorites=1), 1 + math.log(4))
+        self.assertAlmostEqual(self.score(now=now, contacts=1), 1 + math.log(6))
+        self.assertAlmostEqual(self.score(now=now, shares=1), 1 + math.log(9))
+        row.weight_contacts = 10
         row.save()
-        score = services.compute_score(views=0, likes=0, comments=0, shares=0, created_at=now, trust_score=5, now=now)
-        self.assertAlmostEqual(score, 1.0)
+        self.assertAlmostEqual(self.score(now=now, contacts=1), 1 + math.log(11))
+
+    def test_the_score_has_no_trust_input(self):
+        import inspect
+
+        parameters = set(inspect.signature(services.compute_score).parameters)
+        self.assertEqual(parameters, {'views', 'favorites', 'contacts', 'shares', 'created_at', 'settings_row', 'now'})
 
     def test_settings_row_is_a_single_configurable_row(self):
         first = RankingSettings.get_solo()
         self.assertEqual(RankingSettings.get_solo().pk, first.pk)
         self.assertEqual(RankingSettings.objects.count(), 1)
+
+    def test_proximity_weights_come_from_the_settings(self):
+        self.assertEqual(services.get_proximity_weights(), (1.2, 1.1, 1.0))
+        row = RankingSettings.get_solo()
+        row.proximity_same_commune = 1.5
+        row.save()
+        self.assertEqual(services.get_proximity_weights(), (1.5, 1.1, 1.0))
+
+
+class RankingSettingsValidationTests(VisibilityTestBase):
+    def test_defaults_are_valid(self):
+        RankingSettings().full_clean()
+
+    def test_invalid_values_are_refused(self):
+        from django.core.exceptions import ValidationError
+
+        cases = [
+            ({'weight_views': -1}, 'weight_views'), ({'weight_favorites': -0.5}, 'weight_favorites'),
+            ({'weight_contacts': -2}, 'weight_contacts'), ({'weight_shares': -1}, 'weight_shares'),
+            ({'recency_half_life_hours': 0}, 'recency_half_life_hours'),
+            ({'recency_half_life_hours': -5}, 'recency_half_life_hours'),
+            ({'proximity_default': 0.9}, 'proximity_default'), ({'proximity_same_city': 0.5}, 'proximity_same_city'),
+            ({'proximity_same_commune': 1.05, 'proximity_same_city': 1.1}, 'proximity_same_commune'),
+            ({'proximity_same_city': 1.0, 'proximity_default': 1.05, 'proximity_same_commune': 1.2},
+             'proximity_same_commune'),
+        ]
+        for values, field in cases:
+            with self.assertRaises(ValidationError, msg=values) as caught:
+                RankingSettings(**values).full_clean()
+            self.assertIn(field, caught.exception.message_dict, values)
+
+    def test_zero_weights_are_allowed(self):
+        RankingSettings(weight_views=0, weight_favorites=0, weight_contacts=0, weight_shares=0).full_clean()
+
+
+class RankingSettingsAdminTests(VisibilityTestBase):
+    def save_through_admin(self, **changes):
+        from unittest import mock
+
+        from django.contrib.admin.sites import site as admin_site
+        from django.db import transaction
+        from django.test import RequestFactory
+
+        from apps.identity.models import User
+
+        from .admin import RankingSettingsAdmin
+
+        admin = User.objects.create_user(
+            email='ranking-admin@example.com', password='x', full_name='Admin', is_staff=True,
+        )
+        request = RequestFactory().post('/admin/')
+        request.user = admin
+        row = RankingSettings.get_solo()
+        initial = {name: getattr(row, name) for name in changes}
+        for name, value in changes.items():
+            setattr(row, name, value)
+        form = mock.Mock(changed_data=list(changes), initial=initial)
+        with transaction.atomic():
+            RankingSettingsAdmin(RankingSettings, admin_site).save_model(request, row, form, True)
+        return admin, row
+
+    def test_change_is_audited_and_publishes_an_event(self):
+        from apps.moderation.models import AuditLog
+        from apps.platform_core.models import OutboxEvent
+
+        admin, row = self.save_through_admin(weight_contacts=7.0)
+        entry = AuditLog.objects.get(action='SETTINGS_CHANGED', actor=admin)
+        self.assertEqual(entry.target_id, row.pk)
+        self.assertIn('weight_contacts : 5.0 -> 7.0', entry.details)
+        event = OutboxEvent.objects.get(event_type='visibility.ranking_settings_changed')
+        self.assertEqual(event.payload, {'changed': ['weight_contacts']})
+
+    def test_the_event_triggers_a_recalculation_of_the_scores(self):
+        from apps.catalog.models import Category, City, Commune
+        from apps.identity.models import User
+        from apps.marketplace.models import Offer
+        from apps.marketplace.tests import make_test_image
+        from apps.platform_core.testing import dispatch_outbox_now
+
+        city = City.objects.create(name='Kinshasa')
+        commune = Commune.objects.create(city=city, name='Gombe')
+        category = Category.objects.create(name='Électronique', slug='electronique')
+        seller = User.objects.create_user(email='ranking-seller@example.com', password='x', full_name='V')
+        offer = Offer.objects.create(
+            seller=seller, category_id=category.id, commune_id=commune.id, title='Un joli canapé à vendre',
+            description='Description suffisamment longue pour le CDC.', price=100, main_image=make_test_image(),
+            contacts_count=2,
+        )
+        self.assertEqual(offer.visibility_score, 0)
+        self.save_through_admin(weight_contacts=7.0)
+        dispatch_outbox_now()
+        offer.refresh_from_db()
+        self.assertGreater(offer.visibility_score, 1.0)  # E > 1 avec 2 contacts
+
+    def test_admin_does_not_allow_a_second_row_or_deletion(self):
+        from django.contrib.admin.sites import site as admin_site
+
+        from .admin import RankingSettingsAdmin
+
+        model_admin = RankingSettingsAdmin(RankingSettings, admin_site)
+        RankingSettings.get_solo()
+        self.assertFalse(model_admin.has_add_permission(None))
+        self.assertFalse(model_admin.has_delete_permission(None))
 
 
 class TrendingTests(VisibilityTestBase):

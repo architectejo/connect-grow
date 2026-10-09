@@ -4,6 +4,7 @@ Le module ne référence aucune table d'un autre domaine : l'offre est désigné
 UUID (`offer_id`) ; seul le vendeur est une clé étrangère vers l'utilisateur (autorisée).
 """
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 
@@ -11,30 +12,54 @@ from apps.common.models import BaseModel, SingletonSettingsModel
 
 
 class RankingSettings(SingletonSettingsModel):
-    """CDC 3.8 : pondérations, demi-vie et bornes de l'algorithme « Trust & Engage »,
-    paramétrables dans le back-office. Ligne unique.
+    """CDC 3.5 : réglages du classement organique, modifiables dans le back-office (règle 11).
+    Ligne unique. Score organique = P x E x R x D, sans terme de note (règle 4) :
 
-    Le facteur de confiance est retiré par L0-07 / L0-08 (règle 4), pas pendant le portage."""
+    - E, engagement : 1 + ln(1 + w_vues.vues + w_favoris.favoris + w_contacts.contacts + w_partages.partages) ;
+    - R, récence : 0,5 ** (âge_heures / demi-vie) ;
+    - D, proximité : coefficients par commune / ville / défaut, appliqués à la lecture ;
+    - P : filtre strict de la recherche (pas de réglage)."""
 
-    # Engagement E = 1 + ln(1 + w_views*vues + w_likes*likes + w_comments*commentaires + w_shares*partages)
-    weight_views = models.FloatField(default=1.0)
-    weight_likes = models.FloatField(default=3.0)
-    weight_comments = models.FloatField(default=5.0)
-    weight_shares = models.FloatField(default=8.0)
+    weight_views = models.FloatField(default=1.0, validators=[MinValueValidator(0)])
+    weight_favorites = models.FloatField(default=3.0, validators=[MinValueValidator(0)])
+    weight_contacts = models.FloatField(default=5.0, validators=[MinValueValidator(0)])
+    weight_shares = models.FloatField(default=8.0, validators=[MinValueValidator(0)])
 
-    # Confiance T = 0.8 + 0.4 * (TrustScore / 5), bornée à [trust_factor_min, trust_factor_max]
-    trust_factor_min = models.FloatField(default=0.8)
-    trust_factor_max = models.FloatField(default=1.2)
-
-    # Récence R = e^(-λ * âge_heures), demi-vie en heures
+    # Demi-vie de la récence, en heures (> 0).
     recency_half_life_hours = models.FloatField(default=72.0)
+
+    # Proximité D : même commune >= même ville >= défaut, chacun >= 1.
+    proximity_same_commune = models.FloatField(default=1.2)
+    proximity_same_city = models.FloatField(default=1.1)
+    proximity_default = models.FloatField(default=1.0)
 
     class Meta:
         verbose_name = "Paramètres de classement"
         verbose_name_plural = "Paramètres de classement"
 
+    def clean(self):
+        errors = {}
+        for name in ('weight_views', 'weight_favorites', 'weight_contacts', 'weight_shares'):
+            value = getattr(self, name)
+            if value is None or value < 0:
+                errors[name] = "Le poids doit être supérieur ou égal à 0."
+        if self.recency_half_life_hours is None or self.recency_half_life_hours <= 0:
+            errors['recency_half_life_hours'] = "La demi-vie doit être strictement positive."
+        for name in ('proximity_same_commune', 'proximity_same_city', 'proximity_default'):
+            value = getattr(self, name)
+            if value is None or value < 1:
+                errors[name] = "Le coefficient de proximité doit être supérieur ou égal à 1."
+        if not errors and not (
+            self.proximity_same_commune >= self.proximity_same_city >= self.proximity_default
+        ):
+            errors['proximity_same_commune'] = (
+                "Les coefficients doivent respecter : même commune >= même ville >= défaut."
+            )
+        if errors:
+            raise ValidationError(errors)
+
     def __str__(self):
-        return "Paramètres de l'algorithme Trust & Engage"
+        return "Paramètres de classement"
 
 
 class VisibilitySettings(SingletonSettingsModel):

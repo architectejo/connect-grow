@@ -1,29 +1,26 @@
 from django.contrib import admin
 
+from apps.common.admin_mixins import SingletonSettingsAdminMixin
+from apps.platform_core.services import publish_event
+
 from .models import RankingSettings, VisibilitySettings
 
 
 @admin.register(RankingSettings)
-class RankingSettingsAdmin(admin.ModelAdmin):
+class RankingSettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
     list_display = (
-        'weight_views', 'weight_likes', 'weight_comments', 'weight_shares',
-        'trust_factor_min', 'trust_factor_max', 'recency_half_life_hours',
+        'weight_views', 'weight_favorites', 'weight_contacts', 'weight_shares',
+        'recency_half_life_hours', 'proximity_same_commune', 'proximity_same_city', 'proximity_default',
     )
 
-    def has_add_permission(self, request):
-        # Ligne unique de paramètres.
-        return not RankingSettings.objects.exists()
-
-    def has_delete_permission(self, request, obj=None):
-        return False
+    def on_settings_changed(self, request, obj, changed):
+        # Publié dans la transaction de l'admin : les scores sont recalculés à la diffusion.
+        publish_event(
+            'visibility.ranking_settings_changed', aggregate_type='rankingsettings', aggregate_id=obj.pk,
+            payload={'changed': changed},
+        )
 
 
 @admin.register(VisibilitySettings)
-class VisibilitySettingsAdmin(admin.ModelAdmin):
+class VisibilitySettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
     list_display = ('unique_view_retention_days',)
-
-    def has_add_permission(self, request):
-        return not VisibilitySettings.objects.exists()
-
-    def has_delete_permission(self, request, obj=None):
-        return False

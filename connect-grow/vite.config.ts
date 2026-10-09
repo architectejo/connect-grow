@@ -96,7 +96,11 @@ export default defineConfig(({ mode }) => ({
           {
             // Contenus publics : le réseau d'abord, le cache si la connexion tombe (contenus déjà vus consultables)
             urlPattern: ({ url, request }) =>
-              request.method === "GET" && /\/api\/(v1\/)?(marketplace\/posts|accounts\/businesses)\//.test(url.pathname),
+              request.method === "GET" &&
+              !request.headers.has("Authorization") &&
+              !url.searchParams.has("my_posts") &&
+              !/\/posts\/(trash|mine)\//.test(url.pathname) &&
+              /\/api\/(v1\/)?(marketplace\/posts|accounts\/businesses)\//.test(url.pathname),
             handler: "NetworkFirst",
             options: {
               cacheName: "api-annonces",

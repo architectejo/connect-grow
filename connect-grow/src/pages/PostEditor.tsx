@@ -25,6 +25,7 @@ import { marketplaceKeys, useCategories, useCities, usePost } from "@/hooks/use-
 import { accountKeys } from "@/hooks/use-account";
 import { categoryIcon } from "@/lib/category-icons";
 import { mediaUrl } from "@/lib/media";
+import { POST_DRAFT_KEY } from "@/lib/tokens";
 import { parseApiErrors } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +34,7 @@ const TITLE_MIN = 10;
 const TITLE_MAX = 100;
 const DESCRIPTION_MIN = 20;
 const DESCRIPTION_MAX = 3000;
-const DRAFT_KEY = "connecte:post-draft";
+const DRAFT_KEY = POST_DRAFT_KEY;
 
 const schema = z
   .object({

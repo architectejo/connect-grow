@@ -47,5 +47,6 @@ class OutboxDeliveryAdmin(ReadOnlyAdmin):
 
     @admin.action(description="Relancer les livraisons sélectionnées", permissions=['requeue'])
     def requeue_selected(self, request, queryset):
-        count = requeue_and_audit(request.user, queryset.select_related('event'))
+        dead = queryset.filter(status=OutboxDelivery.DEAD).select_related('event')  # jamais une livraison saine
+        count = requeue_and_audit(request.user, dead)
         self.message_user(request, f"{count} livraison(s) relancée(s).", messages.SUCCESS)

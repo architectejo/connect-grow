@@ -306,4 +306,4 @@ OUTBOX_BACKOFF_MAX_SECONDS = int(os.getenv('OUTBOX_BACKOFF_MAX_SECONDS', '3600')
 OUTBOX_MAX_PAYLOAD_BYTES = 16 * 1024
 # Rétention courte : certaines charges utiles contiennent des données personnelles (message de contact).
 OUTBOX_RETENTION_DAYS = int(os.getenv('OUTBOX_RETENTION_DAYS', '7'))
-OUTBOX_DEAD_RETENTION_DAYS = int(os.getenv('OUTBOX_DEAD_RETENTION_DAYS', '90'))
+OUTBOX_DEAD_RETENTION_DAYS = int(os.getenv('OUTBOX_DEAD_RETENTION_DAYS', '30'))

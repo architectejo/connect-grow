@@ -70,6 +70,27 @@ class ViewEventTests(MarketplaceTestBase):
         self.assertEqual(self.totals(), (0, 1))
         self.assertEqual(DailyVisibilityCounter.objects.get().shares, 1)
 
+    def test_the_daily_counters_are_the_only_source_of_the_totals(self):
+        # Une valeur divergente (ancien incrément, saisie manuelle) est écrasée : pas de max() hybride.
+        self.view('user:a')
+        self.view('user:b')
+        Offer.objects.filter(pk=self.offer.pk).update(views_count=50, shares_count=7)
+        services.sync_offer_engagement(self.offer.id)
+        self.assertEqual(self.totals(), (2, 0))
+        DailyVisibilityCounter.objects.all().delete()
+        services.sync_offer_engagement(self.offer.id)
+        self.assertEqual(self.totals(), (0, 0))
+
+    @override_settings(OUTBOX_INLINE_DISPATCH=True)
+    def test_share_value_with_immediate_diffusion_inside_a_test_transaction(self):
+        self.client.force_authenticate(self.buyer)
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            response = self.client.post(reverse('offer-share', args=[self.offer.id]))
+        self.assertEqual(len(callbacks), 1)
+        self.assertEqual(response.data, {'shares_count': 0})  # « au mieux » : la diffusion suit la réponse
+        self.assertEqual(self.totals(), (0, 1))  # puis le total est exact
+        self.assertEqual(OutboxEvent.objects.get().status, 'done')
+
     def test_share_endpoint_keeps_its_json_contract_and_is_best_effort_before_diffusion(self):
         self.client.force_authenticate(self.buyer)
         response = self.client.post(reverse('offer-share', args=[self.offer.id]))

@@ -14,7 +14,7 @@ from typing import Optional
 
 from django.conf import settings
 from django.db import OperationalError, connection, transaction
-from django.db.models import F, Min, Q
+from django.db.models import Count, Exists, F, Min, OuterRef, Q
 from django.utils import timezone
 
 from . import registry
@@ -130,21 +130,22 @@ def _describe(exc) -> str:
 
 def _refresh_event_status(event_id) -> None:
     """`done` quand toutes les livraisons sont traitées ; `dead` si l'une est en échec définitif
-    et qu'aucune n'est en attente ; sinon `pending`."""
-    statuses = set(OutboxDelivery.objects.filter(event_id=event_id).values_list('status', flat=True))
+    et qu'aucune n'est en attente ; sinon `pending`. Chaque transition est un UPDATE unique dont la
+    condition (sous-requêtes EXISTS) est évaluée par la base au moment de l'écriture : deux
+    exécutions qui terminent en même temps convergent sans lire un état périmé."""
+    deliveries = OutboxDelivery.objects.filter(event_id=OuterRef('pk'))
+    unfinished = deliveries.filter(status__in=(OutboxDelivery.PENDING, OutboxDelivery.PROCESSING))
     now = timezone.now()
-    if statuses <= {OutboxDelivery.DONE}:
-        OutboxEvent.objects.filter(pk=event_id).exclude(status=OutboxEvent.DONE).update(
-            status=OutboxEvent.DONE, completed_at=now,
-        )
-    elif OutboxDelivery.DEAD in statuses and not statuses & {OutboxDelivery.PENDING, OutboxDelivery.PROCESSING}:
-        OutboxEvent.objects.filter(pk=event_id).exclude(status=OutboxEvent.DEAD).update(
-            status=OutboxEvent.DEAD, completed_at=now,
-        )
-    else:
-        OutboxEvent.objects.filter(pk=event_id).exclude(status=OutboxEvent.PENDING).update(
-            status=OutboxEvent.PENDING, completed_at=None,
-        )
+    events = OutboxEvent.objects.filter(pk=event_id)
+    events.exclude(status=OutboxEvent.DONE).exclude(Exists(deliveries.exclude(status=OutboxDelivery.DONE))).update(
+        status=OutboxEvent.DONE, completed_at=now,
+    )
+    events.exclude(status=OutboxEvent.DEAD).filter(
+        Exists(deliveries.filter(status=OutboxDelivery.DEAD)),
+    ).exclude(Exists(unfinished)).update(status=OutboxEvent.DEAD, completed_at=now)
+    events.exclude(status=OutboxEvent.PENDING).filter(Exists(unfinished)).update(
+        status=OutboxEvent.PENDING, completed_at=None,
+    )
 
 
 def _record_failure(delivery, token, exc, permanent) -> None:
@@ -199,7 +200,8 @@ def _process(pk, seen_status, seen_locked_by, now) -> Optional[bool]:
         outcome = False
     except Exception as exc:  # un abonné ne doit jamais interrompre la diffusion des autres
         if not isinstance(exc, OutboxError):
-            logger.exception("Outbox : échec de l'abonné %s (livraison %s).", delivery.handler, pk)
+            # Ni message ni trace (ils peuvent citer des données personnelles) : classe et origine.
+            logger.error("Outbox : échec de l'abonné %s (livraison %s) : %s", delivery.handler, pk, _describe(exc))
         _record_failure(delivery, token, exc, permanent=False)
         outcome = False
     else:
@@ -239,15 +241,14 @@ def dispatch_for_event(event_id) -> None:
     émettrice. Les exceptions sont journalisées : le cron reste le filet de sécurité."""
     try:
         _run(OutboxDelivery.objects.filter(event_id=event_id), limit=50, max_seconds=None)
-    except Exception:
-        logger.exception("Outbox : diffusion immédiate de l'événement %s échouée.", event_id)
+    except Exception as exc:
+        logger.error("Outbox : diffusion immédiate de l'événement %s échouée : %s", event_id, _describe(exc))
 
 
 def get_stats() -> dict:
     """Décompte des livraisons par statut et date de la plus ancienne en attente."""
     counts = {status: 0 for status, _ in OutboxDelivery.STATUS_CHOICES}
-    for status in OutboxDelivery.objects.values_list('status', flat=True):
-        counts[status] += 1
+    counts.update(dict(OutboxDelivery.objects.values_list('status').annotate(total=Count('pk'))))
     oldest = OutboxDelivery.objects.filter(status=OutboxDelivery.PENDING).aggregate(m=Min('created_at'))['m']
     return {'counts': counts, 'oldest_pending_at': oldest}
 

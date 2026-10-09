@@ -374,6 +374,122 @@ class CommandsAndAdminTests(OutboxTestMixin, TestCase):
         self.assertEqual(self.client.get(reverse('admin:platform_core_outboxevent_add')).status_code, 403)
 
 
+class CorrectionsTests(OutboxTestMixin, TestCase):
+    """Corrections d'audit (aller-retour 1) : journaux, atomicité, statistiques, relance."""
+
+    def test_logs_never_carry_the_exception_message_nor_a_traceback(self):
+        def boom(event):
+            raise ValueError('secret=jean@example.com')
+        self.subscribe('platform_core.a', boom)
+        self.publish()
+        with self.assertLogs('apps.platform_core', level='DEBUG') as captured:
+            dispatch_outbox_now()
+        self.assertTrue(captured.records)
+        for record in captured.records:
+            self.assertIsNone(record.exc_info)
+        text = ' '.join(captured.output) + ' '.join(r.getMessage() for r in captured.records)
+        self.assertNotIn('secret', text)
+        self.assertNotIn('jean@example.com', text)
+        self.assertIn('ValueError', text)
+
+    def test_inline_dispatch_failure_log_has_no_message_either(self):
+        with mock.patch.object(services, '_run', side_effect=ValueError('secret')):
+            with self.assertLogs('apps.platform_core', level='ERROR') as captured:
+                services.dispatch_for_event(uuid.uuid4())
+        self.assertNotIn('secret', ' '.join(captured.output))
+        self.assertIsNone(captured.records[0].exc_info)
+
+    def test_stats_use_a_grouped_query(self):
+        self.subscribe('platform_core.a')
+        self.publish()
+        dispatch_outbox_now()
+        with self.assertNumQueries(2):
+            stats = services.get_stats()
+        self.assertEqual(stats['counts'], {'pending': 0, 'processing': 0, 'done': 1, 'dead': 0})
+
+    def test_event_status_follows_its_deliveries_with_conditional_updates(self):
+        self.subscribe('platform_core.a')
+        self.subscribe('platform_core.b')
+        event_id = self.publish()
+        OutboxDelivery.objects.filter(handler='platform_core.a').update(status='done')
+        OutboxEvent.objects.filter(pk=event_id).update(status='done')  # état périmé : b est encore en attente
+        with self.assertNumQueries(3):
+            services._refresh_event_status(event_id)
+        self.assertEqual(OutboxEvent.objects.get().status, 'pending')
+        OutboxDelivery.objects.update(status='done')
+        services._refresh_event_status(event_id)
+        event = OutboxEvent.objects.get()
+        self.assertEqual(event.status, 'done')
+        self.assertIsNotNone(event.completed_at)
+        OutboxDelivery.objects.filter(handler='platform_core.b').update(status='dead')
+        services._refresh_event_status(event_id)
+        self.assertEqual(OutboxEvent.objects.get().status, 'dead')
+        OutboxDelivery.objects.filter(handler='platform_core.b').update(status='processing')
+        services._refresh_event_status(event_id)
+        self.assertEqual(OutboxEvent.objects.get().status, 'pending')
+
+    def test_admin_requeue_touches_dead_deliveries_only(self):
+        from django.urls import reverse
+
+        self.subscribe('platform_core.a')
+        self.subscribe('platform_core.b')
+        self.publish()
+        OutboxDelivery.objects.filter(handler='platform_core.a').update(status='dead', attempts=8)
+        OutboxDelivery.objects.filter(handler='platform_core.b').update(status='pending', attempts=3)
+        admin_user = User.objects.create_superuser(email='root@example.com', password='Motdepasse-Solide-1')
+        self.client.force_login(admin_user)
+        self.client.post(reverse('admin:platform_core_outboxdelivery_changelist'), {
+            'action': 'requeue_selected',
+            '_selected_action': [str(pk) for pk in OutboxDelivery.objects.values_list('pk', flat=True)],
+        })
+        self.assertEqual(OutboxDelivery.objects.get(handler='platform_core.a').attempts, 0)
+        self.assertEqual(OutboxDelivery.objects.get(handler='platform_core.b').attempts, 3)  # intacte
+        self.assertEqual(AuditLog.objects.filter(action='OUTBOX_REQUEUED').count(), 1)
+
+    def test_command_requeue_is_audited_with_no_actor(self):
+        self.subscribe('platform_core.a')
+        self.publish()
+        OutboxDelivery.objects.update(status='dead')
+        call_command('dispatch_outbox', '--requeue', 'dead', stdout=io.StringIO())
+        entry = AuditLog.objects.get(action='OUTBOX_REQUEUED')
+        self.assertIsNone(entry.actor)
+        self.assertIn('ligne de commande', entry.details)
+
+    def test_requeue_and_its_audit_entry_succeed_or_fail_together(self):
+        from .operations import requeue_and_audit
+
+        self.subscribe('platform_core.a')
+        self.publish()
+        OutboxDelivery.objects.update(status='dead', attempts=8)
+        with mock.patch('apps.platform_core.operations.record_audit', side_effect=RuntimeError('journal indisponible')):
+            with self.assertRaises(RuntimeError):
+                requeue_and_audit(None, OutboxDelivery.objects.all())
+        delivery = OutboxDelivery.objects.get()
+        self.assertEqual((delivery.status, delivery.attempts), ('dead', 8))
+
+    def test_dead_events_are_kept_30_days_by_default(self):
+        from django.conf import settings
+
+        self.assertEqual(settings.OUTBOX_DEAD_RETENTION_DAYS, 30)
+        self.assertEqual(settings.OUTBOX_RETENTION_DAYS, 7)
+
+    def test_notification_handlers_reject_an_invalid_payload_definitively(self):
+        from apps.notifications.models import Notification
+
+        for event_type in ('marketplace.contact_recorded', 'marketplace.exchange_proposed',
+                           'marketplace.offer_expiring_soon', 'reviews.review_posted', 'reviews.review_replied'):
+            self.publish({'seulement': 'du bruit'}, event_type=event_type)
+        self.publish({'seller_id': 'pas-un-uuid', 'sender_id': 'x', 'offer_title': 't'},
+                     event_type='marketplace.contact_recorded')
+        dispatch_outbox_now()
+        notifications = OutboxDelivery.objects.filter(handler__startswith='notifications.')
+        self.assertEqual(notifications.count(), 6)
+        self.assertEqual(set(notifications.values_list('status', flat=True)), {'dead'})
+        self.assertTrue(all('charge utile invalide' in d.last_error for d in notifications))
+        self.assertTrue(all(d.attempts == 1 for d in notifications))
+        self.assertFalse(Notification.objects.exists())
+
+
 class PurgeTests(OutboxTestMixin, TestCase):
     def make(self, status, age_days):
         event = OutboxEvent.objects.create(
@@ -386,7 +502,7 @@ class PurgeTests(OutboxTestMixin, TestCase):
 
     def test_purge_respects_the_retention_per_status(self):
         old_done, recent_done = self.make('done', 8), self.make('done', 6)
-        old_dead, recent_dead = self.make('dead', 91), self.make('dead', 89)
+        old_dead, recent_dead = self.make('dead', 31), self.make('dead', 29)
         pending = OutboxEvent.objects.create(event_type=TYPE, aggregate_type='t', payload={})
         out = io.StringIO()
         call_command('purge_outbox', stdout=out)

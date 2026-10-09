@@ -1,4 +1,4 @@
-"""ADR 0003 : purge les événements traités (7 jours) et en échec définitif (90 jours). Cron quotidien."""
+"""ADR 0003 : purge les événements traités (7 jours) et en échec définitif (30 jours). Cron quotidien."""
 from django.core.management.base import BaseCommand
 
 from apps.platform_core import services

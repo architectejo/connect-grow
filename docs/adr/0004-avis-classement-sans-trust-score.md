@@ -318,3 +318,8 @@ Zones disjointes : T2 ne touche pas `reviews/` ; T3 ne touche ni `visibility/` n
 - **Reste pour T2** : marquage `is_counted` et recalcul de `contacts_count` dans `create_contact_event` (point d'extension commenté), filtre `is_counted` dans `count_contacts_by_offer`, tri avec D et paramètre `near`, commande `refresh_visibility_scores` et cron, recompte de `likes_count`.
 - **Reste pour T3** : `GET eligibility`, délai `delay_after_contact_hours` (point d'extension dans `reviews.services.ensure_can_review`, `review_too_early`), restriction du motif `CONTACT_FICTIF` au vendeur concerné (`ensure_can_report`), `is_review_seller`.
 - **Précisions de comportement** : l'unicité `(auteur, offre)` répond 409 `already_reviewed` (vérification préalable puis `IntegrityError`) ; `PUT` n'est plus routé sur `/reviews/` ; un avis modifié qui n'est pas le plus récent du couple ne change pas la note vendeur ; `summary.review_count` du tableau de bord compte les avis visibles reçus, `avg_rating` la moyenne des dernières notes vendeur visibles (sans seuil).
+
+### T2 (branche `feat/L0-08-classement-organique`, 09/10/2026) : fait
+
+- Aucune migration. `is_counted`/`contacts_count` dans `create_contact_event` (même transaction), filtre `is_counted` dans `count_contacts_by_offer`, score E x R recalculé depuis les sources (`refresh_all_scores` recompte `likes_count` et `contacts_count`), commande `refresh_visibility_scores` (cron :15), tri `visibility_score x D` en SQL avec `near` (repli : commune du profil), tie-break `-created_at` puis `id`.
+- Écart de test T1 : `test_ratings_do_not_change_the_organic_score` crée maintenant les mêmes contacts sur l offre jumelle (le recomptage à la source rend les contacts réels).

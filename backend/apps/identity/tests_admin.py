@@ -68,6 +68,18 @@ class UserAdminHardeningTests(TestCase):
         self.assertTrue(AuditLog.objects.filter(action='USER_ADMIN_CHANGED', actor=staff).exists())
         self.assertFalse(UserAdmin(User, admin.site).has_add_permission(self.request_for(staff)))
 
+    def test_bulk_and_single_deletions_are_audited_per_account(self):
+        staff = make_admin_user('adm@example.com', perms=['view_user', 'delete_user'])
+        victims = [User.objects.create_user(email=f'v{i}@example.com', password='x', full_name='V') for i in range(3)]
+        ids = [str(v.pk) for v in victims]
+        model_admin = UserAdmin(User, admin.site)
+        request = self.request_for(staff)
+        model_admin.delete_queryset(request, User.objects.filter(pk__in=[v.pk for v in victims[:2]]))
+        model_admin.delete_model(request, victims[2])
+        logged = set(AuditLog.objects.filter(action='USER_ADMIN_DELETED', actor=staff).values_list('object_id', flat=True))
+        self.assertEqual(logged, set(ids))
+        self.assertEqual(User.objects.filter(pk__in=ids).count(), 0)
+
     def test_standard_roles_cannot_change_users_or_edit_kyc(self):
         call_command('setup_roles', verbosity=0)
         for name in ('Modérateur', 'Administrateur'):

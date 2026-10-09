@@ -49,6 +49,12 @@ class UserAdmin(admin.ModelAdmin):
         record_audit(request.user, 'USER_ADMIN_DELETED', target=obj, details=f"Compte supprimé ({obj.pk}).")
         super().delete_model(request, obj)
 
+    def delete_queryset(self, request, queryset):
+        # Suppression en masse (action « supprimer la sélection ») : une trace par compte.
+        for obj in queryset:
+            record_audit(request.user, 'USER_ADMIN_DELETED', target=obj, details=f"Compte supprimé ({obj.pk}).")
+        super().delete_queryset(request, queryset)
+
 
 class BusinessProfileCategoryInline(admin.TabularInline):
     model = BusinessProfileCategory

@@ -71,6 +71,17 @@ describe("apiErrorMessage", () => {
     expect(apiErrorMessage(failure(404, { error: "Photo introuvable." }))).toBe("Photo introuvable.");
   });
 
+  it("n'affiche jamais le corps d'une erreur 5xx", () => {
+    expect(apiErrorMessage(failure(500, "<html>Traceback (most recent call last)</html>"))).toBe(i18n.t("errors.server"));
+    expect(apiErrorMessage(failure(502, { detail: "secret interne" }))).toBe(i18n.t("errors.server"));
+  });
+
+  it("limite la longueur du message affiché à 200 caractères", () => {
+    const message = apiErrorMessage(failure(400, { error: "x".repeat(500) }));
+    expect(message).toHaveLength(200);
+    expect(message.endsWith("…")).toBe(true);
+  });
+
   it("utilise le texte de repli sans réponse du serveur", () => {
     expect(apiErrorMessage(new Error("réseau"), "Échec.")).toBe("Échec.");
     expect(apiErrorMessage(new Error("réseau"))).toBe(i18n.t("errors.generic"));

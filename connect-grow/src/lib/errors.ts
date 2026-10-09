@@ -47,6 +47,9 @@ export function rateLimitMessage(error: unknown): string {
   return seconds === undefined ? i18n.t("errors.tooManyAttemptsNoDelay") : i18n.t("errors.tooManyAttempts", { count: seconds });
 }
 
+const MAX_MESSAGE_LENGTH = 200;
+const limitLength = (text: string) => (text.length > MAX_MESSAGE_LENGTH ? `${text.slice(0, MAX_MESSAGE_LENGTH - 1)}…` : text);
+
 /**
  * Premier message d'erreur lisible d'une réponse DRF.
  * Un 429 donne toujours le message de délai ; sans réponse (réseau), le message de connexion.
@@ -55,6 +58,8 @@ export function apiErrorMessage(error: unknown, fallback?: string): string {
   const response = responseOf(error);
   if (response?.status === 429) return rateLimitMessage(error);
   const fallbackText = fallback ?? i18n.t("errors.generic");
+  // 5xx : le corps peut contenir une trace ou du HTML serveur, il n'est jamais affiché
+  if (response?.status !== undefined && response.status >= 500) return i18n.t("errors.server");
   const data = response?.data;
   // 404 : l'API répond aussi 404 (et non 403) pour l'action d'un propriétaire sur l'offre d'autrui.
   // Un message métier explicite (clé `error`) reste prioritaire sur le texte générique de DRF.
@@ -62,8 +67,8 @@ export function apiErrorMessage(error: unknown, fallback?: string): string {
   if (!data || typeof data !== "object") return fallbackText;
   const record = data as Record<string, unknown>;
   const first = record.non_field_errors ?? record.detail ?? record.error ?? Object.values(record)[0];
-  if (Array.isArray(first)) return first.length ? String(first[0]) : fallbackText;
-  return typeof first === "string" ? first : fallbackText;
+  if (Array.isArray(first)) return first.length ? limitLength(String(first[0])) : fallbackText;
+  return typeof first === "string" ? limitLength(first) : fallbackText;
 }
 
 /** Les erreurs réseau, 429 et 5xx ne se règlent pas en réessayant tout de suite : pas de relance automatique. */

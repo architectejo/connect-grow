@@ -5,9 +5,12 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import apiClient, { unwrapList } from "@/api/client";
-import type { Uuid } from "@/api/types";
-import { apiErrorMessage, isRateLimited, rateLimitMessage } from "@/lib/errors";
+import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
+import apiClient from "@/api/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { messageKeys, useConversationMessages, useConversations, type ConversationItem, type MessageItem } from "@/hooks/use-messages";
+import { apiErrorMessage } from "@/lib/errors";
 import { formatClockTime } from "@/lib/format";
 import { 
     MessageSquare, Send, Search, User as UserIcon, 
@@ -16,81 +19,28 @@ import {
 
 import { mediaUrl } from "@/lib/media";
 
-interface ConversationItem {
-    id: Uuid;
-    other_participant?: { photo?: string | null; full_name?: string };
-    post_title?: string;
-    last_message?: { content: string; created_at: string | Date } | null;
-}
-
-interface MessageItem {
-    id: Uuid;
-    sender: Uuid;
-    content: string;
-    created_at: string;
-}
-
 const Messages = () => {
     const navigate = useNavigate();
-    const [conversations, setConversations] = useState<ConversationItem[]>([]);
+    const { t } = useTranslation();
+    const queryClient = useQueryClient();
+    const { user } = useAuth();
+    const conversationsQuery = useConversations();
+    const conversations = conversationsQuery.data ?? [];
     const [activeConv, setActiveConv] = useState<ConversationItem | null>(null);
-    const [messages, setMessages] = useState<MessageItem[]>([]);
+    const thread = useConversationMessages(activeConv?.id);
+    const messages = thread.data ?? [];
     const [newMessage, setNewMessage] = useState("");
-    const [isLoading, setIsLoading] = useState(true);
     const [isSending, setIsSending] = useState(false);
-    const [userData, setUserData] = useState<{ id?: Uuid } | null>(null);
+    const userData = user;
+    const isLoading = conversationsQuery.isLoading;
     const scrollRef = useRef<HTMLDivElement>(null);
-
-    // Fetch user and conversations
-    useEffect(() => {
-        const loadInitialData = async () => {
-            try {
-                const userRes = await apiClient.get("accounts/me/");
-                setUserData(userRes.data);
-
-                const convRes = await apiClient.get("interactions/conversations/");
-                setConversations(unwrapList<ConversationItem>(convRes.data));
-            } catch {
-                console.error("Erreur chargement messages");
-            } finally {
-                setIsLoading(false);
-            }
-        };
-        loadInitialData();
-    }, []);
-
-    // Fetch messages for active conversation
-    useEffect(() => {
-        if (activeConv) {
-            const fetchMessages = async () => {
-                try {
-                    const res = await apiClient.get("interactions/messages/", { params: { conversation: activeConv.id } });
-                    setMessages(unwrapList<MessageItem>(res.data));
-                } catch (error) {
-                    // 429 : on arrête l'interrogation périodique (pas de boucle) et on prévient l'utilisateur
-                    if (isRateLimited(error)) {
-                        clearInterval(interval);
-                        toast.error(rateLimitMessage(error));
-                    } else {
-                        console.error("Erreur chargement des messages de la conversation");
-                    }
-                }
-            };
-
-            setMessages([]); // Nettoyer les messages précédents lors du changement de conversation
-            // Polling simple (on pourrait utiliser WebSockets/Ably/Pusher si dispo)
-            const interval = setInterval(fetchMessages, 5000);
-            fetchMessages();
-            return () => clearInterval(interval);
-        }
-    }, [activeConv]);
 
     // Scroll to bottom when messages change
     useEffect(() => {
         if (scrollRef.current) {
             scrollRef.current.scrollIntoView({ behavior: "smooth" });
         }
-    }, [messages]);
+    }, [thread.data]);
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -98,19 +48,17 @@ const Messages = () => {
 
         setIsSending(true);
         try {
-            const res = await apiClient.post("interactions/messages/", {
+            const res = await apiClient.post<MessageItem>("interactions/messages/", {
                 conversation: activeConv.id,
                 content: newMessage
             });
-            setMessages([...messages, res.data]);
+            queryClient.setQueryData<MessageItem[]>(messageKeys.thread(activeConv.id), (previous) => [...(previous ?? []), res.data]);
             setNewMessage("");
-            
+
             // Mettre à jour l'aperçu dans la liste des conversations
-            setConversations(prev => prev.map(c => 
-                c.id === activeConv.id 
-                ? { ...c, last_message: { content: newMessage, created_at: new Date() } }
-                : c
-            ));
+            queryClient.setQueryData<ConversationItem[]>(messageKeys.conversations, (previous) =>
+                previous?.map((c) => (c.id === activeConv.id ? { ...c, last_message: { content: newMessage, created_at: new Date() } } : c)),
+            );
         } catch (error) {
             // 429 : « Trop de tentatives, réessayez dans N secondes » ; l'envoi n'est pas relancé
             toast.error(apiErrorMessage(error, "Le message n'a pas pu être envoyé."));
@@ -183,6 +131,13 @@ const Messages = () => {
                                             </div>
                                         </div>
                                     ))
+                                ) : conversationsQuery.isError ? (
+                                    <div role="alert" className="p-8 text-center text-muted-foreground">
+                                        <p className="text-sm">{t("states.errorTitle")}</p>
+                                        <Button variant="outline" className="mt-3" onClick={() => conversationsQuery.refetch()}>
+                                            {t("states.retry")}
+                                        </Button>
+                                    </div>
                                 ) : (
                                     <div className="p-8 text-center text-muted-foreground">
                                         <MessageSquare className="mx-auto mb-2 opacity-20" size={40} />
@@ -224,6 +179,11 @@ const Messages = () => {
                                 </div>
 
                                 {/* Messages */}
+                                {thread.isPaused && (
+                                    <p role="status" className="bg-muted px-4 py-2 text-center text-xs text-muted-foreground">
+                                        {t("auth.refreshPaused")}
+                                    </p>
+                                )}
                                 <ScrollArea className="flex-1 p-6">
                                     <div className="space-y-6">
                                         {messages.map((msg, idx) => {

@@ -11,9 +11,10 @@ from datetime import date, timedelta
 from typing import Iterable, Optional
 
 from django.db import transaction
-from django.db.models import Count, F
+from django.db.models import Case, Count, ExpressionWrapper, F, FloatField, Value, When
 from django.utils import timezone
 
+from apps.catalog import services as catalog_services
 from apps.common.contexts import CONTEXT_USER
 from apps.common.utils import day_bounds, parse_uuid
 from apps.platform_core.services import publish_event
@@ -127,10 +128,11 @@ def lift_moderation_hiding(offer_id) -> None:
 
 
 def count_contacts_by_offer(day: date) -> list:
-    """(offer_id, seller_id, total) des contacts reçus un jour donné (agrégat du tableau de bord)."""
+    """(offer_id, seller_id, total) des contacts comptés un jour donné (agrégat du tableau de bord).
+    Même définition du « contact » que l'engagement E du classement : `is_counted` (ADR 0004)."""
     start, end = day_bounds(day)
     rows = (
-        ContactEvent.objects.filter(created_at__gte=start, created_at__lt=end)
+        ContactEvent.objects.filter(created_at__gte=start, created_at__lt=end, is_counted=True)
         .values('offer_id', 'offer__seller_id')
         .annotate(total=Count('id'))
     )
@@ -148,21 +150,44 @@ def _score_of(offer: Offer, settings_row, now=None) -> float:
 
 def refresh_visibility_score(offer: Offer, settings_row=None) -> None:
     """Recalcule et enregistre le score de visibilité d'une offre (E x R, CDC 3.5), depuis les
-    compteurs : jamais d'incrément, donc rejouable."""
-    offer.visibility_score = _score_of(offer, settings_row)
-    offer.last_score_update = timezone.now()
-    offer.save(update_fields=['visibility_score', 'last_score_update'])
+    compteurs : jamais d'incrément, donc rejouable. Aucune note ni avis n'entre dans le score
+    (règle 4) et la promotion est séparée (règle 5)."""
+    now = timezone.now()
+    offer.visibility_score = _score_of(offer, settings_row, now)
+    offer.last_score_update = now
+    Offer.objects.filter(pk=offer.pk).update(visibility_score=offer.visibility_score, last_score_update=now)
+
+
+def recount_contacts(offer_id) -> int:
+    """Recompte `contacts_count` à la source (nombre de contacts comptés) ; renvoie le total."""
+    total = ContactEvent.objects.filter(offer_id=offer_id, is_counted=True).count()
+    Offer.objects.filter(pk=offer_id).update(contacts_count=total)
+    return total
 
 
 def refresh_all_scores() -> int:
-    """Recalcule le score de toutes les offres actives (action d'administration, réglages modifiés)."""
+    """Recalcule le score de toutes les offres actives (réglages modifiés, cron horaire de récence,
+    action d'administration). Idempotent : les compteurs sources sont recomptés (favoris, contacts)
+    ou relus (vues, partages) avant le calcul ; renvoie le nombre d'offres mises à jour."""
     offers = list(Offer.objects.filter(is_active=True, is_deleted=False))
+    ids = [o.id for o in offers]
+    favorites = dict(
+        Favorite.objects.filter(offer_id__in=ids).values('offer_id').annotate(n=Count('id')).values_list('offer_id', 'n')
+    )
+    contacts = dict(
+        ContactEvent.objects.filter(offer_id__in=ids, is_counted=True)
+        .values('offer_id').annotate(n=Count('id')).values_list('offer_id', 'n')
+    )
     settings_row = visibility_services.get_ranking_settings()
     now = timezone.now()
     for offer in offers:
+        offer.likes_count = favorites.get(offer.id, 0)
+        offer.contacts_count = contacts.get(offer.id, 0)
         offer.visibility_score = _score_of(offer, settings_row, now)
         offer.last_score_update = now
-    Offer.objects.bulk_update(offers, ['visibility_score', 'last_score_update'], batch_size=200)
+    Offer.objects.bulk_update(
+        offers, ['likes_count', 'contacts_count', 'visibility_score', 'last_score_update'], batch_size=200,
+    )
     return len(offers)
 
 
@@ -337,7 +362,7 @@ def remove_favorite(favorite: Favorite) -> None:
 
 
 def _refresh_after_like_change(offer: Offer) -> None:
-    offer.refresh_from_db(fields=['likes_count'])
+    offer.refresh_from_db(fields=['views_count', 'likes_count', 'shares_count', 'contacts_count'])
     refresh_visibility_score(offer)
 
 
@@ -390,6 +415,15 @@ def _interaction_payload(offer: Offer, sender, **ids) -> dict:
     }
 
 
+def is_countable_contact(offer: Offer, sender, window_hours: int) -> bool:
+    """Un contact entre dans l'engagement une seule fois par expéditeur et par offre dans la
+    fenêtre réglée (même fenêtre que l'anti-doublon), tous canaux confondus."""
+    return not ContactEvent.objects.filter(
+        offer=offer, sender=sender, is_counted=True,
+        created_at__gte=timezone.now() - timedelta(hours=window_hours),
+    ).exists()
+
+
 def create_contact_event(*, offer: Offer, sender, message: str, channel: str = ContactEvent.CHANNEL_MESSAGE) -> ContactEvent:
     """Enregistre un contact et publie `marketplace.contact_recorded` dans la même transaction :
     la conversation et la notification du vendeur sont créées par leurs domaines à la diffusion
@@ -404,9 +438,16 @@ def create_contact_event(*, offer: Offer, sender, message: str, channel: str = C
             f"Vous avez déjà contacté le vendeur pour cette annonce ces dernières {window_hours} heures."
         )
     with transaction.atomic():
-        # Extension (classement) : le marquage `is_counted` et le recalcul de `contacts_count`
-        # se font ici, dans la même transaction.
-        event = ContactEvent.objects.create(offer=offer, sender=sender, message=message, channel=channel)
+        # Engagement : un contact compte une fois par expéditeur et par offre dans la fenêtre,
+        # tous canaux confondus ; `contacts_count` est recompté à la source, puis le score,
+        # dans la même transaction.
+        event = ContactEvent.objects.create(
+            offer=offer, sender=sender, message=message, channel=channel,
+            is_counted=is_countable_contact(offer, sender, window_hours),
+        )
+        recount_contacts(offer.id)
+        offer.refresh_from_db(fields=['views_count', 'likes_count', 'shares_count', 'contacts_count'])
+        refresh_visibility_score(offer)
         publish_event(
             'marketplace.contact_recorded', aggregate_type='offer', aggregate_id=offer.id,
             payload={**_interaction_payload(offer, sender, contact_event_id=event.pk), 'channel': event.channel},
@@ -445,3 +486,35 @@ def seller_owns_offer(offer_id, user_id) -> bool:
     """Vrai si l'offre existe et appartient à cet utilisateur (rattachement d'une sanction)."""
     parsed = parse_uuid(offer_id)
     return parsed is not None and Offer.objects.filter(id=parsed, seller_id=user_id).exists()
+
+
+# --- Proximité D à la lecture (CDC 3.5, ADR 0004 6.2) -------------------------
+
+def proximity_expression(near_commune_id):
+    """Coefficient D en expression SQL (Case/When) : même commune, même ville, défaut. Lu en base
+    (RankingSettings). Renvoie None quand aucune commune de référence n'est connue : pas de
+    proximité, l'ordre reste celui du score stocké. Le coefficient n'est jamais exposé."""
+    commune = parse_uuid(near_commune_id)
+    if commune is None:
+        return None
+    same_commune, same_city, default = visibility_services.get_proximity_weights()
+    info = catalog_services.get_communes_by_ids([commune]).get(commune)
+    whens = [When(commune_id=commune, then=Value(float(same_commune)))]
+    if info is not None:
+        city_communes = catalog_services.get_commune_ids_for_city(info.city_id)
+        if city_communes:
+            whens.append(When(commune_id__in=city_communes, then=Value(float(same_city))))
+    return Case(*whens, default=Value(float(default)), output_field=FloatField())
+
+
+def order_by_relevance(queryset, near_commune_id=None, descending=True):
+    """Tri par pertinence : score stocké (E x R) multiplié par D à la lecture, entièrement en SQL
+    (pagination exacte). Départage stable : date de création puis identifiant."""
+    proximity = proximity_expression(near_commune_id)
+    if proximity is None:
+        score = F('visibility_score')
+    else:
+        score = ExpressionWrapper(F('visibility_score') * proximity, output_field=FloatField())
+    if descending:
+        return queryset.order_by(score.desc(), '-created_at', 'id')
+    return queryset.order_by(score.asc(), 'created_at', 'id')

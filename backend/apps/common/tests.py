@@ -359,7 +359,7 @@ class TestStorageCleanupTests(SimpleTestCase):
 # Tâches planifiées de la V1 (CDC 5.6) : une ligne de backend/cron/crontab chacune.
 SCHEDULED_COMMANDS = {
     'purge_offer_trash', 'expire_offers', 'lift_expired_sanctions',
-    'purge_otp_codes', 'refresh_daily_contacts', 'purge_offer_views', 'dispatch_outbox', 'purge_outbox',
+    'purge_otp_codes', 'refresh_daily_contacts', 'refresh_visibility_scores', 'purge_offer_views', 'dispatch_outbox', 'purge_outbox',
 }
 
 

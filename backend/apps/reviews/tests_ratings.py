@@ -5,7 +5,7 @@ from django.utils import timezone
 from rest_framework import status
 
 from apps.identity.models import User
-from apps.marketplace.models import Offer
+from apps.marketplace.models import ContactEvent, Offer
 from apps.moderation.models import AuditLog
 
 from . import services
@@ -102,6 +102,9 @@ class RatingAveragesTests(ReviewsTestBase):
         self.rate(self.offer, [5, 5, 5])
         twin = self.make_offer(self.other, 'Une annonce jumelle sans avis')
         Offer.objects.filter(pk=twin.pk).update(created_at=self.offer.created_at)
+        # Mêmes contacts (ils entrent dans l'engagement), mais aucun avis sur la jumelle.
+        for sender in {c.sender for c in ContactEvent.objects.filter(offer=self.offer)}:
+            self.make_contact(twin, sender)
         services.marketplace_services.refresh_all_scores()
         self.offer.refresh_from_db()
         twin.refresh_from_db()

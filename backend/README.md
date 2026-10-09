@@ -47,3 +47,10 @@ proxy_set_header X-Forwarded-Proto $scheme;
 ```
 
 `$remote_addr` (et non `$proxy_add_x_forwarded_for`) écrase tout en-tête envoyé par le client : l'IP lue par les limites de débit n'est alors pas falsifiable. Un contrôle Django (`common.E001`, exécuté par `check`, `migrate`, `runserver`...) échoue si `DEBUG=False` et `NUM_PROXIES=0`.
+
+
+## Envois de fichiers et tâches planifiées
+
+- **Taille des envois** : Django borne le corps hors fichiers (`DATA_UPLOAD_MAX_MEMORY_SIZE`, 1 Mo par défaut, réglable par `DATA_UPLOAD_MAX_MEMORY_KB`), le nombre de fichiers par requête (`DATA_UPLOAD_MAX_NUMBER_FILES = 10`) et chaque image (`PROFILE_IMAGE_MAX_MB`, `PROFILE_IMAGE_MAX_PIXELS`, 16 Mpx, mêmes plafonds pour les photos d'offres). Nginx doit aussi borner le corps total avant Django : `client_max_body_size 12m;` (8 photos de 5 Mo ne passent pas d'un seul envoi : le plafond protège le serveur, les photos s'envoient en plusieurs requêtes).
+- **Vues uniques** : la commande `purge_offer_views` (quotidienne, voir `cron/crontab`) supprime les vues uniques plus anciennes que la durée réglée dans le back-office (Paramètres de visibilité, 2 jours par défaut ; durée définitive à fixer avec LEG-PRV).
+- **Fuseau** : `TIME_ZONE = 'Africa/Kinshasa'`, `USE_TZ = True`. Les dates JSON portent le décalage (`+01:00`).

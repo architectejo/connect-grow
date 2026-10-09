@@ -164,4 +164,4 @@ class PixelLimitTests(TestCase):
                 field.clean(upload(self.png((50, 50)), 'p.png', 'image/png'), None)
 
     def test_pillow_pixel_ceiling_is_explicit(self):
-        self.assertEqual(Image.MAX_IMAGE_PIXELS, 40_000_000)
+        self.assertEqual(Image.MAX_IMAGE_PIXELS, 16_000_000)

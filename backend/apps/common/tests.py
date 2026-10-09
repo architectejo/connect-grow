@@ -9,6 +9,8 @@ from django.urls import Resolver404, URLResolver, get_resolver, resolve
 from rest_framework.permissions import AllowAny
 from rest_framework.test import APIClient
 
+from apps.common import boundaries
+
 # Routes (méthode, gabarit d'URL) volontairement publiques : tout le reste doit refuser un
 # anonyme. Une vue qui devient publique par erreur (AllowAny ajouté) OU privée par erreur
 # (AllowAny oublié avec le refus par défaut) fait échouer test_every_route_..., qui parcourt
@@ -137,7 +139,8 @@ class PermissionDefaultsTests(TestCase):
 # traités par R3.
 DECOUPLED_APPS = ('catalog', 'identity', 'marketplace', 'visibility', 'reviews', 'messaging', 'notifications')
 APPS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODEL_IMPORT = re.compile(r'^\s*(?:from\s+apps\.(\w+)(?:\.models)?\s+import\s+(.+)|import\s+apps\.(\w+)\.models)', re.M)
+ALL_DOMAINS = {'catalog', 'identity', 'marketplace', 'visibility', 'reviews', 'messaging', 'notifications',
+               'moderation', 'payments'}
 
 
 class DomainBoundariesTests(SimpleTestCase):
@@ -157,31 +160,71 @@ class DomainBoundariesTests(SimpleTestCase):
     def test_no_domain_imports_the_models_of_another_one(self):
         offenders = []
         for label in DECOUPLED_APPS:
-            for root, dirs, files in os.walk(os.path.join(APPS_DIR, label)):
-                dirs[:] = [d for d in dirs if d not in ('migrations', '__pycache__')]
-                for name in files:
-                    if not name.endswith('.py') or name.startswith('tests'):
-                        continue
-                    path = os.path.join(root, name)
-                    with open(path, encoding='utf-8') as handle:
-                        source = handle.read()
-                    for match in MODEL_IMPORT.finditer(source):
-                        other = match.group(1) or match.group(3)
-                        imported = match.group(2) or 'models'
-                        # `from apps.x import services` est l'interface autorisée ; `from apps.x.models import ...`
-                        # et `from apps.x import models` ne le sont pas.
-                        is_models = ('.models' in match.group(0)) or imported.strip().split(',')[0].strip() == 'models'
-                        if other not in (label, 'common') and is_models:
-                            offenders.append(f'{os.path.relpath(path, APPS_DIR)}: {match.group(0).strip()}')
+            offenders += boundaries.scan_domain(APPS_DIR, label, ALL_DOMAINS)
         self.assertEqual(offenders, [])
 
-    def test_import_detector_catches_model_imports(self):
-        for line in ('from apps.marketplace.models import Offer', 'from apps.marketplace import models',
-                     'import apps.marketplace.models'):
-            self.assertTrue(MODEL_IMPORT.search(line), line)
-        match = MODEL_IMPORT.search('from apps.marketplace import services as s')
-        self.assertNotIn('.models', match.group(0))
-        self.assertNotEqual(match.group(2).strip().split(',')[0].strip(), 'models')
+    def violations(self, source, label='marketplace', module='views'):
+        return boundaries.find_violations(source, label, ['apps', label, module], ALL_DOMAINS)
+
+    def test_analyzer_catches_every_form_of_model_access(self):
+        faulty = [
+            'from apps.reviews.models import Review',
+            'from apps.reviews.models import Review, Deal as D',
+            'from apps.reviews import models',
+            'from apps.reviews import services, models as m',
+            'import apps.reviews.models',
+            'import apps.reviews.models as m',
+            'from ..reviews.models import Review',
+            'from .. import reviews',
+            'from apps import reviews',
+            'apps.get_model("reviews.Review")',
+            'apps.get_model("reviews", "Review")',
+            'import_string("apps.reviews.models.Review")',
+            'importlib.import_module("apps.reviews.models")',
+        ]
+        for source in faulty:
+            self.assertTrue(self.violations(source), source)
+
+    def test_analyzer_allows_services_own_models_user_and_shared_code(self):
+        fine = [
+            'from apps.reviews import services as reviews_services',
+            'from apps.reviews.services import notify',
+            'from apps.common.models import BaseModel',
+            'from apps.marketplace.models import Offer',
+            'from .models import Offer',
+            'from . import models',
+            'from .services import x',
+            'from apps.reviews.serializers import ReviewSerializer',
+            'apps.get_model("identity.User")',
+            'get_user_model()',
+        ]
+        for source in fine:
+            self.assertEqual(self.violations(source), [], source)
+
+    def test_relative_import_that_leaves_the_domain_is_resolved_from_the_file_location(self):
+        source = 'from ..reviews.models import Review'
+        self.assertTrue(boundaries.find_violations(source, 'marketplace', ['apps', 'marketplace', 'views'], ALL_DOMAINS))
+        # Dans un sous-paquet, `..` reste dans le domaine.
+        self.assertEqual(
+            boundaries.find_violations('from ..models import Offer', 'marketplace',
+                                       ['apps', 'marketplace', 'management', 'x'], ALL_DOMAINS), [],
+        )
+
+    def test_scanner_reports_a_faulty_file(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            apps_root = os.path.join(tmp, 'apps')
+            os.makedirs(os.path.join(apps_root, 'marketplace', 'sub'))
+            with open(os.path.join(apps_root, 'marketplace', 'sub', 'bad.py'), 'w', encoding='utf-8') as handle:
+                handle.write('from ...reviews.models import Review' + chr(10))
+            with open(os.path.join(apps_root, 'marketplace', 'good.py'), 'w', encoding='utf-8') as handle:
+                handle.write('from apps.reviews import services' + chr(10))
+            with open(os.path.join(apps_root, 'marketplace', 'tests_x.py'), 'w', encoding='utf-8') as handle:
+                handle.write('from apps.reviews.models import Review' + chr(10))
+            offenders = boundaries.scan_domain(apps_root, 'marketplace', ALL_DOMAINS)
+        self.assertEqual(len(offenders), 1)
+        self.assertIn('sub/bad.py', offenders[0])
 
     def test_domain_models_use_uuid_primary_keys(self):
         from django.apps import apps as django_apps

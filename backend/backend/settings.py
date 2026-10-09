@@ -130,6 +130,16 @@ REST_FRAMEWORK = {
         'refresh': '60/hour',       # renouvellement de jeton, par IP
         'change_password': '10/hour',  # par utilisateur
         'kyc_write': '20/hour',     # dépôt/suppression de pièces KYC, par utilisateur
+        # Écritures du marketplace et des interactions (par utilisateur ; par IP pour la vue anonyme).
+        'contact': '20/hour',
+        'exchange': '10/hour',
+        'share': '30/hour',
+        'message': '120/hour',
+        'review': '10/hour',
+        'deal': '10/hour',
+        'offer_upload': '30/hour',  # création / modification d'offre et envoi de photos
+        'favorite': '60/hour',
+        'offer_view_anon': '300/hour',  # consultation anonyme d'une offre, par IP
     }
 }
 
@@ -248,6 +258,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # --- Mots de passe et langue ---
 LANGUAGE_CODE = 'fr'  # messages de validation Django en français
+# Les dates sont stockées en UTC et exposées avec leur décalage (Kinshasa : UTC+1). Les « jours »
+# des compteurs et des limites quotidiennes suivent ce fuseau (timezone.localdate()).
+TIME_ZONE = 'Africa/Kinshasa'
+USE_TZ = True
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -267,4 +281,14 @@ KYC_MAX_DOCUMENTS_PER_PROFILE = int(os.getenv('KYC_MAX_DOCUMENTS_PER_PROFILE', '
 PROFILE_IMAGE_MAX_SIDE = int(os.getenv('PROFILE_IMAGE_MAX_SIDE', '1024'))      # pixels, côté le plus long
 PROFILE_IMAGE_QUALITY = int(os.getenv('PROFILE_IMAGE_QUALITY', '85'))
 PROFILE_IMAGE_MAX_BYTES = int(os.getenv('PROFILE_IMAGE_MAX_MB', '5')) * 1024 * 1024
-PROFILE_IMAGE_MAX_PIXELS = int(os.getenv('PROFILE_IMAGE_MAX_PIXELS', str(40_000_000)))  # anti « bombe » d'image
+PROFILE_IMAGE_MAX_PIXELS = int(os.getenv('PROFILE_IMAGE_MAX_PIXELS', str(16_000_000)))  # anti « bombe » d'image
+
+# Plafonds de requête : corps hors fichiers (JSON, champs de formulaire) et nombre de fichiers par
+# requête. La taille des fichiers est contrôlée par PROFILE_IMAGE_MAX_BYTES ; la taille totale du
+# corps doit aussi être bornée par Nginx (client_max_body_size, voir README).
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv('DATA_UPLOAD_MAX_MEMORY_KB', '1024')) * 1024
+DATA_UPLOAD_MAX_NUMBER_FILES = 10
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 200
+
+# Cookie signé qui identifie un visiteur anonyme pour le comptage des vues (apps.marketplace).
+ANON_VIEW_COOKIE_MAX_AGE = 365 * 86400

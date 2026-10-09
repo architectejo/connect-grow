@@ -15,7 +15,8 @@ from rest_framework.throttling import ScopedRateThrottle
 
 from apps.identity.models import User
 from apps.moderation.models import AuditLog, Sanction
-from apps.visibility.models import OfferUniqueView, VisibilitySettings
+from apps.platform_core.testing import dispatch_outbox_now
+from apps.visibility.models import DailyVisibilityCounter, OfferUniqueView, VisibilitySettings
 
 from . import services
 from .admin import OfferAdmin
@@ -87,16 +88,22 @@ class DeduplicationTests(MarketplaceTestBase):
     def test_share_counts_once_per_user_offer_and_day(self):
         offer = self.make_offer()
         self.client.force_authenticate(self.buyer)
-        first = self.client.post(reverse('offer-share', args=[offer.id]))
-        second = self.client.post(reverse('offer-share', args=[offer.id]))
-        self.assertEqual((first.data['shares_count'], second.data['shares_count']), (1, 1))
+        def share_and_count():
+            self.client.post(reverse('offer-share', args=[offer.id]))
+            dispatch_outbox_now()
+            offer.refresh_from_db()
+            return offer.shares_count
+
+        self.assertEqual(share_and_count(), 1)
+        self.assertEqual(share_and_count(), 1)  # même utilisateur, même jour
         other = User.objects.create_user(email='other@example.com', password='x', full_name='Autre')
         self.client.force_authenticate(other)
-        self.assertEqual(self.client.post(reverse('offer-share', args=[offer.id])).data['shares_count'], 2)
-        # Le lendemain, le même utilisateur peut de nouveau partager.
+        self.assertEqual(share_and_count(), 2)
+        # Le lendemain, le même utilisateur peut de nouveau partager ; les partages d'hier restent comptés.
         OfferUniqueView.objects.update(date=timezone.localdate() - timedelta(days=1))
+        DailyVisibilityCounter.objects.update(date=timezone.localdate() - timedelta(days=1))
         self.client.force_authenticate(self.buyer)
-        self.assertEqual(self.client.post(reverse('offer-share', args=[offer.id])).data['shares_count'], 3)
+        self.assertEqual(share_and_count(), 3)
 
     def test_one_contact_per_offer_and_sender_per_24_hours(self):
         offer = self.make_offer()

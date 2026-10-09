@@ -56,9 +56,10 @@ class VisibilitySettings(SingletonSettingsModel):
 
 
 class DailyVisibilityCounter(BaseModel):
-    """CDC 3.9 / 5.6 : vues et contacts reçus par offre et par jour (graphiques du tableau
-    de bord). Les vues sont tenues à jour en temps réel, les contacts par la tâche
-    planifiée `refresh_daily_contacts`."""
+    """CDC 3.9 / 5.6 : vues, partages et contacts reçus par offre et par jour (graphiques du
+    tableau de bord). Vues et partages sont tenus à jour en temps réel ; les contacts le sont par
+    la tâche planifiée `refresh_daily_contacts`. Ces compteurs, jamais purgés, sont la source
+    des totaux `views_count` / `shares_count` de l'offre (recalculés par événement, ADR 0003)."""
 
     offer_id = models.UUIDField()
     # Le vendeur facilite les requêtes du tableau de bord (clé étrangère vers l'utilisateur : autorisée).
@@ -67,6 +68,7 @@ class DailyVisibilityCounter(BaseModel):
     )
     date = models.DateField()
     views = models.PositiveIntegerField(default=0)
+    shares = models.PositiveIntegerField(default=0)
     contacts = models.PositiveIntegerField(default=0)
 
     class Meta:

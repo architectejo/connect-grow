@@ -464,6 +464,7 @@ class UniqueViewTests(MarketplaceTestBase):
         self.client.get(url)  # compté
         self.client.get(url)  # même visiteur, même jour : pas recompté
 
+        dispatch_outbox_now()
         offer.refresh_from_db()
         self.assertEqual(offer.views_count, 1)
         self.assertEqual(OfferUniqueView.objects.filter(offer_id=offer.id).count(), 1)
@@ -480,6 +481,7 @@ class UniqueViewTests(MarketplaceTestBase):
         self.client.force_authenticate(other)
         self.client.get(url)
 
+        dispatch_outbox_now()
         offer.refresh_from_db()
         self.assertEqual(offer.views_count, 2)
         self.assertEqual(DailyVisibilityCounter.objects.get(offer_id=offer.id).views, 2)
@@ -535,7 +537,9 @@ class ShareActionTests(MarketplaceTestBase):
         self.client.force_authenticate(self.buyer)
         response = self.client.post(reverse('offer-share', args=[offer.id]))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['shares_count'], 1)
+        dispatch_outbox_now()  # le total de l'offre est recalculé par l'outbox
+        offer.refresh_from_db()
+        self.assertEqual(offer.shares_count, 1)
 
 
 class OfferLifecycleActionTests(MarketplaceTestBase):

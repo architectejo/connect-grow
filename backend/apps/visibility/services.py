@@ -13,6 +13,8 @@ from django.db import transaction
 from django.db.models import F, Sum
 from django.utils import timezone
 
+from apps.platform_core.services import publish_event
+
 from .models import DailyVisibilityCounter, OfferUniqueView, RankingSettings, VisibilitySettings
 
 # Fenêtres de l'historique et de la tendance (CDC 3.8, 3.9).
@@ -46,31 +48,60 @@ def build_viewer_key(user, anon_fingerprint) -> str:
 
 
 def record_view(*, offer_id, seller_id, viewer_key: str, day: Optional[date] = None) -> bool:
-    """Enregistre une vue unique (offre, jour, visiteur). Renvoie True si elle est nouvelle."""
+    """Enregistre une vue unique (offre, jour, visiteur). Renvoie True si elle est nouvelle.
+    Une vue nouvelle publie `visibility.offer_viewed` dans la même transaction : le total de
+    l'offre et son score sont recalculés par l'abonné de `marketplace`."""
     day = day or timezone.localdate()
     with transaction.atomic():
         _, is_new = OfferUniqueView.objects.get_or_create(offer_id=offer_id, date=day, viewer_key=viewer_key)
         if not is_new:
             return False
-        counter, _ = DailyVisibilityCounter.objects.get_or_create(
-            offer_id=offer_id, date=day, defaults={'seller_id': seller_id},
+        _increment_counter(offer_id, seller_id, day, 'views')
+        publish_event(
+            'visibility.offer_viewed', aggregate_type='offer', aggregate_id=offer_id,
+            payload={'offer_id': str(offer_id), 'date': day.isoformat()},
         )
-        DailyVisibilityCounter.objects.filter(pk=counter.pk).update(views=F('views') + 1)
     return True
+
+
+def _increment_counter(offer_id, seller_id, day, field) -> None:
+    counter, _ = DailyVisibilityCounter.objects.get_or_create(
+        offer_id=offer_id, date=day, defaults={'seller_id': seller_id},
+    )
+    DailyVisibilityCounter.objects.filter(pk=counter.pk).update(**{field: F(field) + 1})
 
 
 SHARE_KEY_PREFIX = 'share:'
 
 
-def record_share(*, offer_id, actor_key: str, day: Optional[date] = None) -> bool:
+def record_share(*, offer_id, seller_id, actor_key: str, day: Optional[date] = None) -> bool:
     """Un partage compte une fois par (offre, utilisateur, jour). Renvoie True s'il est nouveau.
-    La trace réutilise OfferUniqueView (clé préfixée « share: ») et suit la même purge.
-    `seller_id` est inutilisé ici mais gardé pour symétrie avec record_view."""
+    L'unicité de la journée s'appuie sur OfferUniqueView (clé préfixée « share: », purgée comme
+    les vues) ; le total durable est le compteur journalier `shares`, qui survit à cette purge.
+    Un partage nouveau publie `visibility.offer_shared` dans la même transaction."""
     day = day or timezone.localdate()
-    _, is_new = OfferUniqueView.objects.get_or_create(
-        offer_id=offer_id, date=day, viewer_key=f"{SHARE_KEY_PREFIX}{actor_key}"[:64],
-    )
-    return is_new
+    with transaction.atomic():
+        _, is_new = OfferUniqueView.objects.get_or_create(
+            offer_id=offer_id, date=day, viewer_key=f"{SHARE_KEY_PREFIX}{actor_key}"[:64],
+        )
+        if not is_new:
+            return False
+        _increment_counter(offer_id, seller_id, day, 'shares')
+        publish_event(
+            'visibility.offer_shared', aggregate_type='offer', aggregate_id=offer_id,
+            payload={'offer_id': str(offer_id), 'date': day.isoformat()},
+        )
+    return True
+
+
+def total_views(offer_id) -> int:
+    """Total des vues uniques d'une offre (somme des compteurs journaliers)."""
+    return DailyVisibilityCounter.objects.filter(offer_id=offer_id).aggregate(total=Sum('views'))['total'] or 0
+
+
+def total_shares(offer_id) -> int:
+    """Total des partages d'une offre (somme des compteurs journaliers)."""
+    return DailyVisibilityCounter.objects.filter(offer_id=offer_id).aggregate(total=Sum('shares'))['total'] or 0
 
 
 def purge_unique_views(retention_days: Optional[int] = None, today: Optional[date] = None) -> int:

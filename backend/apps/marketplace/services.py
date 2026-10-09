@@ -260,25 +260,38 @@ def expire_offers() -> tuple:
 
 # --- Engagement ---------------------------------------------------------------
 
+def sync_offer_engagement(offer_id) -> bool:
+    """Recalcule `views_count` et `shares_count` d'une offre à partir des compteurs journaliers
+    de `visibility` (source de vérité), puis son score. Idempotent : rejouable sans risque
+    (abonné aux événements de vue et de partage). Renvoie False si l'offre n'existe plus."""
+    offer = Offer.objects.select_related('seller').filter(pk=offer_id).first()
+    if offer is None:
+        return False
+    offer.views_count = visibility_services.total_views(offer_id)
+    offer.shares_count = visibility_services.total_shares(offer_id)
+    Offer.objects.filter(pk=offer_id).update(views_count=offer.views_count, shares_count=offer.shares_count)
+    refresh_visibility_score(offer)
+    return True
+
+
 def register_view(offer: Offer, viewer_key: str) -> bool:
-    """CDC 3.8 : une vue unique par jour et par visiteur. Met à jour le total, les compteurs
-    journaliers (visibility) et le score. Renvoie True si la vue est nouvelle."""
+    """CDC 3.8 : une vue unique par jour et par visiteur. `visibility` compte la vue et publie
+    l'événement ; le total et le score de l'offre suivent à la diffusion (immédiate après la
+    validation, sinon reprise par le cron). Renvoie True si la vue est nouvelle ; l'instance
+    reçoit alors les compteurs lus en base, « au mieux »."""
     if not visibility_services.record_view(offer_id=offer.id, seller_id=offer.seller_id, viewer_key=viewer_key):
         return False
-    Offer.objects.filter(pk=offer.pk).update(views_count=F('views_count') + 1)
     offer.refresh_from_db(fields=['views_count'])
-    refresh_visibility_score(offer)
     return True
 
 
 def register_share(offer: Offer, user) -> int:
     """CDC 3.4 : partage externe, compteur qui alimente l'engagement. Un utilisateur ne compte
-    qu'une fois par offre et par jour."""
-    if not visibility_services.record_share(offer_id=offer.id, actor_key=f"user:{user.pk}"):
-        return offer.shares_count
-    Offer.objects.filter(pk=offer.pk).update(shares_count=F('shares_count') + 1)
+    qu'une fois par offre et par jour. Renvoie `shares_count` « au mieux » : valeur lue après la
+    diffusion immédiate de l'événement ; si elle n'a pas encore eu lieu, le total précédent
+    (la source de vérité reste le compteur de `visibility`, recalculé ensuite)."""
+    visibility_services.record_share(offer_id=offer.id, seller_id=offer.seller_id, actor_key=f"user:{user.pk}")
     offer.refresh_from_db(fields=['shares_count'])
-    refresh_visibility_score(offer)
     return offer.shares_count
 
 

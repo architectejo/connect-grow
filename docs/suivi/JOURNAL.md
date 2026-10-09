@@ -2,6 +2,15 @@
 
 Une entrée par tâche terminée ou décision prise, la plus récente en haut.
 
+## 09/10/2026 — L0-07, L0-08, L0-10 fusionnés (Trust Score retiré, avis après contact, classement organique)
+
+- **Livré (dev-backend, dev-frontend ; ADR 0004) :** `Review` réécrit (note d'offre + note de vendeur, preuve de contact, un avis par couple auteur-offre) ; `Deal`, `TrustScore`, badge « Vendeur fiable » supprimés ; éligibilité authentifiée, délai contact→avis (≥ 1 h, défaut 24 h), compte ≥ 24 h ; signalement « contact fictif » réservé au vendeur avec recours de l'auteur (notifications, réponse, verrou sur la seule suppression, délai de traitement 72 h) ; score organique E×R stocké, proximité D à la lecture (`near`), recalcul horaire ; réglages en base bornés (règle 11) avec audit. 678 tests backend, 155 front.
+- **Décisions du chef de projet :** migrations `0002` à `0004` au lieu de réécrire les `0001` (CLAUDE.md §9) ; deux tables de réglages ; limite quotidienne d'avis en 429 et format d'erreur `{detail, code}` ; événements d'avis en version 2 ; nom d'auteur « prénom + initiale » par défaut (D11, en attente du client) ; verrou de suppression seul pour les motifs graves.
+- **Intégration :** T1 corrigé, T2 et T3 fusionnés dans `integ/L0-07-08-10` puis dans `backend` ; conflits résolus par dev-backend en gardant les verrous de T1 et l'éligibilité de T3.
+- **Questions LEG-PRV ajoutées :** droit d'information et de contestation de l'auteur d'un avis masqué ; durée de conservation des signalements, de leur description et de la réponse de l'auteur ; consentement pour afficher « prénom + initiale » ; anonymisation des avis à la fermeture d'un compte (`Review.user` en CASCADE).
+- **Dettes :** alerte sur les pics d'avis à 5 étoiles ; message réellement échangé comme preuve (L0-10a) ; plafond de signalements non atomique ; tri par pertinence non indexé (à mesurer au passage MySQL) ; badge « Vérifié » sans libellé précis (L1-02).
+- **Opération :** `NUM_PROXIES=1` obligatoire derrière Nginx (`.env.example` à 0 pour le développement).
+
 ## 09/10/2026 — L0-19 et L0-10a-a fusionnés (fuite du téléphone colmatée)
 
 - **L0-19 :** `logout/` sans access valide, `Retry-After` exposé en CORS, offres non actives lisibles par leur vendeur, filtre `is_verified` ; 516 tests.

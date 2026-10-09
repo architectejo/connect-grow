@@ -29,9 +29,9 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 | L0-13 | Paiements : geler `payments.Transaction` (vente d'annonce, hors V1) derrière un interrupteur ; le module sera refondu en L1-12 | dev-paiements | À faire | §3.14 |
 | L0-14 | Troc (`is_exchangeable`, `ExchangeProposal`) : masquer derrière un interrupteur en attendant la confirmation du client | dev-backend, dev-frontend | À faire | §8.3 |
 | L0-15 | Fusionner les doublons `Conversation`/`Message` dans un futur module `messaging` (préparation du lot 2) | architecte-technique | Fait (R2, module `messaging`) | §3.15 |
-| L0-16 | Table outbox et commande de diffusion des événements de domaine (app `platform_core`, ADR 0003) | architecte-technique, dev-backend | En cours (branche `feat/L0-16-outbox`) | §5.4 |
+| L0-16 | Table outbox et commande de diffusion des événements de domaine (app `platform_core`, ADR 0003) | architecte-technique, dev-backend | Fait (relu, audité, 504 tests ; fusionné dans `backend`) | §5.4 |
 | L0-17 | Rattrapage du front (phases 0 à 4, livrées hors circuit) : lint à 0 erreur, audit sécurité, relecture | dev-frontend, auditeur-securite, relecteur-code | Fait (lint 0 erreur, 15 tests, build vert, audit corrigé, relu ; reste : test du cache PWA en navigateur en recette ; react-router 7 et Tailwind 4 à valider) | §2.4 (DoD) |
-| L0-19 | Correctifs backend issus de F1 : `logout/` sans access valide (refresh seul, `authentication_classes=[]`, throttlé), `CORS_EXPOSE_HEADERS=["Retry-After"]`, retrieve des offres non actives pour leur propriétaire (`my_posts`), filtre `is_verified` de `businesses/` | dev-backend | À faire (après L0-16) | §5.9 |
+| L0-19 | Correctifs backend issus de F1 : `logout/` sans access valide (refresh seul, `authentication_classes=[]`, throttlé), `CORS_EXPOSE_HEADERS=["Retry-After"]`, retrieve des offres non actives pour leur propriétaire (`my_posts`), filtre `is_verified` de `businesses/` | dev-backend | En cours (branche `fix/L0-19-correctifs-f1`) | §5.9 |
 | L0-18 | Passe finale i18n : sortir les textes en dur des pages du front (à faire après L0-07, L0-09 et L0-14, qui réécrivent plusieurs écrans) | dev-frontend | À faire | §4.6 |
 
 ## Lot 1 — Visibilité

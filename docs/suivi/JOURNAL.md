@@ -2,6 +2,13 @@
 
 Une entrée par tâche terminée ou décision prise, la plus récente en haut.
 
+## 09/10/2026 — F1 et L0-16 fusionnés
+
+- **F1 (dev-frontend, 2 allers-retours) :** ids UUID, erreurs 429 avec `Retry-After`, déconnexion serveur et « tous les appareils », purge des caches PWA et multi-onglets, entreprises paginées, dates Africa/Kinshasa, messagerie en `useQuery` ; 78 tests, lint 0 erreur. Fusionné dans `frontend`.
+- **L0-16 (dev-backend, 2 allers-retours) :** outbox `platform_core` (ADR 0003) ; contact, échange, vues, partages, avis, réponse, avis croisés et expiration passent par l'outbox ; 504 tests ; concurrence SQLite vérifiée par script manuel (`scripts/check_outbox_concurrency.py`). Décisions : nom `platform_core` (pas `platform`), diffusion immédiate après commit en plus du cron, compteurs journaliers de `visibility` seule source des totaux, `reputation_changed` non migré (L0-07), rétention 7 jours (traités) et 30 jours (échecs). Audit : plus de données personnelles dans les journaux.
+- **Décisions avis/classement/contact :** voir `docs/specs/avis-classement-contact.md` section 6 (suppression de `Deal`, consentement de contact par canal désactivé par défaut, etc.).
+- **En cours :** L0-19 (correctifs backend issus de F1). **Ensuite :** L0-10a-a (retrait de `phone`), L0-07/L0-08, L0-10.
+
 ## 09/10/2026 — R2 et R3 du reset fusionnés dans `backend`
 
 - **R2 (dev-backend, 2 allers-retours) :** `marketplace` (Offer, `is_deleted`), `visibility`, `reviews` (Deal/TrustScore transitoires), `notifications`, `messaging` ; anciennes apps `interactions`, `reputation`, `ranking` supprimées ; 381 tests. Failles de l'ancien code corrigées : modification d'une offre par n'importe quel connecté, conversation unique partagée par offre, écriture dans toute conversation, réponse d'avis écrite par son auteur. Ajouts : limites de débit sur les écritures, masquage de modération explicite (`is_hidden_by_moderation`), cookie anonyme signé, purge des vues (`VisibilitySettings`), journalisation règle 12, fuseau `Africa/Kinshasa` avec `USE_TZ`.

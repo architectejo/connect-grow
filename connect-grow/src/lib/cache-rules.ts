@@ -10,5 +10,7 @@ export function isCacheableApiContent({ url, request }: { url: URL; request: Req
   if (request.headers.has("Authorization")) return false;
   if (url.searchParams.has("my_posts")) return false;
   if (/\/posts\/(trash|mine)\//.test(url.pathname)) return false;
+  // Données personnelles : pièces KYC, messages, contacts, avis, notifications (jamais en cache)
+  if (/\/(accounts\/kyc|interactions)\//.test(url.pathname)) return false;
   return /\/api\/(v1\/)?(marketplace\/posts|accounts\/businesses)\//.test(url.pathname);
 }

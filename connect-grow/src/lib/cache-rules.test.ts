@@ -34,4 +34,12 @@ describe("isCacheableApiContent", () => {
   it("refuse les méthodes autres que GET", () => {
     expect(call("/api/marketplace/posts/", {}, "POST")).toBe(false);
   });
+  it("refuse KYC et interactions, même sans en-tête Authorization", () => {
+    expect(call("/api/accounts/kyc/documents/")).toBe(false);
+    expect(call("/api/v1/interactions/messages/?conversation=x")).toBe(false);
+    expect(call("/api/interactions/notifications/")).toBe(false);
+  });
+  it("refuse toute requête portant Authorization, y compris sur les routes publiques", () => {
+    expect(call("/api/accounts/businesses/", { Authorization: "Bearer x" })).toBe(false);
+  });
 });

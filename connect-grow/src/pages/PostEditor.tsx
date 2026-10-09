@@ -25,7 +25,7 @@ import { marketplaceKeys, useCategories, useCities, usePost } from "@/hooks/use-
 import { accountKeys } from "@/hooks/use-account";
 import { categoryIcon } from "@/lib/category-icons";
 import { mediaUrl } from "@/lib/media";
-import { POST_DRAFT_KEY } from "@/lib/tokens";
+import { clearDraft, readDraft, writeDraft } from "@/lib/draft";
 import { apiErrorMessage } from "@/lib/errors";
 import { parseApiErrors } from "@/lib/validation";
 import { cn } from "@/lib/utils";
@@ -149,23 +149,6 @@ function StepIndicator({ current, onSelect, maxReached }: { current: number; onS
   );
 }
 
-function readDraft(): Partial<FormValues> | null {
-  try {
-    const raw = localStorage.getItem(POST_DRAFT_KEY);
-    return raw ? (JSON.parse(raw) as Partial<FormValues>) : null;
-  } catch {
-    return null;
-  }
-}
-
-function clearDraft() {
-  try {
-    localStorage.removeItem(POST_DRAFT_KEY);
-  } catch {
-    /* stockage indisponible */
-  }
-}
-
 /** Télécharge une photo déjà en ligne pour la renvoyer comme photo principale. */
 async function fileFromUrl(url: string): Promise<File> {
   const response = await fetch(mediaUrl(url) ?? url);
@@ -225,7 +208,7 @@ function PostEditorForm({ post }: { post?: Post }) {
   // Brouillon (création uniquement) : une coupure réseau ou un onglet fermé ne fait pas tout perdre
   useEffect(() => {
     if (isEdit) return;
-    const draft = readDraft();
+    const draft = readDraft<Partial<FormValues>>(user?.id);
     if (draft && (draft.title || draft.description)) {
       form.reset({ ...defaultValues, ...draft });
       toast.info("Brouillon restauré", {
@@ -233,20 +216,16 @@ function PostEditorForm({ post }: { post?: Post }) {
         action: { label: "Effacer", onClick: () => { clearDraft(); form.reset(defaultValues); } },
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restauration au montage uniquement
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restauration quand l'utilisateur est connu (une fois)
+  }, [user?.id]);
 
   useEffect(() => {
     if (isEdit) return;
     const subscription = watch((draft) => {
-      try {
-        localStorage.setItem(POST_DRAFT_KEY, JSON.stringify(draft));
-      } catch {
-        /* stockage indisponible */
-      }
+      writeDraft(user?.id, draft);
     });
     return () => subscription.unsubscribe();
-  }, [watch, isEdit]);
+  }, [watch, isEdit, user?.id]);
 
   const goTo = (index: number) => {
     setStep(index);

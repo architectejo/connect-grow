@@ -1,7 +1,7 @@
 import axios, { AxiosError, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AUTH_EXPIRED_EVENT, tokenStorage } from "@/lib/tokens";
-import apiClient from "./client";
+import apiClient, { resetRefreshState } from "./client";
 
 const reply = (config: InternalAxiosRequestConfig, status: number, data: unknown = {}, headers = {}): Promise<AxiosResponse> => {
   const response = { data, status, statusText: "", headers, config } as AxiosResponse;
@@ -18,6 +18,7 @@ describe("intercepteur de rafraîchissement du jeton", () => {
   beforeEach(() => {
     localStorage.clear();
     seen = [];
+    resetRefreshState();
     apiClient.defaults.adapter = ((config: InternalAxiosRequestConfig) => {
       seen.push({ url: config.url, auth: config.headers.Authorization as string | undefined });
       return respond(config);
@@ -90,5 +91,24 @@ describe("intercepteur de rafraîchissement du jeton", () => {
 
     expect(seen).toHaveLength(1);
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it("ne retente pas le refresh avant l'échéance du Retry-After après un 429", async () => {
+    const post = vi.spyOn(axios, "post").mockRejectedValue(
+      new AxiosError("429", "429", undefined, null, { status: 429, data: {}, headers: { "retry-after": "60" } } as unknown as AxiosResponse),
+    );
+    respond = (config) => reply(config, 401);
+
+    await expect(apiClient.get("accounts/me/")).rejects.toMatchObject({ response: { status: 429 } });
+    await expect(apiClient.get("accounts/me/")).rejects.toMatchObject({ response: { status: 429 } });
+    expect(post).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 61_000);
+    post.mockResolvedValue({ data: { access: "neuf", refresh: "r2" } });
+    respond = (config) => (config.headers.Authorization === "Bearer neuf" ? reply(config, 200, {}) : reply(config, 401));
+    await apiClient.get("accounts/me/");
+    vi.useRealTimers();
+    expect(post).toHaveBeenCalledTimes(2);
   });
 });

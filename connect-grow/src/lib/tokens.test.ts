@@ -27,6 +27,13 @@ describe("tokenStorage.clear", () => {
     expect(del).toHaveBeenCalledWith(API_CONTENT_CACHE);
   });
 
+  it("purge tous les caches applicatifs (annonces, référentiels, photos)", () => {
+    const del = vi.fn().mockResolvedValue(true);
+    vi.stubGlobal("caches", { delete: del });
+    tokenStorage.clear();
+    expect(del.mock.calls.map((c) => c[0]).sort()).toEqual(["api-annonces", "api-referentiels", "photos"]);
+  });
+
   it("ne plante pas si l'API Cache est indisponible", () => {
     vi.stubGlobal("caches", undefined);
     expect(() => tokenStorage.clear()).not.toThrow();

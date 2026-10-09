@@ -2,6 +2,13 @@
 
 Une entrée par tâche terminée ou décision prise, la plus récente en haut.
 
+## 09/10/2026 — L0-19 et L0-10a-a fusionnés (fuite du téléphone colmatée)
+
+- **L0-19 :** `logout/` sans access valide, `Retry-After` exposé en CORS, offres non actives lisibles par leur vendeur, filtre `is_verified` ; 516 tests.
+- **L0-10a-a (backend + front, 2 allers-retours chacun) :** `phone` retiré de tous les sérialiseurs publics ; test de non-fuite exhaustif (`common/tests_privacy.py`, 6 profils dont modérateur et administrateur, recherche, écritures) ; boutons Appeler/WhatsApp supprimés du front ; `Vary: Authorization` et `Cache-Control: private` sur `/api/` ; cache PWA renommé `api-annonces-v2` ; oracle d'existence du téléphone à l'inscription supprimé (unicité contrôlée après un OTP valide). 539 tests backend, 85 front.
+- **Dette tracée :** oracle d'existence d'e-mail à l'inscription (à lever avec une vérification d'e-mail) ; accès des modérateurs aux e-mails/téléphones dans l'admin (LEG-PRV) ; WebSocket non couverts par le test de non-fuite.
+- **Écart de contrat front :** plus d'erreur `phone` « déjà utilisé » à l'étape 1 (remplacée par `otp_code` neutre) ; 429 possibles sur `register` et `PATCH me/`.
+
 ## 09/10/2026 — F1 et L0-16 fusionnés
 
 - **F1 (dev-frontend, 2 allers-retours) :** ids UUID, erreurs 429 avec `Retry-After`, déconnexion serveur et « tous les appareils », purge des caches PWA et multi-onglets, entreprises paginées, dates Africa/Kinshasa, messagerie en `useQuery` ; 78 tests, lint 0 erreur. Fusionné dans `frontend`.

@@ -17,7 +17,7 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 | L0-05-R1 | Reset R1 : `common`, `identity` (ex-`accounts`), `catalog`, `AUTH_USER_MODEL`, UUID (inclut L0-06). Un seul agent, une seule branche `chore/L0-05-reset-migrations` | dev-backend | Fait (relu, audité, 235 tests ; fusionné dans `backend`) | ADR 0002 |
 | L0-05-R2 | Reset R2 : `marketplace` (`Offer`, `is_deleted`, inclut L0-12 et L0-15), `visibility`, `reviews`, `notifications`, `messaging` | dev-backend | Fait (relu, audité, fusionné dans `backend`) | ADR 0002 |
 | L0-05-R3 | Reset R3 : `moderation`, `payments`, cron, `setup_roles`, import-linter, régénération des `0001`, `migrate` sur base vierge | dev-backend | Fait (relu, audité, fusionné dans `backend`) | ADR 0002 |
-| L0-05-F1 | Front : ids en `string` (UUID), en parallèle de R1 à R3 | dev-frontend | À faire | ADR 0002 |
+| L0-05-F1 | Front : ids en `string` (UUID), en parallèle de R1 à R3 | dev-frontend | Fait (relu, audité, 78 tests ; fusionné dans `frontend`) | ADR 0002 |
 | L0-06 | Créer le module `catalog` (City, Commune, Category, ForbiddenItem) et supprimer les clés étrangères entre domaines (ex. `accounts.User` → `marketplace.City`) | architecte-technique, dev-backend | Fait (module `catalog` livré avec R1) | §5.3, §5.4 |
 | L0-07 | Retirer le Trust Score : `User.trust_score`, `TrustScoreSettings`, facteur de confiance de `ranking`, `TrustScore.tsx` et `lib/trust.ts` ; remplacer par note d'offre et note vendeur affichées (moyenne, nombre, ancienneté) ; retirer aussi le badge « Vendeur fiable » et `avg_rating` issu du Trust Score. Stories : `docs/specs/avis-classement-contact.md` | analyste-fonctionnel, architecte-technique, dev-backend, dev-frontend | À faire | §3.4, règle 4 |
 | L0-08 | Remplacer le classement par le score organique P × E × R × D, sans note ; pondérations en base | dev-backend | À faire | §3.5 |
@@ -31,6 +31,7 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 | L0-15 | Fusionner les doublons `Conversation`/`Message` dans un futur module `messaging` (préparation du lot 2) | architecte-technique | Fait (R2, module `messaging`) | §3.15 |
 | L0-16 | Table outbox et commande de diffusion des événements de domaine (app `platform_core`, ADR 0003) | architecte-technique, dev-backend | En cours (branche `feat/L0-16-outbox`) | §5.4 |
 | L0-17 | Rattrapage du front (phases 0 à 4, livrées hors circuit) : lint à 0 erreur, audit sécurité, relecture | dev-frontend, auditeur-securite, relecteur-code | Fait (lint 0 erreur, 15 tests, build vert, audit corrigé, relu ; reste : test du cache PWA en navigateur en recette ; react-router 7 et Tailwind 4 à valider) | §2.4 (DoD) |
+| L0-19 | Correctifs backend issus de F1 : `logout/` sans access valide (refresh seul, `authentication_classes=[]`, throttlé), `CORS_EXPOSE_HEADERS=["Retry-After"]`, retrieve des offres non actives pour leur propriétaire (`my_posts`), filtre `is_verified` de `businesses/` | dev-backend | À faire (après L0-16) | §5.9 |
 | L0-18 | Passe finale i18n : sortir les textes en dur des pages du front (à faire après L0-07, L0-09 et L0-14, qui réécrivent plusieurs écrans) | dev-frontend | À faire | §4.6 |
 
 ## Lot 1 — Visibilité

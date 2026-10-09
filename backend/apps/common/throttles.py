@@ -21,6 +21,11 @@ class ActionScopedThrottleMixin:
         return throttles
 
 
+class AnonymousOrUserScopedThrottle(ScopedRateThrottle):
+    """Comme ScopedRateThrottle (clé : utilisateur connecté, sinon adresse IP), nommé pour les
+    lectures publiques coûteuses : la limite s'applique à tous, par IP pour les anonymes."""
+
+
 class AnonymousScopedThrottle(ScopedRateThrottle):
     """Comme ScopedRateThrottle, mais ne limite que les requêtes anonymes (par IP)."""
 

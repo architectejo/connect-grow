@@ -144,6 +144,7 @@ REST_FRAMEWORK = {
         'share': '30/hour',
         'message': '120/hour',
         'review': '10/hour',
+        'offer_list': '600/hour',  # liste des annonces (tri par pertinence non indexé), par IP ou par utilisateur
         'review_eligibility': '120/hour',  # lecture du droit d'avis, par utilisateur
         'report': '10/hour',        # signalements, par utilisateur
         'offer_upload': '30/hour',  # création / modification d'offre et envoi de photos

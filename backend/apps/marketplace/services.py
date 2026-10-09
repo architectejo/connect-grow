@@ -107,9 +107,11 @@ class ReviewContact:
 
 
 def get_review_contact(offer_id, user_id) -> Optional[ReviewContact]:
-    """Plus ancien contact de `user_id` sur l'offre, ou None s'il n'a jamais contacté le vendeur."""
+    """Plus ancien contact de `user_id` sur l'offre, ou None s'il n'a jamais contacté le vendeur.
+    Seuls les contacts comptés (`is_counted`) valent preuve. Limite connue : « un message
+    effectivement échangé » (réponse du vendeur) comme preuve viendra avec L0-10a."""
     row = (
-        ContactEvent.objects.filter(offer_id=offer_id, sender_id=user_id)
+        ContactEvent.objects.filter(offer_id=offer_id, sender_id=user_id, is_counted=True)
         .order_by('created_at', 'id').values_list('id', 'channel', 'created_at').first()
     )
     return None if row is None else ReviewContact(contact_event_id=row[0], channel=row[1], recorded_at=row[2])
@@ -165,30 +167,42 @@ def recount_contacts(offer_id) -> int:
     return total
 
 
+REFRESH_BATCH_SIZE = 500
+
+
 def refresh_all_scores() -> int:
     """Recalcule le score de toutes les offres actives (réglages modifiés, cron horaire de récence,
     action d'administration). Idempotent : les compteurs sources sont recomptés (favoris, contacts)
-    ou relus (vues, partages) avant le calcul ; renvoie le nombre d'offres mises à jour."""
-    offers = list(Offer.objects.filter(is_active=True, is_deleted=False))
-    ids = [o.id for o in offers]
-    favorites = dict(
-        Favorite.objects.filter(offer_id__in=ids).values('offer_id').annotate(n=Count('id')).values_list('offer_id', 'n')
-    )
-    contacts = dict(
-        ContactEvent.objects.filter(offer_id__in=ids, is_counted=True)
-        .values('offer_id').annotate(n=Count('id')).values_list('offer_id', 'n')
-    )
+    ou relus (vues, partages) avant le calcul ; renvoie le nombre d'offres mises à jour.
+
+    Traitement par lots de `REFRESH_BATCH_SIZE` identifiants (pas de `IN (...)` géant, portable
+    MySQL), chaque lot dans sa transaction. Ce recomptage horaire corrige aussi toute dérive des
+    compteurs incrémentaux (`likes_count`, `contacts_count`) : l'auto-correction est au plus d'une heure."""
+    ids = list(Offer.objects.filter(is_active=True, is_deleted=False).order_by('id').values_list('id', flat=True))
     settings_row = visibility_services.get_ranking_settings()
     now = timezone.now()
-    for offer in offers:
-        offer.likes_count = favorites.get(offer.id, 0)
-        offer.contacts_count = contacts.get(offer.id, 0)
-        offer.visibility_score = _score_of(offer, settings_row, now)
-        offer.last_score_update = now
-    Offer.objects.bulk_update(
-        offers, ['likes_count', 'contacts_count', 'visibility_score', 'last_score_update'], batch_size=200,
-    )
-    return len(offers)
+    for start in range(0, len(ids), REFRESH_BATCH_SIZE):
+        batch = ids[start:start + REFRESH_BATCH_SIZE]
+        with transaction.atomic():
+            offers = list(Offer.objects.filter(id__in=batch, is_active=True, is_deleted=False))
+            batch_ids = [o.id for o in offers]
+            favorites = dict(
+                Favorite.objects.filter(offer_id__in=batch_ids).values('offer_id')
+                .annotate(n=Count('id')).values_list('offer_id', 'n')
+            )
+            contacts = dict(
+                ContactEvent.objects.filter(offer_id__in=batch_ids, is_counted=True)
+                .values('offer_id').annotate(n=Count('id')).values_list('offer_id', 'n')
+            )
+            for offer in offers:
+                offer.likes_count = favorites.get(offer.id, 0)
+                offer.contacts_count = contacts.get(offer.id, 0)
+                offer.visibility_score = _score_of(offer, settings_row, now)
+                offer.last_score_update = now
+            Offer.objects.bulk_update(
+                offers, ['likes_count', 'contacts_count', 'visibility_score', 'last_score_update'], batch_size=200,
+            )
+    return len(ids)
 
 
 # --- Cycle de vie (CDC 3.2, 3.9, 3.10) ----------------------------------------
@@ -427,7 +441,12 @@ def is_countable_contact(offer: Offer, sender, window_hours: int) -> bool:
 def create_contact_event(*, offer: Offer, sender, message: str, channel: str = ContactEvent.CHANNEL_MESSAGE) -> ContactEvent:
     """Enregistre un contact et publie `marketplace.contact_recorded` dans la même transaction :
     la conversation et la notification du vendeur sont créées par leurs domaines à la diffusion
-    de l'événement (outbox), avec reprise en cas d'échec."""
+    de l'événement (outbox), avec reprise en cas d'échec.
+
+    Limite connue : le contrôle de doublon puis le marquage `is_counted` ne sont pas atomiques
+    entre deux requêtes simultanées du même expéditeur (SQLite sérialise les écritures ; sous
+    MySQL, deux contacts pourraient être comptés). L'effet est borné : `contacts_count` est
+    recompté à la source et corrigé à chaque rafraîchissement horaire (`refresh_all_scores`)."""
     _check_can_contact(offer, sender)
     window_hours = MarketplaceSettings.get_solo().duplicate_contact_window_hours
     recent = ContactEvent.objects.filter(

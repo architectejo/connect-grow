@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from apps.catalog import services as catalog_services
 from apps.common.images import validate_image_pixels, validate_image_upload_size
 from apps.common.pagination import OptionalPagination
-from apps.common.throttles import ActionScopedThrottleMixin, AnonymousScopedThrottle
+from apps.common.throttles import ActionScopedThrottleMixin, AnonymousOrUserScopedThrottle, AnonymousScopedThrottle
 from apps.moderation.services import record_audit
 from apps.common.utils import parse_uuid
 from apps.visibility import services as visibility_services
@@ -67,6 +67,7 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
         'pause', 'unpause', 'mark_sold', 'renew', 'images', 'delete_image',
     }
     throttle_scopes = {
+        'list': ('offer_list', AnonymousOrUserScopedThrottle),
         'create': 'offer_upload', 'update': 'offer_upload', 'partial_update': 'offer_upload',
         'images': 'offer_upload', 'share': 'share', 'favorite': 'favorite',
         'retrieve': ('offer_view_anon', AnonymousScopedThrottle),

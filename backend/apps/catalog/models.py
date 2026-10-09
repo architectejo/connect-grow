@@ -26,7 +26,12 @@ class NormalizedKeyMixin(models.Model):
     la clé normalisée stockée dans une colonne dédiée (unique, éventuellement dans la
     portée `KEY_SCOPE`), et `clean()` renvoie une erreur de formulaire lisible avant
     que la base ne la refuse (le champ clé est non éditable, donc ignoré par les
-    formulaires)."""
+    formulaires).
+
+    Limites connues : `QuerySet.update()` et `bulk_create()` contournent `save()` et ne
+    recalculent pas les clés (passer par `save()`). Les clés ont `max_length` = 3 x celui du
+    nom : `casefold()` peut allonger une chaîne (« ß » -> « ss »), au plus d'un facteur 3.
+    """
 
     KEY_FIELDS: dict = {}
     KEY_SCOPE: tuple = ()
@@ -52,6 +57,14 @@ class NormalizedKeyMixin(models.Model):
 
     def save(self, *args, **kwargs):
         self._compute_keys()
+        update_fields = kwargs.get('update_fields')
+        if update_fields is not None:
+            # Une sauvegarde partielle du nom doit emporter sa clé, sinon elle périme.
+            update_fields = set(update_fields)
+            for source, key in self.KEY_FIELDS.items():
+                if source in update_fields:
+                    update_fields.add(key)
+            kwargs['update_fields'] = update_fields
         super().save(*args, **kwargs)
 
 
@@ -80,7 +93,7 @@ class City(NormalizedKeyMixin, SlugMixin, BaseModel):
     KEY_FIELDS = {'name': 'name_key'}
 
     name = models.CharField(max_length=100, unique=True)
-    name_key = models.CharField(max_length=100, unique=True, editable=False)
+    name_key = models.CharField(max_length=300, unique=True, editable=False)
     slug = models.SlugField(max_length=100, unique=True, blank=True)
 
     class Meta:
@@ -98,7 +111,7 @@ class Commune(NormalizedKeyMixin, BaseModel):
 
     city = models.ForeignKey(City, on_delete=models.CASCADE, related_name='communes')
     name = models.CharField(max_length=100)
-    name_key = models.CharField(max_length=100, editable=False)
+    name_key = models.CharField(max_length=300, editable=False)
 
     class Meta:
         unique_together = ('city', 'name_key')
@@ -113,7 +126,7 @@ class Category(NormalizedKeyMixin, SlugMixin, BaseModel):
     KEY_FIELDS = {'name': 'name_key'}
 
     name = models.CharField(max_length=100, unique=True)
-    name_key = models.CharField(max_length=100, unique=True, editable=False)
+    name_key = models.CharField(max_length=300, unique=True, editable=False)
     icon = models.CharField(max_length=50, help_text="Nom de l'icône Lucide (ex: shopping-bag)", blank=True)
     slug = models.SlugField(max_length=100, unique=True, blank=True)
 
@@ -132,7 +145,7 @@ class ForbiddenItem(NormalizedKeyMixin, BaseModel):
     KEY_FIELDS = {'keyword': 'keyword_key'}
 
     keyword = models.CharField(max_length=100, unique=True)
-    keyword_key = models.CharField(max_length=100, unique=True, editable=False)
+    keyword_key = models.CharField(max_length=300, unique=True, editable=False)
     category = models.ForeignKey(
         Category, on_delete=models.SET_NULL, null=True, blank=True, related_name='forbidden_items',
     )

@@ -1,18 +1,42 @@
-"""Réglages de test : indépendants de .env et de DEBUG.
+"""Réglages de test, réservés à `python manage.py test` (manage.py les sélectionne seul).
 
-Utilisés automatiquement par `python manage.py test` (voir manage.py). Ils ne
-servent qu'aux tests : jamais en développement ni en production.
+Le module refuse de se charger autrement : ses allègements (hachage MD5, SSL désactivé,
+cache factice) seraient dangereux en développement ou en production.
+
+Reproductibilité : `backend.settings` appelle load_dotenv(), donc un `.env` local serait lu.
+Pour qu'il ne puisse pas changer le résultat des tests, toutes les variables d'environnement
+que les réglages consultent sont fixées ici AVANT l'import (load_dotenv n'écrase jamais une
+variable déjà présente).
 """
 import os
+import sys
 import tempfile
 
-# Avant l'import des réglages principaux : aucune clé réelle n'est nécessaire.
-os.environ.setdefault('SECRET_KEY', 'test-only-secret-key-not-for-production')
-os.environ['DB_ENGINE'] = 'sqlite'
+from django.core.exceptions import ImproperlyConfigured
+
+if len(sys.argv) < 2 or sys.argv[1] != 'test':
+    raise ImproperlyConfigured(
+        "backend.settings_test ne se charge que par `python manage.py test` ; "
+        "n'utilisez jamais ces réglages ailleurs."
+    )
+
+_FORCED_ENV = {
+    'SECRET_KEY': 'test-only-secret-key-not-for-production',
+    'DEBUG': 'False',
+    'DB_ENGINE': 'sqlite',
+    'BEHIND_PROXY': 'False',
+    'NUM_PROXIES': '0',
+    'KYC_MAX_FILE_MB': '5',
+    'KYC_MAX_DOCUMENTS_PER_PROFILE': '6',
+    'PROFILE_IMAGE_MAX_SIDE': '1024',
+    'PROFILE_IMAGE_QUALITY': '85',
+    'PROFILE_IMAGE_MAX_MB': '5',
+    'PROFILE_IMAGE_MAX_PIXELS': '40000000',
+}
+os.environ.update(_FORCED_ENV)
 
 from .settings import *  # noqa: E402,F401,F403
 
-DEBUG = False
 SECURE_SSL_REDIRECT = False
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False

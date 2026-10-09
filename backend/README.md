@@ -31,4 +31,8 @@ python manage.py seed_catalog    # villes, communes, catégories, produits inter
 python manage.py test apps
 ```
 
-`manage.py test` charge automatiquement `backend/settings_test.py` : pas de `.env` ni de `DEBUG=True` nécessaires, redirection HTTPS désactivée, hachage MD5 (tests uniquement), stockages dans un dossier temporaire. Comptez quelques dizaines de secondes. Pour un autre module de réglages, définir `DJANGO_SETTINGS_MODULE`.
+`manage.py test` charge automatiquement `backend/settings_test.py` : pas de `.env` ni de `DEBUG=True` nécessaires, redirection HTTPS désactivée, hachage MD5 (tests uniquement), stockages dans un dossier temporaire. Comptez quelques dizaines de secondes. Ces réglages ne se chargent que par `manage.py test` (ils lèvent `ImproperlyConfigured` ailleurs) et fixent eux-mêmes les variables d'environnement lues par `settings.py`, pour qu'un `.env` local ne change pas le résultat.
+
+## Limitation de débit derrière Nginx
+
+Définir `NUM_PROXIES=1` (et `BEHIND_PROXY=True`) en production derrière Nginx, avec `proxy_set_header X-Forwarded-For $remote_addr;` et `proxy_set_header X-Forwarded-Proto $scheme;` : sans cela, tous les clients partagent l'IP du proxy ou l'en-tête devient falsifiable. Le cache de production devra être partagé entre processus (LocMem est local à chaque processus).

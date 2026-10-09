@@ -283,3 +283,37 @@ class ForbiddenItemAuditTests(TestCase):
         actions = list(self.AuditLog.objects.filter(actor=self.admin).order_by('created_at').values_list('action', flat=True))
         self.assertEqual(actions, ['FORBIDDEN_ITEM_CREATED', 'FORBIDDEN_ITEM_DELETED'])
         self.assertEqual(item.added_by, self.admin)
+
+
+class NormalizedKeyMaintenanceTests(TestCase):
+    def test_partial_save_of_the_name_recomputes_the_key(self):
+        city = City.objects.create(name='Kinshasa')
+        city.name = 'Lubumbashi'
+        city.save(update_fields=['name'])
+        city.refresh_from_db()
+        self.assertEqual(city.name_key, 'lubumbashi')
+        self.assertTrue(City.objects.filter(name_key='lubumbashi').exists())
+
+    def test_partial_save_of_another_field_leaves_the_key_untouched(self):
+        category = Category.objects.create(name='Mode')
+        category.icon = 'shirt'
+        category.save(update_fields=['icon'])
+        category.refresh_from_db()
+        self.assertEqual((category.icon, category.name_key), ('shirt', 'mode'))
+
+    def test_key_field_is_long_enough_for_casefold_expansion(self):
+        longest = 'ß' * 100  # casefold -> 'ss' * 100 = 200 caractères
+        city = City.objects.create(name=longest)
+        self.assertEqual(len(city.name_key), 200)
+        max_length = City._meta.get_field('name_key').max_length
+        self.assertGreaterEqual(max_length, 3 * City._meta.get_field('name').max_length)
+
+    def test_commune_id_cap_keeps_a_stable_order(self):
+        city = City.objects.create(name='Ville ordonnée')
+        for i in range(6):
+            Commune.objects.create(city=city, name=f'C{i}')
+        with mock.patch.object(services, 'MAX_COMMUNE_IDS', 3):
+            first = services.get_commune_ids_for_city(city.id)
+            second = services.get_commune_ids_for_city(city.id)
+        self.assertEqual(first, second)
+        self.assertEqual(first, sorted(first))

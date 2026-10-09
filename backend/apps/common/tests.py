@@ -113,3 +113,14 @@ class SecretKeySettingsTests(SimpleTestCase):
                 capture_output=True, text=True, timeout=60,
             )
             self.assertEqual(result.stdout.strip(), expected, result.stderr)
+
+
+class TestSettingsGuardTests(SimpleTestCase):
+    def test_settings_test_refuses_to_load_outside_manage_py_test(self):
+        env = {k: v for k, v in os.environ.items() if k != 'DJANGO_SETTINGS_MODULE'}
+        result = subprocess.run(
+            [sys.executable, '-c', 'import backend.settings_test'],
+            cwd=str(settings.BASE_DIR), env=env, capture_output=True, text=True, timeout=60,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('ImproperlyConfigured', result.stderr)

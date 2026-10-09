@@ -106,7 +106,7 @@ def get_commune_ids_for_city(city_id) -> list:
     parsed = parse_uuid(city_id)
     if parsed is None:
         return []
-    return list(Commune.objects.filter(city_id=parsed).values_list('id', flat=True)[:MAX_COMMUNE_IDS])
+    return list(Commune.objects.filter(city_id=parsed).order_by('id').values_list('id', flat=True)[:MAX_COMMUNE_IDS])
 
 
 def search_commune_ids(text: str) -> list:
@@ -115,7 +115,7 @@ def search_commune_ids(text: str) -> list:
     plafonné à MAX_COMMUNE_IDS. Note : `icontains` ne neutralise la casse qu'en ASCII sous SQLite."""
     return list(
         Commune.objects.filter(Q(name__icontains=text) | Q(city__name__icontains=text))
-        .values_list('id', flat=True)[:MAX_COMMUNE_IDS]
+        .order_by('id').values_list('id', flat=True)[:MAX_COMMUNE_IDS]
     )
 
 

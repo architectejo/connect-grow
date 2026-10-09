@@ -14,6 +14,13 @@ from django.core.files.base import ContentFile
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 
+# Formats image acceptés : jamais EPS (Ghostscript), PSD, TIFF... exposés par Pillow.
+ALLOWED_IMAGE_FORMATS = ['JPEG', 'PNG', 'WEBP', 'GIF']
+
+# Plafond explicite de Pillow (au-delà, avertissement ; à 2x, DecompressionBombError).
+Image.MAX_IMAGE_PIXELS = settings.PROFILE_IMAGE_MAX_PIXELS
+
+
 def validate_image_upload_size(file):
     """Validateur de champ : taille maximale du fichier envoyé (PROFILE_IMAGE_MAX_BYTES)."""
     if file.size > settings.PROFILE_IMAGE_MAX_BYTES:
@@ -23,13 +30,29 @@ def validate_image_upload_size(file):
         )
 
 
+def validate_image_pixels(file):
+    """Validateur de champ (formulaire, API, admin) : refuse une image trop grande en pixels
+    SANS la décoder (lecture de l'en-tête seule), et tout format hors liste blanche.
+    Évite qu'une ValidationError ne remonte du `save()` du modèle en erreur 500."""
+    try:
+        with Image.open(file, formats=ALLOWED_IMAGE_FORMATS) as image:
+            width, height = image.size
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+        raise ValidationError("Fichier image invalide.", code='invalid_image')
+    finally:
+        if hasattr(file, 'seek'):
+            file.seek(0)
+    if width * height > settings.PROFILE_IMAGE_MAX_PIXELS:
+        raise ValidationError("Les dimensions de l'image sont trop grandes.", code='image_too_large')
+
+
 def reencode_image(uploaded_file) -> ContentFile:
     """Renvoie un ContentFile WebP sans métadonnées, redimensionné, au nom généré côté serveur.
 
     Lève ValidationError si le fichier n'est pas une image lisible ou dépasse le nombre de
     pixels autorisé (protection contre les images « bombes »)."""
     try:
-        with Image.open(uploaded_file) as image:
+        with Image.open(uploaded_file, formats=ALLOWED_IMAGE_FORMATS) as image:
             if image.width * image.height > settings.PROFILE_IMAGE_MAX_PIXELS:
                 raise ValidationError("Les dimensions de l'image sont trop grandes.", code='image_too_large')
             image = ImageOps.exif_transpose(image)  # orientation appliquée, balise EXIF abandonnée
@@ -39,7 +62,7 @@ def reencode_image(uploaded_file) -> ContentFile:
             image.thumbnail((max_side, max_side))
             buffer = io.BytesIO()
             image.save(buffer, format='WEBP', quality=settings.PROFILE_IMAGE_QUALITY)  # aucun exif= transmis
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
         raise ValidationError("Fichier image invalide.", code='invalid_image')
     return ContentFile(buffer.getvalue(), name=f"{uuid.uuid4().hex}.webp")
 

@@ -10,7 +10,7 @@ from django.db.models import F
 from django.conf import settings
 from django.utils import timezone
 
-from apps.common.images import sanitize_uploaded_field
+from apps.common.images import sanitize_uploaded_field, validate_image_pixels, validate_image_upload_size
 from apps.common.models import BaseModel
 
 from .kyc_files import kyc_upload_to
@@ -74,7 +74,10 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
     )
     phone_verified = models.BooleanField(default=False)
 
-    photo = models.ImageField(upload_to='profile_photos/', null=True, blank=True)
+    photo = models.ImageField(
+        upload_to='profile_photos/', null=True, blank=True,
+        validators=[validate_image_upload_size, validate_image_pixels],
+    )
     full_name = models.CharField(max_length=255)
     user_type = models.CharField(max_length=20, choices=USER_TYPE_CHOICES, default='PARTICULIER')
 
@@ -131,7 +134,10 @@ class BusinessProfile(BaseModel):
     # Les catégories (domaine `catalog`) sont portées par BusinessProfileCategory,
     # par UUID : pas de relation Many-to-Many entre domaines.
     bio = models.TextField(blank=True)
-    logo = models.ImageField(upload_to='business_logos/', null=True, blank=True)
+    logo = models.ImageField(
+        upload_to='business_logos/', null=True, blank=True,
+        validators=[validate_image_upload_size, validate_image_pixels],
+    )
     is_verified = models.BooleanField(default=False)
     nif = models.CharField(max_length=50, blank=True) # Pour le côté pro client
 

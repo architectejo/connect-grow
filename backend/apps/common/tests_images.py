@@ -106,3 +106,62 @@ class ProfileImagesAreSanitizedTests(TestCase):
         user.full_name = 'Renommé'
         user.save()
         self.assertEqual(user.photo.name, name)
+
+
+class PixelLimitTests(TestCase):
+    def png(self, size):
+        buffer = io.BytesIO()
+        Image.new('RGB', size, (10, 10, 10)).save(buffer, format='PNG')
+        return buffer.getvalue()
+
+    def test_oversized_png_is_a_400_never_a_500_for_photo_and_logo(self):
+        owner = User.objects.create_user(
+            email='big@example.com', password='x', full_name='B', user_type='ENTREPRISE',
+        )
+        BusinessProfile.objects.create(user=owner, business_name='B')
+        client = APIClient(raise_request_exception=False)
+        client.force_authenticate(owner)
+        with self.settings(PROFILE_IMAGE_MAX_PIXELS=1000):
+            photo = client.patch('/api/accounts/me/', {'photo': upload(self.png((50, 50)), 'p.png', 'image/png')}, format='multipart')
+            logo = client.patch(
+                '/api/accounts/me/',
+                {'business_profile.logo': upload(self.png((50, 50)), 'l.png', 'image/png')}, format='multipart',
+            )
+        self.assertEqual(photo.status_code, 400, photo.content)
+        self.assertIn('photo', photo.data)
+        self.assertLess(logo.status_code, 500)
+
+    def test_image_within_limit_is_accepted(self):
+        user = User.objects.create_user(email='ok@example.com', password='x', full_name='O')
+        client = APIClient()
+        client.force_authenticate(user)
+        response = client.patch('/api/accounts/me/', {'photo': upload(self.png((20, 20)), 'p.png', 'image/png')}, format='multipart')
+        self.assertEqual(response.status_code, 200)
+
+    def test_pixel_validator_does_not_decode_and_rewinds_the_file(self):
+        from apps.common.images import validate_image_pixels
+
+        file = upload(self.png((30, 30)), 'p.png', 'image/png')
+        validate_image_pixels(file)
+        self.assertEqual(file.tell(), 0)
+
+    def test_non_whitelisted_formats_are_refused(self):
+        from apps.common.images import validate_image_pixels
+
+        buffer = io.BytesIO()
+        Image.new('RGB', (10, 10)).save(buffer, format='BMP')
+        with self.assertRaises(ValidationError):
+            validate_image_pixels(upload(buffer.getvalue(), 'x.bmp', 'image/bmp'))
+        with self.assertRaises(ValidationError):
+            reencode_image(upload(buffer.getvalue(), 'x.bmp', 'image/bmp'))
+
+    def test_admin_form_rejects_oversized_image_instead_of_crashing(self):
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        field = User._meta.get_field('photo')
+        with self.settings(PROFILE_IMAGE_MAX_PIXELS=1000):
+            with self.assertRaises(DjangoValidationError):
+                field.clean(upload(self.png((50, 50)), 'p.png', 'image/png'), None)
+
+    def test_pillow_pixel_ceiling_is_explicit(self):
+        self.assertEqual(Image.MAX_IMAGE_PIXELS, 40_000_000)

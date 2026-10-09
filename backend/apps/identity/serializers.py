@@ -5,7 +5,6 @@ from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from apps.catalog import services as catalog_services
-from apps.common.images import validate_image_upload_size
 from apps.common.serializers import PreloadingListSerializer
 
 from .models import BusinessProfile, KycDocument, OtpCode, User
@@ -21,7 +20,6 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = BusinessProfile
         fields = ['business_name', 'categories', 'bio', 'logo', 'nif', 'is_verified']
-        extra_kwargs = {'logo': {'validators': [validate_image_upload_size]}}
         # is_verified ne se décide que par la validation KYC de la modération
         # (KycDecisionView), jamais par l'utilisateur via son propre profil (CDC 3.1).
         read_only_fields = ['is_verified']
@@ -122,7 +120,6 @@ class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
         extra_kwargs = {
             'password': {'write_only': True},  # Sécurité : ne jamais renvoyer le mot de passe
             'phone_verified': {'read_only': True},
-            'photo': {'validators': [validate_image_upload_size]},
         }
         list_serializer_class = UserListSerializer
 

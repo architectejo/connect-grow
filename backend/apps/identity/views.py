@@ -28,7 +28,7 @@ from .services import KycError, decide_kyc_document, revoke_all_sessions, valida
 from .sms import send_otp_sms
 from .throttles import (
     ChangePasswordThrottle, FailureLimiter, KycWriteThrottle, LoginIpThrottle, OtpConfirmIpThrottle,
-    OtpRequestIpThrottle, OtpRequestPhoneDailyThrottle, OtpRequestPhoneThrottle, RefreshIpThrottle,
+    LogoutIpThrottle, OtpRequestIpThrottle, OtpRequestPhoneDailyThrottle, OtpRequestPhoneThrottle, RefreshIpThrottle,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,22 +143,26 @@ class ChangePasswordView(APIView):
 
 
 class LogoutView(APIView):
-    """Déconnexion : le refresh token fourni est mis sur liste noire."""
+    """Déconnexion : le refresh token fourni est mis sur liste noire.
 
-    permission_classes = [permissions.IsAuthenticated]
+    Public (ni authentification ni jeton d'accès) : le refresh dans le corps prouve la
+    possession de la session, et l'access token a souvent expiré à la déconnexion. Réponse
+    200 uniforme que le jeton soit valide, forgé, expiré ou déjà révoqué (pas d'oracle) ;
+    400 seulement si le champ est absent. Limité par IP (scope `logout`)."""
+
+    authentication_classes = []
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [LogoutIpThrottle]
 
     def post(self, request):
-        raw = request.data.get('refresh')
-        if not raw:
+        data = request.data if hasattr(request.data, 'get') else {}
+        raw = data.get('refresh')
+        if not isinstance(raw, str) or not raw.strip():
             return Response({'error': "Le jeton de rafraîchissement est requis."}, status=status.HTTP_400_BAD_REQUEST)
-        invalid = Response({'error': "Jeton invalide ou expiré."}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            token = RefreshToken(raw)
-            if str(token.get(api_settings.USER_ID_CLAIM)) != str(request.user.pk):
-                return invalid
-            token.blacklist()
+            RefreshToken(raw).blacklist()
         except TokenError:
-            return invalid
+            pass
         return Response({'message': "Déconnecté."}, status=status.HTTP_200_OK)
 
 
@@ -197,6 +201,16 @@ class BusinessListView(generics.ListAPIView):
                 Q(business_profile__business_name__icontains=search) |
                 Q(business_profile__bio__icontains=search)
             )
+
+        # Filtre ?is_verified=true|false (strict, insensible à la casse). Toute autre valeur
+        # est refusée en 400 plutôt qu'ignorée : un filtre silencieusement perdu afficherait
+        # des entreprises non vérifiées sous une étiquette « vérifiées ».
+        is_verified = self.request.query_params.get('is_verified')
+        if is_verified is not None:
+            value = is_verified.strip().lower()
+            if value not in ('true', 'false'):
+                raise serializers.ValidationError({'is_verified': "Valeur attendue : true ou false."})
+            queryset = queryset.filter(business_profile__is_verified=(value == 'true'))
 
         return queryset
 

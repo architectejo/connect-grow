@@ -121,6 +121,12 @@ class RefreshIpThrottle(IpThrottle):
     scope = 'refresh'
 
 
+class LogoutIpThrottle(IpThrottle):
+    """Déconnexion (publique) : scope distinct, par adresse IP."""
+
+    scope = 'logout'
+
+
 class ChangePasswordThrottle(UserWriteThrottle):
     """Changement de mot de passe : par utilisateur."""
 

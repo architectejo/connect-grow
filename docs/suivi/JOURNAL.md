@@ -2,6 +2,15 @@
 
 Une entrée par tâche terminée ou décision prise, la plus récente en haut.
 
+## 09/10/2026 — R2 et R3 du reset fusionnés dans `backend`
+
+- **R2 (dev-backend, 2 allers-retours) :** `marketplace` (Offer, `is_deleted`), `visibility`, `reviews` (Deal/TrustScore transitoires), `notifications`, `messaging` ; anciennes apps `interactions`, `reputation`, `ranking` supprimées ; 381 tests. Failles de l'ancien code corrigées : modification d'une offre par n'importe quel connecté, conversation unique partagée par offre, écriture dans toute conversation, réponse d'avis écrite par son auteur. Ajouts : limites de débit sur les écritures, masquage de modération explicite (`is_hidden_by_moderation`), cookie anonyme signé, purge des vues (`VisibilitySettings`), journalisation règle 12, fuseau `Africa/Kinshasa` avec `USE_TZ`.
+- **R3 (dev-backend, 2 allers-retours) :** `moderation` par `target_type`/`target_id` sans clé générique ; `payments` aligné structurellement ; cron renommé (`purge_offer_trash`, `expire_offers`, `purge_otp_codes`, `refresh_daily_contacts`) ; `setup_roles` au moindre privilège ; frontières de modules vérifiées par analyse `ast` sur les 9 domaines ; import-linter non ajouté (redondant) ; migrations 0001 finales. 425 tests, `migrate` sur base vierge OK. Audit : fuite d'e-mail/téléphone par la réponse de création d'un signalement corrigée ; permissions de modération par droits et groupes ; machine d'états des signalements ; sanctions liées à la bonne cible.
+- **Décision du chef de projet :** fuseau `Africa/Kinshasa`.
+- **Contrat front (F1 en cours) :** voir la liste dans le brief F1 ; en plus : réponse de création de signalement minimale pour un non-staff, 409 sur signalement clos ou doublon, 400 sur sanction invalide.
+- **Questions LEG-PRV ajoutées :** durée de conservation des messages, contacts, avis, signalements, journal d'audit et vues anonymes ; consentement du cookie anonyme ; finalité de l'accès du Modérateur aux e-mails/téléphones.
+- **Points ouverts :** téléphone vendeur (L0-10a) ; affaire déclarable après `mark_sold` (à arbitrer avec L0-10) ; cache de production partagé ; taux de limitation en `settings` (pas administrables) ; Trust Score transitoire (L0-07). Prochaine étape : L0-16 (outbox), L0-07, après fusion de F1.
+
 ## 09/10/2026 — R1 du reset fusionné dans `backend` (L0-04, L0-06)
 
 - **Livré (dev-backend, 3 allers-retours) :** `common`, `identity`, `catalog`, UUID, migrations régénérées ; 235 tests verts sans `.env` ni `DEBUG` (relancés par le chef de projet), `migrate` sur base vierge et `makemigrations --check` OK. Relecture et ré-audit sécurité : OK, aucun bloquant.

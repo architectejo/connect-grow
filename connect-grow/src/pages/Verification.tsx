@@ -1,10 +1,20 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { BadgeCheck, CheckCircle2, Clock, FileText, Loader2, Lock, Trash2, Upload, XCircle, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { KycDocument, KycDocumentType, KycStatus } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AccountShell } from "@/components/layout/AccountShell";
 import { ErrorState, PageHeader } from "@/components/common";
@@ -35,6 +45,7 @@ function DocumentRow({ spec, latest }: { spec: (typeof DOCUMENTS)[number]; lates
   const { t } = useTranslation();
   const upload = useUploadKyc();
   const remove = useDeleteKyc();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const status = latest ? STATUS[latest.status] : null;
   const canUpload = !latest || latest.status === "REFUSE";
 
@@ -77,7 +88,7 @@ function DocumentRow({ spec, latest }: { spec: (typeof DOCUMENTS)[number]; lates
         <Button
           variant="ghost"
           className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onClick={() => remove.mutate(latest.id)}
+          onClick={() => setConfirmDelete(true)}
           disabled={remove.isPending}
           aria-label={t("kyc.deleteLabel", { title: spec.title })}
         >
@@ -85,6 +96,18 @@ function DocumentRow({ spec, latest }: { spec: (typeof DOCUMENTS)[number]; lates
           {t("kyc.delete")}
         </Button>
       )}
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("kyc.deleteConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("kyc.deleteConfirmDescription", { title: spec.title })}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => latest && remove.mutate(latest.id)}>{t("kyc.delete")}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {canUpload && (
         <>
           <Button variant={latest ? "default" : "outline"} className="shrink-0" onClick={() => inputRef.current?.click()} disabled={upload.isPending}>

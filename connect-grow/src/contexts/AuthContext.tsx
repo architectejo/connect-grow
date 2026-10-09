@@ -1,6 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import apiClient from "@/api/client";
+import { toast } from "sonner";
+import apiClient, { refreshSession } from "@/api/client";
+import i18n from "@/i18n";
+import { httpStatus } from "@/lib/errors";
 import type { User } from "@/api/types";
 import { AUTH_EXPIRED_EVENT, tokenStorage } from "@/lib/tokens";
 
@@ -14,7 +17,9 @@ interface AuthContextValue {
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<User>;
   /** Ferme la session ici et révoque le refresh token côté serveur (`all` : tous les appareils). */
-  logout: (options?: { all?: boolean }) => void;
+  logout: (options?: { all?: boolean }) => Promise<void>;
+  /** Purge locale seule (sans appel serveur) : session déjà révoquée ou expirée. */
+  endSession: () => void;
   refreshUser: () => Promise<unknown>;
 }
 
@@ -22,18 +27,41 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const ME_QUERY_KEY = ["accounts", "me"] as const;
 
+const authHeader = (access: string | null) => (access ? { headers: { Authorization: `Bearer ${access}` } } : undefined);
+
 /**
- * Appelle `accounts/logout/` (ou `logout-all/`) avec le refresh token. Les jetons sont lus avant la
- * purge locale et l'en-tête est fixé ici, car la purge a lieu tout de suite après. Toute erreur est ignorée.
+ * Révoque la session côté serveur. Les jetons sont lus avant la purge locale et l'en-tête est fixé ici.
+ * - `logout/` n'a besoin que du refresh token : toute erreur est ignorée (la purge locale suffit).
+ * - `logout-all/` exige un accès valide : sur 401, UN rafraîchissement puis UN rejeu. Renvoie false
+ *   si les autres appareils n'ont pas pu être déconnectés, pour que l'appelant le dise à l'utilisateur.
  */
-async function requestServerLogout(all = false): Promise<void> {
+async function requestServerLogout(all = false): Promise<boolean> {
   const access = tokenStorage.getAccess();
   const refresh = tokenStorage.getRefresh();
-  if (!access) return;
+  if (!all) {
+    if (!refresh) return true;
+    try {
+      await apiClient.post("accounts/logout/", { refresh }, authHeader(access));
+    } catch {
+      /* session déjà invalide, 429 ou réseau coupé : la déconnexion locale suffit */
+    }
+    return true;
+  }
+
+  const send = (token: string) => apiClient.post("accounts/logout-all/", { refresh: tokenStorage.getRefresh() ?? refresh }, authHeader(token));
   try {
-    await apiClient.post(all ? "accounts/logout-all/" : "accounts/logout/", { refresh }, { headers: { Authorization: `Bearer ${access}` } });
+    await send(access ?? (await refreshSession()) ?? "");
+    return true;
+  } catch (error) {
+    if (httpStatus(error) !== 401) return false;
+  }
+  try {
+    const fresh = await refreshSession();
+    if (!fresh) return false;
+    await send(fresh);
+    return true;
   } catch {
-    /* session déjà invalide, 429 ou réseau coupé : la déconnexion locale suffit */
+    return false;
   }
 }
 
@@ -62,8 +90,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Déconnexion voulue : le serveur révoque d'abord le refresh token, puis on purge sans l'attendre
   // (réseau faible, ou serveur injoignable : l'utilisateur est déconnecté ici dans tous les cas).
   const logout = useCallback(
-    (options?: { all?: boolean }) => {
-      void requestServerLogout(options?.all);
+    async (options?: { all?: boolean }) => {
+      if (options?.all) {
+        const done = await requestServerLogout(true);
+        clearSession();
+        if (!done) toast.error(i18n.t("auth.logoutAllFailed"));
+        return;
+      }
+      void requestServerLogout(false);
       clearSession();
     },
     [clearSession],
@@ -73,7 +107,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onExpired = () => clearSession();
     const onStorage = (event: StorageEvent) => {
-      if (event.key === "access_token") setHasToken(!!event.newValue);
+      // Jeton retiré dans un autre onglet (déconnexion) : même purge complète qu'ici (cache mémoire, brouillon, caches PWA)
+      if (event.key === "access_token" || event.key === null) {
+        if (tokenStorage.getAccess()) setHasToken(true);
+        else clearSession();
+      }
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
     window.addEventListener("storage", onStorage);
@@ -102,9 +140,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoading: hasToken && isPending,
       login,
       logout,
+      endSession: clearSession,
       refreshUser: refetch,
     }),
-    [user, hasToken, isPending, login, logout, refetch],
+    [user, hasToken, isPending, login, logout, clearSession, refetch],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

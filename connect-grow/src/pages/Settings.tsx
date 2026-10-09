@@ -10,6 +10,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AccountShell } from "@/components/layout/AccountShell";
 import { PageHeader, StatusBadge, UserAvatar } from "@/components/common";
@@ -361,7 +371,8 @@ const passwordFormSchema = z
 function SecurityTab() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, endSession } = useAuth();
+  const [confirmAll, setConfirmAll] = useState(false);
   const changePassword = useChangePassword();
   const [error, setError] = useState<string>();
   const form = useForm<z.infer<typeof passwordFormSchema>>({
@@ -378,7 +389,7 @@ function SecurityTab() {
       form.reset();
       // Le serveur révoque toutes les sessions au changement de mot de passe : on repart de la connexion
       toast.success(t("settings.passwordChanged"));
-      logout();
+      endSession(); // sessions déjà révoquées par le serveur : purge locale seule, sans appeler logout/
       navigate("/login", { replace: true });
     } catch (err) {
       const { general } = parseApiErrors(err);
@@ -420,13 +431,29 @@ function SecurityTab() {
         <Button
           variant="ghost"
           className="ml-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onClick={() => {
-            logout({ all: true });
-            navigate("/", { replace: true });
-          }}
+          onClick={() => setConfirmAll(true)}
         >
           <LogOut aria-hidden /> {t("settings.logoutAll")}
         </Button>
+        <AlertDialog open={confirmAll} onOpenChange={setConfirmAll}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("settings.logoutAllTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>{t("settings.logoutAllDescription")}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={async () => {
+                  await logout({ all: true });
+                  navigate("/", { replace: true });
+                }}
+              >
+                {t("settings.logoutAllConfirm")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

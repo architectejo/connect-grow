@@ -19,7 +19,7 @@ from apps.identity.models import BusinessProfile, KycDocument, User
 from apps.marketplace.models import ContactEvent, ExchangeProposal, Favorite, Offer
 from apps.messaging.models import Conversation, Message
 from apps.moderation.models import Report, Sanction
-from apps.reviews.models import Deal, Review
+from apps.reviews.models import Review
 
 # Seul l'espace personnel d'un utilisateur renvoie ses propres coordonnées. `phone_verified`
 # est interdit partout ailleurs : il révèle qu'un numéro existe sur le compte.
@@ -93,13 +93,12 @@ class NoPersonalContactLeakTests(APITestCase):
             description='Description suffisamment longue pour le CDC.', price=100, main_image=make_test_image(),
         )
         Favorite.objects.create(user=buyer, offer=self.offer)
-        ContactEvent.objects.create(offer=self.offer, sender=buyer, message='Bonjour')
+        contact = ContactEvent.objects.create(offer=self.offer, sender=buyer, message='Bonjour')
         ExchangeProposal.objects.create(offer=self.offer, sender=buyer, message='Echange ?')
-        deal = Deal.objects.create(offer_id=self.offer.id, initiator=buyer, counterparty=seller)
-        deal.confirm()
         self.review = Review.objects.create(
-            deal=deal, offer_id=self.offer.id, user=buyer, reviewed_user=seller,
-            content='Avis suffisamment long pour être valide.', rating=4,
+            offer_id=self.offer.id, user=buyer, seller_context_type='USER', seller_context_id=seller.id,
+            contact_event_id=contact.id, contact_channel=contact.channel, contact_recorded_at=contact.created_at,
+            content='Avis suffisamment long pour être valide.', offer_rating=4, seller_rating=5,
         )
         self.conversation = Conversation.objects.create(offer_id=self.offer.id)
         self.conversation.participants.add(seller, buyer)
@@ -112,7 +111,7 @@ class NoPersonalContactLeakTests(APITestCase):
             user=seller, sanction_type=Sanction.TYPE_AVERTISSEMENT, reason='Test', issued_by=self.users['admin'],
         )
         self.pool = [
-            *(str(u.id) for u in self.users.values()), str(self.offer.id), str(self.review.id), str(deal.id),
+            *(str(u.id) for u in self.users.values()), str(self.offer.id), str(self.review.id),
             str(self.conversation.id), str(report.id), str(sanction.id), str(category.id), str(city.id),
             str(commune.id), *(str(m.id) for m in Message.objects.all()),
             *(str(d.id) for d in KycDocument.objects.all()),
@@ -206,14 +205,12 @@ class NoPersonalContactLeakTests(APITestCase):
     # --- réponses d'écriture -----------------------------------------------------------
 
     def test_write_responses_do_not_leak_either(self):
-        third_deal = Deal.objects.create(
-            offer_id=self.offer.id, initiator=self.users['third'], counterparty=self.users['seller'],
-        )
-        third_deal.confirm()
+        # Le contact de « third » (premier cas) ouvre son droit d'avis (deuxième cas).
         cases = [
             ('third', 'contact-list', {'post': str(self.offer.id), 'message': 'Bonjour, toujours disponible ?'}),
             ('third', 'review-list', {
-                'deal': str(third_deal.id), 'rating': 5, 'content': 'Un avis tout à fait correct et assez long.',
+                'post': str(self.offer.id), 'offer_rating': 5, 'seller_rating': 5,
+                'content': 'Un avis tout à fait correct et assez long.',
             }),
             ('buyer', 'message-list', {'conversation': str(self.conversation.id), 'content': 'Merci'}),
             ('third', 'report-list', {

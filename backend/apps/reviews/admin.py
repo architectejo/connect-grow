@@ -1,29 +1,42 @@
 from django.contrib import admin
 
+from apps.common.admin_mixins import SingletonSettingsAdminMixin
 from apps.moderation.services import record_audit
 
-from .models import Deal, Review, TrustScoreSettings
+from . import services
+from .models import Review, ReviewSettings
 
 
 @admin.register(Review)
 class ReviewAdmin(admin.ModelAdmin):
-    # CDC 3.7 : un avis retiré par la modération (is_hidden) sort du calcul du Trust Score —
-    # cocher/décocher ici déclenche le recalcul (apps.reviews.signals).
-    list_display = ('offer_id', 'user', 'reviewed_user', 'rating', 'is_hidden', 'created_at')
-    list_filter = ('is_hidden', 'rating')
+    # Un avis masqué par la modération (is_hidden) sort de toutes les moyennes ; le drapeau
+    # « dernière note vendeur » est recalculé à l'enregistrement (services.reconcile_seller_flag).
+    list_display = (
+        'offer_id', 'user', 'offer_rating', 'seller_rating', 'contact_channel', 'is_hidden', 'created_at',
+    )
+    list_filter = ('is_hidden', 'contact_channel', 'offer_rating', 'seller_rating')
     search_fields = ('user__email', 'user__phone', 'content')
-    raw_id_fields = ('user', 'reviewed_user', 'deal')
+    raw_id_fields = ('user',)
+    # Preuve de contact et drapeau calculé : jamais modifiables à la main (la modération les consulte).
+    ALWAYS_READONLY = (
+        'contact_event_id', 'contact_channel', 'contact_recorded_at', 'counts_for_seller', 'edited_at',
+    )
+
+    def has_add_permission(self, request):
+        # Un avis naît d'une prise de contact (API) : pas de création à la main.
+        return False
 
     def get_readonly_fields(self, request, obj=None):
         # Le modérateur (droit `change_review`) masque ou réaffiche un avis ; seul le
-        # super-administrateur peut en réécrire le contenu ou la note.
+        # super-administrateur peut en réécrire le contenu ou les notes.
         if request.user.is_superuser:
-            return super().get_readonly_fields(request, obj)
+            return self.ALWAYS_READONLY
         return tuple(f.name for f in Review._meta.fields if f.name != 'is_hidden')
 
     def save_model(self, request, obj, form, change):
         hidden_changed = change and 'is_hidden' in form.changed_data
         super().save_model(request, obj, form, change)
+        services.reconcile_seller_flag(obj.user_id, obj.seller_context_type, obj.seller_context_id)
         record_audit(request.user, 'REVIEW_ADMIN_UPDATED' if change else 'REVIEW_ADMIN_CREATED', target=obj,
                      details=f"Champs : {', '.join(form.changed_data)}")
         if hidden_changed:
@@ -32,26 +45,20 @@ class ReviewAdmin(admin.ModelAdmin):
     def delete_model(self, request, obj):
         record_audit(request.user, 'REVIEW_ADMIN_DELETED', target=obj)
         super().delete_model(request, obj)
+        services.reconcile_seller_flag(obj.user_id, obj.seller_context_type, obj.seller_context_id)
 
     def delete_queryset(self, request, queryset):
-        for review in queryset:
+        reviews = list(queryset)
+        for review in reviews:
             record_audit(request.user, 'REVIEW_ADMIN_DELETED', target=review)
         super().delete_queryset(request, queryset)
+        for pair in {(r.user_id, r.seller_context_type, r.seller_context_id) for r in reviews}:
+            services.reconcile_seller_flag(*pair)
 
 
-@admin.register(Deal)
-class DealAdmin(admin.ModelAdmin):
-    list_display = ('offer_id', 'initiator', 'counterparty', 'status', 'created_at', 'confirmed_at')
-    list_filter = ('status',)
-    raw_id_fields = ('initiator', 'counterparty')
-
-
-@admin.register(TrustScoreSettings)
-class TrustScoreSettingsAdmin(admin.ModelAdmin):
-    list_display = ('neutral_rating', 'neutral_weight', 'min_reviews_to_display')
-
-    def has_add_permission(self, request):
-        return not TrustScoreSettings.objects.exists()
-
-    def has_delete_permission(self, request, obj=None):
-        return False
+@admin.register(ReviewSettings)
+class ReviewSettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
+    list_display = (
+        'min_reviews_to_display', 'daily_review_limit', 'edit_window_hours', 'delay_after_contact_hours',
+        'crossed_reviews_window_days', 'crossed_reviews_threshold',
+    )

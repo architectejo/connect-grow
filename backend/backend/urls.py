@@ -15,7 +15,6 @@ urlpatterns = [
     path('api/interactions/', include('apps.marketplace.urls_interactions')),
     path('api/interactions/', include('apps.messaging.urls')),
     path('api/interactions/', include('apps.notifications.urls')),
-    path('api/reputation/', include('apps.reviews.urls_deals')),
     path('api/moderation/forbidden-items/', include('apps.catalog.urls_forbidden')),
     path('api/moderation/', include('apps.moderation.urls')),
 ]

@@ -60,8 +60,6 @@ MUST_BE_WALKED = {
     'api/interactions/messages/',
     'api/interactions/notifications/',
     'api/interactions/notifications/mark_all_as_read/',
-    'api/reputation/deals/',
-    'api/reputation/deals/<pk>/confirm/',
 }
 
 SAMPLE_VALUES = ('1', '8f0f5a52-3c6e-4a49-9d44-0d8a3d5f1c11')
@@ -194,7 +192,7 @@ class DomainBoundariesTests(SimpleTestCase):
     def test_analyzer_catches_every_form_of_model_access(self):
         faulty = [
             'from apps.reviews.models import Review',
-            'from apps.reviews.models import Review, Deal as D',
+            'from apps.reviews.models import Review, ReviewSettings as S',
             'from apps.reviews import models',
             'from apps.reviews import services, models as m',
             'import apps.reviews.models',

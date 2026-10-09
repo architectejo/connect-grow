@@ -1,7 +1,11 @@
+"""Avis après contact (ADR 0004, T1) : création, modification, réponse, visibilité, réglages,
+avis croisés et découplage. Moyennes et drapeau vendeur : voir `tests_ratings.py`."""
 import uuid
 from datetime import timedelta
 
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -12,9 +16,14 @@ from apps.marketplace.models import ContactEvent, Offer
 from apps.marketplace.tests import make_test_image
 from apps.moderation.models import Report
 from apps.notifications.models import Notification
+from apps.platform_core.models import OutboxEvent
 from apps.platform_core.testing import dispatch_outbox_now
 
-from .models import Deal, Review, TrustScoreSettings
+from . import services
+from .models import Review, ReviewSettings
+
+REVIEWS_URL = '/api/interactions/reviews/'
+GOOD = {'offer_rating': 4, 'seller_rating': 5, 'content': 'Très bon vendeur, je recommande.'}
 
 
 class ReviewsTestBase(APITestCase):
@@ -27,446 +36,463 @@ class ReviewsTestBase(APITestCase):
         self.other = User.objects.create_user(email='other@example.com', password='x', full_name='Tiers')
         self.offer = self.make_offer(self.seller)
 
-    def make_offer(self, seller, title='Un joli canapé à vendre'):
+    def make_offer(self, seller, title='Un joli canapé à vendre', **extra):
         return Offer.objects.create(
             seller=seller, category_id=self.category.id, commune_id=self.commune.id,
             title=title, description='Description suffisamment longue pour le CDC.',
-            price=100, main_image=make_test_image(),
+            price=100, main_image=make_test_image(), **extra,
         )
 
-    def make_confirmed_deal(self, offer=None, initiator=None, counterparty=None):
-        deal = Deal.objects.create(
-            offer_id=(offer or self.offer).id, initiator=initiator or self.buyer,
-            counterparty=counterparty or self.seller,
+    def make_contact(self, offer=None, user=None, channel=ContactEvent.CHANNEL_MESSAGE):
+        return ContactEvent.objects.create(
+            offer=offer or self.offer, sender=user or self.buyer, message='Bonjour, toujours disponible ?',
+            channel=channel,
         )
-        deal.confirm()
-        return deal
 
-    def make_review(self, deal=None, user=None, reviewed_user=None, **kwargs):
-        deal = deal or self.make_confirmed_deal()
+    def make_review(self, offer=None, user=None, **kwargs):
+        """Avis créé directement (sans passer par l'API), avec son contact si nécessaire."""
+        offer = offer or self.offer
+        user = user or self.buyer
+        contact = ContactEvent.objects.filter(offer=offer, sender=user).order_by('created_at').first() \
+            or self.make_contact(offer, user)
         defaults = dict(
-            deal=deal, offer_id=deal.offer_id, user=user or self.buyer, reviewed_user=reviewed_user or self.seller,
-            content='Avis suffisamment long pour être valide.', rating=4,
+            offer_id=offer.id, user=user, seller_context_type='USER', seller_context_id=offer.seller_id,
+            contact_event_id=contact.id, contact_channel=contact.channel, contact_recorded_at=contact.created_at,
+            offer_rating=4, seller_rating=5, content='Avis suffisamment long pour être valide.',
         )
         defaults.update(kwargs)
-        return Review.objects.create(**defaults)
+        review = Review.objects.create(**defaults)
+        services.reconcile_seller_flag(user.pk, review.seller_context_type, review.seller_context_id)
+        review.refresh_from_db()
+        return review
 
 
-class ReviewCreationGateTests(ReviewsTestBase):
-    url = '/api/interactions/reviews/'
-
-    def post_review(self, deal, **extra):
-        payload = {'deal': str(deal.id), 'content': 'Très bon vendeur, je recommande.', 'rating': 5}
+class ReviewCreationTests(ReviewsTestBase):
+    def post_review(self, post_id=None, **extra):
+        payload = {'post': str(post_id or self.offer.id), **GOOD}
         payload.update(extra)
-        return self.client.post(self.url, payload)
+        return self.client.post(REVIEWS_URL, payload, format='json')
 
-    def test_review_requires_a_deal(self):
+    def test_contact_opens_the_right_to_review(self):
+        contact = self.make_contact()
         self.client.force_authenticate(self.buyer)
-        response = self.client.post(self.url, {
-            'post': str(self.offer.id), 'content': 'Très bon vendeur, je recommande.', 'rating': 5,
-        })
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_review_requires_a_confirmed_deal(self):
-        deal = Deal.objects.create(offer_id=self.offer.id, initiator=self.buyer, counterparty=self.seller)
-        self.client.force_authenticate(self.buyer)
-        self.assertEqual(self.post_review(deal).status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_confirmed_deal_allows_review(self):
-        deal = self.make_confirmed_deal()
-        self.client.force_authenticate(self.buyer)
-        response = self.post_review(deal)
+        response = self.post_review()
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
-        self.assertEqual(str(response.data['reviewed_user_id']), str(self.seller.id))
-        self.assertEqual(str(response.data['post']), str(self.offer.id))
         self.assertEqual(set(response.data), {
-            'id', 'post', 'deal', 'user_id', 'user_name', 'reviewed_user_id', 'content', 'rating',
-            'reply_content', 'reply_at', 'created_at', 'is_post_owner', 'can_edit',
+            'id', 'post', 'user_id', 'user_name', 'offer_rating', 'seller_rating', 'content', 'source',
+            'reply_content', 'reply_at', 'created_at', 'edited_at', 'is_post_owner', 'can_edit',
         })
-        # L'évalué est prévenu, à la diffusion de l'événement.
-        dispatch_outbox_now()
-        self.assertEqual(Notification.objects.get(user=self.seller).notification_type, 'COMMENT')
+        self.assertEqual(response.data['post'], str(self.offer.id))
+        self.assertEqual((response.data['offer_rating'], response.data['seller_rating']), (4, 5))
+        self.assertEqual(response.data['source'], 'CONTACT')
+        self.assertEqual(response.data['user_name'], 'Acheteur')
+        self.assertIsNone(response.data['edited_at'])
+        self.assertTrue(response.data['can_edit'])
+        review = Review.objects.get()
+        # Instantané de la preuve de contact et contexte vendeur ; jamais exposés publiquement.
+        self.assertEqual(review.contact_event_id, contact.id)
+        self.assertEqual((review.contact_channel, review.contact_recorded_at), ('MESSAGE', contact.created_at))
+        self.assertEqual((review.seller_context_type, review.seller_context_id), ('USER', self.seller.id))
+        self.assertNotIn('contact_channel', response.data)
+        self.assertTrue(review.counts_for_seller)
 
-    def test_stranger_to_the_deal_cannot_review(self):
-        deal = self.make_confirmed_deal()
-        self.client.force_authenticate(self.other)
-        self.assertEqual(self.post_review(deal).status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_only_one_review_per_party_per_deal(self):
-        deal = self.make_confirmed_deal()
+    def test_without_contact_the_review_is_refused(self):
         self.client.force_authenticate(self.buyer)
-        self.post_review(deal)
-        response = self.post_review(deal, content='Deuxième avis sur la même affaire.', rating=4)
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.post_review()
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data['code'], 'not_eligible')
+        self.assertEqual(response.data['detail'], 'Vous pourrez donner votre avis après avoir contacté le vendeur.')
+        self.assertFalse(Review.objects.exists())
 
-    def test_both_parties_can_review_the_same_deal(self):
-        deal = self.make_confirmed_deal()
+    def test_contact_of_someone_else_does_not_count(self):
+        self.make_contact(user=self.other)
         self.client.force_authenticate(self.buyer)
-        r1 = self.post_review(deal)
+        self.assertEqual(self.post_review().data['code'], 'not_eligible')
+
+    def test_any_contact_channel_opens_the_right_and_the_oldest_contact_is_the_proof(self):
+        newer = self.make_contact(channel=ContactEvent.CHANNEL_CALL)
+        older = self.make_contact(channel=ContactEvent.CHANNEL_WHATSAPP)
+        ContactEvent.objects.filter(pk=older.pk).update(created_at=timezone.now() - timedelta(days=2))
+        self.client.force_authenticate(self.buyer)
+        self.assertEqual(self.post_review().status_code, status.HTTP_201_CREATED)
+        review = Review.objects.get()
+        self.assertEqual((review.contact_event_id, review.contact_channel), (older.id, 'WHATSAPP'))
+        self.assertNotEqual(review.contact_event_id, newer.id)
+
+    def test_own_offer_cannot_be_reviewed(self):
+        self.make_contact(user=self.seller)
         self.client.force_authenticate(self.seller)
-        r2 = self.post_review(deal, content='Acheteur sérieux et ponctuel.')
-        self.assertEqual(r1.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(r2.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(str(r2.data['reviewed_user_id']), str(self.buyer.id))
+        response = self.post_review()
+        self.assertEqual((response.status_code, response.data['code']), (403, 'own_offer'))
 
-    def test_content_too_short_is_rejected(self):
-        deal = self.make_confirmed_deal()
+    def test_unknown_offer_is_404(self):
         self.client.force_authenticate(self.buyer)
-        self.assertEqual(self.post_review(deal, content='Court').status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.post_review(post_id=uuid.uuid4())
+        self.assertEqual((response.status_code, response.data['code']), (404, 'offer_not_found'))
+        self.assertEqual(response.data['detail'], 'Annonce introuvable.')
 
-    def test_rating_out_of_bounds_is_rejected(self):
-        deal = self.make_confirmed_deal()
+    def test_second_review_for_the_same_offer_is_409(self):
+        self.make_contact()
         self.client.force_authenticate(self.buyer)
-        response = self.post_review(deal, content='Contenu suffisamment long pour être valide.', rating=7)
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.post_review().status_code, status.HTTP_201_CREATED)
+        response = self.post_review(content='Deuxième avis sur la même annonce.')
+        self.assertEqual((response.status_code, response.data['code']), (409, 'already_reviewed'))
+        self.assertEqual(Review.objects.count(), 1)
 
-    def test_anonymous_cannot_create_but_can_list(self):
-        deal = self.make_confirmed_deal()
-        self.assertEqual(self.post_review(deal).status_code, status.HTTP_401_UNAUTHORIZED)
-        self.assertEqual(self.client.get(self.url).status_code, status.HTTP_200_OK)
+    def test_database_enforces_one_review_per_author_and_offer(self):
+        self.make_review()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.make_review()
 
-    def test_review_of_a_purged_offer_does_not_crash(self):
-        """L'offre de l'affaire n'existe plus : l'avis reste possible, sans lien ni titre."""
-        deal = self.make_confirmed_deal()
+    def test_offer_in_the_trash_or_hidden_by_moderation_is_unavailable(self):
+        self.make_contact()
+        self.client.force_authenticate(self.buyer)
+        for changes in ({'is_deleted': True}, {'is_hidden_by_moderation': True, 'is_active': False}):
+            Offer.objects.filter(pk=self.offer.pk).update(**changes)
+            response = self.post_review()
+            self.assertEqual((response.status_code, response.data['code']), (409, 'offer_unavailable'), changes)
+            Offer.objects.filter(pk=self.offer.pk).update(
+                is_deleted=False, is_hidden_by_moderation=False, is_active=True,
+            )
+        self.assertFalse(Review.objects.exists())
+
+    def test_sold_offer_stays_reviewable(self):
+        self.make_contact()
+        self.client.force_authenticate(self.buyer)
+        for state in ({'status': Offer.STATUS_SOLD}, {'status': Offer.STATUS_EXPIRED}, {'status': Offer.STATUS_PAUSED}):
+            Review.objects.all().delete()
+            Offer.objects.filter(pk=self.offer.pk).update(is_active=False, **state)
+            self.assertEqual(self.post_review().status_code, status.HTTP_201_CREATED, state)
+
+    def test_review_of_a_purged_offer_is_404(self):
+        self.make_contact()
+        offer_id = self.offer.id
         self.offer.delete()
         self.client.force_authenticate(self.buyer)
-        response = self.post_review(deal)
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
-        self.assertIsNone(response.data['post'])
-        self.assertFalse(response.data['is_post_owner'])
+        self.assertEqual(self.post_review(post_id=offer_id).data['code'], 'offer_not_found')
 
-
-class ReviewDailyLimitTests(ReviewsTestBase):
-    def test_sixth_review_in_one_day_is_rejected(self):
+    def test_invalid_bodies_are_rejected_with_field_errors(self):
+        self.make_contact()
         self.client.force_authenticate(self.buyer)
-        for i in range(5):
-            seller = User.objects.create_user(email=f'seller{i}@example.com', password='x', full_name=f'V{i}')
-            deal = self.make_confirmed_deal(offer=self.make_offer(seller, f'Annonce numéro {i} à vendre'), counterparty=seller)
-            response = self.client.post('/api/interactions/reviews/', {
-                'deal': str(deal.id), 'content': f'Avis numéro {i} suffisamment long.', 'rating': 5,
-            })
-            self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        cases = [
+            ({'offer_rating': 0}, 'offer_rating'), ({'offer_rating': 6}, 'offer_rating'),
+            ({'seller_rating': 'abc'}, 'seller_rating'), ({'seller_rating': 4.5}, 'seller_rating'),
+            ({'seller_rating': None}, 'seller_rating'),
+            ({'content': 'Court'}, 'content'), ({'content': '  neuf car  '}, 'content'),
+            ({'content': 'x' * 501}, 'content'), ({'content': ''}, 'content'),
+            ({'post': 'pas-un-uuid'}, 'post'),
+        ]
+        for extra, field in cases:
+            response = self.post_review(**extra)
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, extra)
+            self.assertIn(field, response.data, extra)
+        for field in ('offer_rating', 'seller_rating', 'content', 'post'):
+            payload = {'post': str(self.offer.id), **GOOD}
+            del payload[field]
+            response = self.client.post(REVIEWS_URL, payload, format='json')
+            self.assertEqual(response.status_code, 400, field)
+            self.assertIn(field, response.data)
+        self.assertFalse(Review.objects.exists())
 
-        seller = User.objects.create_user(email='seller5@example.com', password='x', full_name='V5')
-        sixth = self.make_confirmed_deal(offer=self.make_offer(seller, 'Sixième annonce du jour'), counterparty=seller)
-        response = self.client.post('/api/interactions/reviews/', {
-            'deal': str(sixth.id), 'content': 'Sixième avis, devrait être refusé.', 'rating': 5,
-        })
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+    def test_content_bounds_are_inclusive_after_strip(self):
+        self.make_contact()
+        self.client.force_authenticate(self.buyer)
+        self.assertEqual(self.post_review(content='  ' + 'a' * 10 + '  ').status_code, 201)
+        Review.objects.all().delete()
+        self.assertEqual(self.post_review(content='a' * 500).status_code, 201)
 
+    def test_legacy_keys_are_ignored(self):
+        self.make_contact()
+        self.client.force_authenticate(self.buyer)
+        response = self.post_review(deal=str(self.offer.id), rating=1, reviewed_user=str(self.other.id))
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Review.objects.get().seller_context_id, self.seller.id)
 
-class ReviewEditWindowTests(ReviewsTestBase):
-    def test_can_edit_within_48_hours(self):
+    def test_anonymous_cannot_create_but_can_list(self):
+        response = self.post_review()
+        self.assertEqual((response.status_code, response.data['code']), (401, 'not_authenticated'))
+        self.assertEqual(self.client.get(REVIEWS_URL).status_code, status.HTTP_200_OK)
+
+    def test_seller_is_notified_after_the_diffusion(self):
+        self.make_contact()
+        self.client.force_authenticate(self.buyer)
+        self.post_review()
+        dispatch_outbox_now()
+        notification = Notification.objects.get(user=self.seller)
+        self.assertEqual(notification.notification_type, 'COMMENT')
+
+    def test_put_is_not_routed(self):
         review = self.make_review()
         self.client.force_authenticate(self.buyer)
-        response = self.client.patch(f'/api/interactions/reviews/{review.id}/', {'content': 'Avis modifié à temps.'})
-        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(self.client.put(f'{REVIEWS_URL}{review.id}/', GOOD).status_code, 405)
 
-    def test_cannot_edit_after_48_hours(self):
+
+class ReviewEditTests(ReviewsTestBase):
+    def detail(self, review):
+        return f'{REVIEWS_URL}{review.id}/'
+
+    def test_author_edits_a_subset_and_edited_at_is_set(self):
+        review = self.make_review()
+        self.client.force_authenticate(self.buyer)
+        response = self.client.patch(self.detail(review), {'seller_rating': 2, 'post': str(self.other.id)})
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual((response.data['seller_rating'], response.data['offer_rating']), (2, 4))
+        self.assertIsNotNone(response.data['edited_at'])
+        review.refresh_from_db()
+        self.assertEqual(review.offer_id, self.offer.id)  # `post` ignoré
+
+    def test_edit_validates_values_and_requires_a_change(self):
+        review = self.make_review()
+        self.client.force_authenticate(self.buyer)
+        self.assertEqual(self.client.patch(self.detail(review), {'content': 'Court'}).status_code, 400)
+        self.assertEqual(self.client.patch(self.detail(review), {'offer_rating': 9}).status_code, 400)
+        self.assertEqual(self.client.patch(self.detail(review), {}).status_code, 400)
+
+    def test_edit_window_comes_from_the_settings(self):
         review = self.make_review()
         Review.objects.filter(pk=review.pk).update(created_at=timezone.now() - timedelta(hours=49))
         self.client.force_authenticate(self.buyer)
-        response = self.client.patch(f'/api/interactions/reviews/{review.id}/', {'content': 'Trop tard pour modifier.'})
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.client.patch(self.detail(review), {'content': 'Trop tard pour modifier.'})
+        self.assertEqual((response.status_code, response.data['code']), (403, 'edit_window_closed'))
+        self.assertFalse(self.client.get(self.detail(review)).data['can_edit'])
+        ReviewSettings.objects.update_or_create(pk=ReviewSettings.SINGLETON_ID, defaults={'edit_window_hours': 72})
+        self.assertEqual(self.client.patch(self.detail(review), {'content': 'Encore dans les temps.'}).status_code, 200)
 
     def test_only_the_author_edits_or_deletes(self):
         review = self.make_review()
-        url = f'/api/interactions/reviews/{review.id}/'
         self.client.force_authenticate(self.other)
-        self.assertEqual(self.client.patch(url, {'content': 'Avis détourné par un tiers.'}).status_code, 403)
-        self.assertEqual(self.client.delete(url).status_code, 403)
+        for response in (
+            self.client.patch(self.detail(review), {'content': 'Avis détourné par un tiers.'}),
+            self.client.delete(self.detail(review)),
+        ):
+            self.assertEqual((response.status_code, response.data['code']), (403, 'not_author'))
+        self.client.force_authenticate(self.seller)
+        self.assertEqual(self.client.delete(self.detail(review)).data['code'], 'not_author')
         self.client.force_authenticate(self.buyer)
-        self.assertEqual(self.client.delete(url).status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(self.client.delete(self.detail(review)).status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Review.objects.exists())
 
     def test_author_cannot_write_a_reply_on_their_own_review(self):
         review = self.make_review()
         self.client.force_authenticate(self.buyer)
-        self.client.patch(f'/api/interactions/reviews/{review.id}/', {'reply_content': 'Fausse réponse'})
+        self.client.patch(self.detail(review), {'reply_content': 'Fausse réponse', 'offer_rating': 3})
         review.refresh_from_db()
         self.assertIsNone(review.reply_content)
 
+    def test_anonymous_cannot_edit(self):
+        review = self.make_review()
+        self.assertEqual(self.client.patch(self.detail(review), {'offer_rating': 1}).status_code, 401)
+
 
 class ReviewReplyTests(ReviewsTestBase):
-    def test_reviewed_user_can_reply(self):
+    def url(self, review):
+        return f'{REVIEWS_URL}{review.id}/reply/'
+
+    def test_seller_can_reply(self):
         review = self.make_review()
         self.client.force_authenticate(self.seller)
-        response = self.client.post(f'/api/interactions/reviews/{review.id}/reply/', {
-            'reply_content': 'Merci pour votre confiance !',
-        })
+        response = self.client.post(self.url(review), {'reply_content': 'Merci pour votre confiance !'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['reply_content'], 'Merci pour votre confiance !')
+        self.assertTrue(response.data['is_post_owner'])
         dispatch_outbox_now()
         self.assertEqual(Notification.objects.get(user=self.buyer).notification_type, 'SYSTEM')
 
-    def test_stranger_cannot_reply(self):
+    def test_author_and_strangers_cannot_reply(self):
         review = self.make_review()
-        self.client.force_authenticate(self.buyer)
-        response = self.client.post(f'/api/interactions/reviews/{review.id}/reply/', {
-            'reply_content': 'Je réponds à mon propre avis.',
-        })
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        for user in (self.buyer, self.other):
+            self.client.force_authenticate(user)
+            response = self.client.post(self.url(review), {'reply_content': 'Je réponds à cet avis.'})
+            self.assertEqual((response.status_code, response.data['code']), (403, 'not_seller'))
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.post(self.url(review), {'reply_content': 'Anonyme'}).status_code, 401)
 
     def test_reply_is_required_and_bounded(self):
         review = self.make_review()
         self.client.force_authenticate(self.seller)
-        url = f'/api/interactions/reviews/{review.id}/reply/'
-        self.assertEqual(self.client.post(url, {'reply_content': '  '}).status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(self.client.post(url, {}).status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(self.client.post(url, {'reply_content': 'x' * 501}).status_code, status.HTTP_400_BAD_REQUEST)
+        for body in ({'reply_content': '  '}, {}, {'reply_content': 'x' * 501}):
+            response = self.client.post(self.url(review), body)
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, body)
+            self.assertIn('reply_content', response.data)
 
     def test_reply_to_a_review_of_a_purged_offer(self):
         review = self.make_review()
         self.offer.delete()
         self.client.force_authenticate(self.seller)
-        response = self.client.post(f'/api/interactions/reviews/{review.id}/reply/', {'reply_content': 'Merci !'})
+        response = self.client.post(self.url(review), {'reply_content': 'Merci !'})
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+    def test_second_reply_is_409(self):
+        review = self.make_review()
+        self.client.force_authenticate(self.seller)
+        self.client.post(self.url(review), {'reply_content': 'Merci !'})
+        response = self.client.post(self.url(review), {'reply_content': 'Encore merci !'})
+        self.assertEqual((response.status_code, response.data['code']), (409, 'already_replied'))
 
 
 class ReviewVisibilityTests(ReviewsTestBase):
-    url = '/api/interactions/reviews/'
-
-    def test_list_filters_by_offer_and_hides_moderated_reviews(self):
+    def test_list_filters_by_offer_and_seller_and_hides_moderated_reviews(self):
         shown = self.make_review()
-        hidden = self.make_review(
-            deal=self.make_confirmed_deal(initiator=self.other), user=self.other, is_hidden=True,
-        )
+        hidden = self.make_review(user=self.other, is_hidden=True)
         other_offer = self.make_offer(self.buyer, 'Une autre annonce à vendre')
-        elsewhere = self.make_review(deal=self.make_confirmed_deal(offer=other_offer, initiator=self.seller, counterparty=self.buyer),
-                                     user=self.seller, reviewed_user=self.buyer)
+        elsewhere = self.make_review(offer=other_offer, user=self.seller)
 
-        response = self.client.get(self.url, {'post': str(self.offer.id)})
-        self.assertEqual([r['id'] for r in response.data], [str(shown.id)])
-        self.assertEqual(response.data[0]['post'], str(self.offer.id))
-        everything = {r['id'] for r in self.client.get(self.url).data}
-        self.assertEqual(everything, {str(shown.id), str(elsewhere.id)})
-        self.assertEqual(self.client.get(self.url, {'post': 'pas-un-uuid'}).data, [])
+        by_offer = self.client.get(REVIEWS_URL, {'post': str(self.offer.id)})
+        self.assertEqual([r['id'] for r in by_offer.data], [str(shown.id)])
+        self.assertEqual({r['id'] for r in self.client.get(REVIEWS_URL).data}, {str(shown.id), str(elsewhere.id)})
+        by_seller = self.client.get(REVIEWS_URL, {'seller': str(self.seller.id)})
+        self.assertEqual([r['id'] for r in by_seller.data], [str(shown.id)])
+        self.assertEqual(self.client.get(REVIEWS_URL, {'post': 'pas-un-uuid'}).data, [])
+        self.assertEqual(self.client.get(REVIEWS_URL, {'seller': 'pas-un-uuid'}).data, [])
 
         # Un avis masqué n'est pas public par son identifiant ; son auteur le voit encore.
-        detail = f'{self.url}{hidden.id}/'
+        detail = f'{REVIEWS_URL}{hidden.id}/'
         self.assertEqual(self.client.get(detail).status_code, status.HTTP_404_NOT_FOUND)
         self.client.force_authenticate(self.seller)
         self.assertEqual(self.client.get(detail).status_code, status.HTTP_404_NOT_FOUND)
         self.client.force_authenticate(self.other)
         self.assertEqual(self.client.get(detail).status_code, status.HTTP_200_OK)
 
+    def test_list_is_newest_first_and_paginates_on_demand(self):
+        first = self.make_review()
+        second = self.make_review(user=self.other)
+        Review.objects.filter(pk=first.pk).update(created_at=timezone.now() - timedelta(days=1))
+        ids = [r['id'] for r in self.client.get(REVIEWS_URL).data]
+        self.assertEqual(ids, [str(second.id), str(first.id)])
+        page = self.client.get(REVIEWS_URL, {'page_size': 1}).data
+        self.assertEqual((page['count'], len(page['results'])), (2, 1))
+
     def test_list_flags_for_the_connected_user(self):
         review = self.make_review()
         self.client.force_authenticate(self.seller)
-        item = self.client.get(self.url).data[0]
+        item = self.client.get(REVIEWS_URL).data[0]
         self.assertTrue(item['is_post_owner'])
         self.assertFalse(item['can_edit'])
         self.client.force_authenticate(self.buyer)
-        item = self.client.get(self.url).data[0]
+        item = self.client.get(REVIEWS_URL).data[0]
+        self.assertFalse(item['is_post_owner'])
         self.assertTrue(item['can_edit'])
         self.assertEqual(item['id'], str(review.id))
+
+    def test_author_name_is_first_name_and_initial(self):
+        self.buyer.full_name = 'Marie Kabongo'
+        self.buyer.save()
+        self.make_review()
+        self.assertEqual(self.client.get(REVIEWS_URL).data[0]['user_name'], 'Marie K.')
 
     def test_review_of_a_purged_offer_stays_listed_without_link(self):
         review = self.make_review()
         self.offer.delete()
-        item = self.client.get(self.url).data[0]
+        item = self.client.get(REVIEWS_URL).data[0]
         self.assertEqual(item['id'], str(review.id))
         self.assertIsNone(item['post'])
+        self.assertFalse(item['is_post_owner'])
 
 
-class DealCreationTests(ReviewsTestBase):
-    url = '/api/reputation/deals/'
-
-    def setUp(self):
-        super().setUp()
-        ContactEvent.objects.create(offer=self.offer, sender=self.buyer, message='Bonjour, toujours dispo ?')
-
-    def declare(self, user, counterparty, offer=None):
-        self.client.force_authenticate(user)
-        return self.client.post(self.url, {'post': str((offer or self.offer).id), 'counterparty': str(counterparty.id)})
-
-    def test_buyer_can_declare_deal_with_seller(self):
-        response = self.declare(self.buyer, self.seller)
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
-        self.assertEqual(response.data['status'], Deal.STATUS_PENDING)
-        self.assertEqual(response.data['post_title'], self.offer.title)
-        self.assertEqual(Deal.objects.get().initiator, self.buyer)
-
-    def test_seller_can_declare_deal_with_a_contact(self):
-        self.assertEqual(self.declare(self.seller, self.buyer).status_code, status.HTTP_201_CREATED)
-
-    def test_cannot_declare_deal_with_self(self):
-        self.assertEqual(self.declare(self.buyer, self.buyer).status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_buyer_cannot_declare_deal_with_uninvolved_user(self):
-        self.assertEqual(self.declare(self.buyer, self.other).status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_seller_cannot_declare_deal_with_non_contact(self):
-        self.assertEqual(self.declare(self.seller, self.other).status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_user_who_never_contacted_cannot_declare(self):
-        self.assertEqual(self.declare(self.other, self.seller).status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_unknown_offer_is_rejected(self):
-        self.client.force_authenticate(self.buyer)
-        response = self.client.post(self.url, {'post': str(uuid.uuid4()), 'counterparty': str(self.seller.id)})
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('post', response.data)
-
-    def test_deals_are_private_to_their_parties(self):
-        self.declare(self.buyer, self.seller)
-        self.client.force_authenticate(self.other)
-        self.assertEqual(len(self.client.get(self.url).data), 0)
-        self.client.force_authenticate(self.seller)
-        data = self.client.get(self.url).data
-        self.assertEqual(len(data), 1)
-        self.assertEqual(set(data[0]), {
-            'id', 'post', 'post_title', 'initiator', 'initiator_name', 'counterparty', 'counterparty_name',
-            'status', 'created_at', 'confirmed_at',
-        })
-
-    def test_anonymous_is_refused(self):
-        self.client.force_authenticate(None)
-        self.assertEqual(self.client.get(self.url).status_code, status.HTTP_401_UNAUTHORIZED)
-
-
-class DealConfirmationTests(ReviewsTestBase):
-    def setUp(self):
-        super().setUp()
-        self.deal = Deal.objects.create(offer_id=self.offer.id, initiator=self.buyer, counterparty=self.seller)
-
-    def test_only_counterparty_can_confirm(self):
-        self.client.force_authenticate(self.buyer)
-        response = self.client.post(f'/api/reputation/deals/{self.deal.id}/confirm/')
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-
-    def test_counterparty_confirms(self):
-        self.client.force_authenticate(self.seller)
-        response = self.client.post(f'/api/reputation/deals/{self.deal.id}/confirm/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.deal.refresh_from_db()
-        self.assertEqual(self.deal.status, Deal.STATUS_CONFIRMED)
-        self.assertIsNotNone(self.deal.confirmed_at)
-
-    def test_counterparty_declines(self):
-        self.client.force_authenticate(self.seller)
-        response = self.client.post(f'/api/reputation/deals/{self.deal.id}/decline/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.deal.refresh_from_db()
-        self.assertEqual(self.deal.status, Deal.STATUS_DECLINED)
-
-    def test_cannot_confirm_twice(self):
-        self.deal.confirm()
-        self.client.force_authenticate(self.seller)
-        response = self.client.post(f'/api/reputation/deals/{self.deal.id}/confirm/')
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_stranger_cannot_see_or_confirm(self):
-        self.client.force_authenticate(self.other)
-        response = self.client.post(f'/api/reputation/deals/{self.deal.id}/confirm/')
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-
-
-class TrustScoreTests(ReviewsTestBase):
-    def test_review_creation_updates_trust_score(self):
-        self.make_review(rating=5)
-        self.seller.refresh_from_db()
-        row = TrustScoreSettings.get_solo()
-        expected = (row.neutral_weight * row.neutral_rating + 5) / (row.neutral_weight + 1)
-        self.assertAlmostEqual(self.seller.trust_score, round(expected, 2))
-        self.assertEqual(self.seller.reviews_count, 1)
-
-    def test_deleting_review_recomputes_trust_score(self):
-        review = self.make_review(rating=1)
-        self.seller.refresh_from_db()
-        self.assertEqual(self.seller.reviews_count, 1)
-
-        review.delete()
-        self.seller.refresh_from_db()
-        self.assertEqual(self.seller.reviews_count, 0)
-        self.assertEqual(self.seller.trust_score, 3.5)  # retombe à la note neutre
-
-    def test_hidden_review_excluded_from_trust_score(self):
-        review = self.make_review(rating=1)
-        self.seller.refresh_from_db()
-        self.assertLess(self.seller.trust_score, 3.5)
-
-        review.is_hidden = True
-        review.save()
-        self.seller.refresh_from_db()
-        self.assertEqual(self.seller.trust_score, 3.5)
-        self.assertEqual(self.seller.reviews_count, 0)
-
-    def test_new_review_refreshes_seller_offers_visibility_score(self):
-        before = self.offer.visibility_score
-        self.make_review(rating=5)
-        self.offer.refresh_from_db()
-        self.assertNotEqual(before, self.offer.visibility_score)
-
-    def test_deleting_the_reviewed_account_does_not_fail(self):
-        self.make_review(rating=5)
-        self.seller.delete()
-        self.assertEqual(Review.objects.count(), 0)
-
-    def test_min_reviews_to_display_comes_from_settings(self):
-        from . import services
-
-        self.assertEqual(services.get_min_reviews_to_display(), 3)
-        row = TrustScoreSettings.get_solo()
-        row.min_reviews_to_display = 7
-        row.save()
-        self.assertEqual(services.get_min_reviews_to_display(), 7)
-
-
-class CrossedReviewsDetectionTests(ReviewsTestBase):
-    def exchange_reviews(self, times):
-        last = None
-        for i in range(times):
-            offer = self.make_offer(self.seller, f'Une annonce quelconque numéro {i}')
-            deal = self.make_confirmed_deal(offer=offer)
-            self.make_review(deal=deal, user=self.buyer, reviewed_user=self.seller, rating=5)
-            last = self.make_review(deal=deal, user=self.seller, reviewed_user=self.buyer, rating=5)
-        return last
-
-    def reports(self):
-        return Report.objects.filter(
-            target_type='review', reason=Report.REASON_AVIS_CROISES,
+class ReviewSettingsTests(ReviewsTestBase):
+    def test_defaults_match_the_adr(self):
+        row = ReviewSettings.get_solo()
+        self.assertEqual(
+            (row.min_reviews_to_display, row.daily_review_limit, row.edit_window_hours,
+             row.delay_after_contact_hours, row.crossed_reviews_window_days, row.crossed_reviews_threshold),
+            (3, 5, 48, 24, 30, 3),
         )
 
-    def test_three_mutual_deals_trigger_a_report(self):
-        last_review = self.exchange_reviews(3)
-        dispatch_outbox_now()
-        self.assertTrue(self.reports().filter(target_id=last_review.id).exists())
-        self.assertIsNone(self.reports().first().reporter)
-
-    def test_two_mutual_deals_do_not_trigger_a_report(self):
-        self.exchange_reviews(2)
-        dispatch_outbox_now()
-        self.assertFalse(self.reports().exists())
-
-    def test_a_review_is_reported_only_once(self):
-        from . import services
-
-        last_review = self.exchange_reviews(3)
-        dispatch_outbox_now()
-        count = self.reports().count()
-        services.check_crossed_reviews(last_review)
-        dispatch_outbox_now()
-        self.assertEqual(self.reports().count(), count)
+    def test_bounds_are_validated(self):
+        for field, bad in (
+            ('min_reviews_to_display', 0), ('daily_review_limit', 0), ('edit_window_hours', 0),
+            ('crossed_reviews_window_days', 0), ('crossed_reviews_threshold', 1),
+        ):
+            row = ReviewSettings(**{field: bad})
+            with self.assertRaises(ValidationError, msg=field) as caught:
+                row.full_clean()
+            self.assertIn(field, caught.exception.message_dict)
+        ReviewSettings(delay_after_contact_hours=0).full_clean()  # 0 : aucun délai
 
 
 class DecouplingTests(ReviewsTestBase):
     def test_offers_are_referenced_by_uuid_only(self):
-        for model in (Review, Deal):
-            for field in model._meta.get_fields():
-                if field.is_relation and field.concrete:
-                    self.assertIn(field.related_model._meta.app_label, ('reviews', 'identity'), field.name)
-        self.assertEqual(Review._meta.get_field('offer_id').get_internal_type(), 'UUIDField')
+        for field in Review._meta.get_fields():
+            if field.is_relation and field.concrete:
+                self.assertEqual(field.related_model._meta.app_label, 'identity', field.name)
+        for name in ('offer_id', 'contact_event_id', 'seller_context_id'):
+            self.assertEqual(Review._meta.get_field(name).get_internal_type(), 'UUIDField')
 
-    def test_purging_the_offer_keeps_reviews_and_deals(self):
+    def test_purging_the_offer_keeps_the_reviews(self):
         review = self.make_review()
-        deal = review.deal
         Offer.objects.filter(pk=self.offer.pk).update(is_deleted=True, deleted_at=timezone.now() - timedelta(days=31))
-
         call_command('purge_offer_trash', verbosity=0)
-
         self.assertFalse(Offer.objects.filter(pk=self.offer.pk).exists())
         review.refresh_from_db()
-        deal.refresh_from_db()
-        # Les avis et affaires survivent (CDC 3.10) et gardent l'UUID de l'offre disparue.
-        self.assertEqual(review.offer_id, self.offer.id)
-        self.assertEqual(deal.offer_id, self.offer.id)
+        self.assertEqual(review.offer_id, self.offer.id)  # CDC 3.10 : l'avis garde l'UUID de l'offre disparue
+
+    def test_old_deals_endpoint_is_gone(self):
+        self.client.force_authenticate(self.buyer)
+        self.assertEqual(self.client.get('/api/reputation/deals/').status_code, status.HTTP_404_NOT_FOUND)
+
+
+class CrossedReviewsDetectionTests(ReviewsTestBase):
+    def post_as(self, user, offer):
+        self.client.force_authenticate(user)
+        self.make_contact(offer, user)
+        return self.client.post(REVIEWS_URL, {'post': str(offer.id), **GOOD})
+
+    def reports(self):
+        return Report.objects.filter(target_type='review', reason=Report.REASON_AVIS_CROISES)
+
+    def test_threshold_reached_through_the_api_publishes_v2_event_and_files_a_report(self):
+        offers = [self.make_offer(self.seller, f'Annonce vendeur numéro {i}') for i in range(2)]
+        mine = self.make_offer(self.buyer, 'Annonce de l’acheteur')
+        self.assertEqual(self.post_as(self.buyer, offers[0]).status_code, 201)
+        self.assertEqual(self.post_as(self.buyer, offers[1]).status_code, 201)
+        self.assertFalse(OutboxEvent.objects.filter(event_type='reviews.crossed_reviews_detected').exists())
+        response = self.post_as(self.seller, mine)  # troisième avis entre les deux comptes
+        self.assertEqual(response.status_code, 201, response.data)
+        event = OutboxEvent.objects.get(event_type='reviews.crossed_reviews_detected')
+        self.assertEqual(event.version, 2)
+        self.assertEqual(
+            (event.payload['review_id'], event.payload['reviews_count'], event.payload['window_days']),
+            (response.data['id'], 3, 30),
+        )
+        dispatch_outbox_now()
+        report = self.reports().get()
+        self.assertEqual((str(report.target_id), report.reporter), (response.data['id'], None))
+        self.assertIn('3 avis distincts sur 30 jours', report.description)
+
+    def test_below_the_threshold_nothing_is_published(self):
+        offers = [self.make_offer(self.seller, f'Annonce vendeur numéro {i}') for i in range(2)]
+        last = None
+        for offer in offers:
+            last = self.make_review(offer=offer, user=self.buyer)
+        with transaction.atomic():
+            services.check_crossed_reviews(last)
+        self.assertFalse(OutboxEvent.objects.filter(event_type='reviews.crossed_reviews_detected').exists())
+
+    def test_threshold_and_window_come_from_the_settings(self):
+        offers = [self.make_offer(self.seller, f'Annonce vendeur numéro {i}') for i in range(2)]
+        last = None
+        for offer in offers:
+            last = self.make_review(offer=offer, user=self.buyer)
+        ReviewSettings.objects.update_or_create(
+            pk=ReviewSettings.SINGLETON_ID, defaults={'crossed_reviews_threshold': 2},
+        )
+        with transaction.atomic():
+            services.check_crossed_reviews(last)
+        self.assertEqual(OutboxEvent.objects.filter(event_type='reviews.crossed_reviews_detected').count(), 1)
+        ReviewSettings.objects.update(crossed_reviews_window_days=1)
+        Review.objects.update(created_at=timezone.now() - timedelta(days=3))
+        before = OutboxEvent.objects.count()
+        with transaction.atomic():
+            services.check_crossed_reviews(last)
+        self.assertEqual(OutboxEvent.objects.count(), before)  # hors fenêtre
+
+    def test_replaying_detection_does_not_duplicate_the_report(self):
+        for i in range(3):
+            last = self.make_review(offer=self.make_offer(self.seller, f'Annonce vendeur numéro {i}'), user=self.buyer)
+            with transaction.atomic():
+                services.check_crossed_reviews(last)
+        dispatch_outbox_now()
+        with transaction.atomic():
+            services.check_crossed_reviews(last)
+        dispatch_outbox_now()
+        self.assertEqual(self.reports().filter(target_id=last.id).count(), 1)

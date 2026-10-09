@@ -1,15 +1,33 @@
 from rest_framework import serializers
 
 from apps.common.serializers import PreloadingListSerializer
+from apps.identity import services as identity_services
 from apps.marketplace import services as marketplace_services
 
 from . import services
-from .models import Deal, Review
+from .models import CONTENT_MAX_LENGTH, CONTENT_MIN_LENGTH, Review
+
+SOURCE_CONTACT = 'CONTACT'  # libellé front : « Avis après contact »
+
+CONTENT_MESSAGES = {
+    'blank': f"L'avis doit contenir entre {CONTENT_MIN_LENGTH} et {CONTENT_MAX_LENGTH} caractères.",
+    'required': "Le commentaire est requis.",
+    'null': "Le commentaire est requis.",
+    'min_length': f"L'avis doit contenir au moins {CONTENT_MIN_LENGTH} caractères.",
+    'max_length': f"L'avis ne doit pas dépasser {CONTENT_MAX_LENGTH} caractères.",
+}
+RATING_MESSAGES = {
+    'required': "La note est requise.",
+    'null': "La note est requise.",
+    'invalid': "La note doit être un nombre entier de 1 à 5.",
+    'min_value': "La note doit être comprise entre 1 et 5.",
+    'max_value': "La note doit être comprise entre 1 et 5.",
+}
 
 
 class OfferLookupMixin:
-    """Charge par lot les offres citées (domaine marketplace) : titre, vendeur, existence.
-    Une offre purgée n'est plus trouvée : la clé JSON `post` vaut alors null."""
+    """Charge par lot les offres citées (domaine marketplace) : existence et titre. Une offre
+    purgée n'est plus trouvée : la clé JSON `post` vaut alors null."""
 
     OFFERS_KEY = 'reviews_offers'
 
@@ -39,109 +57,82 @@ class ReviewListSerializer(PreloadingListSerializer):
 
 
 class ReviewSerializer(OfferLookupMixin, serializers.ModelSerializer):
-    user_name = serializers.ReadOnlyField(source='user.full_name')
+    """Lecture d'un avis (contrat de l'ADR 0004, 7.2). Le canal du contact et la date du contact
+    ne sont pas exposés publiquement (modération seulement)."""
+
+    post = serializers.SerializerMethodField()
     user_id = serializers.ReadOnlyField()
-    reviewed_user_id = serializers.ReadOnlyField()
+    user_name = serializers.SerializerMethodField()
+    source = serializers.SerializerMethodField()
     is_post_owner = serializers.SerializerMethodField()
     can_edit = serializers.SerializerMethodField()
-    # `post` est dérivé de l'affaire côté serveur (voir validate) pour éviter toute
-    # incohérence entre l'offre fournie par le client et celle de l'affaire.
-    post = serializers.SerializerMethodField()
 
     class Meta:
         model = Review
         fields = [
-            'id', 'post', 'deal', 'user_id', 'user_name', 'reviewed_user_id', 'content', 'rating',
-            'reply_content', 'reply_at', 'created_at', 'is_post_owner', 'can_edit',
+            'id', 'post', 'user_id', 'user_name', 'offer_rating', 'seller_rating', 'content', 'source',
+            'reply_content', 'reply_at', 'created_at', 'edited_at', 'is_post_owner', 'can_edit',
         ]
-        # La réponse ne s'écrit que par l'action `reply` (personne évaluée), jamais par l'auteur.
-        read_only_fields = ['user', 'reply_content', 'reply_at']
+        read_only_fields = fields
         list_serializer_class = ReviewListSerializer
+
+    def get_user_name(self, obj):
+        return identity_services.public_display_name(obj.user.full_name)
+
+    def get_source(self, obj):
+        return SOURCE_CONTACT
 
     def get_is_post_owner(self, obj):
         request = self.context.get('request')
-        offer = self._offer(obj)
-        if request and request.user and offer:
-            return offer.seller_id == request.user.id
-        return False
+        if not request or not request.user.is_authenticated:
+            return False
+        return services.can_reply(obj, request.user)
 
     def get_can_edit(self, obj):
         request = self.context.get('request')
-        if not request or obj.user_id != getattr(request.user, 'id', None):
+        if not request or obj.user_id != getattr(request.user, 'id', None) or obj.is_hidden:
             return False
-        return obj.can_still_be_edited()
-
-    def validate(self, data):
-        user = self.context['request'].user
-
-        if not self.instance:
-            try:
-                reviewed_user = services.validate_new_review(user, data.get('deal'))
-            except services.ReviewError as exc:
-                raise serializers.ValidationError({exc.field: exc.message} if exc.field else exc.message)
-            data['offer_id'] = data['deal'].offer_id
-            data['reviewed_user'] = reviewed_user
-        else:
-            if not self.instance.can_still_be_edited():
-                raise serializers.ValidationError("L'avis n'est plus modifiable après 48 heures.")
-            # L'affaire et la personne évaluée ne changent jamais après coup.
-            data.pop('deal', None)
-
-        return data
+        # Une lecture par sérialisation de liste : le contexte est partagé.
+        if 'review_edit_window_hours' not in self.context:
+            self.context['review_edit_window_hours'] = services.get_settings().edit_window_hours
+        return obj.can_still_be_edited(self.context['review_edit_window_hours'])
 
 
-class DealListSerializer(PreloadingListSerializer):
-    pass
+class ReviewCreateSerializer(serializers.Serializer):
+    """Corps de `POST /reviews/` : une clé inconnue (par exemple une ancienne clé d'affaire) est ignorée."""
+
+    post = serializers.UUIDField(
+        error_messages={'required': "L'annonce est requise.", 'null': "L'annonce est requise.",
+                        'invalid': "Identifiant d'annonce invalide."},
+    )
+    offer_rating = serializers.IntegerField(min_value=1, max_value=5, error_messages=RATING_MESSAGES)
+    seller_rating = serializers.IntegerField(min_value=1, max_value=5, error_messages=RATING_MESSAGES)
+    content = serializers.CharField(
+        min_length=CONTENT_MIN_LENGTH, max_length=CONTENT_MAX_LENGTH, error_messages=CONTENT_MESSAGES,
+    )
 
 
-class DealSerializer(OfferLookupMixin, serializers.ModelSerializer):
-    initiator_name = serializers.ReadOnlyField(source='initiator.full_name')
-    counterparty_name = serializers.ReadOnlyField(source='counterparty.full_name')
-    # Clés JSON `post` / `post_title` conservées jusqu'à L0-11 : UUID de l'offre.
-    post = serializers.UUIDField(source='offer_id')
-    post_title = serializers.SerializerMethodField()
+class ReviewUpdateSerializer(serializers.Serializer):
+    """Corps de `PATCH /reviews/{id}/` : sous-ensemble de notes et de commentaire ; `post` est ignoré."""
 
-    class Meta:
-        model = Deal
-        fields = [
-            'id', 'post', 'post_title', 'initiator', 'initiator_name',
-            'counterparty', 'counterparty_name', 'status', 'created_at', 'confirmed_at',
-        ]
-        read_only_fields = ['initiator', 'status', 'created_at', 'confirmed_at']
-        list_serializer_class = DealListSerializer
-
-    def get_post_title(self, obj):
-        offer = self._offer(obj)
-        return offer.title if offer else None
-
-    def validate_post(self, value):
-        offer = marketplace_services.get_offer(value)
-        if offer is None:
-            raise serializers.ValidationError("Annonce introuvable.")
-        if not offer.is_available:
-            raise serializers.ValidationError("Cette annonce n'est plus disponible.")
-        return value
+    offer_rating = serializers.IntegerField(min_value=1, max_value=5, error_messages=RATING_MESSAGES)
+    seller_rating = serializers.IntegerField(min_value=1, max_value=5, error_messages=RATING_MESSAGES)
+    content = serializers.CharField(
+        min_length=CONTENT_MIN_LENGTH, max_length=CONTENT_MAX_LENGTH, error_messages=CONTENT_MESSAGES,
+    )
 
     def validate(self, attrs):
-        user = self.context['request'].user
-        offer = marketplace_services.get_offer(attrs['offer_id'])
-        counterparty = attrs['counterparty']
-
-        if counterparty.id == user.id:
-            raise serializers.ValidationError("Vous ne pouvez pas déclarer une affaire avec vous-même.")
-
-        # CDC 3.7 : au MVP, la déclaration se fait depuis l'historique des contacts.
-        contacted_user_ids = marketplace_services.get_contact_sender_ids(offer.id)
-
-        if offer.seller_id == user.id:
-            if counterparty.id not in contacted_user_ids:
-                raise serializers.ValidationError("La contrepartie doit avoir contacté cette annonce.")
-        else:
-            if user.id not in contacted_user_ids:
-                raise serializers.ValidationError(
-                    "Vous devez avoir contacté cette annonce avant de déclarer une affaire."
-                )
-            if counterparty.id != offer.seller_id:
-                raise serializers.ValidationError("La contrepartie doit être le vendeur de l'annonce.")
-
+        if not attrs:
+            raise serializers.ValidationError("Aucune modification fournie.")
         return attrs
+
+
+class ReviewReplySerializer(serializers.Serializer):
+    reply_content = serializers.CharField(
+        max_length=CONTENT_MAX_LENGTH,
+        error_messages={
+            'required': "Le contenu de la réponse est requis.", 'blank': "Le contenu de la réponse est requis.",
+            'null': "Le contenu de la réponse est requis.",
+            'max_length': f"La réponse ne doit pas dépasser {CONTENT_MAX_LENGTH} caractères.",
+        },
+    )

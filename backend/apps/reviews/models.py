@@ -1,126 +1,124 @@
-"""Avis (CDC 3.7). `Deal` et `TrustScoreSettings` sont des portages transitoires de l'ancien
-module `reputation`, supprimés par L0-07 (retrait du Trust Score, règle 4) ; `Review.deal_id`
-disparaît alors avec eux au profit de l'avis après contact (L0-10).
+"""Avis après contact (CDC 3.4, ADR 0004).
 
-L'offre est désignée par son UUID (`offer_id`) : pas de clé étrangère vers `marketplace`
-(CDC §5.4). Un avis survit à la purge de l'offre (CDC 3.10) ; les clés vers l'utilisateur
-sont autorisées.
+Un avis note **une offre** (note d'offre) et **son vendeur** (note vendeur) ; la preuve qui ouvre
+le droit d'avis est une prise de contact (`contact_event_id`). Aucun score agrégé n'est stocké :
+les moyennes sont calculées à la lecture (règle 4, pas de score de confiance).
+
+L'offre et le contact sont désignés par leur UUID, sans clé étrangère (CDC §5.4) : un avis survit
+à la purge de l'offre. Seul l'auteur est une clé étrangère (vers l'utilisateur).
 """
 from datetime import timedelta
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxLengthValidator, MaxValueValidator, MinLengthValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
+from apps.common.contexts import CONTEXT_CHOICES, CONTEXT_USER
 from apps.common.models import BaseModel, SingletonSettingsModel
 
-REVIEW_EDIT_WINDOW_HOURS = 48
+CONTENT_MIN_LENGTH = 10
+CONTENT_MAX_LENGTH = 500
 
 
-class TrustScoreSettings(SingletonSettingsModel):
-    """CDC 3.7 : paramètres de la moyenne bayésienne du Trust Score, modifiables dans le
-    back-office. Transitoire (L0-07)."""
+class ReviewSettings(SingletonSettingsModel):
+    """Règles des avis, modifiables dans le back-office (règle 11). Ligne unique.
+    Les limites de révélation de numéro relèvent du domaine `marketplace` (L0-10a)."""
 
-    neutral_rating = models.FloatField(default=3.5, help_text="m : note neutre")
-    neutral_weight = models.FloatField(default=5.0, help_text="C : poids de la note neutre")
-    min_reviews_to_display = models.PositiveIntegerField(default=3)
+    min_reviews_to_display = models.PositiveIntegerField(
+        default=3, validators=[MinValueValidator(1)],
+        help_text="Nombre d'avis à partir duquel une moyenne est affichée.",
+    )
+    daily_review_limit = models.PositiveIntegerField(
+        default=5, validators=[MinValueValidator(1)], help_text="Avis maximum par utilisateur et par jour.",
+    )
+    edit_window_hours = models.PositiveIntegerField(
+        default=48, validators=[MinValueValidator(1)], help_text="Heures pendant lesquelles un avis reste modifiable.",
+    )
+    delay_after_contact_hours = models.PositiveIntegerField(
+        default=24, help_text="Heures à attendre entre le contact et l'avis (0 : aucun délai).",
+    )
+    crossed_reviews_window_days = models.PositiveIntegerField(
+        default=30, validators=[MinValueValidator(1)], help_text="Fenêtre de détection des avis croisés, en jours.",
+    )
+    crossed_reviews_threshold = models.PositiveIntegerField(
+        default=3, validators=[MinValueValidator(2)],
+        help_text="Nombre d'avis entre les deux mêmes comptes qui déclenche un signalement automatique.",
+    )
 
     class Meta:
-        verbose_name = "Paramètres du Trust Score"
-        verbose_name_plural = "Paramètres du Trust Score"
+        verbose_name = "Paramètres des avis"
+        verbose_name_plural = "Paramètres des avis"
 
     def __str__(self):
-        return "Paramètres du Trust Score"
+        return "Paramètres des avis"
 
 
-class Deal(BaseModel):
-    """CDC 3.7 : « affaire conclue » — interaction déclarée par l'une des parties et
-    confirmée par l'autre, seule condition d'accès au droit d'avis. Transitoire (L0-07)."""
-
-    STATUS_PENDING = 'PENDING'
-    STATUS_CONFIRMED = 'CONFIRMED'
-    STATUS_DECLINED = 'DECLINED'
-    STATUS_CHOICES = (
-        (STATUS_PENDING, "En attente de confirmation"),
-        (STATUS_CONFIRMED, "Confirmée"),
-        (STATUS_DECLINED, "Refusée"),
-    )
-
-    # CDC 3.10 : si l'offre est purgée, l'affaire (et les avis qui en dépendent) survit.
-    offer_id = models.UUIDField(null=True, blank=True, db_index=True)
-    initiator = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='deals_initiated',
-    )
-    counterparty = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='deals_to_confirm',
-    )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
-    confirmed_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        ordering = ['-created_at']
-
-    def other_party(self, user):
-        if self.initiator_id == user.id:
-            return self.counterparty
-        if self.counterparty_id == user.id:
-            return self.initiator
-        return None
-
-    def confirm(self):
-        self.status = self.STATUS_CONFIRMED
-        self.confirmed_at = timezone.now()
-        self.save(update_fields=['status', 'confirmed_at', 'updated_at'])
-
-    def decline(self):
-        self.status = self.STATUS_DECLINED
-        self.save(update_fields=['status', 'updated_at'])
-
-    def __str__(self):
-        return f"Affaire {self.offer_id} ({self.get_status_display()})"
+def _validate_content_length(value):
+    """10 à 500 caractères après suppression des espaces de bord."""
+    length = len((value or '').strip())
+    if length < CONTENT_MIN_LENGTH or length > CONTENT_MAX_LENGTH:
+        raise ValidationError(
+            f"L'avis doit contenir entre {CONTENT_MIN_LENGTH} et {CONTENT_MAX_LENGTH} caractères."
+        )
 
 
 class Review(BaseModel):
-    offer_id = models.UUIDField(null=True, blank=True, db_index=True)
-    # L'auteur de l'avis
+    # L'auteur de l'avis (le visiteur qui a contacté le vendeur).
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='reviews_written')
-    # La personne évaluée (CDC 3.7 : l'une des deux parties de l'affaire conclue).
-    reviewed_user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, related_name='reviews_received',
-    )
-    # CDC 3.7 : un avis n'est possible qu'après une affaire conclue (transitoire, L0-07 / L0-10).
-    deal = models.ForeignKey(Deal, on_delete=models.CASCADE, null=True, blank=True, related_name='reviews')
+    # Référence sans clé étrangère : l'avis survit à la purge de l'offre (CDC 3.10).
+    offer_id = models.UUIDField(db_index=True)
+    # Contexte vendeur noté (CDC 3.4 : jamais fusionné avec un autre rôle). Un `User.id` tant que
+    # les organisations n'existent pas (L0-09).
+    seller_context_type = models.CharField(max_length=20, choices=CONTEXT_CHOICES, default=CONTEXT_USER)
+    seller_context_id = models.UUIDField()
 
-    # CDC 3.7 : commentaire de 10 à 500 caractères.
-    content = models.TextField(validators=[MinLengthValidator(10), MaxLengthValidator(500)])
-    rating = models.PositiveSmallIntegerField(
-        default=5, validators=[MinValueValidator(1), MaxValueValidator(5)],
-    )  # De 1 à 5 étoiles
+    # Preuve de contact (instantané, pour la modération) ; pas de clé étrangère vers `marketplace`.
+    contact_event_id = models.UUIDField()
+    contact_channel = models.CharField(max_length=10)
+    contact_recorded_at = models.DateTimeField()
 
-    # Réponse publique de la personne évaluée
-    reply_content = models.TextField(null=True, blank=True, validators=[MaxLengthValidator(500)])
+    offer_rating = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    seller_rating = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    content = models.TextField(validators=[_validate_content_length])
+
+    # Réponse publique du vendeur concerné.
+    reply_content = models.TextField(null=True, blank=True, validators=[MaxLengthValidator(CONTENT_MAX_LENGTH)])
     reply_at = models.DateTimeField(null=True, blank=True)
 
-    # CDC 3.7 : un avis retiré par la modération sort du calcul du Trust Score.
+    # Avis masqué par la modération : exclu de toutes les moyennes et listes publiques.
     is_hidden = models.BooleanField(default=False)
+    # Vrai pour la dernière note vendeur non masquée du couple (auteur, contexte vendeur) ;
+    # recalculé par `services.reconcile_seller_flag` (règle en couche service, pas en base).
+    counts_for_seller = models.BooleanField(default=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']
-        # Un seul avis par partie et par affaire (CDC 3.7).
-        constraints = [models.UniqueConstraint(fields=['deal', 'user'], name='uniq_review_deal_user')]
+        constraints = [models.UniqueConstraint(fields=['user', 'offer_id'], name='uniq_review_author_offer')]
+        indexes = [
+            models.Index(
+                fields=['seller_context_type', 'seller_context_id', 'is_hidden', 'counts_for_seller'],
+                name='review_seller_avg',
+            ),
+            models.Index(fields=['offer_id', 'is_hidden'], name='review_offer_avg'),
+            models.Index(fields=['user', 'seller_context_id', 'created_at'], name='review_author_seller'),
+        ]
 
-    def can_still_be_edited(self):
-        # CDC 3.7 : l'avis est modifiable pendant 48 heures.
-        return timezone.now() < self.created_at + timedelta(hours=REVIEW_EDIT_WINDOW_HOURS)
+    def can_still_be_edited(self, window_hours=None):
+        if window_hours is None:
+            window_hours = ReviewSettings.get_solo().edit_window_hours
+        return timezone.now() < self.created_at + timedelta(hours=window_hours)
 
     def __str__(self):
-        return f"Avis de {self.user_id} sur {self.offer_id or 'une annonce supprimée'}"
+        return f"Avis de {self.user_id} sur {self.offer_id}"
 
 
 class ReviewDailyCount(BaseModel):
-    """Avis écrits par un utilisateur un jour donné (CDC 3.7 : 5 par jour). Compteur dédié : la
-    suppression d'un avis ne libère pas de place, sinon écrire puis supprimer contournerait la limite."""
+    """Avis écrits par un utilisateur un jour donné (limite quotidienne, `ReviewSettings`). Compteur
+    dédié : la suppression d'un avis ne libère pas de place, sinon écrire puis supprimer
+    contournerait la limite."""
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='review_daily_counts')
     date = models.DateField()

@@ -6,7 +6,8 @@ from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, Ou
 def revoke_all_sessions(user) -> int:
     """Révoque tous les refresh tokens en cours de `user` (déconnexion de tous les
     appareils, changement ou réinitialisation de mot de passe). Renvoie le nombre
-    de jetons révoqués. Les jetons d'accès déjà émis expirent d'eux-mêmes (15 min).
+    de jetons ciblés (approximatif : une révocation concurrente du même jeton est ignorée par
+    `ignore_conflicts` mais reste comptée). Les jetons d'accès déjà émis expirent d'eux-mêmes (15 min).
 
     Atomique et sans course : une révocation simultanée du même jeton (autre requête,
     autre processus) est ignorée par `ignore_conflicts` au lieu de lever une erreur."""
@@ -44,7 +45,10 @@ class KycError(Exception):
 def recompute_verification(business_profile):
     """Recalcule `is_verified` : vrai seulement si chaque type de pièce requis a une
     pièce validée. Révoque la vérification si ce n'est plus le cas. La vérification
-    ne vient que de décisions de la modération, jamais d'un achat (règle 3)."""
+    ne vient que de décisions de la modération, jamais d'un achat (règle 3).
+
+    À appeler DANS un `transaction.atomic()` : le `select_for_update` ci-dessous n'a d'effet
+    (et n'est autorisé hors autocommit) que dans une transaction."""
     from .models import BusinessProfile, KycDocument
 
     # Verrou de ligne sur le profil (à appeler dans une transaction) : deux décisions

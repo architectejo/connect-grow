@@ -23,6 +23,7 @@ jobs:
       DB_ENGINE: sqlite
       DB_NAME: ci.sqlite3
       SECRET_KEY: ci-only-not-a-secret
+      NUM_PROXIES: "1"  # exigé hors DEBUG par le contrôle common.E001
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

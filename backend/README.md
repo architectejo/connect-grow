@@ -36,3 +36,14 @@ python manage.py test apps
 ## Limitation de débit derrière Nginx
 
 Définir `NUM_PROXIES=1` (et `BEHIND_PROXY=True`) en production derrière Nginx, avec `proxy_set_header X-Forwarded-For $remote_addr;` et `proxy_set_header X-Forwarded-Proto $scheme;` : sans cela, tous les clients partagent l'IP du proxy ou l'en-tête devient falsifiable. Le cache de production devra être partagé entre processus (LocMem est local à chaque processus).
+
+### NUM_PROXIES (obligatoire hors développement)
+
+Derrière Nginx : `NUM_PROXIES=1` et `BEHIND_PROXY=True` dans l'environnement, avec dans Nginx :
+
+```nginx
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+`$remote_addr` (et non `$proxy_add_x_forwarded_for`) écrase tout en-tête envoyé par le client : l'IP lue par les limites de débit n'est alors pas falsifiable. Un contrôle Django (`common.E001`, exécuté par `check`, `migrate`, `runserver`...) échoue si `DEBUG=False` et `NUM_PROXIES=0`.

@@ -8,7 +8,9 @@ Pour qu'il ne puisse pas changer le résultat des tests, toutes les variables d'
 que les réglages consultent sont fixées ici AVANT l'import (load_dotenv n'écrase jamais une
 variable déjà présente).
 """
+import atexit
 import os
+import shutil
 import sys
 import tempfile
 
@@ -37,6 +39,7 @@ os.environ.update(_FORCED_ENV)
 
 from .settings import *  # noqa: E402,F401,F403
 
+TESTING = True
 SECURE_SSL_REDIRECT = False
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
@@ -47,6 +50,7 @@ PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
 
 # Les pièces KYC et médias de test ne polluent pas le dépôt ni le stockage de dev.
 _TEST_STORAGE = tempfile.mkdtemp(prefix='connecteplus-tests-')
+atexit.register(shutil.rmtree, _TEST_STORAGE, ignore_errors=True)  # supprimé en fin de run
 KYC_PRIVATE_ROOT = type(KYC_PRIVATE_ROOT)(_TEST_STORAGE) / 'kyc'  # noqa: F405
 MEDIA_ROOT = os.path.join(_TEST_STORAGE, 'media')
 

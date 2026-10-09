@@ -19,6 +19,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # DEBUG doit être à False en production pour ne pas exposer la structure de la DB en cas d'erreur
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
+# Vrai seulement sous backend.settings_test (lancé par `manage.py test`).
+TESTING = False
+
 # Ne jamais stocker la clé secrète dans le code. Valeur de repli réservée au développement
 # (DEBUG=True) : hors DEBUG, une clé absente ou factice interrompt le démarrage.
 _DEV_SECRET_KEY = 'django-insecure-dev-only-key'

@@ -168,3 +168,51 @@ class TestSettingsGuardTests(SimpleTestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('ImproperlyConfigured', result.stderr)
+
+
+class NumProxiesCheckTests(SimpleTestCase):
+    def run_check(self, *, debug, testing, num_proxies):
+        from django.test import override_settings
+
+        from apps.common.checks import check_num_proxies
+
+        rest = {**settings.REST_FRAMEWORK, 'NUM_PROXIES': num_proxies}
+        with override_settings(DEBUG=debug, TESTING=testing, REST_FRAMEWORK=rest):
+            return check_num_proxies(None)
+
+    def test_error_when_production_without_proxy_count(self):
+        errors = self.run_check(debug=False, testing=False, num_proxies=0)
+        self.assertEqual([e.id for e in errors], ['common.E001'])
+        self.assertIn('NUM_PROXIES=1', errors[0].hint)
+
+    def test_no_error_in_debug_in_tests_or_with_a_proxy_count(self):
+        self.assertEqual(self.run_check(debug=True, testing=False, num_proxies=0), [])
+        self.assertEqual(self.run_check(debug=False, testing=True, num_proxies=0), [])
+        self.assertEqual(self.run_check(debug=False, testing=False, num_proxies=1), [])
+
+    def test_check_is_registered_and_fails_the_real_check_command_in_production_settings(self):
+        env = {k: v for k, v in os.environ.items() if k not in ('DEBUG', 'NUM_PROXIES')}
+        env.update(SECRET_KEY='cle-de-test-unique', DEBUG='False', NUM_PROXIES='0', DJANGO_SETTINGS_MODULE='backend.settings')
+        result = subprocess.run(
+            [sys.executable, 'manage.py', 'check'], cwd=str(settings.BASE_DIR), env=env,
+            capture_output=True, text=True, timeout=120,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('common.E001', result.stderr)
+        env['NUM_PROXIES'] = '1'
+        ok = subprocess.run(
+            [sys.executable, 'manage.py', 'check'], cwd=str(settings.BASE_DIR), env=env,
+            capture_output=True, text=True, timeout=120,
+        )
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+
+
+class TestStorageCleanupTests(SimpleTestCase):
+    def test_media_and_kyc_roots_are_temporary_and_registered_for_removal(self):
+        import atexit  # noqa: F401
+        import tempfile
+
+        tmp = tempfile.gettempdir()
+        self.assertTrue(str(settings.MEDIA_ROOT).startswith(tmp))
+        self.assertTrue(str(settings.KYC_PRIVATE_ROOT).startswith(tmp))
+        self.assertIn('connecteplus-tests-', str(settings.MEDIA_ROOT))

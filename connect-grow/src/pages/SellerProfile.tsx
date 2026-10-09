@@ -1,14 +1,13 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
-import { CalendarDays, Eye, Package, Phone, Share2, Store } from "lucide-react";
+import { CalendarDays, Eye, Package, Share2, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppShell } from "@/components/layout/AppShell";
 import { EmptyState, ErrorState, PostCard, PostGrid, PostGridSkeleton, StatusBadge, TrustScore, UserAvatar } from "@/components/common";
-import { WhatsAppIcon } from "@/components/post/ContactActions";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePosts, useToggleFavorite } from "@/hooks/use-marketplace";
-import { shareLink, telLink, whatsappLink } from "@/lib/contact";
+import { shareLink } from "@/lib/contact";
 import { formatCount, formatMonthYear } from "@/lib/format";
 import { getSellerTrust, sellerDisplayName } from "@/lib/trust";
 
@@ -67,8 +66,6 @@ const SellerProfile = () => {
   const trust = getSellerTrust(seller);
   const isBusiness = seller.user_type === "ENTREPRISE";
   const isMe = user?.id === seller.id;
-  const whatsapp = whatsappLink(seller.phone, `Bonjour, je vous contacte depuis votre vitrine Connecte+.`);
-  const call = telLink(seller.phone);
 
   return (
     <AppShell>
@@ -93,27 +90,10 @@ const SellerProfile = () => {
             </div>
 
             <div className="flex gap-2">
-              {isMe ? (
+              {isMe && (
                 <Button asChild variant="outline">
                   <Link to="/settings">Modifier mon profil</Link>
                 </Button>
-              ) : (
-                <>
-                  {whatsapp && (
-                    <Button asChild className="bg-whatsapp text-white hover:bg-whatsapp/90">
-                      <a href={whatsapp} target="_blank" rel="noopener noreferrer">
-                        <WhatsAppIcon className="!h-5 !w-5" /> WhatsApp
-                      </a>
-                    </Button>
-                  )}
-                  {call && (
-                    <Button asChild variant="outline" size="icon" className="h-10 w-10">
-                      <a href={call} aria-label={`Appeler ${name}`}>
-                        <Phone />
-                      </a>
-                    </Button>
-                  )}
-                </>
               )}
               <Button
                 variant="outline"

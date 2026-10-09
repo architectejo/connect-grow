@@ -61,6 +61,11 @@ const fr = {
     addFavorite: "Ajouter aux favoris",
     removeFavorite: "Retirer des favoris",
     noImage: "Pas de photo",
+    contact: {
+      sendMessage: "Envoyer un message",
+      sendMessageShort: "Contacter",
+      phoneSoon: "Bientôt disponible : le contact par téléphone se fera avec l'accord du vendeur",
+    },
     status: {
       ACTIVE: "En ligne",
       PAUSED: "En pause",

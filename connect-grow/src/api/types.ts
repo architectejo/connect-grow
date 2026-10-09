@@ -53,12 +53,11 @@ export interface User {
     reviews_count?: number;
 }
 
-/** Vendeur tel qu'imbriqué dans une annonce (SellerSerializer). */
+/** Vendeur tel qu'imbriqué dans une annonce (SellerSerializer). Ni téléphone ni e-mail : règle 10. */
 export interface Seller {
     id: Uuid;
     full_name: string;
     photo?: string | null;
-    phone?: string;
     user_type: UserType;
     business_profile?: Pick<BusinessProfile, "business_name" | "bio" | "logo" | "is_verified"> | null;
     date_joined?: string;

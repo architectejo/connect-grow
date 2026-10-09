@@ -1,29 +1,26 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const walk = (dir: string): string[] =>
-  readdirSync(dir).flatMap((f) => {
-    const p = join(dir, f);
-    return statSync(p).isDirectory() ? walk(p) : [p];
-  });
+// Sources lues à la compilation : indépendant du répertoire de travail.
+const modules = import.meta.glob("/src/**/*.{ts,tsx}", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const sources = Object.entries(modules).filter(([path]) => !/\.test\.tsx?$/.test(path));
 
 describe("règle 10 : pas de téléphone public", () => {
-  const files = walk("src").filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f));
+  it("charge bien les sources", () => {
+    expect(sources.length).toBeGreaterThan(50);
+  });
 
   it("aucune source ne construit de lien tel: ni wa.me", () => {
-    const offenders = files.filter((f) => /["'`]tel:|wa\.me/.test(readFileSync(f, "utf8")));
-    expect(offenders).toEqual([]);
+    expect(sources.filter(([, src]) => /["'`]tel:|wa\.me/.test(src)).map(([p]) => p)).toEqual([]);
   });
 
   it("aucune source ne lit seller.phone", () => {
-    const offenders = files.filter((f) => /seller\??\.phone/.test(readFileSync(f, "utf8")));
-    expect(offenders).toEqual([]);
+    expect(sources.filter(([, src]) => /seller\??\.phone/.test(src)).map(([p]) => p)).toEqual([]);
   });
 
   it("le type Seller n'expose ni phone ni email", () => {
-    const src = readFileSync("src/api/types.ts", "utf8");
-    const block = src.slice(src.indexOf("export interface Seller"), src.indexOf("export interface PostImage"));
+    const types = modules["/src/api/types.ts"];
+    const block = /export interface Seller\s*\{[\s\S]*?\n\}/.exec(types)?.[0];
+    expect(block).toBeDefined();
     expect(block).not.toMatch(/\b(phone|email)\??:/);
   });
 });

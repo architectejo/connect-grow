@@ -59,6 +59,16 @@ class ReportFlowTests(ModerationTestBase):
             })
             self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, bad)
 
+    def test_report_object_id_is_normalized(self):
+        self.client.force_authenticate(self.reporter)
+        for written in (str(self.seller.id).upper(), self.seller.id.hex, f'  {self.seller.id}'.strip()):
+            response = self.client.post('/api/moderation/reports/', {
+                'target_type': 'USER', 'object_id': written, 'reason': 'SPAM',
+            })
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, written)
+        stored = set(Report.objects.values_list('object_id', flat=True))
+        self.assertEqual(stored, {str(self.seller.id)})
+
     def test_report_rejects_unknown_target(self):
         self.client.force_authenticate(self.reporter)
         response = self.client.post('/api/moderation/reports/', {

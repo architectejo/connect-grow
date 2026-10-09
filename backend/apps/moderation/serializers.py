@@ -42,11 +42,14 @@ class ReportSerializer(serializers.ModelSerializer):
         content_type = ContentType.objects.get(app_label=app_label, model=model_name)
         model_class = content_type.model_class()
         try:
-            target_exists = model_class.objects.filter(pk=attrs['object_id']).exists()
+            target = model_class.objects.filter(pk=attrs['object_id']).first()
         except (ValueError, TypeError, DjangoValidationError):
-            target_exists = False  # identifiant mal formé pour ce type de cible
-        if not target_exists:
+            target = None  # identifiant mal formé pour ce type de cible
+        if target is None:
             raise serializers.ValidationError({'object_id': "Cible introuvable."})
+        # Forme canonique de la clé (UUID en minuscules avec tirets) : un même objet
+        # signalé sous plusieurs écritures reste regroupé.
+        attrs['object_id'] = str(target.pk)
         attrs['content_type'] = content_type
         return attrs
 

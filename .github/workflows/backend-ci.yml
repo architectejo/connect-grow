@@ -1,11 +1,15 @@
-name: CI
+name: CI backend
 
 on:
   push:
+    branches: [main, backend, frontend]
+    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
   pull_request:
+    branches: [main, backend, frontend]
+    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-backend-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -34,22 +38,3 @@ jobs:
         run: python manage.py migrate --noinput
       - name: Tests
         run: python manage.py test apps
-
-  frontend:
-    name: Frontend (connect-grow)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: connect-grow
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: connect-grow/package-lock.json
-      - run: npm ci
-      # Pas de continue-on-error : un échec de lint doit faire échouer la CI.
-      - run: npm run lint
-      - run: npm run test
-      - run: npm run build

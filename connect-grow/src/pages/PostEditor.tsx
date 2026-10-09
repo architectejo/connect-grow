@@ -34,7 +34,6 @@ const TITLE_MIN = 10;
 const TITLE_MAX = 100;
 const DESCRIPTION_MIN = 20;
 const DESCRIPTION_MAX = 3000;
-const DRAFT_KEY = POST_DRAFT_KEY;
 
 const schema = z
   .object({
@@ -151,7 +150,7 @@ function StepIndicator({ current, onSelect, maxReached }: { current: number; onS
 
 function readDraft(): Partial<FormValues> | null {
   try {
-    const raw = localStorage.getItem(DRAFT_KEY);
+    const raw = localStorage.getItem(POST_DRAFT_KEY);
     return raw ? (JSON.parse(raw) as Partial<FormValues>) : null;
   } catch {
     return null;
@@ -160,7 +159,7 @@ function readDraft(): Partial<FormValues> | null {
 
 function clearDraft() {
   try {
-    localStorage.removeItem(DRAFT_KEY);
+    localStorage.removeItem(POST_DRAFT_KEY);
   } catch {
     /* stockage indisponible */
   }
@@ -240,7 +239,7 @@ function PostEditorForm({ post }: { post?: Post }) {
     if (isEdit) return;
     const subscription = watch((draft) => {
       try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+        localStorage.setItem(POST_DRAFT_KEY, JSON.stringify(draft));
       } catch {
         /* stockage indisponible */
       }

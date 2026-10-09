@@ -1,16 +1,19 @@
 """Interface publique du domaine `identity` (sessions et jetons)."""
+from django.db import transaction
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 
 
 def revoke_all_sessions(user) -> int:
     """Révoque tous les refresh tokens en cours de `user` (déconnexion de tous les
     appareils, changement ou réinitialisation de mot de passe). Renvoie le nombre
-    de jetons révoqués. Les jetons d'accès déjà émis expirent d'eux-mêmes (15 min)."""
-    revoked = 0
-    for token in OutstandingToken.objects.filter(user=user).exclude(blacklistedtoken__isnull=False):
-        _, created = BlacklistedToken.objects.get_or_create(token=token)
-        revoked += created
-    return revoked
+    de jetons révoqués. Les jetons d'accès déjà émis expirent d'eux-mêmes (15 min).
+
+    Atomique et sans course : une révocation simultanée du même jeton (autre requête,
+    autre processus) est ignorée par `ignore_conflicts` au lieu de lever une erreur."""
+    with transaction.atomic():
+        tokens = list(OutstandingToken.objects.filter(user=user).exclude(blacklistedtoken__isnull=False))
+        BlacklistedToken.objects.bulk_create([BlacklistedToken(token=t) for t in tokens], ignore_conflicts=True)
+    return len(tokens)
 
 
 def validate_new_password(password, user=None) -> None:
@@ -42,16 +45,19 @@ def recompute_verification(business_profile):
     """Recalcule `is_verified` : vrai seulement si chaque type de pièce requis a une
     pièce validée. Révoque la vérification si ce n'est plus le cas. La vérification
     ne vient que de décisions de la modération, jamais d'un achat (règle 3)."""
-    from .models import KycDocument
+    from .models import BusinessProfile, KycDocument
 
+    # Verrou de ligne sur le profil (à appeler dans une transaction) : deux décisions
+    # simultanées sur des pièces du même profil se recalculent l'une après l'autre.
+    locked = BusinessProfile.objects.select_for_update().get(pk=business_profile.pk)
     validated_types = set(
-        business_profile.kyc_documents.filter(status=KycDocument.STATUS_VALIDE)
-        .values_list('document_type', flat=True)
+        locked.kyc_documents.filter(status=KycDocument.STATUS_VALIDE).values_list('document_type', flat=True)
     )
     verified = set(KycDocument.REQUIRED_TYPES).issubset(validated_types)
-    if business_profile.is_verified != verified:
-        business_profile.is_verified = verified
-        business_profile.save(update_fields=['is_verified', 'updated_at'])
+    if locked.is_verified != verified:
+        locked.is_verified = verified
+        locked.save(update_fields=['is_verified', 'updated_at'])
+    business_profile.is_verified = verified
     return verified
 
 

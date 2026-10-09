@@ -653,3 +653,19 @@ class CityCommuneConsistencyAndRegistrationTests(APITestCase):
             unknown = self.client.post(reverse('otp_request'), {'phone': '+243899999999', 'purpose': 'LOGIN'})
         self.assertEqual((known.status_code, unknown.status_code), (200, 200))
         self.assertEqual(known.data, unknown.data)
+
+
+class RevokeAllSessionsTests(TestCase):
+    def test_revocation_is_idempotent_and_tolerates_already_blacklisted_tokens(self):
+        from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+
+        user = User.objects.create_user(email='s@example.com', password='x', full_name='S')
+        refreshes = [RefreshToken.for_user(user) for _ in range(3)]
+        refreshes[0].blacklist()  # déjà révoqué par une autre requête
+        from .services import revoke_all_sessions
+
+        self.assertEqual(revoke_all_sessions(user), 2)
+        self.assertEqual(revoke_all_sessions(user), 0)
+        self.assertEqual(
+            BlacklistedToken.objects.filter(token__user=user).count(), OutstandingToken.objects.filter(user=user).count(),
+        )

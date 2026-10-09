@@ -123,3 +123,10 @@ Tâches listées par l'utilisateur, en résumé : **L0-04** (étape 1) → **L0-
 7. **Collision de nom** `platform` avec le module standard : à vérifier dès R1 (test d'import).
 8. **Perf des jointures supprimées** : surveiller les listes marketplace (annonces + catégories + communes) ; méthodes par lot obligatoires.
 9. **Conflit avec des branches ouvertes** : toute branche backend ouverte avant le reset devient inutilisable ; geler les branches backend pendant R1-R3 (hors L0-16 et front).
+
+
+## Notes d'exécution R1 (ajoutées après relecture)
+
+- **Exception assumée à « pas de transaction entre domaines ».** `identity.services.decide_kyc_document` écrit l'`AuditLog` (via `moderation.services.record_audit`) dans la même `transaction.atomic()` que la décision KYC et le recalcul de `is_verified`. Raison : une décision de vérification sans trace (règle 12) ne doit pas exister. C'est la seule transaction à cheval sur deux domaines ; elle passe par le `services.py` du domaine voisin, jamais par ses modèles. En R3, `record_audit` devra rester synchrone (pas d'outbox) pour garder cette garantie.
+- **Cache et limitation de débit.** Les throttles et le compteur d'échecs de connexion (`identity/throttles.py`) s'appuient sur le cache Django. `LocMemCache` est propre à chaque processus : en production à plusieurs processus Daphne, les compteurs ne sont pas partagés (limites effectives multipliées). Avant la mise en production, prévoir un cache partagé (SQLite via `DatabaseCache` en V1, conforme à « pas de Redis »). Les tests utilisent un cache factice, avec LocMem dans les tests de throttling.
+- **Réglages de test.** `backend/settings_test.py`, chargé seulement par `manage.py test`.

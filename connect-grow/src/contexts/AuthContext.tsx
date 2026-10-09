@@ -38,7 +38,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     tokenStorage.clear();
     setHasToken(false);
-    queryClient.removeQueries({ queryKey: ME_QUERY_KEY });
+    // Vide tout le cache en mémoire : aucune donnée privée ne survit à la session
+    queryClient.clear();
   }, [queryClient]);
 
   // Session expirée (signalée par le client API) ou connexion/déconnexion dans un autre onglet

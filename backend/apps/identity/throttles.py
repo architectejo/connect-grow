@@ -102,6 +102,29 @@ class OtpRequestPhoneDailyThrottle(OtpRequestPhoneThrottle):
         return self.cache_format % {'scope': self.scope, 'ident': value}
 
 
+class RegisterIpThrottle(IpThrottle):
+    """Inscription : par adresse IP (freine l'énumération des e-mails, voir l'ADR 0002)."""
+
+    scope = 'register'
+
+
+class ProfileWriteThrottle(UserWriteThrottle):
+    """Écritures du profil (PATCH /me/) : par utilisateur et par IP."""
+
+    scope = 'profile_write'
+
+
+class ProfileWriteIpThrottle(IpThrottle):
+    """Écritures du profil : par IP, pour qu'un lot de comptes jetables ne contourne pas la limite."""
+
+    scope = 'profile_write_ip'
+
+    def allow_request(self, request, view):
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return True
+        return super().allow_request(request, view)
+
+
 class OtpConfirmIpThrottle(IpThrottle):
     """Confirmation de réinitialisation du mot de passe : par adresse IP."""
 

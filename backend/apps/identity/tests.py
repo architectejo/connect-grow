@@ -771,3 +771,51 @@ class CorsExposeHeadersTests(TestCase):
         from django.conf import settings
         self.assertEqual(settings.CORS_EXPOSE_HEADERS, ['Retry-After'])
         self.assertNotIn('*', settings.CORS_ALLOWED_ORIGINS)
+
+
+class PhoneExistenceOracleTests(APITestCase):
+    """Un numéro déjà inscrit ne se distingue pas d'un numéro libre (pas d'oracle d'existence)."""
+
+    TAKEN = '+243830000001'
+    FREE = '+243830000002'
+
+    def setUp(self):
+        self.owner = User.objects.create_user(phone=self.TAKEN, password='x', full_name='Titulaire')
+
+    def register(self, phone, **extra):
+        payload = {'phone': phone, 'password': 'un-mot-de-passe-solide', 'full_name': 'Zoé'}
+        payload.update(extra)
+        return self.client.post(reverse('register'), payload)
+
+    def test_taken_and_free_phone_without_otp_give_the_same_answer(self):
+        taken, free = self.register(self.TAKEN), self.register(self.FREE)
+        self.assertEqual(taken.status_code, 400)
+        self.assertEqual(taken.data, free.data)
+        self.assertNotIn('phone', taken.data)
+
+    def test_taken_and_free_phone_with_wrong_otp_give_the_same_answer(self):
+        OtpCode.issue(self.FREE, OtpCode.PURPOSE_REGISTER)
+        taken, free = self.register(self.TAKEN, otp_code='000000'), self.register(self.FREE, otp_code='000000')
+        self.assertEqual(taken.status_code, 400)
+        self.assertEqual(taken.data, free.data)
+
+    def test_taken_phone_with_a_valid_otp_is_refused_neutrally(self):
+        # Cas limite (course) : un code valide existe pour un numéro déjà pris.
+        _, code = OtpCode.issue(self.TAKEN, OtpCode.PURPOSE_REGISTER)
+        response = self.register(self.TAKEN, otp_code=code)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'otp_code': ["Code invalide ou expiré."]})
+        self.assertEqual(User.objects.filter(phone=self.TAKEN).count(), 1)
+
+    def test_invalid_phone_format_is_still_rejected(self):
+        self.assertIn('phone', self.register('abc').data)
+
+    def test_changing_to_a_third_party_number_looks_like_a_free_number(self):
+        me = User.objects.create_user(email='moi@example.com', password='x', full_name='Moi')
+        self.client.force_authenticate(me)
+        taken = self.client.patch(reverse('user_me'), {'phone': self.TAKEN, 'otp_code': '000000'})
+        free = self.client.patch(reverse('user_me'), {'phone': self.FREE, 'otp_code': '000000'})
+        self.assertEqual(taken.status_code, 400)
+        self.assertEqual(taken.data, free.data)
+        me.refresh_from_db()
+        self.assertIsNone(me.phone)

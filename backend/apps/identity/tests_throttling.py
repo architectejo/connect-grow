@@ -266,3 +266,33 @@ class KycWriteThrottleTests(TestCase):
             listing = client.get('/api/accounts/kyc/documents/')
         self.assertEqual((first.status_code, deleted.status_code, blocked.status_code), (201, 204, 429))
         self.assertEqual(listing.status_code, 200)  # la lecture n'est pas limitée
+
+
+@override_settings(CACHES=LOCMEM_CACHE)
+class RegisterAndProfileThrottleTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_register_is_throttled_per_ip(self):
+        with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'register': '2/hour'}):
+            codes = [
+                APIClient().post('/api/accounts/register/', {'email': f'r{i}@example.com'}, format='json',
+                                 REMOTE_ADDR='10.9.0.1').status_code
+                for i in range(3)
+            ]
+            other_ip = APIClient().post('/api/accounts/register/', {'email': 'r9@example.com'}, format='json',
+                                        REMOTE_ADDR='10.9.0.2').status_code
+        self.assertEqual(codes[2], 429)
+        self.assertNotEqual(codes[1], 429)
+        self.assertNotEqual(other_ip, 429)
+
+    def test_profile_writes_are_throttled_but_reads_are_not(self):
+        user = User.objects.create_user(email='p@example.com', password=PASSWORD, full_name='P')
+        client = APIClient()
+        client.force_authenticate(user)
+        with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'profile_write': '2/hour'}):
+            codes = [client.patch('/api/accounts/me/', {'full_name': f'P{i}'}, format='json').status_code
+                     for i in range(3)]
+            reads = [client.get('/api/accounts/me/').status_code for _ in range(3)]
+        self.assertEqual(codes, [200, 200, 429])
+        self.assertEqual(reads, [200, 200, 200])

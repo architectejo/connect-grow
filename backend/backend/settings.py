@@ -129,6 +129,9 @@ REST_FRAMEWORK = {
         # (voir apps/identity/throttles.py : FailureLimiter).
         'login': '60/hour',
         'refresh': '60/hour',       # renouvellement de jeton, par IP
+        'register': '20/hour',      # inscription, par IP (anti-énumération des e-mails)
+        'profile_write': '30/hour',     # écritures du profil, par utilisateur
+        'profile_write_ip': '60/hour',  # écritures du profil, par IP
         'logout': '60/hour',        # déconnexion (publique), par IP
         'change_password': '10/hour',  # par utilisateur
         'kyc_write': '20/hour',     # dépôt/suppression de pièces KYC, par utilisateur

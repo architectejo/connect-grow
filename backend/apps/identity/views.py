@@ -27,6 +27,7 @@ from .serializers import (
 from .services import KycError, decide_kyc_document, revoke_all_sessions, validate_new_password
 from .sms import send_otp_sms
 from .throttles import (
+    ProfileWriteIpThrottle, ProfileWriteThrottle, RegisterIpThrottle,
     ChangePasswordThrottle, FailureLimiter, KycWriteThrottle, LoginIpThrottle, OtpConfirmIpThrottle,
     LogoutIpThrottle, OtpRequestIpThrottle, OtpRequestPhoneDailyThrottle, OtpRequestPhoneThrottle, RefreshIpThrottle,
 )
@@ -99,9 +100,11 @@ class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     permission_classes = [permissions.AllowAny] # Tout le monde peut s'inscrire
     serializer_class = UserSerializer
+    throttle_classes = [RegisterIpThrottle]
 
 class UserDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = UserSerializer
+    throttle_classes = [ProfileWriteThrottle, ProfileWriteIpThrottle]
     permission_classes = [permissions.IsAuthenticated] # Nécessite d'être connecté
 
     def get_object(self):

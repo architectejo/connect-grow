@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.urls import reverse
+from django.db import IntegrityError, transaction
 from rest_framework import serializers
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -7,10 +8,13 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.catalog import services as catalog_services
 from apps.common.serializers import PreloadingListSerializer
 
-from .models import BusinessProfile, KycDocument, OtpCode, User
+from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
 from .kyc_files import validate_kyc_file
 from .permissions import REVIEW_KYC_PERMISSION
 from .services import validate_new_password
+
+
+OTP_REJECTED = "Code invalide ou expiré."
 
 
 class BusinessProfileSerializer(serializers.ModelSerializer):
@@ -120,6 +124,10 @@ class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
         extra_kwargs = {
             'password': {'write_only': True},  # Sécurité : ne jamais renvoyer le mot de passe
             'phone_verified': {'read_only': True},
+            # Pas d'UniqueValidator sur le téléphone : il dirait qui est inscrit (oracle
+            # d'existence). L'unicité est contrôlée dans validate(), APRÈS la preuve de
+            # possession du numéro par OTP, avec une réponse neutre. Le format reste vérifié.
+            'phone': {'validators': [phone_validator]},
         }
         list_serializer_class = UserListSerializer
 
@@ -180,7 +188,15 @@ class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
                 .first()
             )
             if not otp or not otp.verify(otp_code):
-                raise serializers.ValidationError({'otp_code': "Code invalide ou expiré."})
+                raise serializers.ValidationError({'otp_code': OTP_REJECTED})
+            # Numéro déjà pris : même réponse que pour un code faux (aucune confirmation
+            # d'existence). Un OTP REGISTER n'est émis que pour un numéro libre ; ce cas
+            # ne survient donc qu'en course ou par un code obtenu avant l'inscription d'un autre.
+            others = User.objects.filter(phone=phone)
+            if self.instance is not None:
+                others = others.exclude(pk=self.instance.pk)
+            if others.exists():
+                raise serializers.ValidationError({'otp_code': OTP_REJECTED})
             self._phone_just_verified = True
 
         return attrs
@@ -206,7 +222,13 @@ class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
         business_data = validated_data.pop('business_profile', None)
 
         # Utilise create_user du UserManager pour hacher le mot de passe
-        user = User.objects.create_user(**validated_data)
+        try:
+            with transaction.atomic():
+                user = User.objects.create_user(**validated_data)
+        except IntegrityError:
+            # Course sur un téléphone déjà pris : réponse neutre. (Un e-mail déjà pris est
+            # signalé par l'UniqueValidator, dette tracée dans l'ADR 0002.)
+            raise serializers.ValidationError({'otp_code': OTP_REJECTED})
 
         if self._phone_just_verified:
             user.phone_verified = True

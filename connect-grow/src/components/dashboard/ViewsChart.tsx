@@ -18,7 +18,8 @@ function fillDays(history: ViewStatPoint[], days: number): ViewStatPoint[] {
   const byDay = new Map(history.map((point) => [point.day, point.views]));
   const now = Date.now();
   return Array.from({ length: days }, (_, i) => {
-    // Jours calculés à l'heure de Kinshasa, comme côté serveur (pas de décalage selon l'appareil)
+    // Jours calculés à l'heure de Kinshasa, comme côté serveur (pas de décalage selon l'appareil).
+    // Kinshasa n'a pas d'heure d'été (UTC+1 toute l'année) : soustraire des multiples de 24 h est donc exact.
     const day = formatDayMonth(new Date(now - (days - 1 - i) * 86_400_000));
     return { day, views: byDay.get(day) ?? 0 };
   });

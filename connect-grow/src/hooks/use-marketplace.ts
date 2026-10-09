@@ -16,7 +16,7 @@ export const marketplaceKeys = {
   post: (id: Uuid) => [...marketplaceKeys.all, "post", id] as const,
   myPosts: () => [...marketplaceKeys.all, "my-posts"] as const,
   postStats: (id: Uuid) => [...marketplaceKeys.all, "post-stats", id] as const,
-  businesses: (search: string) => [...marketplaceKeys.all, "businesses", search] as const,
+  businesses: (search: string, verifiedOnly = false) => [...marketplaceKeys.all, "businesses", search, verifiedOnly] as const,
 };
 
 // Les référentiels changent rarement : on les garde longtemps en cache (sobriété en données)
@@ -80,12 +80,21 @@ export function usePostStats(id: Uuid | undefined, enabled: boolean) {
   });
 }
 
+/**
+ * Paramètres de GET accounts/businesses/. `is_verified=true` est un filtre SERVEUR (pas de filtrage local
+ * des pages chargées). NB : tant que le backend n'a pas livré ce filtre (L0-19), il ignore ce paramètre
+ * et renvoie toutes les entreprises ; le front n'a rien à changer quand il sera pris en compte.
+ */
+export function businessesRequestParams(search: string, verifiedOnly: boolean, page: number) {
+  return cleanParams({ search, is_verified: verifiedOnly ? "true" : undefined, page });
+}
+
 /** Entreprises (fiche publique restreinte), paginées par pages de 20 : « Voir plus » charge la suivante. */
-export function useBusinesses(search: string) {
+export function useBusinesses(search: string, verifiedOnly = false) {
   return useInfiniteQuery({
-    queryKey: marketplaceKeys.businesses(search),
+    queryKey: marketplaceKeys.businesses(search, verifiedOnly),
     queryFn: async ({ pageParam }) =>
-      (await apiClient.get<Paginated<PublicBusiness>>("accounts/businesses/", { params: cleanParams({ search, page: pageParam }) })).data,
+      (await apiClient.get<Paginated<PublicBusiness>>("accounts/businesses/", { params: businessesRequestParams(search, verifiedOnly, pageParam) })).data,
     initialPageParam: 1,
     getNextPageParam: (last, _pages, lastPage) => (last.next ? lastPage + 1 : undefined),
     select: (data) => ({ businesses: data.pages.flatMap((page) => page.results), count: data.pages[0]?.count ?? 0 }),

@@ -60,10 +60,10 @@ const Businesses = () => {
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const debouncedSearch = useDebounced(search.trim());
   const { t } = useTranslation();
-  const { data, isLoading, isError, isFetching, isFetchingNextPage, hasNextPage, fetchNextPage, refetch } = useBusinesses(debouncedSearch);
+  const { data, isLoading, isError, isFetching, isFetchingNextPage, hasNextPage, fetchNextPage, refetch } = useBusinesses(debouncedSearch, verifiedOnly);
 
-  const all = data?.businesses ?? [];
-  const businesses = verifiedOnly ? all.filter((b) => b.is_verified) : all;
+  // « Vérifiées uniquement » est un filtre serveur (?is_verified=true) : aucun filtrage local
+  const businesses = data?.businesses ?? [];
 
   return (
     <AppShell>
@@ -101,7 +101,7 @@ const Businesses = () => {
         </div>
       ) : isError ? (
         <ErrorState onRetry={() => refetch()} isRetrying={isFetching} />
-      ) : businesses.length === 0 ? (
+      ) : businesses.length === 0 && !hasNextPage ? (
         <EmptyState
           icon={Building2}
           title="Aucune entreprise trouvée"

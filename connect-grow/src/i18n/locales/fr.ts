@@ -74,20 +74,33 @@ const fr = {
     tooManyAttempts_one: "Trop de tentatives, réessayez dans {{count}} seconde.",
     tooManyAttempts_other: "Trop de tentatives, réessayez dans {{count}} secondes.",
     tooManyAttemptsNoDelay: "Trop de tentatives, réessayez dans quelques instants.",
+    server: "Le service rencontre un problème. Réessayez dans quelques instants.",
     notFound: "Cette ressource est introuvable.",
     forbidden: "Vous n'avez pas le droit d'effectuer cette action.",
     conflict: "Cette action a déjà été effectuée.",
+  },
+  common: {
+    cancel: "Annuler",
+  },
+  auth: {
+    logoutAllFailed: "Déconnexion locale uniquement : les autres appareils n'ont pas pu être déconnectés.",
+    refreshPaused: "Actualisation en pause : trop de requêtes, elle reprendra automatiquement.",
   },
   settings: {
     samePhone: "Ce numéro est déjà celui de votre compte.",
     passwordChanged: "Mot de passe modifié. Reconnectez-vous avec le nouveau.",
     logoutAll: "Se déconnecter de tous les appareils",
+    logoutAllTitle: "Déconnecter tous les appareils ?",
+    logoutAllDescription: "Vous serez déconnecté ici et sur tous vos autres appareils. Vous devrez vous reconnecter partout.",
+    logoutAllConfirm: "Tout déconnecter",
   },
   otp: {
     sentBefore: "Si ce numéro peut recevoir un code, un SMS à 6 chiffres lui a été envoyé :",
   },
   kyc: {
     delete: "Supprimer",
+    deleteConfirmTitle: "Supprimer ce document ?",
+    deleteConfirmDescription: "« {{title}} » sera retiré de votre dossier. Vous pourrez en envoyer un nouveau.",
     deleteLabel: "Supprimer le document : {{title}}",
   },
   businesses: {

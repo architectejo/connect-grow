@@ -2,6 +2,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
+from django.core import signing
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
 from rest_framework import permissions, status, viewsets
@@ -12,6 +13,8 @@ from rest_framework.response import Response
 from apps.catalog import services as catalog_services
 from apps.common.images import validate_image_pixels, validate_image_upload_size
 from apps.common.pagination import OptionalPagination
+from apps.common.throttles import ActionScopedThrottleMixin, AnonymousScopedThrottle
+from apps.moderation.services import record_audit
 from apps.common.utils import parse_uuid
 from apps.visibility import services as visibility_services
 
@@ -37,7 +40,23 @@ def parse_price(value):
     return max(-PRICE_LIMIT, min(PRICE_LIMIT, price)).quantize(Decimal('0.01'))
 
 
-class OfferViewSet(viewsets.ModelViewSet):
+ANON_COOKIE = 'anon_id'
+ANON_COOKIE_SALT = 'marketplace.anon_view'
+
+
+def read_anon_id(request):
+    """Identifiant de visiteur anonyme lu dans le cookie SIGNÉ par le serveur ; None si absent,
+    falsifié ou expiré (la vue n'est alors pas comptée, un nouveau cookie est émis)."""
+    value = request.COOKIES.get(ANON_COOKIE)
+    if not value:
+        return None
+    try:
+        return signing.loads(value, salt=ANON_COOKIE_SALT, max_age=settings.ANON_VIEW_COOKIE_MAX_AGE)
+    except signing.BadSignature:
+        return None
+
+
+class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     serializer_class = OfferSerializer
     pagination_class = OptionalPagination
 
@@ -46,6 +65,11 @@ class OfferViewSet(viewsets.ModelViewSet):
     OWNER_ACTIONS = {
         'update', 'partial_update', 'destroy', 'soft_delete', 'restore', 'hard_delete',
         'pause', 'unpause', 'mark_sold', 'renew', 'images', 'delete_image',
+    }
+    throttle_scopes = {
+        'create': 'offer_upload', 'update': 'offer_upload', 'partial_update': 'offer_upload',
+        'images': 'offer_upload', 'share': 'share', 'favorite': 'favorite',
+        'retrieve': ('offer_view_anon', AnonymousScopedThrottle),
     }
     ORDERINGS = ('-visibility_score', 'visibility_score', '-created_at', 'created_at', 'price', '-price')
 
@@ -60,7 +84,8 @@ class OfferViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         if self.action in self.OWNER_ACTIONS:
-            return Offer.objects.select_related('seller').prefetch_related('images')
+            # Filtré sur le vendeur : l'offre d'un autre répond 404, comme une offre inconnue.
+            return Offer.objects.filter(seller=self.request.user).select_related('seller').prefetch_related('images')
 
         # On trie par le score de visibilité "Trust & Engage" par défaut
         ordering = self.request.query_params.get('ordering', '-visibility_score')
@@ -135,6 +160,7 @@ class OfferViewSet(viewsets.ModelViewSet):
         serializer.save(seller=self.request.user)
 
     def perform_destroy(self, instance):
+        record_audit(self.request.user, 'OFFER_DELETED', target=instance, details=instance.title)
         services.delete_offers(Offer.objects.filter(pk=instance.pk))
 
     @action(detail=False, methods=['post'])
@@ -169,7 +195,9 @@ class OfferViewSet(viewsets.ModelViewSet):
     # 4. Supprimer définitivement une annonce
     @action(detail=True, methods=['delete'])
     def hard_delete(self, request, pk=None):
-        services.delete_offers(Offer.objects.filter(pk=self.get_object().pk))
+        offer = self.get_object()
+        record_audit(request.user, 'OFFER_DELETED', target=offer, details=offer.title)
+        services.delete_offers(Offer.objects.filter(pk=offer.pk))
         return Response({"message": "Annonce supprimée définitivement"})
 
     # Cycle de vie (CDC 3.2, 3.9) : pause, reprise, vente, renouvellement.
@@ -182,7 +210,11 @@ class OfferViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def unpause(self, request, pk=None):
         offer = self.get_object()
-        if not services.unpause_offer(offer):
+        try:
+            resumed = services.unpause_offer(offer)
+        except services.OfferHiddenError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        if not resumed:
             return Response(
                 {"error": "Cette annonce a expiré. Renouvelez-la plutôt.", "status": offer.status},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -198,7 +230,10 @@ class OfferViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def renew(self, request, pk=None):
         offer = self.get_object()
-        services.renew_offer(offer)
+        try:
+            services.renew_offer(offer)
+        except services.OfferHiddenError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         return Response(self.get_serializer(offer).data)
 
     # 5. Galerie de photos (CDC 3.2 : 1 à 8 photos par annonce, main_image comprise)
@@ -240,7 +275,7 @@ class OfferViewSet(viewsets.ModelViewSet):
     # 6. Partage externe (CDC 3.4) : simple compteur, alimente l'engagement (CDC 3.8).
     @action(detail=True, methods=['post'])
     def share(self, request, pk=None):
-        return Response({"shares_count": services.register_share(self.get_object())})
+        return Response({"shares_count": services.register_share(self.get_object(), request.user)})
 
     # 7. Favoris (CDC 3.2)
     @action(detail=True, methods=['post'])
@@ -250,16 +285,17 @@ class OfferViewSet(viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
 
-        # CDC 3.8 : une vue unique par jour et par utilisateur (ou empreinte anonyme),
-        # garantie par une contrainte d'unicité en base plutôt qu'un simple cookie.
-        anon_id = request.COOKIES.get('anon_id') or uuid.uuid4().hex
-        services.register_view(instance, visibility_services.build_viewer_key(request.user, anon_id))
+        # CDC 3.8 : une vue unique par jour et par visiteur. Un visiteur anonyme n'est compté que
+        # si son cookie a été émis ET signé par le serveur (pas de fabrication d'empreintes).
+        anon_id = None if request.user.is_authenticated else read_anon_id(request)
+        if request.user.is_authenticated or anon_id:
+            services.register_view(instance, visibility_services.build_viewer_key(request.user, anon_id))
 
         response = Response(self.get_serializer(instance).data)
-        if not request.COOKIES.get('anon_id'):
+        if not request.user.is_authenticated and anon_id is None:
             response.set_cookie(
-                'anon_id', anon_id,
-                max_age=365 * 86400,
+                ANON_COOKIE, signing.dumps(uuid.uuid4().hex, salt=ANON_COOKIE_SALT),
+                max_age=settings.ANON_VIEW_COOKIE_MAX_AGE,
                 httponly=True,
                 samesite='Lax',
                 secure=not settings.DEBUG,
@@ -267,25 +303,36 @@ class OfferViewSet(viewsets.ModelViewSet):
         return response
 
 
-class FavoriteViewSet(viewsets.ModelViewSet):
+class FavoriteViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     """Liste personnelle des favoris de l'utilisateur connecté (CDC 3.2)."""
 
     serializer_class = FavoriteSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = OptionalPagination
     http_method_names = ['get', 'post', 'delete', 'head', 'options']
+    throttle_scopes = {'create': 'favorite'}
 
     def get_queryset(self):
-        return (
+        queryset = (
             Favorite.objects.filter(user=self.request.user)
             .select_related('offer', 'offer__seller').prefetch_related('offer__images')
         )
+        if self.action == 'list':
+            # Les offres masquées, en pause, vendues ou en corbeille ne sont plus montrées.
+            queryset = queryset.filter(offer__is_active=True, offer__is_deleted=False)
+        return queryset
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        try:
+            serializer.instance, _ = services.add_favorite(self.request.user, serializer.validated_data['offer'])
+        except services.MarketplaceError as exc:
+            raise ValidationError({'post_id': str(exc)})
+
+    def perform_destroy(self, instance):
+        services.remove_favorite(instance)
 
 
-class _OfferMessageViewSet(viewsets.ModelViewSet):
+class _OfferMessageViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     """Base des contacts et propositions d'échange : l'utilisateur ne voit que les siens ;
     ni modification ni suppression (traçabilité)."""
 
@@ -306,6 +353,7 @@ class _OfferMessageViewSet(viewsets.ModelViewSet):
 
 
 class ContactEventViewSet(_OfferMessageViewSet):
+    throttle_scopes = {'create': 'contact'}
     serializer_class = ContactEventSerializer
     model = ContactEvent
 
@@ -314,6 +362,7 @@ class ContactEventViewSet(_OfferMessageViewSet):
 
 
 class ExchangeProposalViewSet(_OfferMessageViewSet):
+    throttle_scopes = {'create': 'exchange'}
     serializer_class = ExchangeProposalSerializer
     model = ExchangeProposal
 

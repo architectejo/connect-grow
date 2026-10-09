@@ -107,6 +107,10 @@ class Offer(BaseModel):
     comments_count = models.PositiveIntegerField(default=0)
     shares_count = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    # Masquage prononcé par la modération (sanction MASQUAGE_ANNONCE). État explicite, distinct
+    # de `is_active` et de `status` : le vendeur ne peut ni reprendre ni renouveler l'offre
+    # (seule la levée de la sanction l'efface).
+    is_hidden_by_moderation = models.BooleanField(default=False)
 
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
     # CDC 3.2 : expiration après N jours sans renouvellement (cf. MarketplaceSettings).

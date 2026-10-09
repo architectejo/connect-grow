@@ -23,3 +23,13 @@ def file_automatic_report(target, reason, description=''):
     return Report.objects.create(
         content_type=content_type, object_id=object_id, reporter=None, reason=reason, description=description,
     )
+
+
+def has_open_report(target) -> bool:
+    """Vrai si la cible fait l'objet d'un signalement non clos (en attente ou pris en charge)."""
+    from django.contrib.contenttypes.models import ContentType
+
+    return Report.objects.filter(
+        content_type=ContentType.objects.get_for_model(target), object_id=str(target.pk),
+        status__in=(Report.STATUS_EN_ATTENTE, Report.STATUS_EN_COURS),
+    ).exists()

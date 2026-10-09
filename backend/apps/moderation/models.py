@@ -129,7 +129,7 @@ class Sanction(models.Model):
         from apps.marketplace import services as marketplace_services
 
         if self.sanction_type == self.TYPE_MASQUAGE_ANNONCE and self.related_offer_id:
-            marketplace_services.set_offer_active(self.related_offer_id, False)
+            marketplace_services.hide_by_moderation(self.related_offer_id)
         elif self.sanction_type in (self.TYPE_SUSPENSION_TEMPORAIRE, self.TYPE_BANNISSEMENT):
             self.user.is_active = False
             self.user.save(update_fields=['is_active'])
@@ -138,7 +138,7 @@ class Sanction(models.Model):
         from apps.marketplace import services as marketplace_services
 
         if self.sanction_type == self.TYPE_MASQUAGE_ANNONCE and self.related_offer_id:
-            marketplace_services.set_offer_active(self.related_offer_id, True)
+            marketplace_services.lift_moderation_hiding(self.related_offer_id)
         elif self.sanction_type in (self.TYPE_SUSPENSION_TEMPORAIRE, self.TYPE_BANNISSEMENT):
             self.user.is_active = True
             self.user.save(update_fields=['is_active'])

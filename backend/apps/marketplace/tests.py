@@ -157,9 +157,9 @@ class OfferOwnershipTests(MarketplaceTestBase):
         offer = self.make_offer()
         self.client.force_authenticate(self.buyer)
         url = reverse('offer-detail', args=[offer.id])
-        self.assertEqual(self.client.patch(url, {'price': 1}).status_code, status.HTTP_403_FORBIDDEN)
-        self.assertEqual(self.client.put(url, {}).status_code, status.HTTP_403_FORBIDDEN)
-        self.assertEqual(self.client.delete(url).status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(self.client.patch(url, {'price': 1}).status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(self.client.put(url, {}).status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(self.client.delete(url).status_code, status.HTTP_404_NOT_FOUND)
         offer.refresh_from_db()
         self.assertEqual(offer.price, 100)
 
@@ -169,9 +169,9 @@ class OfferOwnershipTests(MarketplaceTestBase):
         self.client.force_authenticate(self.buyer)
         for name in ('restore', 'soft-delete', 'pause', 'unpause', 'mark-sold', 'renew'):
             response = self.client.post(reverse(f'offer-{name}', args=[offer.id]))
-            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, name)
+            self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND, name)
         response = self.client.delete(reverse('offer-hard-delete', args=[offer.id]))
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertTrue(Offer.objects.filter(pk=offer.pk).exists())
 
     def test_unknown_offer_gives_404_not_500(self):
@@ -232,7 +232,7 @@ class OfferGalleryTests(MarketplaceTestBase):
         response = self.client.post(
             reverse('offer-images', args=[offer.id]), {'image': make_test_image()}, format='multipart',
         )
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_owner_can_delete_a_gallery_image(self):
         offer = self.make_offer()
@@ -447,12 +447,21 @@ class VisibilityScoreFormulaTests(MarketplaceTestBase):
 
 
 class UniqueViewTests(MarketplaceTestBase):
+    def test_first_anonymous_visit_gets_a_signed_cookie_and_is_not_counted(self):
+        offer = self.make_offer()
+        response = self.client.get(reverse('offer-detail', args=[offer.id]))
+        self.assertIn('anon_id', response.cookies)
+        offer.refresh_from_db()
+        self.assertEqual(offer.views_count, 0)
+        self.assertFalse(OfferUniqueView.objects.exists())
+
     def test_same_anonymous_visitor_counted_once_per_day(self):
         offer = self.make_offer()
         url = reverse('offer-detail', args=[offer.id])
 
-        self.client.get(url)
-        self.client.get(url)  # même client => même cookie anon_id
+        self.client.get(url)  # émet le cookie signé
+        self.client.get(url)  # compté
+        self.client.get(url)  # même visiteur, même jour : pas recompté
 
         offer.refresh_from_db()
         self.assertEqual(offer.views_count, 1)
@@ -474,14 +483,25 @@ class UniqueViewTests(MarketplaceTestBase):
         self.assertEqual(offer.views_count, 2)
         self.assertEqual(DailyVisibilityCounter.objects.get(offer_id=offer.id).views, 2)
 
-    def test_arbitrary_anon_cookie_is_hashed_and_bounded(self):
+    def test_forged_or_unsigned_cookies_are_never_counted(self):
         offer = self.make_offer()
-        self.client.cookies['anon_id'] = 'x' * 500
-        self.client.get(reverse('offer-detail', args=[offer.id]))
+        url = reverse('offer-detail', args=[offer.id])
+        for forged in ('x' * 500, uuid.uuid4().hex, 'abc:def:ghi'):
+            self.client.cookies['anon_id'] = forged
+            response = self.client.get(url)
+            self.assertIn('anon_id', response.cookies)  # remplacé par un cookie signé valide
+        offer.refresh_from_db()
+        self.assertEqual(offer.views_count, 0)
+        self.assertFalse(OfferUniqueView.objects.exists())
+
+    def test_cookie_signed_by_the_server_is_hashed_in_the_database(self):
+        offer = self.make_offer()
+        url = reverse('offer-detail', args=[offer.id])
+        self.client.get(url)
+        self.client.get(url)
         key = OfferUniqueView.objects.get(offer_id=offer.id).viewer_key
-        self.assertLessEqual(len(key), 64)
         self.assertTrue(key.startswith('anon:'))
-        self.assertNotIn('xxxx', key)
+        self.assertLessEqual(len(key), 64)
 
 
 class TrendingBadgeTests(MarketplaceTestBase):
@@ -538,7 +558,7 @@ class OfferLifecycleActionTests(MarketplaceTestBase):
         offer = self.make_offer()
         self.client.force_authenticate(self.buyer)
         response = self.client.post(reverse('offer-pause', args=[offer.id]))
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_mark_sold(self):
         offer = self.make_offer()
@@ -681,12 +701,12 @@ class ContactTests(MarketplaceTestBase):
     def test_each_buyer_gets_a_private_conversation(self):
         offer = self.make_offer()
         other = User.objects.create_user(email='other@example.com', password='x', full_name='Autre')
-        for user in (self.buyer, other, self.buyer):
+        for user in (self.buyer, other):
             self.client.force_authenticate(user)
             self.assertEqual(self.contact(offer).status_code, status.HTTP_201_CREATED)
         self.assertEqual(Conversation.objects.filter(offer_id=offer.id).count(), 2)
         buyer_conversation = Conversation.objects.filter(offer_id=offer.id, participants=self.buyer).get()
-        self.assertEqual(buyer_conversation.messages.count(), 2)
+        self.assertEqual(buyer_conversation.messages.count(), 1)
         self.assertFalse(buyer_conversation.participants.filter(pk=other.pk).exists())
 
     def test_cannot_contact_own_offer(self):

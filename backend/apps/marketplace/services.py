@@ -14,7 +14,7 @@ from django.db import transaction
 from django.db.models import Count, F
 from django.utils import timezone
 
-from apps.common.utils import parse_uuid
+from apps.common.utils import day_bounds, parse_uuid
 from apps.messaging import services as messaging_services
 from apps.notifications import services as notification_services
 from apps.visibility import services as visibility_services
@@ -26,6 +26,13 @@ class MarketplaceError(Exception):
     """Refus métier (message en français destiné à l'utilisateur)."""
 
 
+class OfferHiddenError(MarketplaceError):
+    """L'offre est masquée par la modération : le vendeur ne peut pas la remettre en ligne."""
+
+
+DUPLICATE_CONTACT_WINDOW = timedelta(hours=24)
+
+
 @dataclass(frozen=True)
 class OfferInfo:
     id: uuid.UUID
@@ -34,6 +41,11 @@ class OfferInfo:
     main_image_url: Optional[str]
     is_active: bool
     is_deleted: bool
+
+    @property
+    def is_available(self) -> bool:
+        """Visible sur la marketplace : active (ni masquée, ni en pause, vendue ou expirée) et hors corbeille."""
+        return self.is_active and not self.is_deleted
 
 
 def _info(offer: Offer) -> OfferInfo:
@@ -79,15 +91,23 @@ def get_contact_sender_ids(offer_id) -> set:
     return set(ContactEvent.objects.filter(offer_id=offer_id).values_list('sender_id', flat=True))
 
 
-def set_offer_active(offer_id, active: bool) -> None:
-    """Masque ou réaffiche une offre (sanction de modération « masquage d'annonce »)."""
-    Offer.objects.filter(pk=offer_id).update(is_active=active)
+def hide_by_moderation(offer_id) -> None:
+    """Masque une offre (sanction « masquage d'annonce ») : état explicite + retrait de la marketplace."""
+    Offer.objects.filter(pk=offer_id).update(is_hidden_by_moderation=True, is_active=False)
+
+
+def lift_moderation_hiding(offer_id) -> None:
+    """Lève le masquage. N'active l'offre que si elle est encore en statut ACTIVE : une offre
+    vendue, expirée ou mise en pause reste hors ligne."""
+    Offer.objects.filter(pk=offer_id).update(is_hidden_by_moderation=False)
+    Offer.objects.filter(pk=offer_id, status=Offer.STATUS_ACTIVE, is_deleted=False).update(is_active=True)
 
 
 def count_contacts_by_offer(day: date) -> list:
     """(offer_id, seller_id, total) des contacts reçus un jour donné (agrégat du tableau de bord)."""
+    start, end = day_bounds(day)
     rows = (
-        ContactEvent.objects.filter(created_at__date=day)
+        ContactEvent.objects.filter(created_at__gte=start, created_at__lt=end)
         .values('offer_id', 'offer__seller_id')
         .annotate(total=Count('id'))
     )
@@ -138,7 +158,13 @@ def _expiration_days() -> int:
     return MarketplaceSettings.get_solo().expiration_days
 
 
+def _refuse_if_hidden(offer: Offer) -> None:
+    if offer.is_hidden_by_moderation:
+        raise OfferHiddenError("Cette annonce a été masquée par la modération : vous ne pouvez pas la remettre en ligne.")
+
+
 def renew_offer(offer: Offer) -> None:
+    _refuse_if_hidden(offer)
     offer.status = Offer.STATUS_ACTIVE
     offer.is_active = True
     offer.expires_at = timezone.now() + timedelta(days=_expiration_days())
@@ -159,7 +185,9 @@ def pause_offer(offer: Offer) -> None:
 
 
 def unpause_offer(offer: Offer) -> bool:
-    """Remet l'offre en ligne ; renvoie False (et la marque expirée) si son échéance est passée."""
+    """Remet l'offre en ligne ; renvoie False (et la marque expirée) si son échéance est passée.
+    Refusé (OfferHiddenError) tant que la modération la masque."""
+    _refuse_if_hidden(offer)
     if offer.expires_at and offer.expires_at < timezone.now():
         offer.status = Offer.STATUS_EXPIRED
         offer.save(update_fields=['status', 'updated_at'])
@@ -243,19 +271,47 @@ def register_view(offer: Offer, viewer_key: str) -> bool:
     return True
 
 
-def register_share(offer: Offer) -> int:
-    """CDC 3.4 : partage externe, simple compteur qui alimente l'engagement."""
+def register_share(offer: Offer, user) -> int:
+    """CDC 3.4 : partage externe, compteur qui alimente l'engagement. Un utilisateur ne compte
+    qu'une fois par offre et par jour."""
+    if not visibility_services.record_share(offer_id=offer.id, actor_key=f"user:{user.pk}"):
+        return offer.shares_count
     Offer.objects.filter(pk=offer.pk).update(shares_count=F('shares_count') + 1)
     offer.refresh_from_db(fields=['shares_count'])
     refresh_visibility_score(offer)
     return offer.shares_count
 
 
+def add_favorite(user, offer: Offer) -> tuple:
+    """Ajoute l'offre aux favoris ; renvoie (favori, créé). `likes_count` suit le nombre de favoris."""
+    existing = Favorite.objects.filter(user=user, offer=offer).first()
+    if existing is not None:
+        return existing, False
+    ensure_available(offer)
+    favorite, created = Favorite.objects.get_or_create(user=user, offer=offer)
+    if created:
+        Offer.objects.filter(pk=offer.pk).update(likes_count=F('likes_count') + 1)
+        _refresh_after_like_change(offer)
+    return favorite, created
+
+
+def remove_favorite(favorite: Favorite) -> None:
+    offer = favorite.offer
+    favorite.delete()
+    Offer.objects.filter(pk=offer.pk, likes_count__gt=0).update(likes_count=F('likes_count') - 1)
+    _refresh_after_like_change(offer)
+
+
+def _refresh_after_like_change(offer: Offer) -> None:
+    offer.refresh_from_db(fields=['likes_count'])
+    refresh_visibility_score(offer)
+
+
 def toggle_favorite(user, offer: Offer) -> bool:
     """Ajoute ou retire l'offre des favoris ; renvoie True si elle est désormais favorite."""
-    favorite, created = Favorite.objects.get_or_create(user=user, offer=offer)
+    favorite, created = add_favorite(user, offer)
     if not created:
-        favorite.delete()
+        remove_favorite(favorite)
     return created
 
 
@@ -269,11 +325,17 @@ def _start_conversation(offer: Offer, sender, message: str):
     return conversation
 
 
+def ensure_available(offer: Offer) -> None:
+    """Une offre masquée, en pause, vendue, expirée ou supprimée n'accepte ni contact, ni
+    échange, ni favori, ni affaire."""
+    if not offer.is_active or offer.is_deleted:
+        raise MarketplaceError("Cette annonce n'est plus disponible.")
+
+
 def _check_can_contact(offer: Offer, sender) -> None:
     if offer.seller_id == sender.pk:
         raise MarketplaceError("Vous ne pouvez pas contacter votre propre annonce.")
-    if offer.is_deleted:
-        raise MarketplaceError("Cette annonce n'est plus disponible.")
+    ensure_available(offer)
 
 
 def create_contact_event(*, offer: Offer, sender, message: str) -> ContactEvent:
@@ -281,6 +343,11 @@ def create_contact_event(*, offer: Offer, sender, message: str) -> ContactEvent:
     prévient. Les trois écritures sont indépendantes (pas de transaction entre domaines) :
     elles deviendront des événements de l'outbox (L0-16)."""
     _check_can_contact(offer, sender)
+    recent = ContactEvent.objects.filter(
+        offer=offer, sender=sender, created_at__gte=timezone.now() - DUPLICATE_CONTACT_WINDOW,
+    )
+    if recent.exists():
+        raise MarketplaceError("Vous avez déjà contacté le vendeur pour cette annonce ces dernières 24 heures.")
     event = ContactEvent.objects.create(offer=offer, sender=sender, message=message)
     _start_conversation(offer, sender, message)
     notification_services.notify(

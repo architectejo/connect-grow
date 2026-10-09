@@ -1,5 +1,8 @@
 from django.contrib import admin
 
+from apps.moderation.services import record_audit
+
+from . import services
 from .models import ContactEvent, ExchangeProposal, Favorite, MarketplaceSettings, Offer, OfferImage
 
 
@@ -15,6 +18,20 @@ class OfferAdmin(admin.ModelAdmin):
     search_fields = ('title', 'description')
     raw_id_fields = ('seller',)
     inlines = [OfferImageInline]
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        record_audit(request.user, 'OFFER_ADMIN_UPDATED' if change else 'OFFER_ADMIN_CREATED', target=obj,
+                     details=f"Champs : {', '.join(form.changed_data)}")
+
+    def delete_model(self, request, obj):
+        record_audit(request.user, 'OFFER_DELETED', target=obj, details=obj.title)
+        services.delete_offers(Offer.objects.filter(pk=obj.pk))
+
+    def delete_queryset(self, request, queryset):
+        for offer in queryset:
+            record_audit(request.user, 'OFFER_DELETED', target=offer, details=offer.title)
+        services.delete_offers(queryset)
 
 
 @admin.register(Favorite)

@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { POST_DRAFT_KEY, API_CONTENT_CACHE, tokenStorage } from "./tokens";
 
 describe("tokenStorage.clear", () => {
   beforeEach(() => localStorage.clear());
+  afterEach(() => vi.unstubAllGlobals());
 
   it("supprime jetons, brouillon d'annonce et anciennes clés utilisateur", () => {
     tokenStorage.set("a", "r");
@@ -24,6 +25,18 @@ describe("tokenStorage.clear", () => {
     vi.stubGlobal("caches", { delete: del });
     tokenStorage.clear();
     expect(del).toHaveBeenCalledWith(API_CONTENT_CACHE);
-    vi.unstubAllGlobals();
+  });
+
+  it("ne plante pas si l'API Cache est indisponible", () => {
+    vi.stubGlobal("caches", undefined);
+    expect(() => tokenStorage.clear()).not.toThrow();
+  });
+
+  it("ne produit pas d'erreur non gérée si caches.delete rejette", async () => {
+    const del = vi.fn().mockRejectedValue(new Error("refus"));
+    vi.stubGlobal("caches", { delete: del });
+    expect(() => tokenStorage.clear()).not.toThrow();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(del).toHaveBeenCalled();
   });
 });

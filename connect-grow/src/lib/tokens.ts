@@ -41,6 +41,7 @@ export const tokenStorage = {
     try {
       localStorage.removeItem(ACCESS_KEY);
       localStorage.removeItem(REFRESH_KEY);
+      // Anciennes clés (héritage, plus écrites) : à retirer après quelques versions
       localStorage.removeItem("user_full_name");
       localStorage.removeItem("user_id");
       localStorage.removeItem(POST_DRAFT_KEY);

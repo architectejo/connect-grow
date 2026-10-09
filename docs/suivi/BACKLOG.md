@@ -78,3 +78,5 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 |---|---|---|---|
 | F-01 | Passage à MySQL : `requirements-mysql.txt`, CI sur MySQL, tests de portabilité (casse, unicité, emojis), migration des données | devops, dev-backend, qa-testeur | À faire |
 | F-02 | Déploiement AWS Lightsail (Nginx, Daphne, base managée, stockage objet, CDN, sauvegardes) | devops | À faire |
+| L0-21 | Corrections recette QA backend (R0-01/03/04/05/06/07/08/12) | 0 | dev-backend | Fait | recette QA |
+| L0-22 | Corrections recette QA front (R0-02/10/11) | 0 | dev-frontend | Fait | recette QA |

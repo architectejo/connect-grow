@@ -69,3 +69,11 @@ Une entrée par tâche terminée ou décision prise, la plus récente en haut.
 - Création de `CLAUDE.md`, des 11 agents de `.claude/agents/`, du backlog et de l'ADR 0001.
 - État constaté : 98 tests backend verts sur SQLite ; écarts avec la v1.2 listés dans le lot 0.
 - Prochaine étape : L0-01 (CI) et L0-02 / L0-03 (SQLite seul, retrait de Redis).
+
+## 2026-10-09 — Recette QA du lot 0 et corrections (L0-21, L0-22)
+- qa-testeur : recette refusée (4 majeures : prix négatif, stock négatif/500, e-mail sensible à la casse, levée de suspension qui réactive un banni). Règles 3, 4, 10 OK ; règle 12 OK sauf soft_delete (réversible, voulu).
+- dev-backend (L0-21) : toutes corrigées + 429 avec Retry-After, messages en français, LOGGING OTP en DEBUG, offres des comptes inactifs masquées, user_type en lecture seule. 753 tests verts. Migrations marketplace 0004 et identity 0003 (e-mails en minuscules).
+- dev-frontend (L0-22) : types alignés, null géré, typecheck au build. 183 tests verts.
+- Décisions : prix 0 accepté (« sur devis », à confirmer client) ; stock max 1 000 000 (garde-fou technique) ; pagination plafonnée reportée à L0-11.
+- Points ouverts : stats/agrégats comptent encore les offres de comptes suspendus ; profils vendeurs publics de comptes suspendus ; ENTREPRISE sans business_profile ; fichier parasite D:\Projects	sc.out et dossier cp-wt-QAf à supprimer à la main.
+

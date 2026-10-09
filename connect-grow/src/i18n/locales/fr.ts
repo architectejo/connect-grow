@@ -92,6 +92,8 @@ const fr = {
     refreshPaused: "Actualisation en pause : trop de requêtes, elle reprendra automatiquement.",
   },
   settings: {
+    phonePurpose:
+      "Votre numéro reste privé : il sert à vous connecter et à réinitialiser votre mot de passe. Le contact par téléphone se fera avec votre accord.",
     samePhone: "Ce numéro est déjà celui de votre compte.",
     passwordChanged: "Mot de passe modifié. Reconnectez-vous avec le nouveau.",
     logoutAll: "Se déconnecter de tous les appareils",

@@ -326,6 +326,7 @@ function ChangePhoneDialog({ open, onOpenChange }: { open: boolean; onOpenChange
 }
 
 function ContactTab() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const localPhone = user?.phone?.replace(/^\+243/, "");
@@ -354,7 +355,7 @@ function ContactTab() {
         <p className="font-semibold">{user?.email || "Aucune adresse e-mail"}</p>
       </div>
       <p className="text-xs text-muted-foreground">
-        Votre numéro permet aux acheteurs de vous appeler ou de vous écrire sur WhatsApp, et sert à réinitialiser votre mot de passe.
+        {t("settings.phonePurpose")}
       </p>
       <ChangePhoneDialog open={open} onOpenChange={setOpen} />
     </div>

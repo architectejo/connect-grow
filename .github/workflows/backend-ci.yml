@@ -23,7 +23,6 @@ jobs:
       DB_ENGINE: sqlite
       DB_NAME: ci.sqlite3
       SECRET_KEY: ci-only-not-a-secret
-      DEBUG: "False"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,5 +35,5 @@ jobs:
         run: python manage.py makemigrations --check --dry-run
       - name: Migrations sur base vierge
         run: python manage.py migrate --noinput
-      - name: Tests
+      - name: Tests (réglages backend.settings_test, sans .env ni DEBUG)
         run: python manage.py test apps

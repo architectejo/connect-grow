@@ -24,3 +24,11 @@ python manage.py seed_catalog    # villes, communes, catégories, produits inter
 ```
 
 `seed_catalog` lit `apps/catalog/seed/initial_catalog.json` (ou un autre fichier via `--file`). Il est idempotent : il crée ce qui manque et ne modifie jamais l'existant. Les valeurs se gèrent ensuite dans le back-office ; ne pas l'ajouter au démarrage du conteneur, il recréerait les entrées supprimées par l'administration.
+
+## Tests
+
+```bash
+python manage.py test apps
+```
+
+`manage.py test` charge automatiquement `backend/settings_test.py` : pas de `.env` ni de `DEBUG=True` nécessaires, redirection HTTPS désactivée, hachage MD5 (tests uniquement), stockages dans un dossier temporaire. Comptez quelques dizaines de secondes. Pour un autre module de réglages, définir `DJANGO_SETTINGS_MODULE`.

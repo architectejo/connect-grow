@@ -116,9 +116,16 @@ Les totaux `views_count` et `shares_count` d'une offre sont recalculés à la so
 
 - **Pas de score de confiance** (règle 4). Les moyennes ne sont jamais stockées : `reviews.services.get_offer_ratings` et `get_seller_ratings` les calculent à la lecture (somme et nombre en base, arrondi à une décimale, demi supérieur) ; une moyenne est `null` sous `ReviewSettings.min_reviews_to_display`, le nombre d'avis reste exact ; un avis masqué sort de toutes les notes. Les offres portent `offer_rating` et `seller_rating` (`{average, count}`), jamais fusionnés.
 - **Un avis = un visiteur, une offre** (unicité `(auteur, offre)` en base) ; il note l'offre et son vendeur, après une prise de contact (`marketplace.get_review_contact`, tous canaux). La note vendeur qui compte est la dernière non masquée de chaque auteur pour un même vendeur : drapeau `counts_for_seller` recalculé par `reviews.services.reconcile_seller_flag` (couche service, pas de contrainte conditionnelle).
-- **Réglages en base** (règle 11, modifiés dans l'admin, journalisés dans l'`AuditLog` avec ancienne et nouvelle valeur) : `reviews.ReviewSettings` (seuil d'affichage, limite quotidienne, fenêtre de modification, délai après contact, avis croisés), `marketplace.MarketplaceSettings.duplicate_contact_window_hours`, `visibility.RankingSettings` (poids vues 1, favoris 3, contacts 5, partages 8, demi-vie 72 h, proximité 1,2 / 1,1 / 1,0 ; validation dans `clean()`). Le score stocké sur l'offre est E x R ; la proximité D et le tri associé arrivent avec T2.
+- **Réglages en base** (règle 11, modifiés dans l'admin, journalisés dans l'`AuditLog` avec ancienne et nouvelle valeur) : `reviews.ReviewSettings` (seuil d'affichage, limite quotidienne, fenêtre de modification, délai après contact, avis croisés), `marketplace.MarketplaceSettings.duplicate_contact_window_hours`, `visibility.RankingSettings` (poids vues 1, favoris 3, contacts 5, partages 8, demi-vie 72 h, proximité 1,2 / 1,1 / 1,0 ; validation dans `clean()`). Le score stocké sur l'offre est E x R ; la proximité D est appliquée à la lecture (section suivante).
 - **Format d'erreur** (`common.exception_handler`) : toute erreur hors champ vaut `{"detail": "<message français>", "code": "<code_machine>"}` ; les erreurs de champs gardent le format DRF.
 - **Contextes** : `common/contexts.py` (constantes `USER` / `ORGANIZATION`), `identity.services.acts_for_context` et `public_display_name` sont les coutures que L0-09 étendra aux organisations.
+
+## Classement organique P x E x R x D (L0-08, CDC 3.5, ADR 0004)
+
+- **Stocké** : `Offer.visibility_score = E x R`. E = `1 + ln(1 + w_v.vues + w_f.favoris + w_c.contacts + w_s.partages)`, R = `0,5 ** (âge / demi-vie)`. Aucune note, aucun avis, aucun terme « Sponsorisé » (règles 4 et 5). Tous les poids viennent de `visibility.RankingSettings`.
+- **Recalcul** (`marketplace.services.refresh_visibility_score` pour une offre, `refresh_all_scores` en lot), toujours depuis les compteurs sources, donc rejouable : vue ou partage (événements), favori ajouté ou retiré, contact (`create_contact_event`, même transaction), réglages modifiés (événement `visibility.ranking_settings_changed`), récence (commande `refresh_visibility_scores`, cron :15 chaque heure, affiche « N offres mises à jour. »), action d'administration `recalculate_all_scores`. Le lot recompte aussi `likes_count` (depuis `Favorite`) et `contacts_count` (depuis `ContactEvent.is_counted`).
+- **Contact compté** : `ContactEvent.is_counted` vaut vrai pour le premier contact d'un expéditeur sur une offre dans la fenêtre `MarketplaceSettings.duplicate_contact_window_hours`, tous canaux confondus ; `count_contacts_by_offer` (graphiques du tableau de bord) et `contacts_count` utilisent ce même filtre.
+- **Lecture** : pour le tri par défaut `-visibility_score`, la liste `GET /api/marketplace/posts/` ordonne par `visibility_score x D` dans la requête SQL (`Case/When` + `ExpressionWrapper`, pagination exacte), puis `-created_at`, puis `id` (ordre stable). D = `proximity_same_commune` / `proximity_same_city` / `proximity_default`. Commune de référence : paramètre `near=<uuid commune>` (invalide : ignoré), sinon commune du profil de l'utilisateur connecté, sinon aucune proximité. D n'est jamais exposé. Les autres valeurs de `ordering` ne changent pas. P = 1 (recherche et catégorie sont des filtres stricts).
 
 ## Tâches planifiées (cron)
 
@@ -131,7 +138,8 @@ Déclarées dans `cron/crontab` (conteneur `cron`) ; chacune est une commande de
 | `lift_expired_sanctions` | moderation | quotidienne, 02:10 | lève les suspensions arrivées à échéance (journalisé) |
 | `purge_offer_views` | visibility | quotidienne, 02:20 | purge les vues uniques anciennes |
 | `purge_otp_codes` | identity | horaire | supprime les OTP expirés |
-| `refresh_daily_contacts` | marketplace | horaire (:05) | recalcule les contacts du jour pour les graphiques |
+| `refresh_daily_contacts` | marketplace | horaire (:05) | recalcule les contacts comptés du jour pour les graphiques |
+| `refresh_visibility_scores` | marketplace | horaire (:15) | recalcule le score organique E x R (récence, favoris et contacts recomptés) |
 | `dispatch_outbox` | platform_core | chaque minute | diffuse les événements de domaine aux abonnés |
 | `purge_outbox` | platform_core | quotidienne, 02:30 | supprime les anciens événements (7 j traités, 30 j en échec) |
 

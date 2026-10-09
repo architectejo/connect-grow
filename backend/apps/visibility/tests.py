@@ -180,7 +180,7 @@ class RankingSettingsAdminTests(VisibilityTestBase):
     def test_the_event_triggers_a_recalculation_of_the_scores(self):
         from apps.catalog.models import Category, City, Commune
         from apps.identity.models import User
-        from apps.marketplace.models import Offer
+        from apps.marketplace.models import ContactEvent, Offer
         from apps.marketplace.tests import make_test_image
         from apps.platform_core.testing import dispatch_outbox_now
 
@@ -191,8 +191,10 @@ class RankingSettingsAdminTests(VisibilityTestBase):
         offer = Offer.objects.create(
             seller=seller, category_id=category.id, commune_id=commune.id, title='Un joli canapé à vendre',
             description='Description suffisamment longue pour le CDC.', price=100, main_image=make_test_image(),
-            contacts_count=2,
         )
+        for index in range(2):
+            sender = User.objects.create_user(email=f'ranking-buyer{index}@example.com', password='x', full_name='A')
+            ContactEvent.objects.create(offer=offer, sender=sender, message='Bonjour')
         self.assertEqual(offer.visibility_score, 0)
         self.save_through_admin(weight_contacts=7.0)
         dispatch_outbox_now()

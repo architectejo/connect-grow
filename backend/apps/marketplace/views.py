@@ -109,7 +109,19 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
         elif self.action == 'list':
             queryset = self.apply_filters(queryset)
 
-        return queryset.select_related('seller').prefetch_related('images').order_by(ordering, '-created_at')
+        queryset = queryset.select_related('seller').prefetch_related('images')
+        if ordering == '-visibility_score':
+            # Pertinence : score stocké (E x R) x proximité D, appliquée dans le tri SQL.
+            return services.order_by_relevance(queryset, self.get_near_commune())
+        return queryset.order_by(ordering, '-created_at', 'id')
+
+    def get_near_commune(self):
+        """Commune de référence de la proximité D : paramètre `near` (un identifiant invalide est
+        ignoré), sinon commune du profil de l'utilisateur connecté, sinon aucune."""
+        near = parse_uuid(self.request.query_params.get('near'))
+        if near is None and self.request.user.is_authenticated:
+            near = self.request.user.commune_id
+        return near
 
     def apply_filters(self, queryset):
         """Filtres dynamiques (CDC 3.2). Les référentiels vivent dans `catalog` : pas de

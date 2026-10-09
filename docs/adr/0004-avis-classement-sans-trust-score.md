@@ -329,3 +329,8 @@ Zones disjointes : T2 ne touche pas `reviews/` ; T3 ne touche ni `visibility/` n
 - **Limites connues jusqu'à T3** : le motif `CONTACT_FICTIF` est provisoirement accepté pour toute cible et tout utilisateur (la restriction au vendeur concerné arrive avec T3) ; le délai contact vers avis (`delay_after_contact_hours`) n'est pas encore appliqué.
 - **Dette** : les avis croisés ne sont détectés qu'en réciprocité A vers B ; une alerte sur les pics d'avis 5 étoiles et sur les comptes récents reste à concevoir.
 
+
+### T2 (branche `feat/L0-08-classement-organique`, 09/10/2026) : fait
+
+- Aucune migration. `is_counted`/`contacts_count` dans `create_contact_event` (même transaction), filtre `is_counted` dans `count_contacts_by_offer`, score E x R recalculé depuis les sources (`refresh_all_scores` recompte `likes_count` et `contacts_count`), commande `refresh_visibility_scores` (cron :15), tri `visibility_score x D` en SQL avec `near` (repli : commune du profil), tie-break `-created_at` puis `id`.
+- Écart de test T1 : `test_ratings_do_not_change_the_organic_score` crée maintenant les mêmes contacts sur l offre jumelle (le recomptage à la source rend les contacts réels).

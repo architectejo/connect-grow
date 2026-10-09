@@ -1,0 +1,42 @@
+# --- Python / Django (backend) ---
+__pycache__/
+*.pyc
+backend/.env
+backend/db.sqlite3
+backend/media/
+backend/staticfiles/
+backend/scratch/
+
+# --- Environnement virtuel local (dossier ".env" à la racine, pas des secrets) ---
+/.env/
+
+# --- Node / React (connect-grow) ---
+connect-grow/node_modules/
+connect-grow/dist/
+connect-grow/.env
+
+# --- Divers ---
+.DS_Store
+Thumbs.db
+
+# --- Compléments L0-01 ---
+.venv/
+venv/
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+.env
+!.env.example
+backend/private_media/
+**/private_media/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.log
+connect-grow/dist-ssr/
+connect-grow/coverage/
+connecte-plus-kit.zip
+*.zip

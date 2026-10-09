@@ -1,0 +1,1131 @@
+RÉFÉRENTIEL FONCTIONNEL
+                        COMPLET
+    Plateforme Écosystème RDC
+  Document 01 - Catalogue maître des fonctionnalités
+
+
+            Version de référence V1 / Post-V1 - Septembre 2026
+
+
+
+
+       Plateforme Écosystème RDC · Référentiel Fonctionnel Complet · Septembre 2026
+1. Rôle du référentiel
+Ce document constitue l'inventaire fonctionnel maître de la plateforme. Il traduit la vision produit, les écrans, les
+parcours, les règles métier et les décisions de périmètre en fonctionnalités identifiables et vérifiables. Il sert de
+base commune au produit, au design, au développement, aux tests, aux opérations et au suivi contractuel des
+livrables.
+
+1.1 Convention d'identification
+ Préfixe                                                                   Domaine
+ IAM                                                                       Identité, profils, organisations et accès
+ NAV                                                                       Navigation, Accueil, Explorer, Publier
+ TAX                                                                       Taxonomie, recherche, localisation
+ ORG                                                                       Organisations et prestataires
+ MKT                                                                       Marketplace
+ COM                                                                       Commerce, paiement, remboursement
+ SRV                                                                       Services, devis, réservation
+ FOD                                                                       Restaurants et commandes alimentaires
+ DLV                                                                       Livraison / fulfillment
+ JOB                                                                       Emplois et recrutement
+ TRN                                                                       Formation et développement
+ EVT                                                                       Événements et billetterie
+ NPO                                                                       Associations, campagnes, volontariat
+ SCH                                                                       Écoles, parents et bénéficiaires
+ MSG                                                                       Messagerie
+ NTF                                                                       Notifications et À traiter
+ TRU                                                                       Confiance, vérification, avis, sécurité
+ ENT                                                                       Plans, passes et droits commerciaux
+ PRM                                                                       Promotion
+ SUB                                                                       Abonnements connectés et engagements externes
+ ADM                                                                       Administration / back-office
+ PLT                                                                       Plateforme, fiabilité, localisation, sécurité
+
+
+
+
+1.2 Statuts utilisés
+ Statut                                                                    Signification
+ V1 - Cœur                                                                 Obligatoire pour le lancement du socle V1.
+ V1 - Configurable                                                         Inclus en V1, mais règles/limites administrables.
+                                                                           Prévu dans l'architecture mais non requis pour le lancement
+ Post-V1
+                                                                           V1.
+                                                                           Explicitement exclu de V1 et non à implémenter sans nouvelle
+ Hors périmètre
+                                                                           décision.
+                                                                           Principe défini, paramètre métier/juridique/fournisseur encore
+ À valider
+                                                                           à confirmer.
+
+
+
+
+2. Catalogue maître des fonctionnalités
+Le tableau ci-dessous est la référence de contrôle. Les critères d'acceptation sont volontairement concis; le futur
+Plan de tests & recette transformera ces critères en scénarios de test détaillés.
+
+                  Fonctionnalit                                            Description /       Accès /                           Critère
+ ID                                   Acteurs            Statut                                                    Dépendances
+                  é                                                        règle               prérequis                         d'acceptation
+                                                                           Création d'un                                         Compte créé sans
+                                                                           compte unique       Validation des                    dupliquer une
+                  Créer un compte                                          servant de base     conditions et                     identité existante;
+ IAM-001                              Visiteur           V1 - Cœur                                                 PLT-006
+                  personnel                                                aux activités       contrôles anti-                   session ouverte ou
+                                                                           personnelles et     abus.                             confirmation
+                                                                           professionnelles.                                     requise.
+
+                                    Plateforme Écosystème RDC · Référentiel Fonctionnel Complet · Septembre 2026
+                                                                        Authentification,                                             Session valide,
+                                                                                               Étape renforcée
+                                                                        déconnexion,                                                  révocable et
+          Se connecter et          Tous utilisateurs                                           pour actions
+IAM-002                                                V1 - Cœur        récupération et                            PLT-007            journalisée pour
+          gérer les sessions       authentifiés                                                sensibles selon
+                                                                        gestion sécurisée                                             les événements
+                                                                                               politique.
+                                                                        des sessions.                                                 sensibles.
+                                                                        Un même compte
+                                                                        peut agir comme
+                                                                                               Le contexte ne                         Le contexte actif
+                                   Individu,                            particulier,
+                                                                                               confère que les                        est visible et
+          Changer de               prestataire,                         prestataire
+IAM-003                                                V1 - Cœur                               permissions         IAM-006, IAM-007   toutes les actions
+          contexte actif           membre                               individuel ou au
+                                                                                               attachées à cette                      sont attribuées au
+                                   d'organisation                       nom d'une
+                                                                                               identité.                              bon acteur.
+                                                                        organisation
+                                                                        autorisée.
+                                                                        Ajout d'une                                                   Profil
+                                                                        activité               Éligibilité/                           professionnel
+          Activer un profil
+                                                                        professionnelle        catégorie et                           distinct des
+IAM-004   de prestataire           Individu            V1 - Cœur                                                   TAX-001, TRU-002
+                                                                        personnelle sans       vérifications                          données privées;
+          individuel
+                                                                        créer un second        éventuelles.                           publication selon
+                                                                        login.                                                        règles.
+                                                                        Création
+                                                                        d'organisation,                                               Aucune
+                                                                        demande de                                                    revendication ne
+          Créer, réclamer                                                                      Autorité et
+                                                                        revendication ou                                              donne
+IAM-005   ou rejoindre une         Individu autorisé   V1 - Cœur                               preuves selon le    ORG-001, TRU-003
+                                                                        invitation à                                                  automatiquement
+          organisation                                                                         cas.
+                                                                        rejoindre une                                                 des droits avant
+                                                                        organisation                                                  validation.
+                                                                        existante.
+                                                                        Invitation,                                                   Un départ
+          Gérer les                                                     activation,            Permission                             révoque l'accès
+                                   Admin
+IAM-006   membres et rôles                             V1 - Cœur        révocation et          d'administration    IAM-007            organisationnel
+                                   organisation
+          d'organisation                                                attribution de         des membres.                           sans supprimer le
+                                                                        rôles.                                                        compte personnel.
+                                                                        Permissions par                                               Un utilisateur
+                                                                        module, action,        Chaîne d'accès                         sans permission
+          Autorisation             Système, admins
+IAM-007                                                V1 - Cœur        objet,                 complète; refus     ENT-001, PLT-007   ne peut ni voir ni
+          granulaire               autorisés
+                                                                        branche/départe        par défaut.                            agir sur l'objet
+                                                                        ment et finalité.                                             protégé.
+                                                                        Déléguer à une
+                                                                                                                                      Délégation
+                                                                        personne une           Consentement,
+          Délégation                                                                                                                  révocable et
+                                                                        action sur un          durée et
+IAM-008   personnelle              Individu            Post-V1                                                     IAM-007            auditée, sans
+                                                                        objet précis sans      périmètre
+          limitée à un objet                                                                                                          élargissement
+                                                                        partager le            explicites.
+                                                                                                                                      implicite.
+                                                                        compte.
+                                                                                                                                      Les cinq
+                                                                        Barre Accueil ·
+          Navigation                                                                           Éléments                               destinations
+                                                                        Explorer · +
+NAV-001   permanente               Tous                V1 - Cœur                               contextuels selon   NAV-002            restent cohérentes
+                                                                        Publier · Messages
+          mobile                                                                               authentification.                      sur les parcours
+                                                                        · Compte.
+                                                                                                                                      principaux.
+                                                                        Point d'entrée
+                                                                        vers recherche,        Personnalisation                       Chaque bloc mène
+                                                                        entreprises/servic     non                                    au bon domaine
+          Accueil multi-
+NAV-002                            Tous                V1 - Cœur        es, Marketplace,       discriminatoire;    TAX-003, PRM-001   et les contenus
+          activité
+                                                                        emplois,               promotion                              sponsorisés sont
+                                                                        événements et          identifiée.                            étiquetés.
+                                                                        contenus utiles.
+                                                                        Exploration
+                                                                                                                                      Filtres cohérents
+                                                                        transversale par
+                                                                                               Données privées                        et résultats
+                                                                        domaine,
+NAV-003   Explorer                 Tous                V1 - Cœur                               jamais exposées     TAX-003            explicables par
+                                                                        catégorie,
+                                                                                               par recherche.                         critères
+                                                                        localisation et
+                                                                                                                                      structurés.
+                                                                        filtres.
+                                                                        Passerelle
+                                                                        universelle de         Options selon
+                                                                                                                                      Aucune option
+                                   Utilisateurs                         création: article,     contexte,
+          + Publier                                                                                                                   interdite n'est
+NAV-004                            authentifiés        V1 - Cœur        service, produit,      permission,         IAM-007, ENT-001
+          contextuel                                                                                                                  affichée comme
+                                   éligibles                            emploi,                éligibilité et
+                                                                                                                                      exécutable.
+                                                                        événement,             entitlement.
+                                                                        promotion, etc.
+                                                                                               Administration
+                                                                        Taxonomie              auditée;                               Renommer un
+          Référentiel
+                                                                        configurable avec      désactivation                          libellé ne casse
+TAX-001   catégories/sous-         Admin taxonomie     V1 - Cœur                                                   ADM-004
+                                                                        identifiants           plutôt que                             pas les objets
+          catégories
+                                                                        stables.               suppression                            existants.
+                                                                                               destructive.
+                                                                        Attributs
+                                                                                                                                      Publication et
+                                                                        héritables, typés,
+                                                                                               Applicabilité par                      recherche
+          Attributs et filtres                                          publics/rechercha
+TAX-002                            Admin taxonomie     V1 - Cœur                               domaine/catégori    TAX-001            utilisent la même
+          typés                                                         bles/filtrables/priv
+                                                                                               e.                                     définition
+                                                                        és selon
+                                                                                                                                      canonique.
+                                                                        métadonnées.
+                                                                        Recherche par                                                 Un alias retrouve
+                                                                                               Pas de classement
+          Recherche                                                     mots-clés,                                                    le même objet
+TAX-003                            Tous                V1 - Cœur                               présenté comme      TAX-001, TAX-002
+          structurée et alias                                           catégories,                                                   canonique sans
+                                                                                               'meilleur'.
+                                                                        alias/synonymes,                                              créer une
+
+                                 Plateforme Écosystème RDC · Référentiel Fonctionnel Complet · Septembre 2026
+                                                                           géographie et                                                 catégorie
+                                                                           attributs.                                                    dupliquée.
+                                                                           Règles par
+                                                                                                                                         Changement de
+                                                                           marché, devises,
+                                                                                                 Paramètres DRC à                        libellé/langue ne
+          Configuration                                                    langues,
+TAX-004                            Admin marché        V1 - Configurable                         valider              ADM-005            modifie pas les
+          marché et langues                                                géographie,
+                                                                                                 localement.                             identifiants
+                                                                           catégories et
+                                                                                                                                         métier.
+                                                                           capacités.
+                                                                           Page publique
+                                                                           structurée:
+                                                                           identité, activité,   Champs privés                           Les informations
+                                                                           localisation          exclus;                                 publiques
+          Profil public            Organisation
+ORG-001                                                V1 - Cœur           générale,             vérification         TRU-003            correspondent
+          d'organisation           autorisée
+                                                                           services/offres,      affichée de façon                       aux champs
+                                                                           avis, événements,     granulaire.                             autorisés.
+                                                                           emplois selon
+                                                                           modules.
+                                                                           Profession, zone
+                                                                           générale,
+                                                                                                                                         Le profil distingue
+                                                                           disponibilité,        Adresse exacte et
+          Profil public                                                                                                                  clairement
+                                   Prestataire                             expérience,           documents
+ORG-002   prestataire                                  V1 - Cœur                                                      TRU-002            personne/prestata
+                                   individuel                              compétences,          d'identité non
+          individuel                                                                                                                     ire d'une
+                                                                           langues, avis et      publics.
+                                                                                                                                         entreprise.
+                                                                           indicateurs de
+                                                                           vérification.
+                                                                           Gestion de                                                    Un responsable de
+                                                                           branches/départe                                              branche ne voit
+                                                                                                 Accès limité au
+          Branches et                                                      ments pour                                                    pas
+ORG-003                            Organisation        V1 - Cœur                                 périmètre            IAM-007
+          périmètres                                                       données,                                                      automatiquement
+                                                                                                 autorisé.
+                                                                           permissions et                                                les autres
+                                                                           opérations.                                                   branches.
+                                                                           Vente d'un article                                            Annonce créée
+                                                                           personnel avec                                                avec statut et
+          Publier une                                                                            Catégories/
+                                                                           catégorie, état,                                              données
+MKT-001   annonce                  Individu            V1 - Cœur                                 politiques           TAX-001, TRU-005
+                                                                           prix, photos,                                                 minimales;
+          personnelle                                                                            applicables.
+                                                                           localisation et                                               articles interdits
+                                                                           disponibilité.                                                bloqués.
+                                                                           Publication
+                                                                                                                                         Le type de
+                                                                           d'offres              Éligibilité et
+          Publier une offre        Prestataire/                                                                                          vendeur est
+MKT-002                                                V1 - Cœur           professionnelles      permissions          ENT-001, TRU-003
+          commerciale              organisation                                                                                          visible et distinct
+                                                                           rattachées à un       commerciales.
+                                                                                                                                         d'un particulier.
+                                                                           vendeur identifié.
+                                                                           Recherche, filtres,
+                                                                                                 Visibilité et
+          Consulter et filtrer                                             détail                                                        Offres non actives
+MKT-003                            Tous                V1 - Cœur                                 stock/statut pris    TAX-003
+          les offres                                                       produit/offre et                                              non achetables.
+                                                                                                 en compte.
+                                                                           vendeur.
+                                                                           Commande légère
+                                                                           à partir d'une        Idempotence et                          Une répétition
+          Créer une                Acheteur                                                                           COM-001,
+MKT-004                                                V1 - Cœur           offre, avec lignes,   validation de                           réseau ne crée pas
+          commande                 authentifié                                                                        COM-004
+                                                                           quantités et mode     stock.                                  deux commandes.
+                                                                           de fulfillment.
+                                                                           Suivi des                                                     L'utilisateur
+                                                                           commandes et          Accès uniquement                        comprend ce qui
+MKT-005   Mes commandes            Acheteur/vendeur    V1 - Cœur           états distincts de    aux parties          MKT-004            est payé,
+                                                                           paiement et           concernées.                             préparé/remis/livr
+                                                                           fulfillment.                                                  é séparément.
+                                                                           Création d'une
+                                                                           intention de          Fournisseur                             Le frontend ne
+          Initier un
+                                                                           paiement Mobile       disponible dans le                      peut jamais
+COM-001   paiement                 Acheteur            V1 - Cœur                                                      PLT-003
+                                                                           Money ou autre        marché;                                 déclarer seul un
+          fournisseur
+                                                                           fournisseur           idempotence.                            paiement réussi.
+                                                                           approuvé.
+                                                                                                                                         Le statut
+                                                                           Traitement du
+          Confirmer un                                                                           Signature/secret                        Successful
+                                                                           callback/webhook
+COM-002   paiement                 Système             V1 - Cœur                                 fournisseur          COM-001, PLT-003   provient d'une
+                                                                           et rapprochement
+          fournisseur                                                                            vérifié.                                confirmation
+                                                                           du statut.
+                                                                                                                                         autoritative.
+                                                                                                                                         Cash reste Unpaid
+                                                                           Mode cash à           Responsable                             jusqu'à
+          Paiement en              Acheteur +
+COM-003                                                V1 - Cœur           remise/retrait/livr   d'encaissement       COM-004            confirmation de
+          espèces                  receveur autorisé
+                                                                           aison selon flux.     explicite.                              réception
+                                                                                                                                         autorisée.
+                                                                           Réservation de
+                                                                           stock à la
+                                                                           commande,                                                     Aucun stock
+          Réserver et
+                                                                           décrément à           Règles par type                         fantôme après
+COM-004   décrémenter le           Système/vendeur     V1 - Cœur                                                      MKT-004
+                                                                           l'étape définie,      d'offre.                                échec ou
+          stock
+                                                                           libération sur                                                expiration.
+                                                                           échec/expiration/a
+                                                                           nnulation.
+                                                                           Annulation avec                                               Historique
+                                                                                                 Fenêtres
+          Annuler une              Acheteur/vendeur                        auteur, motif,                             COM-004,           immuable; stock
+COM-005                                                V1 - Configurable                         configurables et
+          commande                 autorisé                                horodatage et                              COM-006            et paiement
+                                                                                                 droit applicable.
+                                                                           conséquence                                                   traités
+
+                                 Plateforme Écosystème RDC · Référentiel Fonctionnel Complet · Septembre 2026
+                                                                       paiement/stock.                                               séparément.
+                                                                       Refund séparé du
+                                                                                                                                     Chaque
+                                                                       paiement original:
+                                                                                              Droits financiers                      remboursement
+                                 Opérations                            demandé,
+          Créer et suivre un                                                                  restreints;         COM-002,           est traçable et ne
+COM-006                          autorisées/systèm    V1 - Cœur        approuvé, soumis,
+          remboursement                                                                       fournisseur         ADM-003            réécrit pas la
+                                 e                                     en traitement,
+                                                                                              compatible.                            transaction
+                                                                       remboursé ou
+                                                                                                                                     d'origine.
+                                                                       échoué.
+                                                                       Cas: débit non
+                                                                                                                                     Le dossier
+                                                                       confirmé,
+                                                                                                                                     conserve
+                                                                       doublon, non-
+          Ouvrir un litige                                                                    Preuves et accès                       chronologie,
+COM-007                          Partie concernée     V1 - Cœur        réception, article                         TRU-006
+          commerce                                                                            contextuels.                           objets liés et
+                                                                       erroné/endomma
+                                                                                                                                     actions
+                                                                       gé, cash, livraison,
+                                                                                                                                     d'opérations.
+                                                                       ticket, etc.
+                                                                       Portefeuille
+          Wallet / solde                                               propriétaire,                                                 Aucun solde
+                                                                                              Non autorisé en
+COM-008   stocké / escrow        Tous                 Hors périmètre   stockage de                                -                  utilisateur détenu
+                                                                                              V1.
+          général                                                      valeur ou escrow                                              par la plateforme.
+                                                                       général.
+                                                                       Offre de service
+                                                                       structurée avec
+                                                                                                                                     Service visible
+                                 Prestataire/                          zone, mode, prix       Permission/
+SRV-001   Publier un service                          V1 - Cœur                                                   ORG-001, TAX-002   selon statut et
+                                 organisation                          indicatif ou devis,    éligibilité.
+                                                                                                                                     zone.
+                                                                       disponibilité et
+                                                                       attributs.
+                                                                       Demande
+                                                                       structurée avec                                               Demande crée un
+                                                                                              Anti-spam et
+          Demander un                                                  besoin,                                                       contexte de
+SRV-002                          Client               V1 - Cœur                               limites             MSG-002
+          devis                                                        localisation,                                                 conversation et
+                                                                                              éventuelles.
+                                                                       pièces jointes et                                             un statut.
+                                                                       paramètres utiles.
+                                                                                                                                     Révision ne
+                                                                       Devis avec lignes,                                            détruit pas
+          Émettre/réviser        Prestataire/                          total, durée,          Accès au dossier                       l'historique; client
+SRV-003                                               V1 - Cœur                                                   SRV-002
+          un devis               organisation                          validité et            uniquement.                            peut
+                                                                       versions.                                                     accepter/question
+                                                                                                                                     ner/refuser.
+                                                                       Ressources,
+                                                                                                                                     Horaires
+                                                                       capacités,
+                                                                                                                                     d'ouverture
+          Gérer ressources       Prestataire/                          horaires,              Permission
+SRV-004                                               V1 - Cœur                                                   TAX-002            distincts de
+          et disponibilité       organisation                          exceptions,            opérationnelle.
+                                                                                                                                     disponibilité
+                                                                       buffers, préavis et
+                                                                                                                                     réservable.
+                                                                       inventaire.
+                                                                       Réservation
+                                                                                              Disponibilité                          Pas de double
+                                                                       appointment/reso
+          Créer/modifier                                                                      autoritative;                          réservation
+SRV-005                          Client/prestataire   V1 - Cœur        urce/capacity/date                         SRV-004
+          une réservation                                                                     règles                                 incompatible;
+                                                                       -range selon
+                                                                                              d'annulation.                          statuts explicites.
+                                                                       l'offre.
+                                                                       Profil, horaires,
+                                                                                                                                     Menu actif et
+                                                                       menu, options de
+          Profil restaurant                                                                   Permission                             prix/devises
+FOD-001                          Restaurant           V1 - Cœur        retrait/livraison,                         ORG-001
+          et menu                                                                             restaurant.                            affichés
+                                                                       événements/empl
+                                                                                                                                     correctement.
+                                                                       ois liés.
+                                                                       Panier restaurant,
+                                                                                                                                     Commande et
+          Créer une                                                    options, montant       Restaurant
+                                                                                                                                     paiement ont des
+FOD-002   commande               Client               V1 - Cœur        nourriture, mode       ouvert/acceptant    COM-001
+                                                                                                                                     états
+          alimentaire                                                  de fulfillment et      commandes.
+                                                                                                                                     indépendants.
+                                                                       paiement.
+                                                                       Received,
+                                                                       Accepted,
+                                                                       Preparing, Ready,                                             Annulation/
+                                                                                              Permission
+          Gérer préparation                                            Picked                                                        refund peut
+FOD-003                          Restaurant           V1 - Cœur                               opérationnelle      FOD-002
+          de commande                                                  up/Collected,                                                 dépendre du stade
+                                                                                              restaurant.
+                                                                       Delivered,                                                    de préparation.
+                                                                       Completed et
+                                                                       exceptions.
+                                                                       Delivery Request                                              La demande
+          Créer une                                                    séparée de la          Mode partner                           n'altère pas
+                                 Restaurant/
+DLV-001   demande de                                  V1 - Cœur        commande, liée à       delivery            ORG-003            directement le
+                                 vendeur/système
+          livraison                                                    pickup/dropoff et      disponible.                            statut paiement
+                                                                       montant livraison.                                            de la commande.
+                                                                       Requested,
+                                                                       Accepted,                                                     Le livreur ne
+          Accepter et                                                  Heading to             Zone/capacité/                         reçoit que les
+                                 Entreprise de
+DLV-002   exécuter une                                V1 - Cœur        pickup, Picked up,     disponibilité et    DLV-001            données
+                                 livraison
+          livraison                                                    In delivery,           permission.                            nécessaires au
+                                                                       Delivered +                                                   fulfillment.
+                                                                       exceptions.
+                                                                       Tracking
+          GPS temps réel,                                              conducteur,            Architecture
+                                 Entreprise de                                                                                       Non requis pour
+DLV-003   routage et flotte                           Post-V1          optimisation de        d'intégration       DLV-002
+                                 livraison                                                                                           accepter V1.
+          avancés                                                      route, surge et        future.
+                                                                       télématique.
+
+                               Plateforme Écosystème RDC · Référentiel Fonctionnel Complet · Septembre 2026
+                                                                       Vacance
+                                                                       structurée:
+                                                                       occupation,
+                                                                       compétences,                                                 Offre attribuée à
+          Publier une offre
+                                  Recruteur                            exigences             Permission                             l'organisation et
+JOB-001   d'emploi                                     V1 - Cœur                                                 TAX-001, IAM-007
+                                  autorisé                             essentielles/préfér   recrutement.                           visible selon
+          entreprise
+                                                                       ées, lieu, type                                              statut.
+                                                                       d'emploi,
+                                                                       rémunération si
+                                                                       publiée.
+                                                                       Offre pour nanny,
+                                                                       ménage,
+                                                                       chauffeur,
+                                                                       cuisinier,            Entitlement/pass                       Ne se présente
+          Publier un emploi       Employeur
+JOB-002                                                V1 - Cœur       jardinier, etc.,      possible; règles    ENT-001, TRU-002   jamais comme
+          à domicile              particulier
+                                                                       clairement            sensibles.                             une entreprise.
+                                                                       étiquetée
+                                                                       Employeur
+                                                                       particulier.
+                                                                       Candidature                                                  La candidature
+                                                                       structurée avec       Candidat                               devient objet
+                                                                       profil/CV,            authentifié;                           privé accessible
+JOB-003   Postuler                Candidat             V1 - Cœur                                                 JOB-001
+                                                                       réponses de           visibilité                             seulement aux
+                                                                       présélection et       contrôlée.                             recruteurs
+                                                                       consentements.                                               autorisés.
+                                                                                                                                    Les changements
+                                                                       Étapes, shortlist,    Permission
+                                                                                                                                    sont auditables et
+                                  Recruteur                            notes factuelles,     recrutement; pas
+JOB-004   Pipeline candidat                            V1 - Cœur                                                 JOB-003            n'exposent pas les
+                                  autorisé                             actions et            de verdict
+                                                                                                                                    candidats hors
+                                                                       historique.           autonome.
+                                                                                                                                    périmètre.
+                                                                       Comparaison des
+                                                                                                                                    'Non trouvé' n'est
+          Comparaison                                                  exigences             Pas de
+                                  Recruteur                                                                                         jamais présenté
+JOB-005   factuelle des                                V1 - Cœur       documentées:          classement/winne    JOB-003
+                                  autorisé                                                                                          comme 'ne
+          candidats                                                    satisfait, non        r automatique.
+                                                                                                                                    possède pas'.
+                                                                       trouvé, à vérifier.
+                                                                       Entretien privé in-                                          L'entretien n'est
+                                                                                             Événement
+          Planifier un            Recruteur/                           person/online/hyb                                            jamais
+JOB-006                                                V1 - Cœur                             restreint; accès    SRV-004
+          entretien               candidat                             rid via moteur de                                            découvrable
+                                                                                             participants.
+                                                                       réservation.                                                 publiquement.
+                                                                       Demande et suivi
+                                                                       de références
+                                                                                                                                    Le profil public
+                                                                       avec
+                                                                                                                                    peut afficher un
+          Références              Candidat/                            consentement,         Consentement
+JOB-007                                                V1 - Cœur                                                 TRU-002            statut/compte
+          professionnelles        recruteur autorisé                   sans exposer les      explicite.
+                                                                                                                                    vérifié, pas les
+                                                                       coordonnées du
+                                                                                                                                    données privées.
+                                                                       référent
+                                                                       publiquement.
+                                                                                                                                    Invitation à
+                                                                       Candidats ayant       Consentement
+                                  Candidat +                                                                                        postuler ne crée
+          Découverte                                                   consenti peuvent      séparé;
+JOB-008                           recruteur            V1 - Cœur                                                 ENT-001            pas
+          Enterprise opt-in                                            être découverts et    entitlement ne
+                                  Enterprise                                                                                        automatiquement
+                                                                       invités à postuler.   l'outrepasse pas.
+                                                                                                                                    une candidature.
+                                                                       Objet de mandat
+                                                                                                                                    Mandat
+                                                                       pour confier un
+                                                                                                                                    réutilisable sans
+          Recruitment                                                  recrutement et
+JOB-009                           Organisation         V1 - Cœur                             Accès contrôlé.     JOB-001            dupliquer
+          Mandate                                                      préparer
+                                                                                                                                    inutilement les
+                                                                       l'interopérabilité
+                                                                                                                                    données.
+                                                                       future.
+                                                                       Tests
+                                                                       techniques/cogniti    Gouvernance                            Aucun rejet
+          Assessment              Recruteur/
+JOB-010                                                Post-V1         fs/situationnels et   humaine et          JOB-003            autonome; non
+          Engine avancé           candidat
+                                                                       intégrations          accessibilité.                         requis V1.
+                                                                       d'évaluation.
+                                                                       Compétences
+                                                                       enseignées,
+                                                                       domaine,                                                     Les déclarations
+          Publier un
+                                  Organisme de                         prérequis, niveau,    Permission/                            de certification
+TRN-001   programme de                                 V1 - Cœur                                                 TAX-002
+                                  formation                            format, lieu,         éligibilité.                           conservent leur
+          formation
+                                                                       durée, capacité,                                             provenance.
+                                                                       prix, certification
+                                                                       déclarée.
+                                                                       Demande de devis
+          Demander une                                                 ou cohorte privée     Consentement                           Cohorte privée
+                                  Employeur/
+TRN-002   cohorte/formation                            V1 - Cœur       pour                  pour personnes      SRV-002            non découvrable
+                                  recruteur
+          entreprise                                                   upskilling/reskilli   invitées.                              publiquement.
+                                                                       ng ou pré-emploi.
+                                                                       Invitation/
+                                                                                                                                    Inscription
+                                  Employeur,                           enrollment avec
+                                                                                             Consentement et                        n'accorde aucun
+TRN-003   Inviter et inscrire     candidat, salarié,   V1 - Cœur       contexte,                                 TRN-001, MSG-002
+                                                                                             accès appropriés.                      accès aux autres
+                                  provider                             planning et
+                                                                                                                                    données RH.
+                                                                       communication.
+          Suivre                  Provider/                            Suivi                                                        Complétion ne
+TRN-004   participation et        employeur            V1 - Cœur       administratif de      Accès contextuel.   TRN-003            signifie pas
+          complétion              autorisé                             présence/compléti                                            automatiquement
+
+                                Plateforme Écosystème RDC · Référentiel Fonctionnel Complet · Septembre 2026
+                                                                      on et                                                         compétence ou
+                                                                      preuve/certificat                                             certification
+                                                                      avec provenance.                                              vérifiée.
+                                                                      E-learning
+                                                                      complet,
+          LMS, tests et
+                                 Provider/                            assessments,
+TRN-005   learning paths                            Post-V1                                 Futur.               TRN-001            Non requis V1.
+                                 apprenant                            parcours,
+          avancés
+                                                                      analytics
+                                                                      compétences.
+                                                                      Type, date,
+                                                                      lieu/online,
+                                                                                                                                    Visibilité et
+          Créer un                                                    audience,
+                                                                                            Permission/                             participation sont
+EVT-001   événement              Organisateur       V1 - Cœur         visibilité,                                ORG-001
+                                                                                            éligibilité.                            des paramètres
+          public/ciblé                                                participation,
+                                                                                                                                    distincts.
+                                                                      capacité et
+                                                                      programme léger.
+                                                                      Événement non                                                 Aucun contenu
+                                                                                            Premium/pass
+          Créer un                                                    indexé avec                                                   privé utilisé
+                                                                                            possible;
+EVT-002   événement privé        Individu           V1 - Cœur         invités, RSVP et                           ENT-001            comme contenu
+                                                                                            confidentialité
+          personnel                                                   informations                                                  public/promotion
+                                                                                            stricte.
+                                                                      privées.                                                      nel.
+                                                                      Entretien,
+                                                                                                                                    Jamais exposé
+          Événement                                                   admission, visite,    Accès uniquement
+                                                                                                                                    dans la
+EVT-003   opérationnel           Organisation       V1 - Cœur         consultation ou       participants         JOB-006
+                                                                                                                                    découverte
+          restreint                                                   réunion liée à un     autorisés.
+                                                                                                                                    publique.
+                                                                      workflow.
+                                                                      Types de billets,
+                                                                                                                                    Quantité et
+                                                                      prix, devise,         Événement
+EVT-004   Configurer billets     Organisateur       V1 - Cœur                                                    COM-001            fenêtre de vente
+                                                                      quantité, dates de    éligible.
+                                                                                                                                    respectées.
+                                                                      vente et limites.
+                                                                                                                                    Billet valide
+                                                                      Ticket Order ->
+                                                                                                                                    seulement selon
+          Acheter et                                                  Payment -> Ticket     Paiement
+EVT-005                          Participant        V1 - Cœur                                                    EVT-004, COM-002   statut
+          émettre un billet                                           numérique avec        autoritatif.
+                                                                                                                                    paiement/comma
+                                                                      QR/token unique.
+                                                                                                                                    nde.
+                                                                                                                                    Deuxième scan est
+                                                                      Scan, validation et
+                                 Staff événement                                            Permission                              signalé sans créer
+EVT-006   Check-in QR                               V1 - Cœur         détection de                               EVT-005
+                                 autorisé                                                   événement.                              un second check-
+                                                                      double scan.
+                                                                                                                                    in.
+                                                                      Workflow
+                                                                      d'événement                                                   Les billets et
+          Annulation/report
+                                 Organisateur/                        annulé/reporté        Politique                               remboursements
+EVT-007   et                                        V1 - Cœur                                                    COM-006
+                                 opérations                           avec notifications    applicable.                             gardent leur
+          remboursement
+                                                                      et choix                                                      historique.
+                                                                      configurables.
+                                                                      Profil public avec
+                                                                                                                                    Pas de statut de
+          Profil                 Organisation                         mission, activités,   Vérification selon
+NPO-001                                             V1 - Cœur                                                    TRU-003            confiance
+          association/ONG        éligible                             événements et         claims.
+                                                                                                                                    universel.
+                                                                      opportunités.
+                                                                      Campagne
+                                                                                                                                    Contribution et
+                                                                      fundraising/goods     Éligibilité
+                                                                                                                                    campagne restent
+          Créer une              Organisation                         /awareness/comm       renforcée; règles
+NPO-002                                             V1 - Cœur                                                    TRU-003            distinctes d'une
+          campagne               éligible                             unity project avec    financières selon
+                                                                                                                                    vente
+                                                                      cause, objectif et    marché.
+                                                                                                                                    Marketplace.
+                                                                      mises à jour.
+                                                                      Besoin,
+          Publier une                                                                       Ne doit pas être                        Étiquetage
+                                                                      compétences,
+NPO-003   opportunité            Organisation       V1 - Cœur                               confondu avec un     NPO-001            explicite
+                                                                      horaires, lieu et
+          bénévole                                                                          emploi salarié.                         bénévolat.
+                                                                      inscription.
+                                                                      Présentation
+                                                                      publique,
+          Profil                                                      sections,             Données d'enfants                       Aucun profil
+SCH-001                          École              V1 - Cœur                                                    ORG-001
+          établissement                                               informations,         jamais publiques.                       enfant public.
+                                                                      événements et
+                                                                      admissions.
+                                                                      Relation privée
+                                                                                                                                    Un parent ne voit
+          Gérer                                                       permettant            Autorisation
+                                 Parent/tuteur                                                                                      que les
+SCH-002   bénéficiaire/enfan                        V1 - Cœur         admission,            relationnelle et     IAM-007
+                                 autorisé                                                                                           bénéficiaires
+          t privé                                                     documents et          minimisation.
+                                                                                                                                    autorisés.
+                                                                      communications.
+                                                                      Candidature,                                                  Dossier non
+          Demande                Parent/tuteur +                      documents, suivi,                                             accessible à
+SCH-003                                             V1 - Cœur                               Accès restreint.     SCH-002, EVT-003
+          d'admission            école                                entretien/visite et                                           d'autres parents
+                                                                      décision.                                                     ou organisations.
+                                                                      Messages et
+                                                                      notifications                                                 Aucune
+          Communication          École +                              contextualisés        Permission                              exposition
+SCH-004                                             V1 - Cœur                                                    MSG-002
+          école-parent           parent/tuteur                        autour du             relationnelle.                          publique du
+                                                                      bénéficiaire/objet                                            bénéficiaire.
+                                                                      autorisé.
+                                                                      Conversations                                                 Le contexte de
+                                                                                            Accès par
+          Boîte de réception     Utilisateur                          filtrables avec                                               l'objet reste
+MSG-001                                             V1 - Cœur                               participant/contex   IAM-003
+          unifiée                authentifié                          contexte et                                                   visible dans la
+                                                                                            te.
+                                                                      identité active.                                              conversation.
+                               Plateforme Écosystème RDC · Référentiel Fonctionnel Complet · Septembre 2026
+                                                                             Conversation liée
+                                                                             à devis,
+                                                                             commande,                                                       Fermeture de
+          Conversation                                                       candidature,           Accès dérivé de la                       l'objet n'efface pas
+MSG-002                           Parties autorisées     V1 - Cœur                                                        MSG-001
+          contextualisée                                                     livraison,             relation à l'objet.                      arbitrairement
+                                                                             événement, etc.,                                                l'historique.
+                                                                             avec actions
+                                                                             structurées.
+                                                                             Boîte d'équipe,
+                                                                                                                                             Un membre non
+                                                                             routage et
+          Team Inbox et                                                                             Permission/                              autorisé ne voit
+MSG-003                           Organisation           V1 - Cœur           assignation aux                              IAM-007
+          assignation                                                                               branche.                                 pas la
+                                                                             membres
+                                                                                                                                             conversation.
+                                                                             autorisés.
+                                                                             Notifications sur
+                                                                             transitions                                                     Pas de spam de
+          Notifications                                                                             Préférences/
+NTF-001                           Tous authentifiés      V1 - Cœur           significatives,                              PLT-002            transitions
+          événementielles                                                                           canaux.
+                                                                             avec                                                            identiques.
+                                                                             déduplication.
+                                                                             Liste distincte des
+                                                                             éléments                                                        Une action
+                                                                             nécessitant une                                                 résolue sort de la
+          File d'actions
+NTF-002                           Tous authentifiés      V1 - Cœur           action: devis,         Accès contextuel.     NTF-001            file sans
+          requises
+                                                                             validation,                                                     supprimer
+                                                                             paiement,                                                       l'historique.
+                                                                             candidature, etc.
+                                                                             Présente les
+                                                                             vérifications          Preuves privées                          L'affichage dit
+          Centre de               Utilisateur/
+TRU-001                                                  V1 - Cœur           possibles, en          séparées de           PLT-005            précisément ce
+          vérification            organisation
+                                                                             cours et               l'affichage public.                      qui a été vérifié.
+                                                                             terminées.
+                                                                             Téléphone,                                                      Vérification
+                                                                             identité,              Granulaire;                              d'identité n'est
+          Vérification
+                                                                             références,            catégories                               jamais présentée
+TRU-002   prestataire/référe      Prestataire            V1 - Cœur                                                        TRU-001
+                                                                             documents/certifi      sensibles                                comme garantie
+          nces
+                                                                             cations selon          renforcées.                              de
+                                                                             catégorie.                                                      qualité/sécurité.
+                                                                             Vérification de                                                 Statut commercial
+          Vérification                                                                              Paiement ne peut
+                                  Organisation/                              l'existence/autorit                                             et statut de
+TRU-003   organisation/auto                              V1 - Cœur                                  acheter la            TRU-001
+                                  représentant                               é/claims selon                                                  vérification
+          rité                                                                                      vérification.
+                                                                             procédure.                                                      restent séparés.
+                                                                             Avis contextuel                                                 'Achat vérifié'
+                                                                             après interaction      Preuve                                   signifie
+          Avis lié à une
+TRU-004                           Partie éligible        V1 - Cœur           enregistrée, sans      d'interaction;        COM-007            interaction
+          interaction
+                                                                             score universel de     modération.                              enregistrée, pas
+                                                                             confiance.                                                      qualité garantie.
+                                                                             Règles de contenu,
+                                                                                                                                             Contenu bloqué
+          Modération                                                         produits
+                                                                                                    Staff autorisé;                          ou restreint selon
+TRU-005   contenus et             Plateforme             V1 - Cœur           interdits/restrictif                         ADM-002
+                                                                                                    audit.                                   règle
+          catégories                                                         s, signalements et
+                                                                                                                                             configurable.
+                                                                             actions.
+                                                                             Dossiers Support,
+                                                                             Interaction
+                                                                                                                                             Chaque action
+                                                                             problem, Safety,       Accès par rôle et
+TRU-006   Case Management         Utilisateur + staff    V1 - Cœur                                                        ADM-002            sensible est
+                                                                             Dispute, Appeal        objet.
+                                                                                                                                             auditée.
+                                                                             avec preuves et
+                                                                             timeline.
+                                                                             Plans, passes,                                                  Un entitlement
+                                                                             quotas et                                                       expiré retire la
+                                                                                                    Achat ne confère
+          Moteur de droits        Système/admin                              capacités                                                       capacité
+ENT-001                                                  V1 - Cœur                                  jamais autorité ou    IAM-007
+          commerciaux             commercial                                 payantes séparés                                                commerciale sans
+                                                                                                    vérification.
+                                                                             des                                                             supprimer les
+                                                                             rôles/permissions.                                              données.
+                                                                             Free/Premium/
+                                                                             Professional/
+          Plans                                                                                                                              Le catalogue peut
+                                                                             Business/Business
+          particuliers/profes     Utilisateurs                                                                                               évoluer sans
+ENT-002                                                  V1 - Configurable   Pro/Enterprise         Prix TBD.             ENT-001
+          sionnels/entrepris      éligibles                                                                                                  migration de
+                                                                             conceptuels;
+          es                                                                                                                                 rôles.
+                                                                             contenu/prix
+                                                                             configurables.
+                                                                             Droits
+          Pass recrutement /                                                                                                                 Expiration
+                                  Individu/                                  temporaires pour       Durée/limites
+ENT-003   promotion / usage                              V1 - Configurable                                                ENT-001            automatique et
+                                  organisation                               actions                configurables.
+          ponctuel                                                                                                                           traçable.
+                                                                             spécifiques.
+                                                                                                                                             Contenu
+                                                                             Promotion d'un
+                                                                                                                                             sponsorisé
+                                                                             service, produit,      Objet existant,
+          Promouvoir un                                                                                                                      clairement
+PRM-001                           Utilisateur éligible   V1 - Cœur           profil, événement      éligible et           ENT-001, TRU-005
+          objet existant                                                                                                                     étiqueté et distinct
+                                                                             ou autre objet         conforme.
+                                                                                                                                             du classement
+                                                                             autorisé.
+                                                                                                                                             organique.
+                                                                             Relation                                                        Ne crée pas
+          Suivre un                                                          récurrente à un                                                 automatiquement
+                                                                                                    Selon
+SUB-001   abonnement de           Client/provider        V1 - Cœur           service avec                                 SRV-001            un wallet ou
+                                                                                                    provider/plan.
+          service connecté                                                   interventions,                                                  prélèvement
+                                                                             support et statut.                                              universel.
+
+                                Plateforme Écosystème RDC · Référentiel Fonctionnel Complet · Septembre 2026
+                                                                       Enregistrement/
+                                                                       suivi d'un                                            Aucun paiement
+          Suivre un
+                                                                       engagement hors                                       externe n'est
+SUB-002   engagement              Individu           V1 - Cœur                                Données privées.     -
+                                                                       plateforme à titre                                    prétendu traité
+          récurrent externe
+                                                                       d'organisation                                        par la plateforme.
+                                                                       personnelle.
+                                                                       Recherche
+          Gestion                                                      administrative,
+                                                                                              Rôle interne +                 Actions sensibles
+ADM-001   utilisateurs/organi     Staff autorisé     V1 - Cœur         statut, restrictions                        PLT-005
+                                                                                              finalité.                      auditées.
+          sations                                                      et support
+                                                                       contrôlés.
+                                                                       Queues de
+          Files de
+                                                                       signalements,          Séparation des                 L'accès dépend du
+ADM-002   modération/suppo        Staff autorisé     V1 - Cœur                                                     TRU-006
+                                                                       cases, appels et       responsabilités.               rôle interne.
+          rt
+                                                                       contenus.
+                                                                       Rapprochement,
+                                                                       remboursements,        MFA/step-up,                   Aucune
+          Opérations
+                                  Staff finance                        anomalies et           audit,                         modification
+ADM-003   financières                                V1 - Cœur                                                     COM-006
+                                  autorisé                             confirmations          éventuellement                 monétaire sans
+          restreintes
+                                                                       administratives        double contrôle.               trace autoritative.
+                                                                       autorisées.
+                                                                       Créer, renommer,
+                                                                       réordonner,
+                                                                                                                             Aucune
+                                                                       aliaser,
+                                                                                              Audit et contrôles             suppression
+ADM-004   Taxonomy Center         Admin taxonomie    V1 - Cœur         désactiver,                                 TAX-001
+                                                                                              de dépendance.                 destructive d'une
+                                                                       fusionner
+                                                                                                                             catégorie utilisée.
+                                                                       catégories et
+                                                                       attributs.
+                                                                       Paramètres
+                                                                       marché, capacités,
+          Market                                                       règles,                                               Changement de
+                                                                                              Accès très
+ADM-005   Configuration &         Admin plateforme   V1 - Cœur         fournisseurs,                               TAX-004   flag journalisé et
+                                                                                              restreint.
+          feature flags                                                langues et                                            réversible.
+                                                                       activation
+                                                                       fonctionnelle.
+                                                                       Désactivation
+                                                                       ciblée de
+                                                                       paiements,                                            Kill switch
+          Contrôles                                                                           Permission élevée
+ADM-006                           Staff privilégié   V1 - Cœur         publication,                                ADM-005   n'efface aucune
+          d'urgence                                                                           + audit.
+                                                                       catégorie ou                                          donnée.
+                                                                       fournisseur en
+                                                                       incident.
+                                                                                                                             Un module ne
+                                                                       API structurée par                                    modifie pas
+          API modulaire                                                                       Contrats
+PLT-001                           Développement      V1 - Cœur         domaines avec                               -         arbitrairement les
+          versionnée                                                                          versionnés.
+                                                                       frontières claires.                                   tables d'un autre
+                                                                                                                             domaine.
+                                                                       Coordination
+                                                                                                                             Événement
+                                                                       fiable des
+          Événements de                                                                       Outbox pour                    critique n'est pas
+                                                                       notifications,
+PLT-002   domaine et              Système            V1 - Cœur                                événements           PLT-001   perdu entre
+                                                                       indexation et
+          outbox                                                                              critiques.                     commit et
+                                                                       workflows
+                                                                                                                             publication.
+                                                                       asynchrones.
+                                                                       Idempotency            Obligatoire
+                                                                                                                             Retry identique ne
+          Idempotence et                                               keys, vérification     paiements/comma
+PLT-003                           Système            V1 - Cœur                                                     -         duplique pas
+          callbacks externes                                           callbacks et           ndes/refunds/deli
+                                                                                                                             l'effet métier.
+                                                                       reprise sûre.          very.
+                                                                       Pagination,
+                                                                                                                             L'utilisateur peut
+          Faible bande                                                 compression,
+                                                                                              Paiement jamais                reprendre un
+PLT-004   passante et             Tous               V1 - Cœur         drafts, cache sûr,                          PLT-003
+                                                                                              retry aveugle.                 brouillon après
+          reprise                                                      retry contrôlé et
+                                                                                                                             perte réseau.
+                                                                       états offline.
+                                                                       Journal immuable
+                                                                                                                             Événement
+                                                                       des actions
+                                                                                                                             sensible
+          Audit et                                                     sensibles,
+PLT-005                           Staff/système      V1 - Cœur                                Accès restreint.     -         identifiable par
+          traçabilité                                                  changements
+                                                                                                                             acteur, objet,
+                                                                       d'accès, paiements
+                                                                                                                             action et temps.
+                                                                       et admin.
+                                                                       Français primaire,
+                                                                       architecture
+                                                                                                                             Aucun texte
+                                                                       extensible aux
+                                                                                              Validation locale              métier critique ne
+          Localisation et                                              langues
+PLT-006                           Tous               V1 - Cœur                                des                  TAX-004   dépend d'un
+          i18n                                                         locales/anglais;
+                                                                                              traductions/alias.             libellé codé en
+                                                                       CDF/USD et
+                                                                                                                             dur.
+                                                                       géographie
+                                                                       configurable.
+                                                                       Chiffrement,
+                                                                       contrôle d'accès,                                     Un utilisateur ne
+                                                                       MFA sensible,                                         peut accéder à
+          Sécurité et                                                                         Politiques et
+PLT-007                           Tous               V1 - Cœur         fichiers privés,                            IAM-007   une donnée sans
+          confidentialité                                                                     consentements.
+                                                                       minimisation et                                       relation/permissio
+                                                                       disclosure par                                        n/finalité.
+                                                                       finalité.
+PLT-008   Observabilité,          Opérations         V1 - Cœur         Logs, métriques,       Accès opérations.    -         Incidents
+
+                                Plateforme Écosystème RDC · Référentiel Fonctionnel Complet · Septembre 2026
+                                                                      traces, alertes,
+                                                                                                                                  détectables;
+               sauvegarde et                                          sauvegardes et
+                                                                                                                                  sauvegarde/restau
+               continuité                                             procédures de
+                                                                                                                                  ration testables.
+                                                                      restauration.
+                                                                      Découpage en                                                Aucun besoin
+               Architecture                                           dizaines de              V1 privilégie                      contractuel de
+ PLT-009       microservices     Développement      Hors périmètre    microservices            monolithe       PLT-001            Kubernetes/micro
+               généralisée                                            sans justification       modulaire.                         services pour
+                                                                      concrète.                                                   accepter V1.
+
+
+
+
+3. Matrice de couverture par domaine
+ Domaine                   Fonctions                    V1                                 Post-V1                       Hors périmètre
+ Abonnements               1                            1                                  0                             0
+ Admin                     6                            6                                  0                             0
+ Associations              1                            1                                  0                             0
+ Avis                      1                            1                                  0                             0
+ Billetterie               4                            4                                  0                             0
+ Campagnes                 1                            1                                  0                             0
+ Candidature               1                            1                                  0                             0
+ Commerce                  8                            7                                  0                             1
+ Confiance                 3                            3                                  0                             0
+ Devis                     2                            2                                  0                             0
+ Emplois                   2                            2                                  0                             0
+ Engagements externes      1                            1                                  0                             0
+ Entitlements              1                            1                                  0                             0
+ Formation                 5                            4                                  1                             0
+ Identité & accès          8                            7                                  1                             0
+ Livraison                 3                            2                                  1                             0
+ Marketplace               5                            5                                  0                             0
+ Messagerie                3                            3                                  0                             0
+ Navigation                4                            4                                  0                             0
+ Notifications             1                            1                                  0                             0
+ Organisations             2                            2                                  0                             0
+ Passes                    1                            1                                  0                             0
+ Plans                     1                            1                                  0                             0
+ Plateforme                9                            8                                  0                             1
+ Prestataires              1                            1                                  0                             0
+ Promotion                 1                            1                                  0                             0
+ Recrutement               7                            6                                  1                             0
+ Restaurants               3                            3                                  0                             0
+ Réservation               2                            2                                  0                             0
+ Services                  1                            1                                  0                             0
+ Support                   1                            1                                  0                             0
+ Sécurité                  1                            1                                  0                             0
+ Taxonomie                 4                            4                                  0                             0
+ Volontariat               1                            1                                  0                             0
+ À traiter                 1                            1                                  0                             0
+ Écoles                    4                            4                                  0                             0
+ Événements                3                            3                                  0                             0
+
+
+
+
+4. Invariants fonctionnels transversaux
+Un compte, plusieurs contextes
+Le login est personnel. Les activités professionnelles et organisationnelles sont des contextes d'action autorisés,
+pas des comptes séparés.
+                               Plateforme Écosystème RDC · Référentiel Fonctionnel Complet · Septembre 2026
+Permissions ≠ droits commerciaux
+Un plan ou pass peut ouvrir une capacité ou un quota; il ne donne jamais une autorité organisationnelle, une
+vérification ou l'accès à des données privées.
+
+États indépendants en commerce
+Commande, paiement, fulfillment, livraison et litige disposent de leurs propres états. Une transition dans l'un ne
+réécrit pas artificiellement les autres.
+
+Source monétaire autoritative
+Toute évolution d'un état financier doit provenir d'une confirmation fournisseur, d'une confirmation cash
+autorisée, d'un remboursement fournisseur ou d'une action administrative auditée.
+
+Confiance granulaire
+La plateforme indique ce qui a été vérifié. Elle ne vend pas la vérification et n'établit pas de score universel de
+confiance.
+
+Vie privée par finalité
+L'accès aux champs dépend du besoin réel: recruteur, livreur, formateur, parent ou agent de facturation ne
+voient pas les mêmes données.
+
+Moteurs réutilisables
+Les domaines spécialisés réutilisent les moteurs communs (identité, réservation, devis, paiement, messagerie,
+entitlement, trust, case management) sans forcer tous les cas d'usage en V1.
+
+Faible connectivité
+Les parcours critiques doivent gérer brouillons, reprise, idempotence et états incertains; le paiement n'est jamais
+supposé réussi à cause de l'interface.
+
+
+
+5. Contrôle du périmètre V1 / Post-V1
+ V1 - inclus                                                            Post-V1 / explicitement différé
+ Identité, organisations, prestataires, permissions granulaires         Délégation personnelle avancée
+ Accueil, Explorer, + Publier, recherche structurée                     Recherche sémantique/recommandations IA avancées
+ Marketplace + commandes + Mobile Money/cash +
+                                                                        Settlement sophistiqué, multi-vendeur, wallet, escrow
+ remboursements de base
+ Services, devis, réservation et ressources                             Orchestration générale de paiements de services
+ Food ordering + livraison partenaire structurée                        GPS conducteur, routage, flotte et surge
+                                                                        Assessment Engine avancé et application headhunting
+ Recrutement substantiel + emploi domestique + entretiens
+                                                                        spécialisée
+ Formation workforce / pré-emploi                                       LMS complet, tests, learning paths, credential integrations
+                                                                        Fonctions événementielles avancées non nécessaires au
+ Événements publics/privés/restreints + billetterie QR
+                                                                        lancement
+ Écoles/parents/bénéficiaires privés                                    Profils publics d'enfants - explicitement interdits
+ Associations/campagnes/volontariat de base                             Finance nonprofit avancée
+ Messagerie, notifications, À traiter, trust, support                   Analytics/API avancés, SSO/SCIM
+
+
+
+
+                                 Plateforme Écosystème RDC · Référentiel Fonctionnel Complet · Septembre 2026
+6. Règles de gestion du référentiel
+Toute nouvelle demande fonctionnelle doit être reliée à un ID existant ou recevoir un nouvel ID. Une évolution
+qui change le périmètre V1, l'autorisation, la donnée sensible, un flux monétaire ou une dépendance critique
+doit être explicitement approuvée avant implémentation. Les écrans peuvent évoluer visuellement sans
+modifier ces invariants fonctionnels.
+
+Ce référentiel sera utilisé comme source pour les documents suivants: Catalogue des parcours utilisateurs,
+Référentiel taxonomique V1, Plans & Entitlements, Trust/Safety, opérations commerce, back-office, plan de tests
+et dictionnaire de données.
+
+
+
+
+                              Plateforme Écosystème RDC · Référentiel Fonctionnel Complet · Septembre 2026
+

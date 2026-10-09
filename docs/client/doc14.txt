@@ -1,0 +1,600 @@
+MASTER DOCUMENTATION INDEX
+          Plateforme Écosystème RDC
+  Document 14 - Carte maîtresse, ordre de lecture, autorités documentaires et gouvernance
+
+                          Version de référence - Septembre 2026
+
+
+
+
+     Plateforme Écosystème RDC · Document 14 · Master Documentation Index · Septembre 2026
+1. Objet
+Ce document est la porte d'entrée officielle de la documentation de la Plateforme Écosystème RDC. Il indique ce que contient chaque
+document, lequel fait autorité pour chaque type de décision, comment les documents se complètent, dans quel ordre les équipes doivent
+les lire et comment gérer les évolutions sans créer de contradictions.
+
+Il ne remplace aucun référentiel spécialisé. Il orchestre la suite documentaire.
+
+
+
+
+2. Architecture documentaire
+ N°                                                         Document                                                         Rôle principal
+ 01                                                         Référentiel Fonctionnel Complet                                  Catalogue maître des fonctionnalités V1/Post-V1.
+ 02                                                         Catalogue des Parcours Utilisateurs                              Parcours end-to-end et transitions vécues par les acteurs.
+ 03                                                         Référentiel Taxonomique V1                                       Catégories, sous-catégories, attributs, aliases et policy states.
+                                                                                                                             Hypothèses financières, scénarios, budget et besoin de
+ 04                                                         Modèle Financier & Budget de Lancement
+                                                                                                                             financement.
+ 05                                                         Catalogue des Offres, Plans, Passes & Entitlements               Architecture commerciale et droits d'usage.
+ 06                                                         Référentiel des Rôles, Permissions & Contrôle d'Accès            Autorisation, scopes, permissions et séparation des pouvoirs.
+ 07                                                         Politique de Confiance, Vérification, Modération & Sécurité      Trust, verification, reviews, reports, moderation, safety.
+ 08                                                         Manuel Paiements, Commandes, Remboursements & Litiges            Commerce states, finance, refunds, reconciliation et disputes.
+ 09                                                         Manuel Back-office & Opérations                                  Queues, staff roles, procédures et gouvernance opérationnelle.
+ 10                                                         Plan de Tests & Recette V1                                       QA, UAT, sécurité fonctionnelle et Go/No-Go.
+ 11                                                         Plan de Lancement Kinshasa & Déploiement Progressif              Pilote, activation écosystème, métriques et expansion gates.
+ 12                                                         Registre Juridique, Conformité & Politiques à Valider            Questions juridiques, blockers et validation de policies.
+ 13                                                         Dictionnaire de Données & Catalogue des Objets Métier            Objets, relations, états, invariants et classifications.
+ 14                                                         Master Documentation Index                                       Carte maîtresse et gouvernance de la documentation.
+
+
+
+
+3. Autorité documentaire - quelle source fait foi?
+ Question                                                                                    Source autoritative
+ Cette fonctionnalité existe-t-elle en V1?                                                   Document 01
+ Quel parcours doit vivre l'utilisateur?                                                     Document 02
+ Quelle catégorie/alias/attribut utiliser?                                                   Document 03
+ Quelles hypothèses financières utiliser?                                                    Document 04
+ Quel plan/pass donne quelle capacité?                                                       Document 05
+ Qui peut faire quoi et dans quel scope?                                                     Document 06
+ Que signifie Verified? Comment modérer?                                                     Document 07
+ Quel est l'état d'un paiement/order/refund/delivery?                                        Document 08 + Document 13 pour objet/relations
+ Comment le staff traite une file/case?                                                      Document 09
+ Comment prouver qu'une fonction est prête?                                                  Document 10
+ Comment activer le marché progressivement?                                                  Document 11
+ Quelle question juridique reste ouverte?                                                    Document 12
+ Quel objet/champ/relation porte la vérité métier?                                           Document 13
+ Où trouver la bonne documentation?                                                          Document 14
+
+
+
+
+4. Principe de résolution des contradictions
+ Type de conflit                                                                             Règle
+                                                                                             Document 01 définit le scope; Document 02 précise le flow. Une divergence déclenche
+ Fonction vs parcours
+                                                                                             clarification, pas invention.
+ Plan vs permission                                                                          Document 06 gagne sur l'autorité; Document 05 ne peut jamais créer une permission.
+ Trust vs commercial                                                                         Document 07 gagne; paiement/promotion ne peut jamais créer verification.
+ Commerce UI vs états                                                                        Document 08/13 gagnent; l'UI ne fusionne pas les state machines.
+ Taxonomie vs texte écran                                                                    Document 03 gagne pour catégories/aliases canoniques.
+ Legal vs product                                                                            Décision VALIDATED du Document 12 peut imposer une mise à jour des autres documents.
+ Test vs requirement                                                                         Le requirement métier reste source; Document 10 doit être mis à jour pour le tester.
+ Data model vs écran                                                                         Document 13 préserve la vérité métier; une vue UI peut agréger sans fusionner les objets.
+
+
+
+
+5. Ordre de lecture recommandé - Direction / Product
+ Étape                                                      Document                                                         Pourquoi
+ 1                                                          14                                                               Comprendre la carte complète.
+ 2                                                          01                                                               Comprendre le scope produit.
+ 3                                                          02                                                               Voir l'expérience utilisateur.
+ 4                                                          05                                                               Comprendre le modèle commercial.
+ 5                                                          07                                                               Comprendre les règles de confiance.
+ 6                                                          11                                                               Comprendre la stratégie de lancement.
+ 7                                                          04                                                               Lire scénarios et besoins financiers.
+ 8                                                          12                                                               Identifier les décisions externes à valider.
+
+
+                                         Plateforme Écosystème RDC · Document 14 · Master Documentation Index · Septembre 2026
+6. Ordre de lecture recommandé - Développeurs / Architectes
+ Étape                                          Document                                                         Focus
+ 1                                              14                                                               Carte et règles de priorité.
+ 2                                              01                                                               Scope fonctionnel.
+ 3                                              13                                                               Objets, relations, invariants.
+ 4                                              06                                                               Authorization Engine et scopes.
+ 5                                              03                                                               Taxonomy/configuration.
+ 6                                              08                                                               Commerce/payment state machines.
+ 7                                              07                                                               Trust/safety/data sensitivity.
+ 8                                              02                                                               Flows end-to-end.
+ 9                                              09                                                               Admin/ops requirements.
+ 10                                             10                                                               Tests et acceptance.
+ 11                                             12                                                               Feature gates juridiques/configurables.
+ 12                                             11                                                               Rollout/feature flags/ops readiness.
+
+
+
+
+7. Ordre de lecture - QA / Recette
+ Document                                                                        Usage QA
+ 01                                                                              Créer la couverture fonctionnelle.
+ 02                                                                              Créer les scénarios end-to-end.
+ 03                                                                              Tester taxonomy/search/policy states.
+ 06                                                                              Tester authorization, scopes et privacy.
+ 07                                                                              Tester verification/moderation/safety.
+ 08                                                                              Tester états, idempotency, refunds et exceptions.
+ 09                                                                              Tester staff workflows et audit.
+ 10                                                                              Plan maître d'exécution et Go/No-Go.
+ 12                                                                              Ajouter les critères issus des décisions juridiques.
+ 13                                                                              Tester invariants et intégrité des données.
+
+
+
+
+8. Ordre de lecture - Operations / Support / Finance
+ Équipe                                                                          Documents prioritaires
+ Support                                                                         09 → 07 → 08 → 02
+ Finance Ops                                                                     08 → 09 → 05 → 12
+ Trust & Safety                                                                  07 → 09 → 06 → 12
+ Verification                                                                    07 → 09 → 12
+ Commerce Ops                                                                    08 → 09 → 11
+ Recruitment Ops                                                                 01/02 → 06 → 07 → 09
+ Partner Success                                                                 11 → 02 → 05 → 07
+ Admin/Platform Ops                                                              09 → 06 → 13 → 10
+
+
+
+
+9. Ordre de lecture - Conseil juridique / Compliance
+Commencer par le Document 12, puis consulter les référentiels spécialisés liés à chaque question: Document 07 pour trust/verification,
+Document 08 pour commerce/paiement, Document 06 pour accès aux données, Document 13 pour classification/retention, Document 05
+pour produits commerciaux et Document 11 pour les gates de lancement.
+
+
+
+
+10. Carte des dépendances
+ Document                                       Dépend principalement de                                         Alimente
+ 01                                             Décisions produit verrouillées                                   02, 10, 13
+ 02                                             01, 03, 05-08                                                    10, UI, analytics
+ 03                                             01 + besoins modules                                             Search, publishing, 10, 13
+ 04                                             05, 11 + hypothèses                                              Budget/board decisions
+ 05                                             01, 06                                                           Billing, entitlements, 10, 13
+ 06                                             01, 13                                                           API auth, admin, 10
+ 07                                             01, 06, 12                                                       Trust engine, admin, 10
+ 08                                             01, 06, 12, 13                                                   Commerce code, ops, 10
+ 09                                             06-08, 13                                                        Admin UI, runbooks, 10/11
+ 10                                             01-09, 12-13                                                     Go/No-Go
+ 11                                             04-10                                                            Launch execution
+ 12                                             Tous domaines                                                    Policies, gates, config, tests
+
+                             Plateforme Écosystème RDC · Document 14 · Master Documentation Index · Septembre 2026
+    13                                                         01, 03, 05-09                                    Schema/API/events/tests
+    14                                                         01-13                                            Navigation et governance
+
+
+
+
+11. Registre des décisions verrouillées - principes structurants
+        Un seul compte peut supporter plusieurs activités/contextes; buyer/seller/candidate/etc. ne sont pas des types de compte.
+        Navigation permanente: Accueil · Explorer · + Publier · Messages · Compte.
+        + Publier est la porte universelle de création, filtrée par contexte, permissions et entitlements.
+        Architecture V1: modular monolith avec frontières métier strictes et coordination event-driven.
+        Permissions/roles sont séparés des entitlements commerciaux.
+        Verification ne peut jamais être achetée et n'est pas une garantie de sécurité/qualité.
+        Pas de universal trust score.
+        Pas de pourcentage de plateforme sur ventes, prestations ou salaires comme modèle principal.
+        Marketplace V1 inclut Order + Mobile Money lorsque provider approuvé + cash + pickup/delivery basique.
+        Food Order et Delivery Request ont des cycles de vie séparés.
+        Livraison via sociétés partenaires; pas de flotte propriétaire V1.
+        Event Commerce et ticketing payant font partie de V1.
+        Recruitment V1 est substantiel mais sans verdict d'embauche autonome.
+        Workforce Training & Development fait partie de V1.
+        Pas de profil public d'enfant.
+        Pas de wallet/stored balance, lending ou general escrow V1.
+        Les règles marché/légales/taxonomiques/prix doivent être configurables, pas hard-coded.
+        Les états Order, Payment, Fulfillment, Delivery, Refund et Case restent indépendants.
+        Tout changement monétaire doit être traçable à une source autoritative ou une action admin auditée.
+
+
+
+
+12. Scope V1 consolidé
+    Domaine                                                                             V1
+    Identity & Organizations                                                            Oui
+    Accueil / Explorer / + Publier                                                      Oui
+    Marketplace Commerce                                                                Oui
+    Services & Quotes                                                                   Oui
+    Booking & Resources                                                                 Oui
+    Restaurants & Food Ordering                                                         Oui
+    Partner Delivery                                                                    Oui
+    Jobs & Assisted Recruitment                                                         Oui
+    Household Employment                                                                Oui
+    Workforce Training                                                                  Oui
+    Events public/private/restricted                                                    Oui
+    Paid Event Ticketing                                                                Oui
+    Basic Nonprofit/Campaign/Volunteering                                               Oui
+    School/Parent/Beneficiary                                                           Oui
+    Messaging/Notifications/À traiter                                                   Oui
+    Trust/Reviews/Safety/Support                                                        Oui
+    Plans/Passes/Promotion/Entitlements                                                 Oui
+    Basic connected recurring commitments                                               Oui
+    Admin/Back-office                                                                   Oui
+    Reliability/Accessibility/Localization/Security                                     Oui
+
+
+
+
+13. Post-V1 / explicitement hors V1
+    Capacité                                                                            Statut
+    Advanced recruitment assessments                                                    Post-V1
+    Managed headhunting specialized app                                                 Post-V1
+    Advanced AI recommendations/discovery                                               Post-V1
+    Advanced delegation                                                                 Post-V1
+    SSO/SCIM                                                                            Post-V1
+    Deep PMS/POS/SIS integrations                                                       Post-V1
+    Advanced fleet/routing/telematics                                                   Post-V1
+    Sophisticated multi-seller settlement/fraud systems                                 Post-V1
+    General integrated service payments                                                 Post-V1
+    Advanced nonprofit finance                                                          Post-V1
+    Advanced analytics/APIs                                                             Post-V1
+    Advanced LMS/testing/credential verification                                        Post-V1
+
+                                            Plateforme Écosystème RDC · Document 14 · Master Documentation Index · Septembre 2026
+ Proprietary wallet/stored balances                                                         Outside V1
+ Lending/credit                                                                             Outside V1
+ General escrow                                                                             Outside V1
+ Platform-owned delivery fleet                                                              Outside V1
+ Autonomous hiring verdicts                                                                 Prohibited by design
+ Universal trust score                                                                      Prohibited by design
+ Purchasable verification                                                                   Prohibited by design
+ Public child profiles                                                                      Prohibited by design
+
+
+
+
+14. TBD - décisions commerciales
+ Sujet                                                    Document owner                                                    Statut
+ Prix finaux des plans                                    05                                                                TBD
+ Prix passes recrutement                                  05                                                                TBD
+ Quotas/limits par plan                                   05                                                                TBD
+ Promotion pricing/credits                                05                                                                TBD
+ Trial/intro offers                                       05/11                                                             TBD
+ Final launch acquisition budget                          04/11                                                             TBD
+ Partner incentives                                       11                                                                TBD
+ Final cohort sizes                                       11                                                                TBD
+
+
+
+
+15. TBD - décisions techniques
+ Sujet                                                    Owner documentaire                                                Statut
+ Cloud/provider final                                     Architecture/Cahier développeur                                   TBD
+ Payment providers production                             08/12                                                             TBD contractuel
+ Exact performance SLOs                                   10                                                                TBD technique
+ Backup RPO/RTO                                           10/09                                                             TBD
+ Exact queue/broker technology                            Architecture                                                      TBD
+ Search technology final                                  Architecture/03                                                   TBD
+ Observability stack                                      Architecture/09                                                   TBD
+ Staff MFA/SSO implementation detail                      06/09                                                             MFA required/recommended scope; SSO post-V1
+ Retention durations                                      12/13                                                             TBD juridique
+
+
+
+
+16. TBD - décisions juridiques et réglementaires
+Le Document 12 est la source unique du registre détaillé. Tout item Critical/High applicable au lancement doit être résolu ou explicitement
+conditionné avant activation du flux. Les autres documents ne doivent pas inventer une réponse pour combler un TBD juridique.
+
+
+
+
+17. Livrables visuels et UI
+ Écran/ensemble                                                                             Statut de direction
+ Accueil                                                                                    Direction approuvée
+ Explorer                                                                                   Direction approuvée
+ + Publier                                                                                  Direction approuvée; inclure Promouvoir quelque chose
+ Marketplace                                                                                Direction approuvée
+ Devis & Services                                                                           Direction approuvée
+ Jobs & Recruitment                                                                         Direction approuvée
+ Events                                                                                     Direction approuvée; ticketing V1 à refléter
+ Places & Reservations                                                                      Direction approuvée
+ Food Order + Partner Delivery                                                              Direction approuvée; live map non requis V1
+ Mon espace / Compte                                                                        Direction approuvée
+ Business Dashboard                                                                         Direction corrigée approuvée
+ Trust & Verification                                                                       Direction approuvée; retirer langage d'endorsement
+ Plans/Passes/Billing                                                                       Direction approuvée; prix illustratifs non autoritatifs
+ Notifications + À traiter                                                                  Direction approuvée
+ Admin / Back-office                                                                        Direction approuvée
+ Privacy/Consent/Security                                                                   Direction approuvée
+ Desktop/responsive                                                                         Direction approuvée
+ School/Parent/Beneficiary                                                                  Direction approuvée
+ Connected Subscriptions                                                                    Direction approuvée
+ Contextual Messaging                                                                       Direction approuvée
+ Nonprofit/Campaign/Volunteering                                                            Couvert fonctionnellement; visual dédié à confirmer
+
+
+
+
+Les mockups sont directionnels et ne constituent pas la source de vérité pour les montants, textes juridiques, permissions, états ou claims
+de verification.
+
+
+                                       Plateforme Écosystème RDC · Document 14 · Master Documentation Index · Septembre 2026
+18. Cahier des charges développeur - rôle
+Le cahier des charges complet sert de document de handoff narratif et architectural. En cas de détail spécialisé ou de divergence apparue
+après sa rédaction, les Documents 01-14 les plus récents et explicitement verrouillés prévalent pour leur domaine. Toute évolution
+importante doit ensuite être répercutée dans une nouvelle version du cahier des charges ou un addendum.
+
+
+
+
+19. Gouvernance des versions
+    Règle                                                                    Application
+    Version visible                                                          Chaque document porte version/date.
+    Changelog                                                                Toute modification structurante indique ce qui a changé.
+    Stable IDs                                                               Feature IDs, permission codes, taxonomy IDs, legal IDs, test IDs ne sont pas recyclés.
+    Superseded                                                               Ancienne décision conservée mais marquée remplacée.
+    Cross-reference                                                          Une modification affectant d'autres docs crée une liste d'impact.
+    Approval                                                                 Owner métier/tech/legal selon domaine.
+    Release baseline                                                         Avant build majeur, figer une baseline documentaire.
+    Archive                                                                  Conserver anciennes versions pour audit/historique.
+
+
+
+
+20. Processus de changement produit
+    Étape                                                                    Action
+    1. Proposal                                                              Décrire besoin, problème et acteurs.
+    2. Scope impact                                                          Identifier V1/Post-V1 et modules.
+    3. Data impact                                                           Vérifier Document 13.
+    4. Access impact                                                         Vérifier Document 06.
+    5. Trust/legal impact                                                    Vérifier Documents 07/12.
+    6. Commercial impact                                                     Vérifier Document 05.
+    7. Flow impact                                                           Mettre à jour Document 02.
+    8. Functional source                                                     Mettre à jour Document 01.
+    9. Tests                                                                 Ajouter/adapter Document 10.
+    10. Ops/launch                                                           Adapter Documents 09/11.
+    11. Release                                                              Versionner et communiquer.
+
+
+
+
+21. Checklist de handoff développeur
+       Lire Documents 14, 01, 13 et 06 avant de finaliser l'architecture.
+       Tracer chaque epic/story vers un Feature ID du Document 01.
+       Tracer chaque flow critique vers Document 02.
+       Utiliser IDs taxonomiques canoniques du Document 03.
+       Implémenter entitlements séparément des permissions.
+       Implémenter state machines commerce selon Documents 08/13.
+       Conserver legal/market rules configurables.
+       Prévoir feature flags/kill switches pour launch gates.
+       Produire ERD, OpenAPI et event catalog à partir du Document 13.
+       Produire matrice Object × Actor × Permission à partir du Document 06.
+       Créer tests automatisés/UAT selon Document 10.
+       Construire Admin selon Document 09, pas comme super-account.
+       Ne pas utiliser les mockups comme source autoritative de prix/claims.
+       Documenter toute divergence technique proposée avant implémentation.
+       Ne pas activer un legal blocker du Document 12 sans validation.
+
+
+
+
+22. Checklist de handoff investisseurs / board
+    Sujet                                                                    Document
+    Vision et scope                                                          01 + cahier des charges
+    Parcours/utilité                                                         02
+    Modèle économique                                                        05
+    Scénarios financiers                                                     04
+    Trust/safety                                                             07
+    Readiness/quality                                                        10
+
+                                 Plateforme Écosystème RDC · Document 14 · Master Documentation Index · Septembre 2026
+Go-to-market                                                       11
+Compliance readiness                                               12
+Technical/data rigor                                               13
+Vue globale                                                        14
+
+
+
+
+23. Checklist pré-développement
+Gate                                                               Critère
+Scope                                                              V1 baseline approuvée.
+Architecture                                                       Modular monolith/domain boundaries confirmés.
+Data                                                               ERD initial aligné Document 13.
+Access                                                             Permission matrix implémentable.
+Taxonomy                                                           Seed V1 disponible/configurable.
+Providers                                                          Interfaces/adapters identifiés.
+Legal                                                              Blockers pour build/pilot identifiés.
+Design                                                             Design system + critical flows prêts.
+QA                                                                 Acceptance IDs traçables.
+DevOps                                                             Environnements DEV/QA/STAGING définis.
+
+
+
+
+24. Checklist pré-beta
+Gate                                                               Critère
+Functional                                                         Critical flows disponibles.
+Security                                                           Auth/access tests critiques passent.
+Privacy                                                            Field-level disclosure testée.
+Payments                                                           Sandbox puis production readiness si argent réel.
+Ops                                                                Support/trust/finance queues prêtes.
+Legal                                                              Beta-specific blockers résolus.
+Supply                                                             Partenaires/cohortes onboardés.
+Monitoring                                                         Logs/alerts/dashboard actifs.
+Rollback                                                           Feature flags/rollback testés.
+Feedback                                                           Canal et taxonomy de feedback prêts.
+
+
+
+
+25. Checklist pré-General Availability
+Gate                                                               Critère
+Document 10                                                        Go/No-Go satisfait.
+Document 12                                                        Tous blockers applicables VALIDATED/CONDITIONAL contrôlé.
+Commerce                                                           Reconciliation/refunds/disputes opérationnels.
+Trust                                                              Verification/moderation/safety opérationnels.
+Support                                                            Backlog/SLA soutenables.
+Supply                                                             Densité suffisante dans catégories activées.
+Partners                                                           Production readiness confirmée.
+Security                                                           Incident/on-call/backup/restore prêts.
+Growth                                                             Campagnes alignées à l'offre réelle.
+Leadership                                                         Go formel enregistré.
+
+
+
+
+26. Matrice de traçabilité recommandée
+Artifact dev                                                       Références minimales
+Epic                                                               Feature ID + Flow IDs
+User Story                                                         Feature ID + Actor + Permission + Acceptance
+API endpoint                                                       Object + Permission + scope + event effects
+DB table/entity                                                    Document 13 object + classification
+Background job                                                     Domain event + idempotency + audit
+Admin action                                                       Staff permission + case/audit + four-eye si applicable
+Payment flow                                                       Document 08 state + provider ref + reconciliation
+UI screen                                                          Flow + object state + permission + entitlement
+Test case                                                          Requirement IDs + expected UI/backend/event/audit
+Release note                                                       Changed IDs + migration/policy impact
+
+
+
+
+27. Nommage des artefacts futurs
+Type                                                               Convention
+                       Plateforme Écosystème RDC · Document 14 · Master Documentation Index · Septembre 2026
+    Feature                                                                  DOMAIN-FNNN ou IDs existants du Référentiel 01
+    User Flow                                                                UF-NN
+    Permission                                                               PERM-DOMAIN-ACTION
+    Capability                                                               CAP-DOMAIN-CAPABILITY
+    Legal item                                                               LEG-DOMAIN-NN
+    Acceptance test                                                          DOMAIN-AC-NN
+    Domain event                                                             Past-tense semantic event, ex. PaymentStatusChanged
+    Taxonomy node                                                            Stable canonical ID/code
+    Policy                                                                   POL-DOMAIN + version
+    Decision                                                                 DEC-<DOMAIN>-YYYY-NNN
+
+
+
+
+28. Ce qui ne doit jamais devenir une source de vérité
+       Un mockup généré visuellement.
+       Un prix illustratif utilisé dans une présentation.
+       Une phrase marketing.
+       Un statut affiché uniquement côté frontend.
+       Une hypothèse financière du Document 04 présentée comme résultat garanti.
+       Une décision juridique non validée.
+       Un rôle commercial ou plan utilisé comme permission.
+       Un message de support utilisé pour modifier silencieusement un état financier.
+       Une catégorie hard-codée dans une app cliente.
+       Un tableur local non versionné qui contredit les référentiels maîtres.
+
+
+
+
+29. Definition of Ready - une fonctionnalité peut entrer en développement si
+    Condition                                                                Oui attendu
+    Purpose                                                                  Problème/utilité clairement décrit.
+    Actor                                                                    Acteur/contexte identifié.
+    Feature                                                                  Feature ID/source fonctionnelle.
+    Flow                                                                     Happy path + exceptions principales.
+    Data                                                                     Objets/relations identifiés.
+    Access                                                                   Permission/scope/entitlement connus.
+    Taxonomy                                                                 Catégories/attributes si nécessaires.
+    Trust                                                                    Verification/moderation impacts connus.
+    Legal                                                                    Blocker ou configurable rule identifié.
+    Acceptance                                                               Critères testables définis.
+
+
+
+
+30. Definition of Done - une fonctionnalité est terminée si
+    Condition                                                                Exigence
+    Functional                                                               Acceptance criteria passent.
+    Authorization                                                            Backend access controls testés.
+    Privacy                                                                  Fields minimisés/scopés.
+    Data                                                                     Migrations/invariants validés.
+    Reliability                                                              Retry/idempotency selon besoin.
+    Audit                                                                    Actions sensibles traçables.
+    Observability                                                            Logs/metrics/alerts pertinents.
+    Admin/Ops                                                                Supportable opérationnellement.
+    Documentation                                                            Références/changes à jour.
+    QA                                                                       Regression + UAT selon criticité.
+
+
+
+
+31. Documentation après lancement
+    Cadence                                                                  Revue
+    Chaque release                                                           Features, flows, data, permissions, tests.
+    Mensuel au début                                                         Ops issues, taxonomy, support reasons, policy gaps.
+    Trimestriel                                                              Plans/entitlements, security/access review, retention/legal items.
+    Après incident                                                           Affected docs + tests + runbooks.
+    Avant nouveau marché                                                     Full market/legal/taxonomy/provider review.
+    Avant module Post-V1                                                     Scope reclassification + architecture impact.
+    Annuel minimum                                                           Master documentation consistency audit.
+
+
+                                 Plateforme Écosystème RDC · Document 14 · Master Documentation Index · Septembre 2026
+32. Responsabilités documentaires
+ Domaine                                                                    Owner recommandé
+ Product scope/flows                                                        Product
+ Taxonomy                                                                   Product Ops / Taxonomy Admin
+ Finance model                                                              Leadership/Finance
+ Plans/entitlements                                                         Product + Commercial
+ Permissions/access                                                         Engineering + Security/Product
+ Trust/safety                                                               Trust & Safety
+ Commerce/payments                                                          Product + Finance/Engineering
+ Back-office                                                                Operations
+ Testing                                                                    QA/Product/Engineering
+ Launch                                                                     Launch/Ops Lead
+ Legal register                                                             Legal/Compliance owner
+ Data dictionary                                                            Architecture/Engineering + domain owners
+ Master index                                                               Product/Program governance
+
+
+
+
+33. État de préparation documentaire
+ Bloc                                                                       État
+ Functional scope                                                           Documenté
+ User flows                                                                 Documenté
+ Taxonomy architecture                                                      Documenté; seed détaillé à maintenir
+ Financial scenarios                                                        Documenté comme hypothèses
+ Commercial architecture                                                    Documenté; prix finaux TBD
+ Access control                                                             Documenté
+ Trust/safety                                                               Documenté; legal details TBD
+ Commerce rules                                                             Documenté; provider/legal details TBD
+ Back-office                                                                Documenté
+ QA/UAT                                                                     Documenté
+ Launch strategy                                                            Documenté
+ Legal/compliance register                                                  Documenté; validations externes requises
+ Data model                                                                 Documenté conceptuellement; ERD/schema à dériver
+ Master governance                                                          Documenté dans ce document
+
+
+
+
+34. Prochaines productions techniques après la suite documentaire
+ Priorité                                                                   Livrable
+ 1                                                                          ERD logique détaillé + schéma initial.
+ 2                                                                          OpenAPI / API contracts V1.
+ 3                                                                          Event Catalog + payload schemas.
+ 4                                                                          Object × Actor × Permission implementation matrix.
+ 5                                                                          Design System / component library finalisée.
+ 6                                                                          Backlog Epics → Stories → Acceptance IDs.
+ 7                                                                          Environment/DevOps architecture.
+ 8                                                                          Provider integration specifications.
+ 9                                                                          Seed taxonomy/configuration packages.
+ 10                                                                         QA automation suite + UAT packs.
+ 11                                                                         Operational runbooks détaillés par provider.
+ 12                                                                         Validated legal policies/contracts as external review completes.
+
+
+
+
+35. Règle finale
+La documentation forme un système, pas une pile de fichiers indépendants. Une décision structurante doit pouvoir être suivie depuis le
+besoin fonctionnel jusqu'au parcours, aux objets de données, à l'autorisation, aux règles commerciales ou de confiance, aux tests, aux
+opérations et au lancement. Lorsqu'une décision change, son impact documentaire doit être explicite avant que le code devienne la
+nouvelle vérité par accident.
+
+
+
+
+                                Plateforme Écosystème RDC · Document 14 · Master Documentation Index · Septembre 2026
+

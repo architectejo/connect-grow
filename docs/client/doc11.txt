@@ -1,0 +1,538 @@
+PLAN DE LANCEMENT KINSHASA &
+        DÉPLOIEMENT PROGRESSIF
+                Plateforme Écosystème RDC
+          Document 11 - Stratégie opérationnelle de mise en marché, pilote et montée en charge
+
+                                Version de référence V1 - Septembre 2026
+
+
+
+
+Plateforme Écosystème RDC · Document 11 · Plan de Lancement Kinshasa & Déploiement Progressif · Septembre 2026
+1. Objet du document
+Ce document organise le passage d'une V1 techniquement validée à une plateforme réellement utilisée à Kinshasa. L'objectif n'est pas
+d'activer simultanément toutes les possibilités du produit, mais de créer progressivement une densité suffisante d'offre, de demande, de
+confiance et d'opérations dans des parcours prioritaires, tout en conservant l'architecture V1 complète.
+
+Principe de lancement: réduire le risque par le séquençage, non par la suppression des fondations. Les moteurs communs sont prêts; les
+catégories, partenaires, volumes et campagnes sont activés par vagues contrôlées.
+
+
+
+
+2. Objectifs du lancement Kinshasa
+ Objectif                                                                        Résultat recherché
+                                                                                 Les premiers utilisateurs trouvent réellement entreprises, services, produits,
+ Utilité immédiate
+                                                                                 emplois ou événements utiles.
+ Densité locale                                                                  Éviter une marketplace ou un annuaire visiblement vide.
+ Confiance                                                                       Onboarding, verification et support fonctionnent avant croissance rapide.
+ Transactions fiables                                                            Paiements, cash, commandes, refunds et reconciliation restent contrôlables.
+                                                                                 Une interaction conduit naturellement à message, devis, commande, candidature,
+ Boucles d'usage
+                                                                                 réservation ou suivi.
+ Apprentissage                                                                   Mesurer les frictions réelles avant expansion géographique ou catégorielle.
+ Opérations soutenables                                                          Back-office et partenaires peuvent absorber le volume.
+ Monétisation saine                                                              Tester les plans/passes/promotion sans bloquer l'adoption gratuite essentielle.
+
+
+
+
+3. Ce que « lancement progressif » signifie
+ Dimension                                                                       Progression
+ Utilisateurs                                                                    Équipe interne → partenaires pilotes → cohortes invitées → public.
+ Géographie                                                                      Kinshasa d'abord; extension RDC après critères d'expansion.
+ Catégories                                                                      Prioritaires d'abord; sensibles seulement quand contrôles prêts.
+ Commerce                                                                        Petits volumes → volumes plus larges après reconciliation stable.
+ Paiements                                                                       Providers validés; montée graduelle des volumes.
+ Recrutement                                                                     Employeurs pilotes → household recruitment contrôlé → élargissement.
+ Événements                                                                      Organisateurs pilotes → ticketing plus large.
+ Restaurants/livraison                                                           Zone et partenaires limités → extension par capacité.
+ Promotion                                                                       Pilote sponsorisé transparent → self-service contrôlé.
+
+
+
+
+4. Phases de lancement
+ Phase                                     Audience                              But                                             Gate de sortie
+                                                                                 Production readiness, runbooks,
+ 0 - Readiness                             Équipe interne                                                                        Doc 10 Go/No-Go satisfait
+                                                                                 providers, staff
+ 1 - Internal Alpha                        Équipe + comptes de test              Parcours réels sans public                      Aucun blocker; ops maîtrisées
+                                           Entreprises/providers/organisateurs
+ 2 - Partner Onboarding                                                          Construire l'offre avant demande                Contenu de qualité + support prêt
+                                           sélectionnés
+                                                                                 Tester discovery, interactions et
+ 3 - Closed Beta                           Utilisateurs invités                                                                  KPIs qualité/stabilité acceptables
+                                                                                 transactions
+ 4 - Kinshasa Pilot                        Public limité/activation ciblée       Tester marché réel et opérations                Densité + fiabilité + support
+ 5 - Kinshasa General Availability         Public Kinshasa                       Croissance contrôlée                            Stabilité continue
+ 6 - Expansion                             Autres zones/villes                   Réplication du modèle                           Readiness locale + critères marché
+
+
+
+
+5. Stratégie de densité: ne pas lancer un désert numérique
+Une plateforme multi-faces échoue facilement si chaque section est techniquement disponible mais vide. Avant l'acquisition massive de
+particuliers, l'équipe doit constituer une offre initiale crédible dans les catégories activées.
+
+ Pôle                                                                            Seed supply recommandé
+ Entreprises & Services                                                          Organisations vérifiables avec profils complets, catégories, contacts et services.
+ Prestataires individuels                                                        Profils volontaires dans métiers à demande fréquente; verification adaptée.
+ Marketplace                                                                     Vendeurs actifs et annonces réelles; éviter import massif de contenu obsolète.
+ Jobs                                                                            Employeurs avec postes réels; candidatures gratuites.
+ Household Jobs                                                                  Employeurs particuliers pilotes + travailleurs consentants.
+ Restaurants                                                                     Menus réellement maintenus, horaires et fulfillment connus.
+                        Plateforme Écosystème RDC · Document 11 · Plan de Lancement Kinshasa & Déploiement Progressif · Septembre 2026
+ Delivery                                                                             Sociétés partenaires avec zones, disponibilité et responsabilités définies.
+ Events                                                                               Organisateurs capables de gérer inscriptions/tickets/check-in.
+ Training                                                                             Prestataires avec programmes structurés et provenance claire.
+
+
+
+
+6. Sélection des catégories initiales
+ Critère                                                                              Question
+ Demande fréquente                                                                    Le besoin apparaît-il régulièrement à Kinshasa?
+ Offre disponible                                                                     Peut-on onboarder assez de providers fiables?
+ Complexité opérationnelle                                                            Le support peut-il traiter les exceptions?
+ Risque                                                                               La catégorie exige-t-elle verification ou contrôle renforcé?
+ Paiement                                                                             Le parcours peut-il fonctionner avec les providers/modes disponibles?
+ Logistique                                                                           La livraison/fulfillment est-elle maîtrisable?
+ Taxonomie                                                                            Catégorie, attributs et aliases sont-ils prêts?
+ Mesure                                                                               Peut-on observer conversion, satisfaction et incidents?
+
+
+
+
+La liste finale des catégories activées au jour J doit être décidée pendant la préparation du pilote. Les catégories sensibles ne sont pas
+activées simplement pour augmenter le catalogue.
+
+
+
+
+7. Cohortes pilotes
+ Cohorte                                               Profil                                                         Objectif
+                                                       Entreprises, écoles, restaurants, organisateurs, training
+ C1 - Organisations                                                                                                   Tester org profiles, teams, publishing, operations
+                                                       providers
+ C2 - Professionals                                    Prestataires individuels                                       Tester services, quotes, booking, verification
+ C3 - Sellers                                          Particuliers + professionnels                                  Tester Marketplace, stock, orders, cash/payment
+ C4 - Employers                                        Entreprises + households                                       Tester jobs/recruitment
+ C5 - Candidates/workers                               Chercheurs d'emploi et prestataires                            Tester applications, privacy, discovery consent
+ C6 - Consumers                                        Particuliers invités                                           Tester discovery, buying, booking, events
+ C7 - Delivery partners                                Sociétés de livraison                                          Tester dispatch/fulfillment/data minimization
+ C8 - Event organizers                                 Organisateurs sélectionnés                                     Tester ticketing/check-in/refunds
+
+
+
+
+8. Onboarding des partenaires pilotes
+ Étape                                                                                Action
+ Qualification                                                                        Confirmer catégorie, identité/organisation et capacité opérationnelle.
+ Account setup                                                                        Créer/claim organisation ou activer provider context.
+ Verification                                                                         Effectuer uniquement contrôles requis et les nommer précisément.
+ Profile completeness                                                                 Logo/photo, description, zone, horaires, services/produits.
+ Training                                                                             Montrer dashboard, messages, orders, applications, refunds/cases selon rôle.
+ Dry run                                                                              Effectuer un parcours test avant activation publique.
+ Support channel                                                                      Attribuer canal/escalade pilote.
+ Activation                                                                           Rendre visible seulement lorsque données et opérations sont prêtes.
+ 30-day review                                                                        Qualité, activité, incidents, besoin de coaching.
+
+
+
+
+9. Acquisition des premiers utilisateurs
+ Canal                                                                                Usage recommandé
+ Partner audiences                                                                    Inviter clients/communautés existantes des partenaires pilotes.
+ Referral                                                                             Invitation organique avec anti-abus; pas de promesse trompeuse.
+ Field onboarding                                                                     Aide à l'inscription dans lieux/événements partenaires lorsque pertinent.
+ Digital campaigns                                                                    Campagnes ciblées sur cas d'usage concrets, pas seulement marque générale.
+ Employer/job campaigns                                                               Mettre en avant postes réels et candidature gratuite.
+ Events                                                                               Utiliser inscriptions/ticketing comme porte d'entrée.
+ Marketplace supply                                                                   Promouvoir catégories avec offre réelle.
+ Community/associations                                                               Partenariats locaux selon pertinence et consentement.
+
+
+
+
+                        Plateforme Écosystème RDC · Document 11 · Plan de Lancement Kinshasa & Déploiement Progressif · Septembre 2026
+10. Message de lancement
+Le message public doit expliquer des usages concrets: trouver une entreprise ou un prestataire, demander un devis, acheter/vendre,
+chercher un emploi, recruter, découvrir un événement, commander auprès d'un restaurant ou gérer une activité professionnelle. Il faut
+éviter de présenter la plateforme comme une promesse abstraite de « tout faire ».
+
+ À communiquer                                                                   À éviter
+ Un seul compte, plusieurs activités                                             Promesse que tous les modules auront immédiatement la même densité
+ Profils et vérifications décrits précisément                                    « Tous les utilisateurs sont sûrs/garantis »
+ Candidature emploi gratuite                                                     Promesse d'emploi
+ Paiements/commandes selon options disponibles                                   Promesse de remboursement instantané dans tous les cas
+ Promotion clairement sponsorisée                                                Confondre paiement et recommandation
+ Support et signalement                                                          Promesse d'absence totale de fraude/incidents
+
+
+
+
+11. Marketplace - lancement contrôlé
+ Étape                                                                           Contrôle
+ Seed listings                                                                   Annonces réelles, récentes, photos et prix cohérents.
+ Seller mix                                                                      Distinguer particulier vs professionnel/organisation.
+ Categories                                                                      Activer progressivement; prohibited/restricted policy appliquée.
+ Commerce pilot                                                                  Limiter volume initial si nécessaire pour observer reconciliation.
+ Cash                                                                            Responsabilité de réception explicite.
+ Mobile Money                                                                    Activer uniquement après provider production checklist.
+ Returns/disputes                                                                Support prêt avant campagne d'acquisition.
+ Reviews                                                                         Interaction-linked; pas de faux avis seedés.
+
+
+
+
+12. Jobs & recrutement - lancement
+ Flux                                                                            Approche
+ Company jobs                                                                    Onboarder employeurs réels avec annonces complètes.
+ Candidate acquisition                                                           Candidature gratuite et profil simple.
+ Household jobs                                                                  Pilote contrôlé; Employeur particulier clairement identifié.
+                                                                                 Tester one-off/pass/Premium sans fixer artificiellement les prix dans l'app avant
+ Private recruitment products
+                                                                                 validation.
+ Discovery                                                                       Opt-in explicite pour candidate discovery.
+ Training bridge                                                                 Présenter formation pertinente factuellement, sans promesse d'embauche.
+ Support                                                                         Canal pour faux jobs, harassment, discrimination et privacy issues.
+
+
+
+
+13. Restaurants & livraison - lancement par zone
+ Sujet                                                                           Règle de pilote
+ Zone                                                                            Commencer là où restaurants et partenaires delivery peuvent réellement servir.
+ Restaurants                                                                     Menus, horaires, capacité et fulfillment vérifiés opérationnellement.
+ Delivery partners                                                               Zones, prix/règles, horaires, cash collection contractualisés.
+ Pickup                                                                          Toujours disponible si restaurant le permet; ne dépend pas du réseau delivery.
+ Order volume                                                                    Limiter/étager si nécessaire pendant premières semaines.
+ Failed delivery                                                                 Runbook et support actifs.
+ Outage partner                                                                  Stop assignment/reassign; message utilisateur honnête.
+ Expansion zone                                                                  Uniquement après métriques de fulfillment acceptables.
+
+
+
+
+14. Events & ticketing - lancement
+ Étape                                                                           Contrôle
+ Pilot organizers                                                                Petit nombre d'organisateurs formés.
+ Paid events                                                                     Provider payment + refund workflow validés.
+ QR check-in                                                                     Dry run sur appareils réels avant événement.
+ Connectivity                                                                    Prévoir procédure faible réseau selon capacité V1.
+ Cancellation                                                                    Organisateur comprend impacts refund/notification.
+ Private events                                                                  Non indexés; invitations/guest list contrôlées.
+ Post-event review                                                               Check-in failures, duplicates, support, settlement/reconciliation.
+
+
+
+
+                         Plateforme Écosystème RDC · Document 11 · Plan de Lancement Kinshasa & Déploiement Progressif · Septembre 2026
+15. Plans, passes et monétisation au lancement
+ Principe                                                                            Application
+ Free remains useful                                                                 Discovery, basic participation et candidature emploi restent réellement utilisables.
+ Paid = utility                                                                      Plans ajoutent capacité, outils, quotas, organisation, analytics ou visibilité.
+ No paid trust                                                                       Verification jamais achetée.
+ No salary commission                                                                Pas de pourcentage sur salaire.
+ No default transaction commission                                                   Philosophie V1 conservée; frais provider externes possibles.
+ Pricing                                                                             Prix finaux validés commercialement avant publication.
+ Trials/promos                                                                       Si utilisés: conditions, expiry et entitlement explicites.
+ Measure                                                                             Conversion, churn, quota friction et support observés.
+
+
+
+
+16. Support de lancement
+ Canal/file                                                                          Couverture
+ General Support                                                                     Compte, navigation, publication, usage
+ Commerce                                                                            Orders, food, delivery
+ Finance                                                                             Payments, refunds, reconciliation
+ Recruitment                                                                         Jobs/applications/privacy
+ Events                                                                              Tickets/check-in/cancellation
+ Trust                                                                               Verification, moderation, reports
+ Safety                                                                              P0/P1 escalations
+ Partner Success                                                                     Onboarding entreprises/providers pilotes
+
+
+
+
+17. Staffing minimum par fonction
+ Fonction                                               Responsabilité                                              Dimensionnement
+ Launch/Ops Lead                                        Coordination quotidienne et escalades                       À dimensionner selon cohortes
+ Customer Support                                       Cases utilisateurs                                          À dimensionner selon volume
+ Partner Success                                        Onboarding et qualité supply                                Fort au début
+ Trust/Verification                                     Verification, claims, moderation                            Selon catégories activées
+ Finance Ops                                            Reconciliation/refunds                                      Obligatoire dès paiement réel
+ Commerce Ops                                           Orders/food/delivery exceptions                             Selon commerce activé
+ Technical On-call                                      Incidents production/providers                              Couverture définie
+ Community/Growth                                       Acquisition et feedback                                     Progressif
+
+
+
+
+Les effectifs exacts ne sont pas fixés dans ce document: ils doivent être calculés à partir des volumes pilotes, horaires de service et SLA
+retenus.
+
+
+
+
+18. Rituels opérationnels pendant pilote
+ Cadence                                                                             Rituel
+ Chaque matin                                                                        Provider health, P0/P1, pending payments, failed refunds, backlog.
+ Midi / pic activité                                                                 Incidents, delivery/food, queue aging.
+ Fin journée                                                                         Reconciliation, handoff incidents, refunds critiques.
+ Quotidien pilote                                                                    15-30 min launch stand-up: Product, Ops, Support, Tech.
+ Hebdomadaire                                                                        Funnel, supply density, quality, abuse, partner feedback.
+ Après incident majeur                                                               Postmortem + action + test de non-régression.
+ Fin de phase                                                                        Go/hold/rollback/expand sur critères mesurés.
+
+
+
+
+19. Dashboard de lancement
+ Famille                                                                             KPIs
+ Acquisition                                                                         Signups, activated accounts, source/channel
+ Supply                                                                              Active organizations/providers/listings/jobs/restaurants/events
+ Discovery                                                                           Search success, profile views, zero-result searches
+ Engagement                                                                          Messages, quotes, applications, saves, bookings
+ Commerce                                                                            Orders, conversion, fulfillment, cancellation
+ Payments                                                                            Success, pending aging, reconciliation mismatch
+ Delivery                                                                            Acceptance, pickup, delivered, failed
+ Recruitment                                                                         Applications, employer activity, interview actions
+ Events                                                                              Ticket orders, issuance, check-in success
+ Trust                                                                               Reports, verification turnaround, appeal rate
+
+                         Plateforme Écosystème RDC · Document 11 · Plan de Lancement Kinshasa & Déploiement Progressif · Septembre 2026
+Support                                                                         First response, resolution, backlog, SLA
+Retention                                                                       Returning users and active partners
+
+
+
+
+20. Métriques de densité et liquidité
+Signal                                                                          Interprétation
+Zero-result search rate                                                         Demande non satisfaite / taxonomie/search issue.
+Time to first relevant result                                                   Qualité discovery.
+Profiles with complete actionable data                                          Qualité supply.
+Quote response rate/time                                                        Liquidité services.
+Job application per active vacancy                                              Activité recrutement, sans juger qualité humaine.
+Seller order fulfillment rate                                                   Fiabilité commerce.
+Restaurant acceptance rate                                                      Disponibilité réelle.
+Delivery acceptance/completion                                                  Capacité réseau partenaire.
+Event check-in success                                                          Fiabilité ticketing.
+Repeat interaction                                                              Valeur perçue/retention.
+
+
+
+
+21. Feedback structuré
+Source                                                                          Méthode
+In-app                                                                          Micro-feedback après parcours, report/support.
+Pilot interviews                                                                Entretiens courts avec cohortes.
+Partner reviews                                                                 Session hebdomadaire avec partenaires pilotes.
+Support taxonomy                                                                Coder motifs récurrents.
+Zero-result analysis                                                            Catégories/aliases/offre manquants.
+Drop-off analysis                                                               Étapes abandonnées.
+Incident postmortem                                                             Cause, impact, correction, regression test.
+Feature requests                                                                Séparer besoin réel, bug et préférence.
+
+
+
+
+22. Expansion gates
+Gate                                                                            Exigence
+Technical stability                                                             Aucun S0/S1; taux d'erreur sous seuil convenu.
+Payment integrity                                                               Reconciliation maîtrisée; pas de pattern de doubles charges.
+Operational capacity                                                            Backlog et SLA soutenables.
+Supply density                                                                  Offre suffisante dans catégorie/zone avant acquisition.
+Trust readiness                                                                 Verification/moderation adaptées au nouveau domaine.
+Partner readiness                                                               Restaurants/delivery/employers/etc. réellement disponibles.
+Unit economics signal                                                           Coût d'acquisition/support compatible avec stratégie; à analyser sans inventer seuil.
+User value                                                                      Interactions utiles et rétention observables.
+
+
+
+
+23. Kill switches et rollback
+Domaine                                                                         Action de protection
+Payment provider                                                                Suspendre nouvelles tentatives; conserver reconciliation.
+Marketplace checkout                                                            Désactiver checkout sans supprimer listings.
+Food ordering                                                                   Désactiver ordering par zone/restaurant.
+Partner delivery                                                                Désactiver assignments; garder pickup si possible.
+Ticket sales                                                                    Stop sales tout en conservant tickets déjà valides.
+Promotion                                                                       Stop campagnes sponsorisées.
+Sensitive category                                                              Désactiver publication/discovery ciblée.
+New registrations                                                               Limiter si incident sécurité majeur.
+Feature release                                                                 Rollback/feature flag sans migration destructive.
+
+
+
+
+24. Communication d'incident
+Audience                                                                        Contenu
+Utilisateurs affectés                                                           Ce qui est indisponible, état de leur action, prochaine étape.
+Partenaires                                                                     Impact opérationnel et procédure temporaire.
+Support                                                                         Script factuel + case routing.
+Finance                                                                         Transactions affectées/reconciliation.
+Leadership                                                                      Impact, scope, mitigation, décision.
+                        Plateforme Écosystème RDC · Document 11 · Plan de Lancement Kinshasa & Déploiement Progressif · Septembre 2026
+ Public status                                                                Si pertinent: information concise sans données sensibles.
+ Authorities                                                                  Uniquement selon obligations validées juridiquement.
+
+
+
+
+25. Risques de lancement et mitigations
+ Risque                                                                       Mitigation
+ Plateforme vide                                                              Seed supply avant campagne publique.
+ Trop de catégories                                                           Activation progressive et taxonomy governance.
+ Fraude/scams                                                                 Verification contextuelle, reports, moderation, manual review.
+ Paiement ambigu                                                              Provider-authoritative states + reconciliation.
+ Delivery insuffisante                                                        Lancement par zones/partenaires; pickup fallback.
+ Support saturé                                                               Cohortes, limits, knowledge base, triage.
+ Partners inactive                                                            Partner Success + quality/activity reviews.
+ Users confused by breadth                                                    Home/search/use-case messaging simple.
+ Poor connectivity                                                            Low-bandwidth design, retries, idempotency.
+ Premature monetization                                                       Free utility first; paid capabilities measured.
+ Privacy incident                                                             Field-level access, audit, incident runbook.
+ Reputation damage                                                            Transparent communication; do not overpromise verification.
+
+
+
+
+26. Critères d'acceptation du lancement
+ Test                                                                         Critère
+ LCH-AC-01                                                                    Aucun lancement public avant Go/No-Go Document 10.
+ LCH-AC-02                                                                    Chaque catégorie activée a un owner opérationnel et une policy applicable.
+ LCH-AC-03                                                                    Les partenaires pilotes effectuent au moins un dry run avant activation.
+ LCH-AC-04                                                                    Un paiement réel ne démarre pas sans reconciliation runbook.
+ LCH-AC-05                                                                    Une zone food/delivery n'est activée qu'avec capacité partenaire vérifiée.
+ LCH-AC-06                                                                    Un événement payant pilote réalise un test QR/check-in avant ouverture.
+ LCH-AC-07                                                                    Les utilisateurs peuvent candidater à un emploi sans abonnement payant.
+ LCH-AC-08                                                                    Une promotion est toujours identifiable comme sponsorisée.
+ LCH-AC-09                                                                    Un plan payé ne modifie jamais verification ou permissions.
+ LCH-AC-10                                                                    Les P0/P1 ont un chemin d'escalade opérationnel.
+ LCH-AC-11                                                                    Les métriques de lancement sont visibles avant acquisition large.
+ LCH-AC-12                                                                    Chaque incident majeur produit une action corrective et un regression test.
+ LCH-AC-13                                                                    L'expansion de zone/catégorie nécessite un gate mesuré.
+ LCH-AC-14                                                                    Les kill switches critiques sont testés avant GA.
+ LCH-AC-15                                                                    Le support sait distinguer payment, order, delivery et case states.
+ LCH-AC-16                                                                    Les claims de verification utilisés en marketing correspondent aux contrôles réels.
+ LCH-AC-17                                                                    Aucune donnée enfant n'est utilisée pour acquisition publique.
+ LCH-AC-18                                                                    Le pilote peut être ralenti ou suspendu sans perte d'historique.
+ LCH-AC-19                                                                    Les prix finaux affichés proviennent de configuration approuvée, pas du code.
+ LCH-AC-20                                                                    Une phase n'est pas déclarée réussie uniquement sur le nombre d'inscriptions.
+
+
+
+
+27. Plan indicatif de séquençage
+ Période indicative                                                           Focus
+ Pré-lancement                                                                Readiness, seed supply, partenaires, runbooks, training staff.
+ Semaine 1                                                                    Internal alpha / production smoke contrôlé.
+ Semaines 2-3                                                                 Partner onboarding + dry runs.
+ Semaines 4-6                                                                 Closed beta multi-cohortes.
+ Semaines 7-10                                                                Kinshasa pilot ciblé; commerce/recruitment/events graduels.
+ Après pilote                                                                 GA Kinshasa si gates satisfaits; sinon prolonger/corriger.
+ Post-GA                                                                      Expansion catégorie/zone par vagues.
+
+
+
+
+Ce calendrier est indicatif, non contractuel. Les gates de qualité priment sur les dates.
+
+
+
+
+28. Préparation de la General Availability Kinshasa
+ Domaine                                                                      Checklist
+ Product                                                                      Critical flows stables; copy/localization validées.
+ Engineering                                                                  Monitoring, backups, rollback, capacity.
+ Payments                                                                     Production provider, reconciliation, refunds.
+ Ops                                                                          Queues, staffing, escalation, handoff.
+ Trust                                                                        Verification/moderation/safety policies actives.
+ Partners                                                                     Supply active et contacts opérationnels.
+
+                      Plateforme Écosystème RDC · Document 11 · Plan de Lancement Kinshasa & Déploiement Progressif · Septembre 2026
+ Support                                                                       Knowledge base, scripts, SLAs.
+ Growth                                                                        Campaigns alignées à supply réelle.
+ Legal                                                                         Launch blockers validés.
+ Analytics                                                                     Dashboards et event tracking vérifiés.
+
+
+
+
+29. Expansion hors Kinshasa
+L'architecture doit être multi-market, mais l'expansion ne doit pas être une simple activation d'un bouton. Chaque nouvelle ville ou zone
+nécessite une revue de supply, providers, delivery, paiements, catégories, règles locales, support, taxonomie/aliases, partenaires et risques.
+
+ Avant expansion                                                               Question
+ Demand                                                                        Quels usages ont une demande observable?
+ Supply                                                                        Quels partenaires peuvent être onboardés avant campagne?
+ Payments                                                                      Méthodes/providers fonctionnent-ils localement?
+ Delivery                                                                      Existe-t-il une capacité partenaire suffisante?
+ Support                                                                       Horaires/langues/escalades sont-ils adaptés?
+ Trust                                                                         Les risques/catégories nécessitent-ils règles supplémentaires?
+ Economics                                                                     Le coût opérationnel est-il soutenable?
+ Connectivity                                                                  Faut-il adapter davantage l'expérience low-bandwidth?
+
+
+
+
+30. Gouvernance de décision
+ Décision                                                                      Participants
+ Go/No-Go release                                                              Product, Engineering, QA, Ops, Security/Trust, Finance selon scope
+ Activate payment provider                                                     Engineering + Finance + Ops
+ Activate sensitive category                                                   Trust + Product + Legal validation si requise
+ Expand delivery zone                                                          Commerce Ops + delivery partner + Product
+ Open public beta/GA                                                           Launch lead + domain owners
+ Pause module                                                                  Incident commander/domain owner selon runbook
+ Expand new city                                                               Leadership + Product/Ops + local readiness owners
+
+
+
+
+31. V1 vs évolution du go-to-market
+ V1 / lancement                                                                Évolution ultérieure
+ Cohortes et activation manuelle                                               Growth automation avancée
+ Partner Success intensif                                                      Self-service onboarding à plus grande échelle
+ Dashboards essentiels                                                         Attribution/analytics avancés
+ Promotion simple                                                              Ads marketplace plus sophistiqué
+ City/zone gates manuels                                                       Automated market readiness signals
+ Basic referral                                                                Referral/loyalty systems avancés
+ Field/community onboarding                                                    Partnership network élargi
+ Manual experimentation governance                                             Experimentation platform/A-B testing avancé
+
+
+
+
+32. Liens avec les documents maîtres
+ Document                                                                      Utilisation dans le lancement
+ Document 01                                                                   Détermine ce qui existe en V1.
+ Document 02                                                                   Définit les parcours à activer et observer.
+ Document 03                                                                   Contrôle catégories, aliases et restrictions.
+ Document 05                                                                   Cadre plans/passes/promotion.
+ Document 06                                                                   Protège rôles et scopes partenaires/staff.
+ Document 07                                                                   Cadre verification, moderation et safety.
+ Document 08                                                                   Sécurise transactions/refunds/disputes.
+ Document 09                                                                   Définit les opérations quotidiennes.
+ Document 10                                                                   Fournit le Go/No-Go et la recette.
+ Document 12 à venir                                                           Centralisera les validations juridiques/conformité restantes.
+
+
+
+
+                       Plateforme Écosystème RDC · Document 11 · Plan de Lancement Kinshasa & Déploiement Progressif · Septembre 2026
+33. Règle finale de lancement
+La réussite du lancement ne se mesure pas au nombre de fonctionnalités activées ni au nombre brut d'inscriptions. Elle se mesure à la
+capacité de la plateforme à produire des interactions utiles, fiables et répétables entre des personnes et des organisations réelles, tout en
+maintenant la confidentialité, la sécurité, la traçabilité financière et une charge opérationnelle soutenable. L'expansion doit suivre la
+preuve d'utilité et de maîtrise opérationnelle.
+
+
+
+
+                  Plateforme Écosystème RDC · Document 11 · Plan de Lancement Kinshasa & Déploiement Progressif · Septembre 2026
+

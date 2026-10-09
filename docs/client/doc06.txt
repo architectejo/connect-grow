@@ -1,0 +1,529 @@
+RÉFÉRENTIEL DES RÔLES, PERMISSIONS &
+                  CONTRÔLE D'ACCÈS
+               Plateforme Écosystème RDC
+                 Document 06 - Object × Actor × Permission × Scope × Entitlement
+
+                        Version de référence V1 / Post-V1 - Septembre 2026
+
+
+
+
+      Plateforme Écosystème RDC · Document 06 · Rôles, Permissions & Contrôle d'Accès · Septembre 2026
+1. Objet et règle d'autorisation
+Ce référentiel transforme le modèle d'accès de la plateforme en règles directement exploitables par le développement, le QA et
+l'administration. Il ne remplace pas l'authentification: il décide ce qu'un acteur authentifié peut faire, sur quel objet, dans quel
+contexte et pour quelle finalité.
+
+Règle autoritative: Authentification → Identité active → Relation/Membership → Permission + Scope objet/organisationnel →
+Éligibilité → Entitlement → Règles marché/catégorie → Consentement & confidentialité → État sécurité → Allow/Deny.
+
+
+
+
+2. Principaux contextes d'action
+ Code                                    Contexte                               Définition                            Exemples d'activités
+                                                                                                                      Explorer; rechercher; voir contenu
+ ACT-VIS                                 Visitor                                Personne non authentifiée
+                                                                                                                      public
+                                                                                                                      Acheter; réserver; postuler;
+ ACT-IND                                 Individual                             Personne agissant pour elle-même
+                                                                                                                      participer; vendre objet personnel
+                                                                                Personne offrant des services en      Publier service; devis; booking;
+ ACT-PRO                                 Individual Provider
+                                                                                son nom                               profil pro
+                                                                                Individu/ménage recrutant à titre     Publier emploi domestique;
+ ACT-HHE                                 Household Employer
+                                                                                privé                                 shortlist; entretien
+                                                                                Membre agissant pour une              Actions limitées aux permissions
+ ACT-OM                                  Organization Member
+                                                                                organisation                          reçues
+                                                                                Administrateur autorisé               Membres; rôles; modules; branches
+ ACT-OA                                  Organization Admin
+                                                                                d'organisation                        selon scope
+                                                                                Mandataire autorisé pour
+ ACT-REP                                 Authorized Representative                                                    Action déléguée et bornée
+                                                                                objet/opération
+                                                                                                                      Support; vérification; modération;
+ ACT-STAFF                               Platform Staff                         Personnel interne de plateforme
+                                                                                                                      finance; admin
+
+
+
+
+3. Activités qui ne sont PAS des types de compte
+ Relation / activité                                                            Pourquoi ce n'est pas un compte séparé
+ Acheteur / client                                                              Un individu ou une organisation peut acheter dans son contexte autorisé.
+ Vendeur                                                                        Décrit une activité Marketplace, pas une identité permanente.
+ Candidat                                                                       Relation à une offre d'emploi; l'individu conserve son identité.
+ Recruteur                                                                      Rôle/permission dans une organisation ou activité d'employeur particulier.
+ Participant / attendee                                                         Relation à un événement.
+ Organisateur                                                                   Capacité exercée par individu/organisation éligible.
+ Parent / tuteur                                                                Relation autorisée avec un bénéficiaire, pas un compte enfant.
+ Donateur / volontaire                                                          Relation à campagne/opportunité.
+ Restaurant / école / hôtel                                                     Types d'organisation, pas classes d'utilisateurs.
+
+
+
+
+4. Modèle de permission
+ Dimension                                            Exemples                                           Règle
+ Module                                               Marketplace; Jobs; Billing; Events                 Réduit le domaine d'action
+                                                      view; create; edit; publish; approve; refund;
+ Action                                                                                                  Verbe atomique autant que possible
+                                                      assign
+ Object type                                          Job; Order; Candidate File; Event; Payment         Type de ressource
+                                                      own; assigned; branch; organization; explicit
+ Object scope                                                                                            Portée concrète
+                                                      object
+ Org scope                                            branche; département; organisation                 Jamais supposé global
+ Purpose                                              recruitment; fulfillment; billing; support         Contrôle de finalité pour données sensibles
+ Field access                                         basic; contact; financial; sensitive               Divulgation minimisée
+ Conditions                                           status; verification; consent; security            Contraintes dynamiques
+
+
+
+
+                              Plateforme Écosystème RDC · Document 06 · Rôles, Permissions & Contrôle d'Accès · Septembre 2026
+5. Bibliothèque initiale de permissions
+Code                             Objet                               Action                           Scope                                  Finalité
+PERM-ORG-VIEW                    organization                        view                             assigned/org                           Voir organisation autorisée
+PERM-ORG-EDIT                    organization                        edit                             assigned/org                           Modifier profil organisation
+PERM-ORG-MEMBER-                                                                                                                             Inviter, suspendre, gérer
+                                 membership                          manage                           org/branch
+MANAGE                                                                                                                                       membres
+PERM-ORG-ROLE-MANAGE             role_binding                        manage                           org/branch                             Attribuer rôles autorisés
+PERM-MKT-PUBLISH                 listing                             publish                          own/org                                Publier annonce/offre
+PERM-MKT-ORDER-MANAGE            order                               manage                           seller/org                             Traiter commandes
+PERM-SRV-PUBLISH                 service                             publish                          own/org                                Publier service
+PERM-QUOTE-RESPOND               quote                               respond                          provider/org                           Répondre devis
+PERM-BOOKING-MANAGE              booking/resource                    manage                           own/org                                Gérer réservations/ressources
+PERM-FOOD-MENU-MANAGE            menu                                manage                           restaurant                             Gérer menu
+PERM-FOOD-ORDER-MANAGE           food_order                          manage                           restaurant                             Traiter commande repas
+PERM-DLV-JOB-MANAGE              delivery_request                    manage                           delivery_org                           Traiter livraison assignée
+PERM-JOB-PUBLISH                 job                                 publish                          household/org                          Publier offre emploi
+                                                                                                                                             Voir dossier candidat pour
+PERM-REC-CANDIDATE-VIEW          candidate_file                      view                             job/assigned
+                                                                                                                                             recrutement autorisé
+PERM-REC-PIPELINE-
+                                 application                         manage                           job/assigned                           Changer étape pipeline
+MANAGE
+PERM-REC-INTERVIEW               interview                           manage                           job/assigned                           Planifier/consigner entretien
+PERM-TRN-PUBLISH                 training_program                    publish                          provider/org                           Publier formation
+PERM-TRN-COHORT-MANAGE           training_cohort                     manage                           provider/org                           Gérer cohorte
+PERM-EVT-PUBLISH                 event                               publish                          own/org                                Publier événement éligible
+PERM-EVT-TICKET-MANAGE           ticket_order                        manage                           event/org                              Gérer billetterie
+PERM-EVT-CHECKIN                 ticket                              checkin                          event                                  Scanner/check-in
+PERM-SCH-BENEFICIARY-
+                                 beneficiary                         view                             authorized relationship                Voir bénéficiaire autorisé
+VIEW
+                                                                                                                                             Voir/assigner conversations
+PERM-MSG-TEAM-INBOX              conversation                        manage                           org/team
+                                                                                                                                             d'équipe
+PERM-BILLING-VIEW                billing                             view                             org                                    Voir facturation plateforme
+                                                                                                                                             Gérer abonnement/moyen de
+PERM-BILLING-MANAGE              billing                             manage                           org
+                                                                                                                                             paiement
+PERM-VERIFY-REVIEW               verification_case                   review                           staff queue                            Traiter vérification
+PERM-MOD-REVIEW                  moderation_case                     review                           staff queue                            Traiter modération
+                                                                                                                                             Autoriser remboursement
+PERM-REFUND-APPROVE              refund                              approve                          staff scope
+                                                                                                                                             selon seuil
+PERM-TAXONOMY-MANAGE             taxonomy                            manage                           staff                                  Administrer taxonomie
+PERM-AUDIT-VIEW                  audit_log                           view                             restricted staff                       Consulter audit selon finalité
+
+
+
+
+6. Rôles organisationnels de référence
+Rôle                                                       Permissions typiques                                     Exclusions importantes
+Owner / Org Admin                                          Profil org, membres, rôles, modules autorisés            Pas automatiquement toutes données sensibles
+Branch Manager                                             Opérations de sa branche                                 Aucune autre branche sauf délégation
+Recruiter                                                  Jobs, candidatures, pipeline, entretiens                 Pas billing; pas dossiers hors recrutements assignés
+Hiring Manager                                             Candidats/jobs assignés, feedback                        Pas administration globale
+Sales / Commerce Manager                                   Produits/services/offres, commandes selon module         Pas candidats ni billing par défaut
+                                                           Conversations/cases assignés, informations
+Customer Service                                                                                                    Pas documents identité/finance sans besoin
+                                                           nécessaires
+                                                           Plans, factures plateforme, paiements commerciaux
+Billing Manager                                                                                                     Pas CV/candidats par défaut
+                                                           autorisés
+Event Manager                                              Événements, tickets, check-in                            Pas recrutement/billing général
+Training Manager                                           Programmes/cohortes/participants autorisés               Pas dossier d'emploi complet
+School Admin                                               Admissions/communications/relations autorisées           Pas exposition publique enfant
+Delivery Dispatcher                                        Delivery Requests et données nécessaires                 Pas détails commerciaux non nécessaires
+
+
+
+
+7. Matrice Object × Actor × Permission - identité & organisation
+Objet / action         Individual                 Provider                  Org Member          Org Admin                   Staff                     Conditions
+Profil personnel -
+                       Own                        Own                       Own                 Own                         Support limité            Propriété identité
+voir/modifier
+                                                                                                                                                      Éligibilité +
+Profil prestataire -
+                       -                          Own                       -                   -                           Modération                entitlement si
+publier
+                                                                                                                                                      requis
+Organisation - voir                                                         Public + interne                                                          Confidentialité
+                       Public                     Public                                        Org                         Support
+public                                                                      autorisé                                                                  champs
+                             Plateforme Écosystème RDC · Document 06 · Rôles, Permissions & Contrôle d'Accès · Septembre 2026
+Organisation -                                                                                                                          Support
+                         -                        -                           Si permission                Oui selon scope                                    Membership actif
+modifier                                                                                                                                exceptionnel
+                                                                                                                                        Support
+Membres - gérer          -                        -                           Si permission                Oui                                                Autorité vérifiée
+                                                                                                                                        exceptionnel
+                                                                                                                                                              Ne peut déléguer
+                                                                                                                                        Support
+Rôles - attribuer        -                        -                           Si délégué                   Oui                                                au-delà de son
+                                                                                                                                        exceptionnel
+                                                                                                                                                              autorité
+Claim organisation       Demande                  Demande                     -                            -                            Review                Preuve d'autorité
+
+
+
+
+8. Marketplace, services et booking
+Action                       Individual                   Provider                            Org Member/Admin                Staff                       Entitlement / règle
+Acheter                      Oui                          Oui                                 Oui si achat org autorisé       Support                     Aucun plan requis
+                                                          Oui en contexte
+Vendre objet personnel       Oui                                                              -                               Modération                  Quota/policy
+                                                          personnel
+Publier offre
+                             Non par défaut               Oui si éligible                     Oui si permission               Modération                  Plan/quota possible
+commerciale
+Gérer commandes
+                             Own                          Own commercial                      Scope org                       Support                     Permission + ownership
+vendeur
+Demander devis               Oui                          Oui comme client                    Oui si autorisé                 -                           Gratuit de base
+Répondre devis               -                            Oui                                 Oui si permission               -                           Provider/service éligible
+Créer ressource
+                             -                            Oui                                 Oui si permission               -                           Plan/capability possible
+réservable
+Gérer booking                Client: own                  Provider: own                       Scope org                       Support                     Field access selon rôle
+
+
+
+
+9. Restaurants et livraison
+Objet/action                 Client                       Restaurant staff                    Delivery provider               Platform staff              Données minimales
+                                                                                                                                                          Commande + contact
+Food Order - créer           Oui                          -                                   -                               Support
+                                                                                                                                                          nécessaire
+Food Order -
+                             Voir own                     Permission restaurant               -                               Support                     Items, timing, fulfillment
+accepter/préparer
+Delivery Request -                                                                                                                                        Pickup/dropoff/contact
+                             Suivi limité                 Suivi fulfillment                   Permission delivery org         Support
+accepter                                                                                                                                                  nécessaire
+Cash collection -                                                                                                                                         Responsabilité
+                             Selon payeur                 Si collecteur autorisé              Si collecteur autorisé          Audit/review
+confirmer                                                                                                                                                 explicitement enregistrée
+                             Après commande                                                   Seulement mission                                           Jamais découverte
+Adresse exacte                                            Fulfillment                                                         Support si case
+                             nécessaire                                                       assignée                                                    publique
+Détails paiement             Statut own                   Statut utile                        Pas plus que nécessaire         Finance/support scope       Séparation financière
+
+
+
+
+10. Jobs & recrutement
+Action                   Candidate                Household Employer          Recruiter                    Hiring Manager               Billing Manager       Staff
+Voir job public          Oui                      Oui                         Oui                          Oui                          Oui                   Modération
+Postuler                 Own                      -                           -                            -                            -                     Support
+Publier emploi
+                         -                        Oui si entitlement          -                            -                            -                     Modération
+domestique
+                                                                              Permission +
+Publier job entreprise   -                        -                                                        Selon permission             Non                   Modération
+                                                                              entitlement
+Voir candidature         Own                      Job own                     Jobs assignés                Jobs assignés                Non                   Support restreint
+                                                  Après relation
+Voir contact candidat    Own                                                  Finalité recrutement         Finalité recrutement         Non                   Support restreint
+                                                  autorisée
+Shortlist / pipeline     -                        Own recruitment             Permission                   Permission                   Non                   Support
+Programmer
+                         Candidate participe      Oui                         Oui                          Oui                          Non                   Support
+entretien
+Voir billing
+                         -                        Own purchase                Non par défaut               Non                          Oui                   Finance staff
+recrutement
+                                                                              Si capability +
+Enterprise discovery     Opt-in seulement         -                                                        Si scope                     Non                   Audit
+                                                                              permission
+
+
+
+
+11. Formation workforce
+Action                       Employee/Candidate           Employer/Recruiter                  Training Provider               Staff                       Protection
+
+                                 Plateforme Écosystème RDC · Document 06 · Rôles, Permissions & Contrôle d'Accès · Septembre 2026
+Voir programme public      Oui                       Oui                        Oui                          Modération             Public seulement
+                                                                                                                                    Consentement/
+Inviter à formation        Reçoit invitation         Permission + relation      -                            Support
+                                                                                                                                    notification
+Inscrire cohorte privée    Own/consent               Permission                 Manage cohort                Support                Finalité formation
+                                                                                                                                    Pas dossier emploi
+Voir présence              Own                       Selon relation/purpose     Cohorte assignée             Support
+                                                                                                                                    complet
+Voir résultat/completion   Own                       Si consent/purpose         Provider record              Support                Provenance obligatoire
+Utiliser completion pour                                                                                                            Ne crée pas verdict
+                           Contrôle applicable       Factual input seulement    -                            Audit
+hiring                                                                                                                              autonome
+
+
+
+
+12. Événements, ticketing et campagnes
+Action                     Individual                Organizer / Org            Check-in Staff               Platform Staff         Conditions
+Voir événement public      Oui                       Oui                        Oui                          Modération             Visibilité public
+                                                                                                                                    Jamais indexé
+Voir événement privé       Invitation/autorisation   Own                        Si assigné                   Support restreint
+                                                                                                                                    publiquement
+Créer événement            Selon éligibilité         Permission                 -                            Modération             Plan/pass si applicable
+Acheter ticket             Oui                       Oui comme participant      -                            Support                Paiement
+Scanner ticket             -                         Permission                 Permission check-in          Support                Event scope seulement
+Voir liste invités         Own relation              Permission                 Minimum check-in             Support restreint      Field-level
+Gérer campagne             Participant seulement     Org permission             -                            Modération             Éligibilité/policy
+
+
+
+
+13. École, parent et bénéficiaire
+Objet/action               Parent/tuteur             School staff               Org Admin                    Staff                  Règle
+                                                                                Selon rôle, pas
+Bénéficiaire - voir        Relation autorisée        Besoin scolaire autorisé                                Support restreint      Pas de profil enfant public
+                                                                                automatiquement
+Admission - soumettre      Oui                       Traite si permission       Selon rôle                   Support                Données minimisées
+                                                     Permission contexte                                                            Pas usage commercial
+Communication parent       Own relation                                         Selon rôle                   Support
+                                                     scolaire                                                                       secondaire
+Événement scolaire
+                           Invitation/relationship   Manage                     Selon rôle                   Support                Non public
+restreint
+Documents sensibles        Own/consent               Seulement rôle/purpose     Pas accès global implicite   Restricted staff       Journalisation
+
+
+
+
+14. Messagerie et Team Inbox
+Règle                                                                           Implémentation attendue
+Contexte fixé                                                                   Chaque conversation conserve l'identité agissante et le contexte métier.
+                                                                                Une conversation organisationnelle n'est visible qu'aux membres
+Accès équipe
+                                                                                autorisés/assignés.
+                                                                                L'historique reste; la nouvelle personne reçoit l'accès nécessaire,
+Réassignation
+                                                                                l'ancienne peut le perdre.
+Départ membre                                                                   Révoquer accès futur sans supprimer l'historique organisationnel.
+                                                                                Héritent du contrôle d'accès de la conversation et de la sensibilité du
+Pièces jointes
+                                                                                document.
+Support plateforme                                                              Pas d'accès généralisé; accès lié à case/support et journalisé.
+Blocage                                                                         Peut empêcher nouveaux messages sans effacer les preuves nécessaires.
+
+
+
+
+15. Billing, paiements et remboursements
+Action                     Utilisateur/Client        Org Billing Manager        Operational staff            Finance staff          Contrôle
+Voir paiement
+                           Oui                       Si paiement org            Selon besoin                 Oui scope              Data minimization
+transactionnel own
+Voir abonnement
+                           Own                       Oui org                    Non par défaut               Oui                    Billing permission
+plateforme
+Changer plan               Own                       Oui                        Non                          Support contrôlé       Entitlement + payment
+Initier refund demande     Selon case                Selon relation             Support                      Oui                    Refund record séparé
+Approuver refund           Non                       Non                        Non par défaut               Permission + seuil     Four-eye selon seuil
+                                                                                                                                    Action auditée +
+Override financier         Non                       Non                        Non                          Très restreint
+                                                                                                                                    justification
+
+
+
+                           Plateforme Écosystème RDC · Document 06 · Rôles, Permissions & Contrôle d'Accès · Septembre 2026
+16. Platform Staff - séparation des fonctions
+Rôle interne                                              Peut                                                       Ne doit pas automatiquement
+                                                                                                                     Voir documents identité complets, approuver gros
+Support Agent                                             Cases, contexte nécessaire, assistance
+                                                                                                                     refunds
+Trust & Verification Reviewer                             Dossiers de vérification assignés                          Accès billing/candidats sans finalité
+Moderator                                                 Contenu signalé, actions de modération                     Accès financier complet
+Finance Operations                                        Paiements/refunds/reconciliation                           Lire messages privés ou CV sans case
+Taxonomy Admin                                            Catégories/attributs/aliases                               Voir données privées utilisateurs
+Platform Admin technique                                  Configuration autorisée                                    Utiliser privilèges pour opérations métier ordinaires
+Security/Audit                                            Logs/incidents selon mandat                                Modifier silencieusement les preuves
+
+
+
+
+17. Field-level disclosure
+Donnée                            Public                             Relation autorisée               Opérations                           Staff restreint
+Nom/profil public choisi          Oui selon profil                   Oui                              Oui si nécessaire                    Oui
+                                                                     Seulement fulfillment/relation
+Adresse exacte domicile           Non                                                                 Très limitée                         Case/sécurité
+                                                                     nécessaire
+Téléphone/email privé             Non par défaut                     Selon interaction/consentement   Selon finalité                       Support restreint
+CV complet                        Non                                Recruitment autorisé             Recruiters assignés                  Support restreint
+                                                                                                                                           Verification reviewers
+Pièce identité                    Jamais                             Non                              Non
+                                                                                                                                           seulement
+Données enfant/bénéficiaire       Jamais                             Parent/école autorisée           Purpose-bound                        Très restreint
+Données paiement sensibles        Jamais                             Statut/référence utile           Billing/finance                      Finance restreint
+Références professionnelles       Statut/count public possible       Contact avec consentement        Recruitment purpose                  Verification/review
+
+
+
+
+18. Entitlements et permissions - interaction
+Situation                                  Permission                                 Entitlement                                  Résultat
+Recruiter autorisé, quota job
+                                           Oui                                        Oui                                          Allow si autres contrôles passent
+disponible
+Recruiter autorisé, quota épuisé           Oui                                        Non                                          Deny création; proposer upgrade/pass
+Plan Enterprise, utilisateur non
+                                           Non                                        Oui                                          Deny
+recruiter
+Billing manager avec Business Pro          Billing only                               Oui                                          Deny accès CV
+Prestataire vérifié mais plan expiré                                                                                               Fonction premium bloquée;
+                                           Oui/éligible                               Non
+pour capacité premium                                                                                                              vérification reste
+Compte suspendu avec abonnement
+                                           Oui                                        Oui                                          Deny par security state
+actif
+
+
+
+
+19. Consentement, délégation et révocation
+Événement                                                                             Effet d'accès
+                                                                                      Révoquer les usages dépendant du consentement, conserver obligations
+Retrait consentement
+                                                                                      légales/audit applicables.
+Membre quitte organisation                                                            Membership inactive; permissions dérivées cessent immédiatement.
+Rôle retiré                                                                           Permissions dérivées cessent; objets/historique restent à l'organisation.
+Changement de branche                                                                 Recalcul du scope; pas d'héritage silencieux de l'ancienne branche.
+Délégation future                                                                     Objet, action, durée et finalité explicites; Post-V1 avancé.
+                                                                                      Security state peut bloquer toutes actions sensibles malgré
+Compte compromis
+                                                                                      permissions/entitlements.
+
+
+
+
+20. Décision Allow / Deny - codes de raison
+Code                                                                                  Signification
+ALLOW                                                                                 Tous contrôles satisfaits
+DENY_AUTH                                                                             Authentification absente/invalide
+DENY_CONTEXT                                                                          Contexte actif incompatible
+DENY_RELATION                                                                         Membership/relation absente
+DENY_PERMISSION                                                                       Permission requise absente
+
+                              Plateforme Écosystème RDC · Document 06 · Rôles, Permissions & Contrôle d'Accès · Septembre 2026
+    DENY_SCOPE                                                                    Objet/branche hors scope
+    DENY_ELIGIBILITY                                                              Acteur/catégorie non éligible
+    DENY_ENTITLEMENT                                                              Capacité commerciale absente/expirée/quota atteint
+    DENY_MARKET_RULE                                                              Règle marché/catégorie bloque
+    DENY_CONSENT                                                                  Consentement/finalité insuffisant
+    DENY_PRIVACY                                                                  Champ/donnée non divulguable
+    DENY_SECURITY                                                                 Suspension/risque/état sécurité
+    DENY_OBJECT_STATE                                                             État de l'objet interdit l'action
+
+
+
+
+21. Audit et actions sensibles
+    Action                                             Journalisation minimale                                Contrôle additionnel
+    Attribution rôle admin                             acteur, cible, rôle, scope, date, motif                Notification + audit
+    Accès document identité                            staff, dossier, finalité, date                         Restricted role
+    Refund important                                   montant, transaction, approver, reason                 Four-eye/seuil configurable
+    Override paiement                                  avant/après, source, justification                     Très restreint
+    Modification taxonomy policy                       règle, marché, auteur, version                         Changelog
+    Suspension compte/org                              acteur, raison, durée, evidence ref                    Appeal path
+    Export données                                     demandeur, scope, finalité, fichier                    Contrôle confidentialité
+    Impersonation/support access si implémenté         staff, user/org, début/fin, raison                     Bannière + audit strict
+
+
+
+
+22. Tests d'acceptation prioritaires
+    Test                                                                          Critère
+                                                                                  Un recruiter de Branche A ne peut pas lire les candidats d'un job Branche B sans
+    AC-01
+                                                                                  scope.
+    AC-02                                                                         Un Billing Manager ne peut pas lire les CV même avec Business Pro.
+    AC-03                                                                         Un plan Enterprise ne permet pas la découverte d'un candidat non opt-in.
+    AC-04                                                                         Un parent ne voit que les bénéficiaires reliés à son autorisation.
+                                                                                  Un delivery provider ne reçoit l'adresse exacte qu'après mission assignée et
+    AC-05
+                                                                                  nécessaire.
+                                                                                  L'expiration d'un plan bloque nouvelles capacités premium sans supprimer
+    AC-06
+                                                                                  historique.
+                                                                                  Le retrait d'un membre révoque immédiatement les permissions
+    AC-07
+                                                                                  organisationnelles.
+                                                                                  Une promotion payée ne change ni verification status ni classement organique
+    AC-08
+                                                                                  non sponsorisé.
+    AC-09                                                                         Un staff support ne peut pas approuver un refund au-delà de son seuil.
+    AC-10                                                                         Un entitlement actif sans permission produit DENY_PERMISSION.
+    AC-11                                                                         Une permission valide avec quota épuisé produit DENY_ENTITLEMENT.
+                                                                                  Une conversation Team Inbox retirée du scope n'est plus lisible par l'ancien
+    AC-12
+                                                                                  membre.
+    AC-13                                                                         Une pièce identité n'est jamais servie via endpoint public.
+    AC-14                                                                         Un changement de rôle est journalisé avec acteur, cible, scope et timestamp.
+    AC-15                                                                         Une suspension sécurité prévaut sur entitlement payé.
+
+
+
+
+23. V1 vs Post-V1
+    V1                                                                            Post-V1
+    RBAC/ABAC hybride avec scopes org/branche/objet                               Délégation personnelle objet-par-objet avancée
+    Field-level privacy pour données sensibles                                    Policy engine externe si complexité le justifie
+    Rôles organisationnels configurables dans cadre contrôlé                      SSO/SCIM Enterprise
+    Entitlements séparés des permissions                                          Federated enterprise identity avancée
+    Audit des actions sensibles                                                   Just-in-time privileged access avancé
+    Four-eye pour opérations financières sensibles                                Workflows d'approbation multi-niveaux sophistiqués
+
+
+
+
+24. Règles d'implémentation développeur
+      Le backend est la source d'autorité: masquer un bouton dans l'UI n'est jamais un contrôle d'accès suffisant.
+
+                               Plateforme Écosystème RDC · Document 06 · Rôles, Permissions & Contrôle d'Accès · Septembre 2026
+      Chaque endpoint sensible doit déclarer objet, action, scope et, lorsque pertinent, purpose.
+      Ne jamais dériver l'autorité organisationnelle du domaine email ou d'un plan payé.
+      Ne jamais stocker un simple booléen is_admin comme substitut au modèle complet.
+      Les permissions effectives doivent être recalculables et invalidées rapidement après changement de membership/rôle.
+      Les contrôles d'entitlement doivent être idempotents et les consommations de quota atomiques.
+      Les réponses Deny doivent exposer un reason code exploitable sans révéler d'informations sensibles.
+      Les logs d'audit doivent être immuables ou protégés contre l'altération ordinaire.
+      Les accès staff sont soumis au même principe de moindre privilège que les utilisateurs externes.
+
+
+
+
+25. Liens avec la suite documentaire
+    Document                                                                   Relation
+    Document 01 - Référentiel Fonctionnel                                      Source des fonctionnalités à protéger.
+    Document 02 - Parcours Utilisateurs                                        Les parcours traversent ces contrôles d'accès.
+    Document 03 - Taxonomie                                                    Éligibilité/policy peuvent dépendre des catégories.
+    Document 05 - Plans & Entitlements                                         Définit les capacités commerciales, distinctes des permissions.
+                                                                               Définira les preuves, workflows de confiance, signalements et décisions de
+    Document 07 à venir - Trust, Vérification, Modération & Sécurité
+                                                                               sécurité.
+    Plan de Tests V1                                                           Transformera notamment AC-01 à AC-15 en scénarios de recette.
+
+
+
+
+                              Plateforme Écosystème RDC · Document 06 · Rôles, Permissions & Contrôle d'Accès · Septembre 2026
+

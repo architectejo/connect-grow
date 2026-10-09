@@ -1,0 +1,582 @@
+ COMPRENDRE LA PLATEFORME
+      Guide des utilisateurs, profils, rôles et accès
+                                                Plateforme Écosystème RDC
+                                         Version fonctionnelle - Septembre 2026
+
+Un compte unique • plusieurs contextes d’action • des permissions précises • des accès protégés
+
+
+
+
+                                                     Objet du document
+Expliquer simplement ce qu’est la plateforme, qui peut l’utiliser, ce que chaque type d’utilisateur peut faire, ce
+                      qu’il peut voir, et selon quelles règles l’accès est accordé ou refusé.
+
+
+
+
+                       Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+1. La plateforme en une phrase
+La plateforme est un écosystème numérique qui permet aux particuliers, prestataires, entreprises, organisations
+et institutions de se découvrir, d’interagir et de gérer différentes activités depuis un même environnement :
+services, commerce, emploi, recrutement, formation, réservation, restauration, livraison, événements, écoles,
+campagnes, messagerie et suivi opérationnel.
+
+    Principe central : l’utilisateur ne crée pas un nouveau compte pour chaque activité. Son compte
+    reste le même ; c’est son contexte d’action qui change.
+
+
+
+
+Ce que la plateforme relie
+     Découverte : rechercher une entreprise, un professionnel, un produit, un emploi, un événement, un
+      restaurant, une école ou un lieu.
+     Interaction : contacter, demander un devis, réserver, candidater, inviter, envoyer des messages ou suivre
+      une demande.
+     Transaction : acheter un article, payer un billet, régler un abonnement de plateforme ou utiliser un moyen
+      de paiement pris en charge dans les flux éligibles.
+     Organisation : publier, recruter, gérer des commandes, des services, des réservations, des événements, des
+      formations, une équipe ou plusieurs branches.
+     Confiance : vérifications granulaires, avis liés à des interactions, signalements, support, consentement et
+      confidentialité.
+
+Navigation commune
+    Accueil               Explorer                      + Publier                     Messages                       Compte
+Cette navigation constitue le socle mental de l’application mobile. Les possibilités visibles derrière « + Publier »
+et dans les tableaux de bord dépendent du contexte actif, des permissions, de l’éligibilité et, lorsque nécessaire,
+des droits commerciaux.
+
+
+
+
+                          Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+2. Un compte, plusieurs contextes
+Le système sépare l’identité de la personne, le contexte dans lequel elle agit et les permissions qui lui sont
+accordées. Cela évite de multiplier les comptes et empêche qu’un droit obtenu dans un contexte se propage
+automatiquement à un autre.
+
+    Niveau                                      Exemple                                            Conséquence
+    Compte                                      Marie se connecte avec un seul compte              Authentifie la personne
+                                                Marie agit comme particulier,                      Détermine au nom de qui l’action est
+    Identité / contexte
+                                                prestataire ou membre de ABC SARL                  faite
+                                                Chez ABC SARL, Marie peut gérer les
+    Permission                                                                                     Limite les actions à ce qui a été délégué
+                                                devis mais pas le recrutement
+
+Exemple concret : Marie
+      Marie crée un compte personnel. Elle peut rechercher, acheter, demander un devis, réserver, candidater et
+       participer à des événements.
+      Elle active ensuite un profil « Prestataire individuel » pour proposer des services de traiteur. Aucun nouveau
+       login n’est nécessaire.
+      Plus tard, ABC SARL l’ajoute comme membre de l’organisation avec le rôle de responsable commercial.
+      Quand Marie agit pour ABC SARL, elle peut recevoir les droits « devis », « clients » et « messages », sans
+       recevoir automatiquement « recrutement », « facturation » ou « sécurité ».
+      Ses achats personnels, candidatures et conversations privées restent séparés de l’activité de l’entreprise.
+    Un rôle organisationnel n’absorbe jamais l’identité personnelle de l’utilisateur.
+
+
+
+
+                            Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+3. Les grands types de contextes utilisateur
+3.1 Visiteur
+Qui est-ce ? Une personne qui consulte la plateforme sans être connectée.
+
+ Peut accéder / agir                                                    Limites et garde-fous
+ • Accueil et Explorer publics
+                                                                        • Pas de message privé persistant sans compte
+ • Recherche et consultation de contenus publics
+                                                                        • Pas de candidature finalisée
+ • Profils publics d’entreprises et prestataires
+                                                                        • Pas de commande ou réservation nécessitant une identité
+ • Annonces Marketplace publiques
+                                                                        • Pas de publication
+ • Offres d’emploi et événements publics
+                                                                        • Aucun accès aux données privées
+ • Découverte de services, restaurants, lieux et écoles
+
+3.2 Particulier
+Qui est-ce ? Le contexte personnel de base d’un utilisateur connecté.
+
+ Peut accéder / agir                                                    Limites et garde-fous
+ • Acheter et vendre des articles personnels éligibles
+ • Demander et suivre des devis                                         • Ne peut pas administrer une organisation sans relation
+ • Réserver des services ou ressources                                  autorisée
+ • Commander dans les flux commerce éligibles                           • Ne voit pas les dossiers privés d’autres personnes
+ • Rechercher et postuler à des emplois                                 • Ne peut pas acheter une vérification
+ • S’inscrire ou acheter des billets d’événements                       • Certaines publications/actions peuvent exiger éligibilité,
+ • Favoris, alertes, messages et suivi dans Mon espace                  pass ou contrôle
+ • Gérer des bénéficiaires lorsque le module le permet
+
+3.3 Prestataire individuel
+Qui est-ce ? Une personne qui offre des services en son nom propre sans devoir se présenter comme une
+entreprise.
+
+ Peut accéder / agir                                                    Limites et garde-fous
+ • Profil professionnel public
+ • Publier des services éligibles
+                                                                        • Adresse privée et documents d’identité non publics
+ • Recevoir demandes de devis et messages
+                                                                        • Vérification granulaire et non assimilée à une garantie
+ • Gérer disponibilité et réservations si applicable
+                                                                        • Catégories sensibles peuvent exiger contrôles renforcés
+ • Recevoir des avis liés à des interactions
+                                                                        • Le plan payant n’accorde aucune autorité
+ • Promouvoir un contenu éligible selon les droits
+                                                                        organisationnelle
+ commerciaux
+ • Peut également rechercher un emploi comme personne
+Évolution possible : Le même utilisateur conserve son espace personnel et peut aussi devenir membre d’une
+organisation.
+
+
+
+
+                           Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+3.4 Employeur particulier
+Qui est-ce ? Un particulier ou ménage qui recrute pour un besoin domestique ou privé.
+
+ Peut accéder / agir                                                    Limites et garde-fous
+ • Publier un emploi à domicile éligible
+                                                                        • Doit être identifié comme « Employeur particulier », pas
+ • Recevoir et gérer des candidatures
+                                                                        comme entreprise
+ • Présélection structurée
+                                                                        • Accès uniquement aux données nécessaires au
+ • Messagerie contextuelle avec candidats
+                                                                        recrutement
+ • Planifier des entretiens
+                                                                        • Aucun accès automatique aux données privées hors
+ • Demander/consulter des références selon consentement
+                                                                        candidature
+ • Utiliser une publication unique, un pass ou un avantage
+                                                                        • Aucune commission sur le salaire du travailleur
+ Premium selon l’offre
+
+3.5 Membre d’organisation
+Qui est-ce ? Une personne rattachée à une organisation et autorisée à agir pour elle.
+
+ Peut accéder / agir                                                    Limites et garde-fous
+ • Accès aux modules attribués : ventes, devis, commandes,
+ recrutement, événements, formation, support, etc.                      • Être membre ne signifie pas être administrateur
+ • Actions au nom de l’organisation dans le périmètre                   • Pas d’accès aux modules non attribués
+ accordé                                                                • Les données sensibles sont cloisonnées par finalité
+ • Accès pouvant être limité à une branche, un département              • La sortie de l’organisation révoque l’accès professionnel
+ ou un objet                                                            sans supprimer le compte personnel
+ • Messagerie d’équipe si autorisée
+
+3.6 Administrateur d’organisation
+Qui est-ce ? Un membre disposant de pouvoirs de gestion organisationnelle dans un périmètre défini.
+
+ Peut accéder / agir                                                    Limites et garde-fous
+ • Gérer le profil et les paramètres autorisés                          • « Admin » peut lui-même être limité par module/branche
+ • Inviter/retirer des membres                                          • Les données sensibles restent soumises au besoin d’en
+ • Attribuer rôles et permissions selon ses propres droits              connaître
+ • Gérer branches et activités                                          • Aucun plan commercial ne transforme un membre en
+ • Accéder aux modules opérationnels autorisés                          administrateur
+ • Gérer plans et capacités si permission de facturation                • Actions sensibles auditées et parfois soumises à contrôle
+ accordée                                                               renforcé
+
+3.7 Représentant autorisé
+Qui est-ce ? Une personne mandatée pour agir sur une organisation, un dossier ou une opération déterminée.
+
+ Peut accéder / agir                                                    Limites et garde-fous
+ • Agir dans le périmètre du mandat                                     • Pas de propriété automatique de l’organisation
+ • Gérer les objets explicitement délégués                              • Pas d’accès général aux données
+ • Interagir avec les utilisateurs concernés par ce mandat              • Mandat révocable, traçable et limité
+
+3.8 Personnel de la plateforme
+Qui est-ce ? Les équipes internes de support, modération, vérification, opérations financières ou administration.
+
+ Peut accéder / agir                                                    Limites et garde-fous
+ • Support et gestion de cas selon rôle
+                                                                        • Pas de super-accès généralisé par défaut
+ • Modération et traitement des signalements
+                                                                        • Séparation des fonctions sensibles
+ • Vérifications autorisées
+                                                                        • Traçabilité/audit des actions
+ • Administration de taxonomie/configuration selon rôle
+                                                                        • Accès au strict nécessaire et contrôles renforcés
+ • Opérations financières strictement limitées et auditées
+
+                           Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+4. Une organisation n’est pas un simple « utilisateur »
+Une entreprise, une école, un restaurant, une ONG ou une société de livraison est un objet organisationnel géré
+par des personnes autorisées. L’organisation possède ses contenus, activités et paramètres ; les humains y
+accèdent au moyen de relations, rôles et permissions.
+
+ Entreprise / commerce                      École / établissement                              Restaurant
+ Hôtel / lieu                               Établissement de santé                             Association / ONG
+ Prestataire de formation                   Société de livraison                               Organisation événementielle / lieu
+
+
+5. Acheteur, candidat, recruteur… sont des activités
+La plateforme évite de transformer chaque comportement en type de compte. Une même personne peut avoir
+plusieurs relations au même moment.
+
+ Acheteur                      Vendeur                               Candidat                              Recruteur
+ Client                        Prestataire                           Participant                           Organisateur
+ Parent                        Donateur                              Volontaire                            Représentant
+ Exemple : une même personne peut être acheteuse le matin, candidate à un emploi l’après-midi,
+ prestataire le soir et membre d’une entreprise dans son activité professionnelle.
+
+
+
+
+                        Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+6. Comment la plateforme décide-t-elle de l’accès ?
+L’accès n’est pas un simple bouton Oui/Non attaché au compte. La décision combine plusieurs contrôles
+successifs.
+
+ Étape                                     Contrôle                                           Question
+ 1                                         Authentification                                   Qui est connecté ?
+ 2                                         Contexte actif                                     Au nom de qui agit-il ?
+                                                                                              Quel lien existe avec l’objet ou
+ 3                                         Relation / appartenance
+                                                                                              l’organisation ?
+                                                                                              Quelle action est autorisée, sur quel
+ 4                                         Permission + portée
+                                                                                              objet/branche ?
+                                                                                              La personne ou l’organisation remplit-
+ 5                                         Éligibilité
+                                                                                              elle les conditions ?
+                                                                                              Un plan/pass est-il requis pour cette
+ 6                                         Droit commercial
+                                                                                              capacité ?
+                                                                                              Cette action est-elle permise dans ce
+ 7                                         Règles marché/catégorie
+                                                                                              marché/cette catégorie ?
+                                                                                              Les conditions de divulgation sont-elles
+ 8                                         Consentement & confidentialité
+                                                                                              satisfaites ?
+                                                                                              Le compte/session est-il autorisé à
+ 9                                         État de sécurité
+                                                                                              poursuivre ?
+                                                                                              Autoriser ou refuser, avec motif
+ 10                                        Décision
+                                                                                              exploitable par l’interface
+
+
+
+
+                       Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+7. Ne pas confondre : rôle, permission, droit commercial et
+vérification
+    RÔLE                                                                   DROIT COMMERCIAL                      VÉRIFICATION
+                                     PERMISSION
+
+    Dans quel cadre agit la                                                Quelle capacité a été                 Qu’est-ce que la plateforme
+                                     Que peut-elle faire ?
+    personne ?                                                             achetée/activée ?                     a effectivement contrôlé ?
+
+                                     Ex. voir candidatures +
+    Ex. recruteur chez ABC                                                 Ex. outils avancés de                 Ex. identité ou organisation
+                                     planifier entretien
+    SARL                                                                   recrutement                           vérifiée
+
+
+
+      Acheter Business Pro ne rend pas une personne « vérifiée ».
+      Être vérifié ne donne pas l’autorité d’administrer une organisation.
+      Être administrateur ne signifie pas automatiquement voir toutes les données sensibles.
+      Un droit commercial débloque une capacité ou une limite ; il ne remplace jamais une permission.
+    Principe : le paiement peut acheter de la capacité, jamais de l’autorité, de la confiance ou l’accès à
+    des données privées.
+
+
+
+
+                              Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+8. Matrice synthétique des accès par contexte
+Légende : ✓ = accès courant ; ◐ = accès contextuel/limité ; P = permission organisationnelle requise ; E =
+éligibilité/vérification possible ; $ = droit commercial/pass possible ; — = non applicable. Les règles détaillées
+priment sur cette synthèse.
+
+                                                                          Employeur
+ Fonction         Visiteur          Particulier        Prestataire                           Membre org.        Admin org.   Staff
+                                                                          privé
+ Consulter
+                  ✓                 ✓                  ✓                  ✓                  ✓                  ✓            ◐
+ contenu public
+ Rechercher /
+                  ✓                 ✓                  ✓                  ✓                  ✓                  ✓            ◐
+ Explorer
+ Messagerie
+                  —                 ✓                  ✓                  ✓                  P                  P            ◐
+ contextuelle
+ Acheter
+                  —                 ✓                  ✓                  ✓                  P                  P            —
+ Marketplace
+ Vendre article
+                  —                 ✓                  ✓                  ✓                  —                  —            —
+ personnel
+ Publier offre
+                  —                 —                  E/$                —                  P/E/$              P/E/$        —
+ commerciale
+ Demander un
+                  —                 ✓                  ✓                  ✓                  P                  P            —
+ devis
+ Répondre à un
+                  —                 —                  ✓                  —                  P                  P            —
+ devis
+ Réserver         —                 ✓                  ✓                  ✓                  P                  P            —
+ Postuler à un
+                  —                 ✓                  ✓                  ✓                  ✓*                 ✓*           —
+ emploi
+ Publier emploi
+                  —                 $                  ◐                  $                  —                  —            —
+ privé
+ Publier emploi
+                  —                 —                  —                  —                  P/$                P/$          —
+ organisation
+ Gérer
+                  —                 —                  —                  ◐/$                P                  P            —
+ candidats
+ Créer
+                  —                 ◐/$                ◐/$                ◐/$                P/$                P/$          —
+ événement
+ Acheter billet   —                 ✓                  ✓                  ✓                  P                  P            —
+ Gérer
+                  —                 —                  ◐                  —                  P                  P            —
+ formation
+ Gérer
+ équipe/permis    —                 —                  —                  —                  —                  P            —
+ sions
+ Vérifier/
+ modérer          —                 —                  —                  —                  —                  —            P
+ plateforme
+ Administrer
+ taxonomie/con    —                 —                  —                  —                  —                  —            P
+ fig
+
+
+
+
+                             Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+9. Accès par grand module
+9.1 Accueil, Explorer et recherche
+Tous les profils peuvent découvrir le contenu compatible avec sa visibilité. Les résultats tiennent compte de la
+taxonomie, de la localisation et du contexte, sans confondre contenu organique, vérification et promotion.
+
+Garde-fou : Les contenus privés, restreints ou non éligibles ne doivent pas être révélés par la recherche.
+
+9.2 + Publier
+Le bouton central propose les créations permises au contexte actif : article personnel, service, produit, emploi,
+événement, promotion d’un objet existant, etc.
+
+Garde-fou : Une option peut être masquée ou expliquée si elle exige une permission, une vérification, une
+catégorie autorisée ou un droit commercial.
+
+9.3 Marketplace
+Le particulier peut acheter et vendre des articles personnels ; les prestataires/organisations peuvent publier des
+offres commerciales selon éligibilité. Les membres d’organisation agissent uniquement avec permission.
+
+Garde-fou : Commande, paiement et exécution restent des états distincts. Le cash n’est payé qu’après
+confirmation autorisée. Les avis transactionnels prouvent une interaction, pas la qualité.
+
+9.4 Services, devis et réservations
+Les clients demandent des devis et réservent ; les prestataires et organisations répondent et gèrent leurs
+disponibilités si leur activité le permet.
+
+Garde-fou : Les membres d’organisation n’accèdent qu’aux devis/réservations de leur périmètre. Les
+informations privées restent minimisées.
+
+9.5 Emplois et recrutement
+Les individus recherchent et candidatent gratuitement. Les ménages peuvent recruter comme « Employeur
+particulier ». Les organisations recrutent via des membres autorisés.
+
+Garde-fou : Un recruteur voit les données nécessaires au recrutement, pas la facturation. Aucun verdict
+d’embauche autonome. Les références sont consenties et protégées.
+
+9.6 Formation
+Les prestataires de formation publient des programmes éligibles ; les organisations peuvent demander des
+cohortes, inviter employés/candidats et suivre participation/completion de base.
+
+Garde-fou : Une formation terminée ne prouve pas automatiquement compétence, certification valide ou
+aptitude à l’emploi.
+
+9.7 Événements et billetterie
+Les utilisateurs découvrent, s’inscrivent ou achètent des billets. Les organisateurs autorisés créent et gèrent
+événements, billets et check-in. Les événements privés restent hors découverte publique.
+
+                         Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+Garde-fou : Le QR/token est unique ; paiement, ticket et check-in ont leurs propres états. Les règles
+d’annulation/remboursement sont configurables.
+
+9.8 Restaurants, commandes et livraison
+Le client commande ; le restaurant gère réception/préparation ; la société de livraison partenaire reçoit
+uniquement les données nécessaires au fulfillment.
+
+Garde-fou : Commande alimentaire et Delivery Request restent séparées. Le livreur ne reçoit pas les données
+personnelles sans rapport avec la livraison.
+
+9.9 Écoles, parents et bénéficiaires
+Le parent ou représentant gère uniquement les bénéficiaires auxquels il est autorisé. L’école gère admissions,
+communication et activités via ses membres autorisés.
+
+Garde-fou : Pas de profil enfant public. Les données des bénéficiaires sont privées et soumises à
+relation/consentement.
+
+9.10 Associations, campagnes et volontariat
+Les utilisateurs peuvent découvrir et participer aux campagnes/volontariats éligibles. Les organisations
+autorisées les créent et les administrent.
+
+Garde-fou : Le volontariat reste distinct d’un emploi. Les règles financières et de conformité peuvent être plus
+strictes selon la campagne.
+
+9.11 Messages, notifications et À traiter
+Les conversations sont rattachées à leur contexte : commande, devis, candidature, livraison, événement, etc. Les
+organisations peuvent disposer d’une boîte d’équipe et d’assignations.
+
+Garde-fou : Le contexte actif doit rester clair. Une notification n’est pas un message ; « À traiter » représente une
+action à accomplir.
+
+9.12 Confiance, vérification, avis et support
+Les utilisateurs voient des indicateurs factuels : téléphone, identité, documents, références ou organisation selon
+le cas. Les avis sont contextuels.
+
+Garde-fou : Pas de score universel de confiance, pas de vérification achetable, pas d’adresse privée publique. Le
+support suit des dossiers/cas audités.
+
+9.13 Plans, passes, promotion et facturation
+Les plans/pass augmentent capacités, limites, outils et visibilité autorisée. La promotion est clairement
+distinguée du classement organique.
+
+Garde-fou : Un achat ne donne jamais permission organisationnelle, statut de confiance, vérification ou accès
+privé.
+
+
+
+
+                         Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+9.14 Administration plateforme
+Le personnel habilité gère support, modération, vérification, taxonomie, configuration de marché, sécurité ou
+opérations financières selon des rôles internes distincts.
+
+Garde-fou : Actions sensibles auditées, accès minimum nécessaire, séparation des responsabilités et revue
+manuelle pour cas critiques.
+
+
+
+
+                        Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+10. Frontières de confidentialité : exemples
+Acteur                                         Peut voir pour sa mission                          Ne doit pas voir par défaut
+                                               Candidature, CV fourni, réponses de                Facturation de l’entreprise, achats
+Recruteur                                      présélection, entretien, références                personnels, messages sans lien avec le
+                                               consenties                                         recrutement
+                                               Plan, factures, paiements de plateforme,           CV des candidats, dossiers scolaires,
+Responsable facturation
+                                               droits commerciaux                                 conversations privées
+                                                                                                  Historique professionnel, autres
+                                               Point de retrait, destination, contact
+Société de livraison                                                                              commandes, messages sans lien avec la
+                                               nécessaire, instructions de livraison
+                                                                                                  livraison
+                                               Inscription à la formation, besoins                Dossier complet de recrutement sauf
+Prestataire de formation
+                                               transmis, planning, participation                  autorisation explicite et finalité légitime
+                                               Données du bénéficiaire lié et services            Autres enfants/bénéficiaires, données
+Parent / représentant
+                                               autorisés                                          internes sans rapport
+                                               Données nécessaires au cas ouvert,
+                                                                                                  Exploration générale de données sans
+Support plateforme                             historique du dossier, éléments de
+                                                                                                  finalité de support
+                                               preuve pertinents
+Principe : ne divulguer que les données nécessaires à la finalité de l’action, au moment où elles
+sont nécessaires.
+
+
+
+
+                           Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+11. Gratuit, payant, vérifié : trois choses différentes
+La plateforme conserve une participation gratuite utile, notamment pour la découverte, la candidature et les
+usages personnels de base. Les offres payantes financent principalement des capacités supplémentaires, des
+limites plus élevées, des outils professionnels, des passes et la promotion éligible.
+
+ Un plan/pass PEUT donner                                               Un plan/pass NE PEUT PAS acheter
+ • Plus de capacité / limites                                           • Vérification
+ • Outils professionnels                                                • Autorité dans une organisation
+ • Fonctionnalités de recrutement                                       • Accès aux données privées
+ • Promotion éligible                                                   • Pouvoir de modération
+ • Fonctions d’équipe / productivité                                    • Priorité d’embauche
+ • Avantages Premium définis                                            • Garantie de qualité / sécurité
+
+
+
+
+                           Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+12. Parcours concrets
+Aline - Particulier
+Découvre un produit → commande → choisit Mobile Money ou cash selon disponibilité → suit la commande →
+laisse un avis lié à l’interaction. Elle peut ensuite réserver un restaurant et acheter un billet sans changer de
+compte.
+
+Patrick - Prestataire individuel
+Active son profil professionnel → publie un service d’électricité → reçoit une demande de devis → échange avec
+le client → planifie une intervention → clôture l’interaction → peut recevoir un avis.
+
+Grace - Candidate
+Recherche un emploi → enregistre une alerte → candidate → répond aux questions de présélection → reçoit une
+invitation d’entretien → peut recevoir une proposition de formation pertinente sans que celle-ci décide de son
+embauche.
+
+Ménage - Employeur particulier
+Publie une offre de nounou → reçoit des candidatures → présélectionne → planifie des entretiens → demande des
+références avec consentement → choisit lui-même la personne à recruter.
+
+ABC SARL - Organisation
+L’admin crée l’organisation → ajoute des membres → donne au commercial accès aux devis, au recruteur accès
+aux candidatures et au responsable facturation accès aux plans. Chacun voit uniquement son périmètre.
+
+Restaurant
+Publie menu et horaires → reçoit commande → accepte → prépare → choisit retrait/livraison propre/livraison
+partenaire → le Delivery Request est suivi séparément de la commande.
+
+École
+Publie son profil → reçoit une demande d’admission → le parent ajoute un bénéficiaire de manière privée →
+l’équipe autorisée traite le dossier → communications et événements restent liés à la relation scolaire.
+
+ONG
+Publie une campagne ou opportunité de volontariat → utilisateurs découvrent et participent → l’organisation
+gère les inscriptions et communications selon les règles du type de campagne.
+
+
+
+
+                         Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+13. Résumé de gouvernance des accès
+     Un seul compte peut porter plusieurs contextes d’action.
+     Les activités (acheteur, candidat, participant, etc.) ne sont pas des comptes séparés.
+     Une organisation est gérée par des personnes autorisées ; elle n’est pas confondue avec leur identité
+      personnelle.
+     Les permissions sont granulaires et peuvent être limitées par module, action, objet, branche, département et
+      finalité.
+     Les droits commerciaux sont séparés des rôles, permissions et vérifications.
+     La confidentialité est appliquée au niveau de la donnée et de la finalité, pas seulement au niveau de l’écran.
+     Les catégories sensibles peuvent exiger davantage d’éligibilité ou de vérification.
+     Le personnel de la plateforme lui-même est soumis à des permissions et à l’audit.
+     Les règles de marché et de conformité restent configurables et doivent être validées pour le contexte de
+      lancement en RDC.
+    Formule de référence : Authentification → Contexte actif → Relation → Permission + portée →
+    Éligibilité → Droit commercial → Règles marché/catégorie → Consentement & confidentialité →
+    Sécurité → Autoriser / Refuser
+
+
+
+
+14. À qui sert ce document ?
+Ce guide sert de référence commune au Conseil d’administration, aux investisseurs, aux équipes produit, UI/UX,
+développement, support, opérations et futurs collaborateurs. Il complète le Cahier des charges et le Guide
+fonctionnel des écrans : le premier décrit ce que le système doit construire, le second décrit l’expérience écran
+par écran, et le présent document explique qui agit, dans quel contexte, avec quels droits et quelles limites.
+
+
+
+
+                          Plateforme Écosystème RDC • Guide Utilisateurs, Profils, Rôles et Accès • Septembre 2026
+

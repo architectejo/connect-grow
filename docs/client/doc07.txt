@@ -1,0 +1,525 @@
+POLITIQUE DE CONFIANCE, VÉRIFICATION,
+           MODÉRATION & SÉCURITÉ
+                  Plateforme Écosystème RDC
+                   Document 07 - Cadre opérationnel V1 de confiance et de protection
+
+                           Version de référence V1 / Post-V1 - Septembre 2026
+
+
+
+
+     Plateforme Écosystème RDC · Document 07 · Confiance, Vérification, Modération & Sécurité · Septembre 2026
+1. Objet et philosophie
+Cette politique définit comment la plateforme établit des signaux de confiance factuels, vérifie certains éléments, modère les
+contenus et comportements, traite les signalements et protège les utilisateurs. Elle ne transforme jamais la plateforme en garant
+universel de l'identité, de la qualité, de la sécurité ou du résultat d'une interaction.
+
+Principe directeur: la plateforme doit dire précisément ce qu'elle a vérifié, conserver la provenance de la preuve, limiter la
+divulgation publique et ne jamais convertir plusieurs signaux hétérogènes en un score universel de confiance.
+
+
+
+
+2. Invariants verrouillés
+       La vérification ne peut jamais être achetée. Un abonnement, pass ou promotion ne modifie pas le résultat d'une vérification.
+       Le libellé « Vérifié » doit toujours pouvoir être expliqué par un ou plusieurs types de vérification concrets.
+       Une identité vérifiée ne signifie ni personne sûre, ni prestataire compétent, ni entreprise recommandée.
+       Les documents d'identité et preuves sensibles ne sont jamais publics.
+       Les catégories sensibles peuvent exiger des contrôles plus forts avant publication ou découvrabilité.
+       Les avis restent liés à un contexte/interactions; aucun score universel de confiance n'est créé.
+       Les décisions de modération et de sécurité restent indépendantes des revenus générés par l'utilisateur.
+       Les utilisateurs disposent d'une voie de contestation/appeal appropriée pour les décisions significatives.
+       Les enfants/bénéficiaires ne disposent jamais de profils publics.
+       Les actions sensibles du personnel interne sont limitées, justifiées et auditées.
+
+
+
+
+3. Vocabulaire de confiance
+    Terme                                               Signification correcte                               Ne signifie PAS
+    Téléphone vérifié                                   Contrôle réussi du numéro selon mécanisme prévu      Identité civile confirmée
+    Email vérifié                                       Contrôle de possession de l'adresse                  Autorité dans une entreprise
+    Identité vérifiée                                   Preuve d'identité contrôlée selon procédure          Personne sûre / sans risque
+    Organisation vérifiée                               Existence/éléments organisationnels contrôlés        Entreprise recommandée ou solvable
+                                                        Lien/mandat pour agir au nom d'une organisation
+    Autorité vérifiée                                                                                        Pouvoir illimité sur l'organisation
+                                                        contrôlé
+    Référence vérifiée                                  Référence contactée/contrôlée selon procédure        Garantie de qualité
+    Document/certification vérifié                      Document/provenance contrôlé selon niveau prévu      Compétence actuelle garantie
+                                                        Plateforme dispose d'une preuve d'interaction
+    Interaction vérifiée                                                                                     Avis nécessairement exact
+                                                        éligible
+    Vendeur/Provider éligible                           Règles minimales de catégorie satisfaites            Endorsement de la plateforme
+
+
+
+
+4. Modèle Verification Record
+    Champ                                                                         Description
+    verification_id                                                               Identifiant immuable du contrôle
+    subject_type / subject_id                                                     Individu, organisation, provider, référence, document, etc.
+    verification_type                                                             phone, email, identity, organization, authority, reference, certification...
+                                                                                  OTP, revue documentaire, source autorisée, contact référence, provider
+    method
+                                                                                  externe
+    status                                                                        Pending, Verified, Failed, Expired, Revoked, NeedsReview
+    assurance_level                                                               Niveau interne documenté; pas nécessairement public
+    evidence_ref                                                                  Référence privée vers preuve, jamais preuve brute publique
+    reviewer / provider                                                           Système, prestataire ou staff autorisé
+    verified_at / expires_at                                                      Temporalité et expiration éventuelle
+    market / policy_version                                                       Règles appliquées
+    public_claim                                                                  Libellé public exact autorisé
+    reason_code                                                                   Motif structuré d'échec/révocation
+    audit_ref                                                                     Lien vers historique d'action
+
+
+
+
+                            Plateforme Écosystème RDC · Document 07 · Confiance, Vérification, Modération & Sécurité · Septembre 2026
+5. Niveaux de vérification par contexte
+Contexte                                                 Contrôles V1 possibles                                     Déclencheur renforcé
+                                                                                                                    Catégorie sensible, paiement/risque, récupération
+Compte individuel                                        Téléphone/email; identité selon action
+                                                                                                                    compte
+                                                         Identité; téléphone; références;                           Garde d'enfants, caregiving, santé, catégories à
+Prestataire individuel
+                                                         documents/certifications pertinents                        risque
+                                                                                                                    Accès financier, publication sensible, claim
+Organisation                                             Existence; coordonnées; représentant/autorité
+                                                                                                                    organisation
+                                                         Téléphone/email; identité selon niveau de
+Employeur particulier                                                                                               Accès à données candidats, comportement suspect
+                                                         recrutement
+                                                         Organisation/provider + informations
+Restaurant/merchant                                                                                                 Paiement/commerce, plaintes répétées
+                                                         opérationnelles
+Delivery company                                         Organisation + autorité + capacité/service déclaré         Accès fulfillment et cash collection
+                                                         Organisation/provider + provenance des credentials
+Training provider                                                                                                   Certifications réglementées
+                                                         déclarés
+                                                         Organisation + autorité; relations
+School                                                                                                              Données enfants et admissions
+                                                         parent/bénéficiaire
+Nonprofit/campaign                                       Organisation/autorité; contrôles campagne                  Collecte de fonds ou catégories sensibles
+
+
+
+
+6. Catégories sensibles et Enhanced Due Diligence
+Catégorie                                 Risque principal                           Contrôles V1 renforcés possibles             Décision
+                                                                                     Identité; références; documents
+Garde d'enfants / nanny                   Accès à mineurs                                                                         Policy configurable
+                                                                                     pertinents; revue manuelle
+                                                                                     Identité; références; qualification si
+Caregiving / aide vulnérable              Accès personne vulnérable                                                               Policy configurable
+                                                                                     revendiquée
+                                                                                     Organisation/profession; documents
+Santé                                     Conseil/acte potentiellement réglementé                                                 Validation juridique requise
+                                                                                     pertinents; limites de publication
+                                                                                     Identité; permis si requis; références
+Chauffeur privé                           Sécurité / conduite                                                                     Policy configurable
+                                                                                     selon politique
+Sécurité/gardiennage                      Accès lieux/personnes                      Organisation/autorisation pertinente         Validation locale requise
+                                                                                     Organisation/autorité; finalité; contrôles
+Collecte de fonds                         Fraude/détournement                                                                     Règles marché
+                                                                                     financiers adaptés
+                                                                                     Provenance/document; émetteur si
+Certifications professionnelles           Fausse qualification                                                                    Ne garantit pas compétence
+                                                                                     possible
+                                                                                     Restriction ou interdiction par
+Biens réglementés                         Risque légal/sécurité                                                                   Policy Taxonomy Center
+                                                                                     catégorie/marché
+
+
+
+
+7. Références professionnelles
+Étape                                                                                Règle
+                                                                                     Le prestataire/candidat autorise la demande et le traitement de la
+Consentement
+                                                                                     référence.
+                                                                                     Le référent reçoit une demande contrôlée; ses coordonnées ne deviennent
+Invitation
+                                                                                     pas publiques.
+                                                                                     Vérifier identité/contact du référent au niveau raisonnable et relation
+Validation
+                                                                                     déclarée.
+Réponse                                                                              Collecter seulement les informations nécessaires à la finalité.
+                                                                                     Afficher éventuellement « 2 références professionnelles vérifiées » ou
+Résultat public
+                                                                                     statut similaire.
+Confidentialité                                                                      Ne jamais publier téléphone/email du référent.
+                                                                                     La date de vérification est conservée; une ancienne référence n'est pas
+Expiration/actualité
+                                                                                     présentée comme récente.
+                                                                                     Le sujet peut signaler une erreur sans pouvoir supprimer arbitrairement
+Contestations
+                                                                                     une preuve légitime.
+
+
+
+
+8. Avis, notes et preuve d'interaction
+Règle                                                                                Application
+                                                                                     Un avis concerne une commande, réservation, service, événement ou
+Contexte spécifique
+                                                                                     interaction identifiable.
+Éligibilité                                                                          La plateforme peut exiger une interaction terminée/éligible avant avis.
+Marketplace                                                                          Une commande complétée peut servir de preuve d'interaction.
+Pas de score universel                                                               Ne pas fusionner vendeur, employeur, candidat, restaurant, provider et individu
+                          Plateforme Écosystème RDC · Document 07 · Confiance, Vérification, Modération & Sécurité · Septembre 2026
+                                                                                     en une note unique.
+                                                                                     Spam, intimidation, conflit d'intérêt, contenu illégal ou données privées peuvent
+ Modération
+                                                                                     être modérés.
+ Désaccord                                                                           Un avis négatif n'est pas supprimé uniquement parce qu'il est défavorable.
+ Réponse                                                                             Le sujet évalué peut répondre si la fonction est prévue.
+ Signalement                                                                         Les deux parties peuvent signaler l'avis selon règles.
+                                                                                     Présenter contexte, volume et récence lorsque pertinent; éviter l'illusion de
+ Affichage
+                                                                                     certitude.
+
+
+
+
+9. Contenus et comportements interdits ou restreints
+ Famille                                               Exemples                                                  Action
+ Fraude / usurpation                                   Faux profil, fausse organisation, fausse preuve           Blocage/revue; conservation preuve
+ Escroquerie commerciale                               Paiement trompeur, non-livraison organisée                Case + restriction + finance/support
+ Contenu illégal                                       Biens/services interdits, documents frauduleux            Retrait + escalation selon droit/policy
+ Harcèlement / menaces                                 Menaces, intimidation, ciblage abusif                     Restriction communication/suspension
+ Exploitation / abus                                   Mineurs, personnes vulnérables, coercition                Escalation sécurité urgente
+ Spam / manipulation                                   Messages massifs, faux avis, multi-comptes abusifs        Rate limit, retrait, suspension
+ Données privées                                       Publication adresse, ID, téléphone sans base légitime     Retrait/redaction + protection
+ Discrimination illégale                               Critères/propos interdits selon contexte légal            Modération + validation juridique
+ Contrefaçon / fausse qualification                    Produits ou credentials trompeurs                         Retrait, vérification, restriction
+ Contournement sécurité                                Tentative d'échapper sanctions/contrôles                  Restriction comptes liés selon preuves
+
+
+
+
+10. Report & Case Management
+ Type de case                                          Exemples                                                  Owner principal
+ Support                                               Question, erreur opérationnelle                           Support
+ Interaction problem                                   Non-réponse, problème service/booking                     Support/Ops
+ Safety                                                Menace, exploitation, risque personne                     Safety/Trust
+ Moderation                                            Contenu, spam, harcèlement                                Moderation
+ Verification                                          Preuve rejetée, autorité contestée                        Trust & Verification
+                                                       Non-livraison, wrong/damaged item, cash
+ Commerce dispute                                                                                                Commerce Support
+                                                       disagreement
+                                                       Chargé mais non confirmé, doublon, unauthorized
+ Payment                                                                                                         Finance/Ops
+                                                       allegation
+ Appeal                                                Contestation décision de plateforme                       Reviewer indépendant/autorisé
+ Security incident                                     Compte compromis, accès suspect                           Security
+
+
+
+
+11. Priorité et triage
+ Niveau                                                Exemples                                                  Traitement attendu
+                                                       Menace crédible immédiate, exploitation,                  Escalation immédiate selon protocole; préserver
+ P0 - Urgent sécurité
+                                                       compromission critique                                    preuves
+                                                       Fraude active, accès données sensibles, risque            Priorité haute; restriction préventive
+ P1 - Élevé
+                                                       financier important                                       proportionnée
+                                                       Litige, harcèlement non immédiat, contenu
+ P2 - Standard                                                                                                   File normale avec SLA interne
+                                                       contesté
+                                                       Spam mineur, qualité contenu, demandes non
+ P3 - Faible                                                                                                     Traitement asynchrone/batch possible
+                                                       urgentes
+
+
+
+Les délais exacts de SLA sont des paramètres opérationnels à fixer. Une priorité commerciale payante ne peut jamais faire passer
+devant une urgence de sécurité.
+
+
+
+
+12. Cycle de décision de modération
+ Étape                                                                               Exigence
+ Détection                                                                           Signalement utilisateur, système, staff ou provider autorisé.
+ Triage                                                                              Catégorie, gravité, objet, parties, marché, urgence.
+ Préservation                                                                        Conserver preuves nécessaires sans diffusion excessive.
+ Mesure temporaire                                                                   Limiter contenu/action si risque justifie; mesure proportionnée.
+
+                           Plateforme Écosystème RDC · Document 07 · Confiance, Vérification, Modération & Sécurité · Septembre 2026
+ Investigation                                                                 Consulter seulement les données nécessaires et sources autorisées.
+                                                                               No action, warning, content action, feature restriction, suspension, termination,
+ Décision
+                                                                               escalation.
+ Notification                                                                  Informer l'utilisateur avec raison exploitable lorsque possible/sûr/légal.
+ Appeal                                                                        Permettre contestation pour décisions éligibles.
+ Clôture                                                                       Documenter décision, durée, reviewer, policy version et éventuel suivi.
+
+
+
+
+13. Échelle des mesures
+ Mesure                                                                        Usage
+ No action                                                                     Signalement non fondé/insuffisant.
+ Education / warning                                                           Violation légère ou première occurrence appropriée.
+ Content edit request                                                          Correction possible sans retrait complet.
+ Content removal                                                               Contenu non conforme.
+ Feature restriction                                                           Bloquer publication, messagerie, paiement ou autre fonction ciblée.
+ Verification downgrade/revoke                                                 Preuve expirée, invalide ou compromise.
+ Temporary suspension                                                          Risque ou violations nécessitant arrêt temporaire.
+ Permanent termination                                                         Violations graves/répétées selon politique.
+                                                                               Seulement si architecture/provider le permet et base légitime; pas assimilé à
+ Financial hold/review
+                                                                               escrow général.
+ External escalation                                                           Autorité/provider compétent lorsque requis par loi/urgence/policy.
+
+
+
+
+14. Appeals / contestation
+ Principe                                                                      Règle
+ Droit de comprendre                                                           Fournir motif/catégorie de décision sauf risque sécurité/légal.
+ Canal distinct                                                                L'appel est un Case lié à la décision initiale.
+                                                                               Éviter que la même personne soit seule juge de son propre acte pour cas
+ Reviewer approprié
+                                                                               significatifs.
+ Nouvelles preuves                                                             Permettre documents/informations pertinents.
+ Pas de paiement                                                               Aucun plan ne donne droit à une décision favorable.
+ Résultat                                                                      Uphold, modify, reverse, request more information.
+ Audit                                                                         Conserver décision initiale et décision d'appel.
+
+
+
+
+15. Suspicious Activity Engine V1
+ Signal                                              Exemples                                              Réponse possible
+ Vélocité                                            Trop de comptes/publications/messages                 Rate limit / challenge / review
+ Paiement                                            Doublons, confirmations incohérentes, chargebacks     Reconciliation / finance review
+ Identité                                            Documents réutilisés, incohérences fortes             Verification review
+ Marketplace                                         Volume anormal pour vendeur particulier               Reclassification/eligibility review
+ Avis                                                Réseau d'avis réciproques artificiels                 Review/remove inauthentic reviews
+ Messagerie                                          Spam massif, liens suspects                           Rate limit/restriction
+ Recrutement                                         Collecte excessive de données candidats               Restriction/review
+ Compte                                              Connexions inhabituelles, récupération répétée        Security challenge/session revoke
+
+
+
+
+Les signaux automatisés déclenchent des contrôles ou restrictions proportionnées; ils ne doivent pas produire seuls des
+décisions conséquentes irréversibles lorsqu'une revue humaine est appropriée.
+
+
+
+
+16. Sécurité des comptes et sessions
+ Contrôle V1                                                                   Exigence
+ Mots de passe / auth                                                          Stockage sécurisé; politiques modernes; aucune conservation en clair.
+ OTP / téléphone/email                                                         Protection contre abus, rate limiting et expiration.
+ Sessions                                                                      Révocation, expiration, visibilité des sessions si possible.
+ Changement sensible                                                           Réauthentification ou challenge pour actions à risque.
+ Récupération compte                                                           Procédure résistante à l'usurpation; journalisation.
+ Organisation                                                                  Changement owner/admin ou autorité = action sensible.
+ Staff                                                                         MFA obligatoire recommandé; moindre privilège.
+
+                         Plateforme Écosystème RDC · Document 07 · Confiance, Vérification, Modération & Sécurité · Septembre 2026
+ Secrets/API keys                                                                  Jamais exposés aux clients; rotation et gestion sécurisée.
+ Logs                                                                              Éviter secrets/PII inutiles dans logs.
+
+
+
+
+17. Protection des données sensibles
+ Donnée                                                Stockage/accès                                           Affichage public
+ Pièce d'identité                                      Privé, chiffré/protégé, accès reviewer                   Jamais
+ Adresse exacte domicile                               Accès contextuel fulfillment/relationship                Jamais par défaut
+ Téléphone/email privé                                 Accès relationnel/purpose-bound                          Seulement si utilisateur choisit et policy autorise
+ CV/candidature                                        Recruitment scope                                        Jamais public par défaut
+ Référent contact                                      Verification/recruitment purpose                         Jamais
+ Données enfant                                        Relation parent/école autorisée                          Jamais
+ Données paiement                                      Token/référence/provider; minimisation                   Jamais
+ Evidence modération                                   Case/staff restreint                                     Jamais
+
+
+
+
+18. Rétention et suppression
+ Catégorie                                                                         Principe
+                                                                                   Conserver uniquement durée nécessaire à finalité, obligations et défense;
+ Preuves vérification
+                                                                                   politique à définir.
+ Cases sécurité                                                                    Rétention proportionnée à gravité/obligations; accès restreint.
+ Contenus supprimés                                                                Peuvent être conservés temporairement comme preuve si base légitime.
+ Audit financier                                                                   Selon exigences légales/comptables/provider.
+ Données enfant                                                                    Minimisation renforcée; suppression/retrait d'accès selon relation et règles.
+                                                                                   Suppression/anonymisation selon obligations, litiges, sécurité et droits
+ Comptes fermés
+                                                                                   applicables.
+
+
+
+
+Les durées exactes doivent être fixées dans le registre juridique et la politique de rétention, avec validation en RDC et selon les
+fournisseurs intégrés.
+
+
+
+
+19. Transparence publique des badges
+ Affichage recommandé                                                              Tooltip / explication
+ Téléphone vérifié                                                                 « Le contrôle du numéro de téléphone a été effectué. »
+                                                                                   « Un contrôle d'identité a été effectué selon la procédure de la plateforme. Cela
+ Identité vérifiée
+                                                                                   ne constitue pas une garantie de sécurité ou de qualité. »
+ Organisation vérifiée                                                             « Certains éléments d'existence/organisation ont été contrôlés. »
+                                                                                   « Deux références ont été contrôlées selon la procédure applicable; leurs
+ 2 références vérifiées
+                                                                                   coordonnées restent privées. »
+ Certification vérifiée                                                            « Le document/la provenance indiqué(e) a été contrôlé(e) au niveau affiché. »
+
+
+
+
+Éviter les libellés « recommandé », « approuvé », « sûr », « garanti » ou tout langage donnant à croire que la plateforme endosse
+globalement une personne ou organisation.
+
+
+
+
+20. Gouvernance du personnel plateforme
+ Rôle                                                  Accès                                                    Contrôle
+ Support                                               Cases et contexte nécessaire                             Pas de browsing libre des données privées
+ Verification Reviewer                                 Evidence assignée                                        Journal accès et décision
+ Moderator                                             Contenus/cases assignés                                  Pas accès financier complet
+ Safety Lead                                           Cases sécurité graves                                    Accès justifié et restreint
+ Finance Ops                                           Transactions/refunds/reconciliation                      Pas CV/messages hors case
+ Security                                              Incidents/logs nécessaires                               Actions privilégiées auditées
+ Admin Policy                                          Règles, taxonomie, configuration                         Four-eye pour changements critiques
+
+
+
+
+                           Plateforme Écosystème RDC · Document 07 · Confiance, Vérification, Modération & Sécurité · Septembre 2026
+21. Four-eye / double contrôle
+Action sensible                                                               Double contrôle recommandé/requis selon seuil
+Refund important / override financier                                         Oui
+Réactivation après fraude grave                                               Oui
+Suppression définitive organisation majeure                                   Oui
+Accès exceptionnel à données très sensibles                                   Oui lorsque praticable
+Modification politique globale                                                Revue/approbation
+Export massif de données                                                      Oui
+Changement d'autorité organisationnelle contesté                              Oui
+
+
+
+
+22. Sécurité spécifique par module
+Module                                                                        Protection clé
+                                                                              Biens interdits/restrictifs, vendeur particulier vs commercial, interaction-linked
+Marketplace
+                                                                              reviews.
+                                                                              Pas de frais/commission sur salaire; données candidat purpose-bound; pas de
+Jobs
+                                                                              verdict autonome.
+Household recruitment                                                         Vérification renforcée possible des deux côtés; protection coordonnées privées.
+Training                                                                      Completion/certificat ne devient pas preuve automatique de compétence.
+Events                                                                        Événements privés non indexés; QR unique; double scan détecté.
+Food/Delivery                                                                 Adresse exacte uniquement pour fulfillment; cash collector explicite.
+Schools                                                                       Aucun profil enfant public; relations parent/bénéficiaire contrôlées.
+Campaigns                                                                     Contrôles renforcés si collecte; séparation campagne/événement.
+Messaging                                                                     Anti-spam, blocage, report; accès staff contextuel.
+
+
+
+
+23. Incidents de sécurité
+Phase                                                                         Actions
+Détecter                                                                      Alerte, report, anomalie, provider.
+Contenir                                                                      Révoquer session/token, limiter feature, isoler intégration.
+Évaluer                                                                       Portée, données, comptes, transactions, gravité.
+Préserver                                                                     Logs/preuves avec chaîne de responsabilité appropriée.
+Remédier                                                                      Patch, rotation secrets, récupération compte, correction données.
+Notifier                                                                      Utilisateurs/provider/autorités si requis par règles applicables.
+Revoir                                                                        Post-mortem, causes, actions préventives, suivi.
+
+
+
+
+24. Critères d'acceptation V1
+Test                                                                          Critère
+                                                                              Un abonnement payé ne peut jamais produire automatiquement un statut
+TRU-AC-01
+                                                                              Verified.
+                                                                              Une pièce d'identité n'est accessible qu'aux rôles de vérification autorisés et
+TRU-AC-02
+                                                                              jamais publiquement.
+TRU-AC-03                                                                     Le profil public explique le type de vérification sans exposer la preuve brute.
+                                                                              Une catégorie sensible peut bloquer publication tant que contrôles requis ne
+TRU-AC-04
+                                                                              sont pas satisfaits.
+TRU-AC-05                                                                     Un avis sans interaction éligible peut être refusé selon policy.
+                                                                              Le retrait d'un avis défavorable n'est pas possible uniquement sur demande du
+TRU-AC-06
+                                                                              sujet.
+TRU-AC-07                                                                     Une décision de suspension significative crée un Case et un audit record.
+TRU-AC-08                                                                     Un appeal conserve la décision initiale et le résultat de révision.
+TRU-AC-09                                                                     Le support ne peut pas parcourir librement les documents de vérification.
+TRU-AC-10                                                                     Un événement privé n'apparaît pas dans la recherche publique.
+TRU-AC-11                                                                     Un provider livraison non assigné ne reçoit pas l'adresse exacte.
+                                                                              Un compte suspendu ne retrouve pas ses capacités parce qu'il renouvelle un
+TRU-AC-12
+                                                                              plan.
+TRU-AC-13                                                                     Un changement de policy sensible est versionné et audité.
+                                                                              Les signaux de fraude automatisés peuvent déclencher review mais pas un
+TRU-AC-14
+                                                                              verdict irréversible non prévu.
+TRU-AC-15                                                                     Les coordonnées d'un référent professionnel ne sont jamais publiques.
+
+
+
+                        Plateforme Écosystème RDC · Document 07 · Confiance, Vérification, Modération & Sécurité · Septembre 2026
+25. V1 vs Post-V1
+V1                                                                            Post-V1
+Verification Records typés et revue manuelle                                  Intégrations de vérification/credential plus profondes
+Case Management support/safety/moderation/appeal                              Risk engine plus sophistiqué et graph analysis
+Rate limits et suspicious flags                                               Détection fraude avancée/ML sous gouvernance
+Interaction-linked reviews                                                    Analyses réputation contextuelles plus avancées sans score universel
+Références contrôlées avec consentement                                       Réseaux de credentials interopérables
+Security incident workflow de base                                            SOC/SIEM avancé selon croissance
+Four-eye sur actions critiques                                                Privileged access management avancé
+
+
+
+
+26. Points à valider juridiquement et opérationnellement
+Sujet                                                                         Statut
+Catégories interdites/restrictives exactes en RDC                             À VALIDER JURIDIQUEMENT
+Contrôles requis pour professions réglementées                                À VALIDER JURIDIQUEMENT
+Traitement et rétention des pièces d'identité                                 À VALIDER JURIDIQUEMENT
+Obligations de notification d'incident                                        À VALIDER JURIDIQUEMENT
+Règles relatives aux mineurs/écoles                                           À VALIDER JURIDIQUEMENT
+Collecte de fonds / nonprofits                                                À VALIDER JURIDIQUEMENT
+Données candidats et pratiques recrutement                                    À VALIDER JURIDIQUEMENT
+Conservation audit/transactions                                               À VALIDER JURIDIQUEMENT + provider
+SLA internes de modération/sécurité                                           À DÉFINIR OPÉRATIONNELLEMENT
+Seuils four-eye et refunds                                                    À DÉFINIR OPÉRATIONNELLEMENT
+
+
+
+
+27. Liens avec les autres documents
+Document                                                                      Relation
+                                                                              Les catégories portent les états Allowed/Restricted/Verification Required/Not
+Document 03 - Taxonomie
+                                                                              Permitted.
+Document 05 - Plans & Entitlements                                            Le paiement reste strictement séparé de la confiance.
+Document 06 - Accès                                                           Les reviewers/staff suivent permissions, scope, purpose et field-level access.
+Document 08 à venir - Paiements, Commandes, Remboursements & Litiges          Les disputes commerce/payment deviennent des Cases spécialisés.
+Document 09 à venir - Back-office & Opérations                                Décrira les queues, écrans staff et procédures quotidiennes.
+Document 10 à venir - Tests & Recette                                         Transformera ces critères en scénarios de recette.
+
+
+
+
+                        Plateforme Écosystème RDC · Document 07 · Confiance, Vérification, Modération & Sécurité · Septembre 2026
+

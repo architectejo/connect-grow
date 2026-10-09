@@ -1,0 +1,1192 @@
+**CATALOGUE DES PARCOURS UTILISATEURS**
+
+**User Flows - Plateforme Écosystème RDC**
+
+*Document 02 de la Suite documentaire maître · Septembre 2026*
+
+# 1. Objet du document
+
+Ce catalogue décrit comment les utilisateurs passent d'un écran et d'un objet métier à l'autre pour atteindre un objectif. Il complète le Référentiel Fonctionnel (Document 01), qui décrit les capacités, et le Guide Fonctionnel des Écrans, qui décrit chaque écran isolément. Ici, l'unité de lecture est le parcours complet : déclencheur, étapes, décisions, exceptions, sortie et objets créés.
+
+## 1.1 Principes de parcours
+
+| **Principe**                   | **Application**                                                                                                                              |
+|--------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| Un compte, plusieurs contextes | Le contexte actif doit rester visible lorsqu'une action est faite à titre personnel, professionnel ou organisationnel.                       |
+| Navigation cohérente           | Accueil · Explorer · + Publier · Messages · Compte reste le socle mobile; les parcours profonds utilisent retour, contexte et liens d'objet. |
+| État explicite                 | Commande, paiement, fulfillment, livraison, candidature, réservation et case conservent des états indépendants.                              |
+| Reprise                        | Un parcours interrompu par faible réseau doit pouvoir reprendre sans dupliquer une action critique.                                          |
+| Accès avant action             | Permission, éligibilité, entitlement, règles marché et consentement sont évalués avant l'action protégée.                                    |
+| Contexte de conversation       | Les échanges conservent le lien avec l'objet: devis, commande, candidature, livraison, événement, etc.                                       |
+| Pas de cul-de-sac              | Une erreur doit proposer une prochaine action utile: réessayer, modifier, contacter, revenir, suivre ou ouvrir un dossier.                   |
+
+# 2. Carte des parcours
+
+| **Code** | **Parcours**                            | **Acteur principal**             | **Sortie**                         |
+|----------|-----------------------------------------|----------------------------------|------------------------------------|
+| UF-01    | Découverte transversale                 | Visiteur / utilisateur           | Objet ou profil pertinent          |
+| UF-02    | Création de compte et contexte          | Visiteur                         | Compte + contexte actif            |
+| UF-03    | Activation Prestataire individuel       | Individu                         | Profil prestataire publiable       |
+| UF-04    | Création / revendication d'organisation | Individu autorisé                | Organisation + autorité validée    |
+| UF-05    | Publication via + Publier               | Acteur éligible                  | Objet publié ou brouillon          |
+| UF-06    | Marketplace - achat Mobile Money        | Acheteur                         | Commande payée et suivie           |
+| UF-07    | Marketplace - achat cash                | Acheteur / vendeur               | Commande remise + cash confirmé    |
+| UF-08    | Marketplace - exception / litige        | Partie à la commande             | Case + résolution                  |
+| UF-09    | Service - demande de devis              | Client                           | Devis accepté/refusé               |
+| UF-10    | Réservation                             | Client / provider                | Réservation confirmée              |
+| UF-11    | Restaurant - retrait                    | Client / restaurant              | Commande collectée                 |
+| UF-12    | Restaurant - livraison partenaire       | Client / restaurant / livreur    | Commande livrée                    |
+| UF-13    | Candidature emploi entreprise           | Candidat / recruteur             | Pipeline de candidature            |
+| UF-14    | Recrutement domestique                  | Employeur particulier / candidat | Processus de recrutement           |
+| UF-15    | Entretien privé                         | Recruteur / candidat             | Entretien planifié/réalisé         |
+| UF-16    | Formation liée au recrutement           | Employeur / candidat / formateur | Inscription + suivi                |
+| UF-17    | Formation workforce                     | Entreprise / formateur           | Cohorte privée                     |
+| UF-18    | Événement gratuit                       | Participant                      | Inscription/RSVP                   |
+| UF-19    | Événement payant                        | Participant                      | Billet QR                          |
+| UF-20    | Check-in événement                      | Staff / participant              | Entrée validée                     |
+| UF-21    | Événement annulé/reporté                | Organisateur / participant       | Notification + remboursement/choix |
+| UF-22    | Admission école                         | Parent / école                   | Dossier + décision                 |
+| UF-23    | Campagne / volontariat                  | Public / organisation            | Contribution/intérêt/inscription   |
+| UF-24    | Messagerie contextualisée               | Parties autorisées               | Conversation + action              |
+| UF-25    | À traiter                               | Utilisateur                      | Action résolue                     |
+| UF-26    | Vérification                            | Utilisateur / organisation       | Statut de vérification granulaire  |
+| UF-27    | Achat plan/pass                         | Utilisateur / organisation       | Entitlement actif                  |
+| UF-28    | Promotion                               | Acteur éligible                  | Campagne sponsorisée étiquetée     |
+| UF-29    | Gestion organisation et équipe          | Admin organisation               | Membres/permissions configurés     |
+| UF-30    | Support / appel / sécurité              | Utilisateur / staff              | Case clôturé ou escaladé           |
+
+# 3. Parcours détaillés
+
+## UF-01 - Découverte transversale
+
+| **Élément**               | **Description**                                                                                                   |
+|---------------------------|-------------------------------------------------------------------------------------------------------------------|
+| Objectif                  | Trouver une entreprise, un service, un produit, un emploi, un événement, un restaurant ou autre offre pertinente. |
+| Acteurs principaux        | Visiteur; utilisateur authentifié                                                                                 |
+| Point d'entrée            | Accueil ou Explorer                                                                                               |
+| Résultat attendu          | Accès à un objet pertinent ou sauvegarde d'une recherche.                                                         |
+| Références fonctionnelles | NAV-002, NAV-003, TAX-003, PRM-001                                                                                |
+
+### Parcours nominal
+
+1\. L'utilisateur saisit un besoin ou choisit un domaine.
+
+2\. Le moteur interprète mots-clés, catégorie/alias, localisation et filtres structurés.
+
+3\. Les résultats affichent clairement leur type et les éventuels contenus sponsorisés.
+
+4\. L'utilisateur ouvre une fiche ou affine les filtres.
+
+5\. Depuis la fiche, il déclenche l'action pertinente: contacter, acheter, devis, réserver, postuler, s'inscrire.
+
+### Variantes / embranchements
+
+- Sans compte: consultation publique possible; action protégée déclenche connexion/création de compte.
+
+- Une recherche peut être sauvegardée par un utilisateur authentifié.
+
+- La localisation exacte n'est pas exigée si une zone suffit.
+
+### Exceptions et protections
+
+- Les objets privés, expirés ou non autorisés ne sont pas exposés.
+
+- Aucun résultat n'est présenté comme 'le meilleur' par simple décision de la plateforme.
+
+## UF-02 - Création de compte et choix du contexte
+
+| **Élément**               | **Description**                                                                                                     |
+|---------------------------|---------------------------------------------------------------------------------------------------------------------|
+| Objectif                  | Créer l'identité de base et permettre à l'utilisateur d'agir ensuite dans plusieurs contextes sans comptes séparés. |
+| Acteurs principaux        | Visiteur                                                                                                            |
+| Point d'entrée            | Action protégée ou écran Compte                                                                                     |
+| Résultat attendu          | Compte personnel actif avec contexte explicite.                                                                     |
+| Références fonctionnelles | IAM-001 à IAM-007                                                                                                   |
+
+### Parcours nominal
+
+1\. Création du compte personnel.
+
+2\. Vérification minimale requise et acceptation des conditions.
+
+3\. Ouverture de l'espace personnel.
+
+4\. Si nécessaire, proposition d'activer un profil prestataire ou de rejoindre/créer une organisation.
+
+5\. Le contexte actif est affiché avant toute publication ou action au nom d'une organisation.
+
+### Variantes / embranchements
+
+- Connexion d'un utilisateur existant.
+
+- Invitation organisationnelle reçue avant création du compte.
+
+- Récupération de compte.
+
+### Exceptions et protections
+
+- Un email professionnel ne prouve pas à lui seul l'autorité organisationnelle.
+
+- Le compte personnel subsiste si l'accès à une organisation est révoqué.
+
+## UF-03 - Activation du profil Prestataire individuel
+
+| **Élément**               | **Description**                                                                            |
+|---------------------------|--------------------------------------------------------------------------------------------|
+| Objectif                  | Permettre à une personne d'offrir ses propres services sans se présenter comme entreprise. |
+| Acteurs principaux        | Individu                                                                                   |
+| Point d'entrée            | Compte \> Mes profils ou + Publier \> Proposer un service                                  |
+| Résultat attendu          | Profil prestataire actif et services publiables.                                           |
+| Références fonctionnelles | IAM-004, ORG-002, SRV-001, TRU-002                                                         |
+
+### Parcours nominal
+
+1\. Choix de l'activité/profession.
+
+2\. Saisie zone de service, expérience, compétences, langues et disponibilité.
+
+3\. Ajout des éléments de confiance pertinents.
+
+4\. Choix des services à publier.
+
+5\. Prévisualisation puis publication selon éligibilité.
+
+### Variantes / embranchements
+
+- Profil peut exister avant publication d'un service.
+
+- Catégories sensibles peuvent demander une vérification renforcée.
+
+### Exceptions et protections
+
+- Adresse privée et pièces d'identité ne sont jamais publiques.
+
+- Vérification d'identité ne vaut pas garantie de qualité ou sécurité.
+
+## UF-04 - Création ou revendication d'une organisation
+
+| **Élément**               | **Description**                                                           |
+|---------------------------|---------------------------------------------------------------------------|
+| Objectif                  | Établir une organisation et l'autorité de la personne qui agit pour elle. |
+| Acteurs principaux        | Individu autorisé                                                         |
+| Point d'entrée            | Compte \> Mes profils/organisations                                       |
+| Résultat attendu          | Organisation contrôlée par les acteurs autorisés.                         |
+| Références fonctionnelles | IAM-005 à IAM-007, ORG-001, TRU-003                                       |
+
+### Parcours nominal
+
+1\. Choix Créer, Revendiquer ou Rejoindre.
+
+2\. Saisie/identification de l'organisation.
+
+3\. Fourniture des preuves ou utilisation d'une invitation autorisée.
+
+4\. Validation de l'autorité selon le cas.
+
+5\. Création du contexte organisationnel et attribution des permissions initiales.
+
+6\. Configuration profil public, branches et modules utiles.
+
+### Variantes / embranchements
+
+- Revendication d'une fiche existante.
+
+- Invitation comme simple membre sans droit d'administration.
+
+### Exceptions et protections
+
+- Le paiement d'un plan ne remplace pas la validation d'autorité.
+
+- Une revendication en attente ne permet pas d'administrer l'organisation.
+
+## UF-05 - Publication universelle via + Publier
+
+| **Élément**               | **Description**                                       |
+|---------------------------|-------------------------------------------------------|
+| Objectif                  | Offrir un point de création unique et contextuel.     |
+| Acteurs principaux        | Individu, prestataire, organisation                   |
+| Point d'entrée            | Bouton central + Publier                              |
+| Résultat attendu          | Objet créé avec bon propriétaire, statut et contexte. |
+| Références fonctionnelles | NAV-004, TAX-001/002, IAM-007, ENT-001, TRU-005       |
+
+### Parcours nominal
+
+1\. Le système lit le contexte actif.
+
+2\. Il affiche seulement les types d'objets pertinents: article, service, produit, emploi, événement, promotion, etc.
+
+3\. L'utilisateur choisit un type.
+
+4\. Le formulaire utilise la taxonomie et les attributs applicables.
+
+5\. Validation des règles, permissions, entitlement et vérifications.
+
+6\. Enregistrement en brouillon ou publication.
+
+### Variantes / embranchements
+
+- Changer de contexte avant publication.
+
+- Promouvoir quelque chose renvoie à un objet existant éligible.
+
+### Exceptions et protections
+
+- Une capacité payante n'accorde pas une permission organisationnelle.
+
+- Contenu interdit/restrictif bloqué ou envoyé en revue.
+
+## UF-06 - Marketplace - achat avec Mobile Money
+
+| **Élément**               | **Description**                                                                            |
+|---------------------------|--------------------------------------------------------------------------------------------|
+| Objectif                  | Acheter un article avec paiement intégré sans confondre commande, paiement et fulfillment. |
+| Acteurs principaux        | Acheteur; vendeur                                                                          |
+| Point d'entrée            | Fiche produit \> Acheter                                                                   |
+| Résultat attendu          | Commande suivie avec états paiement et fulfillment distincts.                              |
+| Références fonctionnelles | MKT-004/005, COM-001/002/004, PLT-003                                                      |
+
+### Parcours nominal
+
+1\. Validation article, quantité et stock.
+
+2\. Création idempotente de la commande et réservation de stock.
+
+3\. Choix Mobile Money disponible.
+
+4\. Création de l'intention de paiement.
+
+5\. Affichage Pending pendant confirmation fournisseur.
+
+6\. Callback fournisseur vérifié: Successful ou Failed/Expired/Cancelled.
+
+7\. Si Successful, commande poursuit fulfillment; vendeur et acheteur sont notifiés.
+
+8\. Remise/retrait/livraison puis complétion.
+
+### Variantes / embranchements
+
+- Paiement peut rester en rapprochement si état inconnu.
+
+- Livraison vendeur/partenaire ou retrait selon offre.
+
+### Exceptions et protections
+
+- Le frontend ne marque jamais le paiement réussi seul.
+
+- Retry ne crée ni double commande ni double débit.
+
+- Échec/expiration libère la réservation de stock selon règle.
+
+## UF-07 - Marketplace - achat en espèces
+
+| **Élément**               | **Description**                                                       |
+|---------------------------|-----------------------------------------------------------------------|
+| Objectif                  | Permettre un achat cash avec preuve de remise/encaissement autorisée. |
+| Acteurs principaux        | Acheteur; vendeur/livreur autorisé                                    |
+| Point d'entrée            | Checkout Marketplace                                                  |
+| Résultat attendu          | Commande remise et paiement cash confirmé par acteur autorisé.        |
+| Références fonctionnelles | COM-003/007, MKT-004/005                                              |
+
+### Parcours nominal
+
+1\. Création de commande avec paiement Cash = Unpaid.
+
+2\. Réservation du stock.
+
+3\. Organisation du retrait/remise/livraison.
+
+4\. Remise de l'article.
+
+5\. Le receveur autorisé confirme l'encaissement.
+
+6\. Paiement devient Paid et fulfillment peut être complété.
+
+### Variantes / embranchements
+
+- Cash peut être collecté par vendeur ou partenaire autorisé selon arrangement explicite.
+
+### Exceptions et protections
+
+- Le bouton 'j'ai payé' côté acheteur ne suffit pas.
+
+- Désaccord cash ouvre un Case sans falsifier l'état de paiement.
+
+## UF-08 - Marketplace - problème, retour ou litige
+
+| **Élément**               | **Description**                                            |
+|---------------------------|------------------------------------------------------------|
+| Objectif                  | Traiter une anomalie sans écraser l'historique commercial. |
+| Acteurs principaux        | Acheteur; vendeur; support                                 |
+| Point d'entrée            | Commande \> Signaler un problème                           |
+| Résultat attendu          | Dossier résolu ou escaladé, avec traces.                   |
+| Références fonctionnelles | COM-006/007, TRU-006                                       |
+
+### Parcours nominal
+
+1\. Sélection du motif: non reçu, erroné, endommagé, paiement, cash, livraison, etc.
+
+2\. Création d'un Case lié à commande/paiement/livraison.
+
+3\. Collecte des preuves et messages contextuels.
+
+4\. Analyse par parties/support selon catégorie.
+
+5\. Décision opérationnelle: information, retour, remboursement, rejet motivé ou escalade.
+
+6\. Clôture avec historique.
+
+### Variantes / embranchements
+
+- Remboursement partiel si fournisseur/règle le permet.
+
+- Allégation de transaction non autorisée suit une voie renforcée.
+
+### Exceptions et protections
+
+- Le Case ne modifie pas silencieusement le paiement.
+
+- Règles de retour et obligations légales restent configurables/à valider.
+
+## UF-09 - Service - demande et traitement d'un devis
+
+| **Élément**               | **Description**                                                        |
+|---------------------------|------------------------------------------------------------------------|
+| Objectif                  | Passer de la découverte d'un prestataire à une proposition structurée. |
+| Acteurs principaux        | Client; prestataire/organisation                                       |
+| Point d'entrée            | Profil/service \> Demander un devis                                    |
+| Résultat attendu          | Devis accepté/refusé avec historique de conversation.                  |
+| Références fonctionnelles | SRV-002/003/005, MSG-002                                               |
+
+### Parcours nominal
+
+1\. Client décrit besoin, lieu, échéance et pièces utiles.
+
+2\. Création de Quote Request et conversation contextuelle.
+
+3\. Prestataire pose des questions ou planifie une visite si nécessaire.
+
+4\. Prestataire émet un devis structuré avec validité.
+
+5\. Client compare factuellement si plusieurs devis, puis Accepter, Question ou Refuser.
+
+6\. Acceptation peut mener à réservation/coordination du service.
+
+### Variantes / embranchements
+
+- Révision du devis conserve versions.
+
+- Demande multi-prestataires limitée pour éviter le spam.
+
+### Exceptions et protections
+
+- Aucun 'meilleur prestataire' automatique.
+
+- Paiement général de services n'est pas supposé intégré en V1.
+
+## UF-10 - Réservation d'un service ou d'une ressource
+
+| **Élément**               | **Description**                                                         |
+|---------------------------|-------------------------------------------------------------------------|
+| Objectif                  | Réserver un créneau, une ressource, une capacité ou une plage de dates. |
+| Acteurs principaux        | Client; provider                                                        |
+| Point d'entrée            | Fiche service/lieu \> Réserver                                          |
+| Résultat attendu          | Réservation valide et visible dans les espaces des parties.             |
+| Références fonctionnelles | SRV-004/005                                                             |
+
+### Parcours nominal
+
+1\. Sélection du service/ressource et date.
+
+2\. Lecture de la disponibilité réelle.
+
+3\. Choix du créneau/plage.
+
+4\. Vérification conflits, capacité, buffers et préavis.
+
+5\. Création Requested/Pending ou Confirmed selon règle.
+
+6\. Notifications aux parties.
+
+7\. Modification/annulation selon politique.
+
+### Variantes / embranchements
+
+- Appointment, resource inventory, capacity ou overnight/date-range.
+
+- Confirmation manuelle possible.
+
+### Exceptions et protections
+
+- Horaires d'ouverture ne sont pas assimilés à disponibilité.
+
+- Conflit simultané doit être empêché transactionnellement.
+
+## UF-11 - Commande restaurant - retrait
+
+| **Élément**               | **Description**                                        |
+|---------------------------|--------------------------------------------------------|
+| Objectif                  | Commander auprès d'un restaurant et retirer sur place. |
+| Acteurs principaux        | Client; restaurant                                     |
+| Point d'entrée            | Menu restaurant                                        |
+| Résultat attendu          | Commande collectée et clôturée.                        |
+| Références fonctionnelles | FOD-001/002/003, COM-001/003/006                       |
+
+### Parcours nominal
+
+1\. Sélection des plats/options.
+
+2\. Création commande et choix Retrait.
+
+3\. Paiement intégré ou cash selon options.
+
+4\. Restaurant reçoit puis accepte/refuse.
+
+5\. États Received \> Accepted \> Preparing \> Ready.
+
+6\. Client reçoit notification Ready.
+
+7\. Retrait et confirmation; Completed.
+
+### Variantes / embranchements
+
+- Annulation possible selon stade et politique.
+
+### Exceptions et protections
+
+- Paiement et préparation restent indépendants.
+
+- Une commande refusée après paiement déclenche le traitement financier approprié.
+
+## UF-12 - Commande restaurant - livraison partenaire
+
+| **Élément**               | **Description**                                                                            |
+|---------------------------|--------------------------------------------------------------------------------------------|
+| Objectif                  | Relier commande alimentaire et entreprise de livraison sans créer une flotte propriétaire. |
+| Acteurs principaux        | Client; restaurant; entreprise de livraison                                                |
+| Point d'entrée            | Checkout restaurant \> Livraison partenaire                                                |
+| Résultat attendu          | Commande livrée avec états Food, Payment et Delivery traçables.                            |
+| Références fonctionnelles | FOD-002/003, DLV-001/002, COM-003                                                          |
+
+### Parcours nominal
+
+1\. Commande Food créée avec montant nourriture.
+
+2\. Demande de livraison séparée créée avec montant livraison.
+
+3\. Restaurant accepte et prépare.
+
+4\. Partenaire accepte Delivery Request.
+
+5\. Livreur se dirige vers pickup; restaurant marque Ready.
+
+6\. Pickup confirmé; livraison passe In delivery.
+
+7\. Remise au client; Delivery = Delivered; Food Order progresse vers Completed.
+
+8\. Notifications présentent un parcours compréhensible au client.
+
+### Variantes / embranchements
+
+- Cash collector explicite selon arrangement.
+
+- Échec livraison, refus partenaire ou retour gérés séparément.
+
+### Exceptions et protections
+
+- Le livreur ne reçoit que les données nécessaires.
+
+- Pas de GPS/routage/flotte avancés requis en V1.
+
+## UF-13 - Candidature à un emploi d'entreprise
+
+| **Élément**               | **Description**                                               |
+|---------------------------|---------------------------------------------------------------|
+| Objectif                  | Permettre une candidature structurée et un traitement humain. |
+| Acteurs principaux        | Candidat; recruteur autorisé                                  |
+| Point d'entrée            | Offre d'emploi \> Postuler                                    |
+| Résultat attendu          | Candidature suivie jusqu'à décision/fermeture.                |
+| Références fonctionnelles | JOB-003/004/005/008                                           |
+
+### Parcours nominal
+
+1\. Candidat consulte exigences essentielles/préférées.
+
+2\. Soumet profil/CV et réponses de présélection.
+
+3\. Création Application privée.
+
+4\. Recruteur voit les dossiers autorisés.
+
+5\. Comparaison factuelle des exigences.
+
+6\. Candidat avance dans pipeline, reçoit demandes/entretien ou décision.
+
+7\. Historique conservé.
+
+### Variantes / embranchements
+
+- Candidat peut être invité à postuler via découverte opt-in.
+
+- Formation pertinente peut être proposée sans devenir condition automatique.
+
+### Exceptions et protections
+
+- Pas de classement automatique gagnant/perdant.
+
+- 'Non trouvé' n'est pas 'ne possède pas'.
+
+- Les membres sans permission recrutement ne voient pas le dossier.
+
+## UF-14 - Recrutement par employeur particulier
+
+| **Élément**               | **Description**                                                                                 |
+|---------------------------|-------------------------------------------------------------------------------------------------|
+| Objectif                  | Permettre à un ménage de recruter un travailleur à domicile sans se présenter comme entreprise. |
+| Acteurs principaux        | Employeur particulier; candidat                                                                 |
+| Point d'entrée            | Emplois à domicile                                                                              |
+| Résultat attendu          | Recrutement géré avec distinction claire particulier/entreprise.                                |
+| Références fonctionnelles | JOB-002/003/006/007, ENT-003                                                                    |
+
+### Parcours nominal
+
+1\. Employeur choisit publication unique/pass/Premium selon entitlement.
+
+2\. Publie le poste étiqueté Employeur particulier.
+
+3\. Candidats recherchent et postulent gratuitement.
+
+4\. Employeur examine les candidatures.
+
+5\. Entretien et références avec consentement.
+
+6\. Décision humaine et clôture du recrutement.
+
+### Variantes / embranchements
+
+- Même candidat peut aussi proposer des services indépendants; les deux activités restent distinctes.
+
+### Exceptions et protections
+
+- Aucune commission sur salaire.
+
+- Critères protégés/sensibles ne deviennent pas filtres arbitraires.
+
+- Références privées.
+
+## UF-15 - Planification d'un entretien privé
+
+| **Élément**               | **Description**                                                |
+|---------------------------|----------------------------------------------------------------|
+| Objectif                  | Coordonner un entretien sans l'exposer comme événement public. |
+| Acteurs principaux        | Recruteur; candidat                                            |
+| Point d'entrée            | Pipeline candidature                                           |
+| Résultat attendu          | Entretien enregistré dans le contexte de candidature.          |
+| Références fonctionnelles | JOB-006, EVT-003, SRV-004                                      |
+
+### Parcours nominal
+
+1\. Recruteur propose créneau et mode.
+
+2\. Système vérifie disponibilité/ressource.
+
+3\. Invitation privée envoyée.
+
+4\. Candidat confirme, demande modification ou décline.
+
+5\. Rappels contextuels.
+
+6\. Entretien marqué réalisé/annulé/no-show selon règles.
+
+### Variantes / embranchements
+
+- Panel/multi-stage possible de manière structurée.
+
+- Online link ou lieu physique.
+
+### Exceptions et protections
+
+- L'événement n'est jamais indexé publiquement.
+
+- Seuls participants et rôles recrutement autorisés y accèdent.
+
+## UF-16 - Formation liée au recrutement
+
+| **Élément**               | **Description**                                                                                             |
+|---------------------------|-------------------------------------------------------------------------------------------------------------|
+| Objectif                  | Relier un écart de compétence documenté à une formation pertinente sans automatiser la décision d'embauche. |
+| Acteurs principaux        | Employeur/recruteur; candidat; formateur                                                                    |
+| Point d'entrée            | Candidature / catalogue formation                                                                           |
+| Résultat attendu          | Inscription/complétion avec provenance et confidentialité.                                                  |
+| Références fonctionnelles | TRN-001/003/004, JOB-005                                                                                    |
+
+### Parcours nominal
+
+1\. Besoin de compétence identifié factuellement.
+
+2\. Recherche de programme pertinent.
+
+3\. Employeur propose/invite ou candidat choisit.
+
+4\. Consentement du candidat.
+
+5\. Inscription à programme/cohorte.
+
+6\. Participation et complétion administrative suivies.
+
+7\. Résultat visible uniquement dans le contexte autorisé.
+
+### Variantes / embranchements
+
+- Formation peut être pré-emploi sans garantir embauche.
+
+### Exceptions et protections
+
+- Complétion n'implique ni compétence prouvée ni certification vérifiée.
+
+- Formateur n'accède pas au dossier complet de recrutement.
+
+## UF-17 - Formation workforce / cohorte entreprise
+
+| **Élément**               | **Description**                                                             |
+|---------------------------|-----------------------------------------------------------------------------|
+| Objectif                  | Organiser upskilling/reskilling d'employés via un prestataire de formation. |
+| Acteurs principaux        | Entreprise; organisme de formation; salariés                                |
+| Point d'entrée            | Dashboard entreprise \> Formation                                           |
+| Résultat attendu          | Cohorte terminée avec suivi administratif.                                  |
+| Références fonctionnelles | TRN-001/002/003/004                                                         |
+
+### Parcours nominal
+
+1\. Entreprise identifie besoin et demande devis/cohorte.
+
+2\. Formateur propose programme, calendrier, capacité et prix.
+
+3\. Entreprise accepte et invite les salariés autorisés.
+
+4\. Chaque participant reçoit l'information/consentement nécessaire.
+
+5\. Sessions planifiées.
+
+6\. Participation et complétion suivies.
+
+7\. Entreprise consulte seulement les données prévues par le contexte.
+
+### Variantes / embranchements
+
+- Cohorte privée, in-person/online/hybrid.
+
+### Exceptions et protections
+
+- L'achat de formation ne donne pas au formateur accès aux RH de l'entreprise.
+
+- LMS avancé hors V1.
+
+## UF-18 - Inscription à un événement gratuit
+
+| **Élément**               | **Description**                                                                    |
+|---------------------------|------------------------------------------------------------------------------------|
+| Objectif                  | Participer à un événement gratuit selon ses règles de visibilité et participation. |
+| Acteurs principaux        | Participant; organisateur                                                          |
+| Point d'entrée            | Fiche événement                                                                    |
+| Résultat attendu          | Inscription/RSVP valide.                                                           |
+| Références fonctionnelles | EVT-001/002                                                                        |
+
+### Parcours nominal
+
+1\. Consultation de l'événement.
+
+2\. Vérification audience/visibilité.
+
+3\. Inscription, RSVP ou demande d'approbation selon configuration.
+
+4\. Confirmation.
+
+5\. Rappels et informations pratiques.
+
+6\. Participation puis clôture.
+
+### Variantes / embranchements
+
+- Invitation-only ou ciblé.
+
+- Capacité limitée.
+
+### Exceptions et protections
+
+- Visibilité publique ne signifie pas inscription ouverte.
+
+- Événement privé non indexé.
+
+## UF-19 - Achat d'un billet événement
+
+| **Élément**               | **Description**                                   |
+|---------------------------|---------------------------------------------------|
+| Objectif                  | Acheter un billet et recevoir un token/QR unique. |
+| Acteurs principaux        | Participant; organisateur                         |
+| Point d'entrée            | Événement payant \> Billets                       |
+| Résultat attendu          | Ticket numérique valide lié à la commande.        |
+| Références fonctionnelles | EVT-004/005, COM-001/002                          |
+
+### Parcours nominal
+
+1\. Choix type/quantité de billets.
+
+2\. Création Ticket Order et réservation de quantité.
+
+3\. Paiement fournisseur.
+
+4\. Confirmation autoritative.
+
+5\. Émission du Ticket unique.
+
+6\. Affichage dans Compte et envoi des notifications utiles.
+
+### Variantes / embranchements
+
+- Billets gratuits et payants peuvent coexister si événement Mixed.
+
+### Exceptions et protections
+
+- Échec/expiration libère la quantité selon règle.
+
+- Un billet ne devient pas valide sur simple écran de succès local.
+
+## UF-20 - Check-in d'un billet
+
+| **Élément**               | **Description**                                              |
+|---------------------------|--------------------------------------------------------------|
+| Objectif                  | Valider l'accès à l'événement et détecter les doubles scans. |
+| Acteurs principaux        | Staff événement autorisé; participant                        |
+| Point d'entrée            | Outil check-in                                               |
+| Résultat attendu          | Check-in unique et audité.                                   |
+| Références fonctionnelles | EVT-006                                                      |
+
+### Parcours nominal
+
+1\. Staff ouvre le contexte de l'événement.
+
+2\. Scan du QR/token.
+
+3\. Système vérifie événement, billet et statut.
+
+4\. Si valide: création du check-in.
+
+5\. Affichage confirmation.
+
+6\. Nouveau scan du même billet est signalé.
+
+### Variantes / embranchements
+
+- Recherche manuelle contrôlée si QR illisible.
+
+### Exceptions et protections
+
+- Staff d'un autre événement ne peut pas valider le billet.
+
+- Double scan ne crée pas une deuxième entrée.
+
+## UF-21 - Annulation ou report d'événement
+
+| **Élément**               | **Description**                                                   |
+|---------------------------|-------------------------------------------------------------------|
+| Objectif                  | Traiter les participants et paiements lorsqu'un événement change. |
+| Acteurs principaux        | Organisateur; participant; opérations                             |
+| Point d'entrée            | Gestion événement                                                 |
+| Résultat attendu          | Participants informés et conséquences financières résolues.       |
+| Références fonctionnelles | EVT-007, COM-006                                                  |
+
+### Parcours nominal
+
+1\. Organisateur autorisé choisit Annuler ou Reporter.
+
+2\. Motif et nouvelle information enregistrés.
+
+3\. Participants notifiés.
+
+4\. Règle détermine conservation du billet, choix participant ou remboursement.
+
+5\. Si remboursement: Refund séparé soumis au fournisseur.
+
+6\. Suivi jusqu'au résultat final.
+
+### Variantes / embranchements
+
+- Remboursement partiel/configurable si applicable.
+
+### Exceptions et protections
+
+- Un report ne doit pas annuler silencieusement tous les billets.
+
+- État du ticket et du refund restent traçables.
+
+## UF-22 - Admission scolaire parent-bénéficiaire
+
+| **Élément**               | **Description**                                                                  |
+|---------------------------|----------------------------------------------------------------------------------|
+| Objectif                  | Permettre à un parent/tuteur de gérer une admission sans profil public d'enfant. |
+| Acteurs principaux        | Parent/tuteur; école                                                             |
+| Point d'entrée            | Profil école \> Admission                                                        |
+| Résultat attendu          | Admission clôturée avec relation autorisée.                                      |
+| Références fonctionnelles | SCH-001/002/003/004, EVT-003                                                     |
+
+### Parcours nominal
+
+1\. Parent crée/associe un bénéficiaire privé.
+
+2\. Choisit section/programme et remplit la demande.
+
+3\. Téléverse documents nécessaires.
+
+4\. École reçoit le dossier dans son périmètre autorisé.
+
+5\. Demande d'information, visite ou entretien privé si nécessaire.
+
+6\. Décision communiquée.
+
+7\. Si admis, relation école-parent/beneficiary devient active selon règles.
+
+### Variantes / embranchements
+
+- Plusieurs bénéficiaires sous un même compte parent.
+
+- Visite scolaire via réservation/événement restreint.
+
+### Exceptions et protections
+
+- Aucun profil enfant public.
+
+- Les autres parents et services non autorisés ne voient pas le dossier.
+
+## UF-23 - Campagne et volontariat
+
+| **Élément**               | **Description**                                              |
+|---------------------------|--------------------------------------------------------------|
+| Objectif                  | Découvrir une cause et participer selon le type de campagne. |
+| Acteurs principaux        | Public; organisation                                         |
+| Point d'entrée            | Profil ONG/campagne                                          |
+| Résultat attendu          | Participation enregistrée dans le bon contexte.              |
+| Références fonctionnelles | NPO-001/002/003                                              |
+
+### Parcours nominal
+
+1\. Consultation de la mission/cause et de la provenance.
+
+2\. Choix: suivre, manifester intérêt, contribuer selon flux autorisé, ou voir opportunités bénévoles.
+
+3\. Pour bénévolat: consultation besoin/horaire/lieu puis inscription.
+
+4\. Organisation traite l'inscription et communique contextuellement.
+
+5\. Mises à jour de campagne datées.
+
+### Variantes / embranchements
+
+- Campagne fundraising, biens, sensibilisation ou projet communautaire.
+
+### Exceptions et protections
+
+- Bénévolat n'est pas présenté comme emploi salarié.
+
+- Règles financières de contribution doivent respecter configuration marché.
+
+## UF-24 - Messagerie contextualisée
+
+| **Élément**               | **Description**                                             |
+|---------------------------|-------------------------------------------------------------|
+| Objectif                  | Communiquer sans perdre le motif métier de la conversation. |
+| Acteurs principaux        | Parties autorisées                                          |
+| Point d'entrée            | Depuis objet ou Messages                                    |
+| Résultat attendu          | Conversation persistante, attribuée et contextualisée.      |
+| Références fonctionnelles | MSG-001/002/003                                             |
+
+### Parcours nominal
+
+1\. Ouverture/création d'une conversation liée à l'objet.
+
+2\. Affichage du contexte: commande, devis, candidature, livraison, etc.
+
+3\. Échange de messages/pièces autorisées.
+
+4\. Actions structurées disponibles selon état: accepter devis, proposer créneau, signaler problème, etc.
+
+5\. Conversation reste consultable selon politique après clôture de l'objet.
+
+### Variantes / embranchements
+
+- Team Inbox avec assignation organisationnelle.
+
+- Changement de contexte utilisateur explicite.
+
+### Exceptions et protections
+
+- Un message ne confère pas l'accès à l'objet si la permission est perdue.
+
+- Pièces sensibles restent protégées.
+
+## UF-25 - File À traiter
+
+| **Élément**               | **Description**                                                                                 |
+|---------------------------|-------------------------------------------------------------------------------------------------|
+| Objectif                  | Centraliser les actions nécessitant une décision plutôt que mélanger messages et notifications. |
+| Acteurs principaux        | Utilisateur authentifié                                                                         |
+| Point d'entrée            | Accueil/Compte/Notifications                                                                    |
+| Résultat attendu          | Action requise résolue ou escaladée.                                                            |
+| Références fonctionnelles | NTF-001/002                                                                                     |
+
+### Parcours nominal
+
+1\. Système reçoit événements métier.
+
+2\. Création d'un Action Item si une action est réellement requise.
+
+3\. Utilisateur ouvre l'item et voit contexte + action.
+
+4\. Action réalisée ou item explicitement résolu.
+
+5\. Item quitte la file active mais reste traçable.
+
+### Variantes / embranchements
+
+- Priorité et rôle/branche peuvent influencer l'affichage.
+
+### Exceptions et protections
+
+- Déduplication obligatoire.
+
+- Une notification informative ne devient pas automatiquement À traiter.
+
+## UF-26 - Vérification granulaire
+
+| **Élément**               | **Description**                                                                  |
+|---------------------------|----------------------------------------------------------------------------------|
+| Objectif                  | Permettre de prouver certains éléments sans créer un label de confiance absolue. |
+| Acteurs principaux        | Individu/prestataire/organisation; staff vérification                            |
+| Point d'entrée            | Centre de vérification                                                           |
+| Résultat attendu          | Record de vérification précis, traçable et distinct du plan commercial.          |
+| Références fonctionnelles | TRU-001/002/003                                                                  |
+
+### Parcours nominal
+
+1\. Utilisateur choisit ou reçoit une exigence de vérification.
+
+2\. Soumet le type de preuve demandé.
+
+3\. Preuve stockée de manière privée.
+
+4\. Staff/processus autorisé examine.
+
+5\. Statut mis à jour: en attente, vérifié, rejeté/à corriger selon modèle.
+
+6\. Profil public n'affiche que l'indicateur précis autorisé.
+
+### Variantes / embranchements
+
+- Téléphone, identité, autorité organisationnelle, références, certifications selon contexte.
+
+### Exceptions et protections
+
+- Paiement ne peut acheter le statut.
+
+- Identité vérifiée n'est pas garantie de sécurité/qualité.
+
+## UF-27 - Achat d'un plan ou pass
+
+| **Élément**               | **Description**                                                                |
+|---------------------------|--------------------------------------------------------------------------------|
+| Objectif                  | Activer une capacité commerciale sans modifier rôle, autorité ou vérification. |
+| Acteurs principaux        | Individu/prestataire/organisation                                              |
+| Point d'entrée            | Plans & Passes                                                                 |
+| Résultat attendu          | Entitlement actif et vérifiable par les modules.                               |
+| Références fonctionnelles | ENT-001/002/003                                                                |
+
+### Parcours nominal
+
+1\. Choix d'une offre éligible.
+
+2\. Affichage capacités, limites, durée et prix.
+
+3\. Paiement plateforme.
+
+4\. Confirmation autoritative.
+
+5\. Création/renouvellement de l'Entitlement.
+
+6\. Fonctionnalités/quotas deviennent disponibles.
+
+7\. Expiration/annulation retire la capacité selon règle sans supprimer les données métier.
+
+### Variantes / embranchements
+
+- Pass ponctuel, 30 jours, abonnement annuel selon offre.
+
+### Exceptions et protections
+
+- Entitlement ne donne pas accès aux données privées ni rôle admin.
+
+- Prix exacts restent configurables/TBD tant que non validés.
+
+## UF-28 - Promotion d'un objet
+
+| **Élément**               | **Description**                                                                                                     |
+|---------------------------|---------------------------------------------------------------------------------------------------------------------|
+| Objectif                  | Donner de la visibilité payante à un objet existant sans confondre promotion, vérification et classement organique. |
+| Acteurs principaux        | Acteur éligible                                                                                                     |
+| Point d'entrée            | \+ Publier \> Promouvoir quelque chose                                                                              |
+| Résultat attendu          | Campagne active/terminée avec provenance commerciale visible.                                                       |
+| Références fonctionnelles | PRM-001, ENT-001, TRU-005                                                                                           |
+
+### Parcours nominal
+
+1\. Sélection d'un objet existant éligible.
+
+2\. Choix du produit de promotion/limite disponible.
+
+3\. Validation conformité et audience autorisée.
+
+4\. Paiement/consommation d'entitlement si requis.
+
+5\. Activation de la campagne.
+
+6\. Affichage Sponsorisé clairement identifiable.
+
+7\. Fin/expiration et reporting basique.
+
+### Variantes / embranchements
+
+- Crédit inclus dans plan ou pass séparé.
+
+### Exceptions et protections
+
+- Promotion ne transforme pas l'objet en 'recommandé'.
+
+- Objet interdit/non conforme ne peut pas être promu.
+
+## UF-29 - Gestion d'une organisation et de son équipe
+
+| **Élément**               | **Description**                                                                  |
+|---------------------------|----------------------------------------------------------------------------------|
+| Objectif                  | Permettre à une organisation de distribuer le travail sans partager des comptes. |
+| Acteurs principaux        | Admin organisation                                                               |
+| Point d'entrée            | Business Dashboard                                                               |
+| Résultat attendu          | Équipe opérationnelle avec accès minimum nécessaire.                             |
+| Références fonctionnelles | IAM-005/006/007, ORG-003, PLT-005                                                |
+
+### Parcours nominal
+
+1\. Admin invite un membre.
+
+2\. Membre accepte via son compte personnel.
+
+3\. Admin attribue rôle, modules, branche et actions autorisées.
+
+4\. Membre change vers contexte organisation.
+
+5\. Dashboard n'affiche que les modules permis.
+
+6\. Admin peut modifier/révoquer l'accès.
+
+7\. Audit conserve les changements.
+
+### Variantes / embranchements
+
+- Recruiter, billing manager, branch manager, customer service, etc.
+
+### Exceptions et protections
+
+- Rôle large ne doit pas contourner les champs sensibles.
+
+- Départ de l'organisation coupe l'accès sans supprimer le compte personnel.
+
+## UF-30 - Support, sécurité, litige ou appel
+
+| **Élément**               | **Description**                                                                 |
+|---------------------------|---------------------------------------------------------------------------------|
+| Objectif                  | Donner une voie structurée pour résoudre un problème et contester une décision. |
+| Acteurs principaux        | Utilisateur; staff plateforme                                                   |
+| Point d'entrée            | Objet concerné ou Centre d'aide                                                 |
+| Résultat attendu          | Case clôturé, escaladé ou action corrective exécutée.                           |
+| Références fonctionnelles | TRU-006, ADM-002/003, PLT-005                                                   |
+
+### Parcours nominal
+
+1\. Utilisateur choisit type de problème.
+
+2\. Case créé avec objet, parties, preuves et timeline.
+
+3\. Routage vers équipe autorisée.
+
+4\. Échanges/demandes de preuve.
+
+5\. Action opérationnelle ou décision motivée.
+
+6\. Si applicable, appel/escalade.
+
+7\. Clôture et audit.
+
+### Variantes / embranchements
+
+- Safety peut avoir priorité et restrictions immédiates.
+
+- Commerce peut déclencher remboursement séparé.
+
+### Exceptions et protections
+
+- Staff n'accède qu'aux données nécessaires à la finalité.
+
+- Une action administrative sensible est auditée.
+
+# 4. Parcours transversaux d'exception
+
+| **Situation**                      | **Comportement attendu**                                                                            |
+|------------------------------------|-----------------------------------------------------------------------------------------------------|
+| Perte réseau avant soumission      | Conserver le brouillon local/sûr; permettre reprise.                                                |
+| Timeout après création critique    | Relire l'état serveur avant de réessayer; utiliser idempotency key.                                 |
+| Paiement état inconnu              | Afficher 'en vérification/rapprochement'; ne pas conclure échec ou succès sans source autoritative. |
+| Permission retirée pendant session | Refuser l'action suivante; ne pas conserver un accès via cache.                                     |
+| Objet devenu indisponible          | Expliquer le changement et proposer retour/recherche alternative.                                   |
+| Stock épuisé                       | Bloquer checkout ou ajuster quantité avant paiement.                                                |
+| Double action utilisateur          | Dédupliquer côté serveur pour commandes/paiements/refunds/delivery.                                 |
+| Contenu en modération              | Afficher statut clair au propriétaire; ne pas publier avant autorisation si catégorie l'exige.      |
+| Entitlement expiré                 | Empêcher nouvelles actions payantes; préserver historique et données existantes selon règles.       |
+| Changement de marché/langue        | Recalculer règles applicables sans changer l'identité canonique des objets.                         |
+
+# 5. Matrice Entrée → Objet créé → Prochaine étape
+
+| **Parcours**                | **Objet(s) créé(s)**                          | **Prochaine étape typique**          |
+|-----------------------------|-----------------------------------------------|--------------------------------------|
+| UF-06 Achat Mobile Money    | Order, Order Line, Payment Intent/Transaction | Fulfillment / Delivery / Review      |
+| UF-09 Devis                 | Quote Request, Quote, Conversation            | Booking / Service / Review           |
+| UF-10 Réservation           | Reservation                                   | Reminder / Modification / Completion |
+| UF-12 Livraison partenaire  | Food Order, Delivery Request                  | Delivery / Case éventuel             |
+| UF-13 Candidature           | Application                                   | Pipeline / Interview / Decision      |
+| UF-16 Formation recrutement | Enrollment / Invitation                       | Session / Completion evidence        |
+| UF-19 Billetterie           | Ticket Order, Payment, Ticket                 | Check-in / Refund éventuel           |
+| UF-22 Admission             | Beneficiary relation, Admission request       | Interview/visit / Decision           |
+| UF-26 Vérification          | Verification Record                           | Public indicator / Eligibility       |
+| UF-30 Support               | Case                                          | Resolution / Appeal                  |
+
+# 6. Règles de conception UX issues des parcours
+
+- Le contexte actif doit être visible avant toute action pouvant engager une organisation.
+
+- Les statuts doivent utiliser des mots compréhensibles et ne pas exposer inutilement les états techniques.
+
+- Une action irréversible ou financière doit confirmer objet, montant, acteur et conséquence.
+
+- Les écrans de succès ne remplacent jamais la vérification serveur d'un paiement.
+
+- Les utilisateurs doivent pouvoir retrouver un parcours en cours depuis Mon espace ou À traiter.
+
+- Messages, Notifications et À traiter ont des finalités différentes et ne doivent pas être fusionnés.
+
+- Les erreurs doivent préserver les données déjà saisies lorsque cela est sûr.
+
+- Les parcours sensibles utilisent la divulgation minimale des données.
+
+- Les parcours V1 doivent fonctionner raisonnablement en faible bande passante.
+
+- Les variantes Post-V1 doivent être prévues par les objets/interfaces sans être simulées dans le produit V1.
+
+# 7. Utilisation par l'équipe produit et développement
+
+Chaque écran de conception et chaque ticket de développement devrait indiquer le ou les codes UF concernés et les IDs fonctionnels du Document 01. Les tests d'acceptation du futur Document 09 reprendront ces parcours et les transformeront en cas de test nominaux, alternatifs, négatifs, de sécurité et de reprise réseau.

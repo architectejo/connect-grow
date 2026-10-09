@@ -16,6 +16,9 @@ from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
 from .serializers import KycDocumentSerializer, PublicBusinessSerializer, UserSerializer
 from .services import revoke_all_sessions, validate_new_password
 from .sms import send_otp_sms
+from .throttles import (
+    OtpConfirmIpThrottle, OtpConfirmPhoneThrottle, OtpRequestIpThrottle, OtpRequestPhoneThrottle,
+)
 
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -122,16 +125,15 @@ class BusinessListView(generics.ListAPIView):
         return queryset
 
 
-class OtpRequestThrottle(AnonRateThrottle):
-    scope = 'otp'
-
-
 class OtpRequestView(APIView):
     """CDC 3.1 : envoi d'un code OTP par SMS pour l'inscription, la connexion
-    ou la réinitialisation du mot de passe."""
+    ou la réinitialisation du mot de passe.
+
+    La réponse est identique que le numéro corresponde ou non à un compte (pas
+    d'énumération de comptes) : le code n'est émis que si la demande est cohérente."""
 
     permission_classes = [permissions.AllowAny]
-    throttle_classes = [OtpRequestThrottle]
+    throttle_classes = [OtpRequestIpThrottle, OtpRequestPhoneThrottle]
 
     def post(self, request):
         phone = request.data.get('phone', '')
@@ -141,6 +143,8 @@ class OtpRequestView(APIView):
             return Response({'error': "purpose invalide."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
+            if not isinstance(phone, str):
+                raise DjangoValidationError("Numéro invalide.")
             phone_validator(phone)
         except DjangoValidationError:
             return Response(
@@ -149,16 +153,16 @@ class OtpRequestView(APIView):
             )
 
         user_exists = User.objects.filter(phone=phone).exists()
-        if purpose == OtpCode.PURPOSE_REGISTER and user_exists:
-            return Response({'error': "Un compte existe déjà avec ce numéro."}, status=status.HTTP_400_BAD_REQUEST)
-        if purpose in (OtpCode.PURPOSE_LOGIN, OtpCode.PURPOSE_PASSWORD_RESET) and not user_exists:
-            return Response({'error': "Aucun compte associé à ce numéro."}, status=status.HTTP_400_BAD_REQUEST)
-
-        _, code = OtpCode.issue(phone, purpose)
-        send_otp_sms(phone, code, purpose)
+        eligible = (purpose == OtpCode.PURPOSE_REGISTER) != user_exists
+        if eligible:
+            _, code = OtpCode.issue(phone, purpose)
+            send_otp_sms(phone, code, purpose)
 
         return Response(
-            {'message': "Code envoyé par SMS.", 'expires_in_minutes': OtpCode.VALIDITY_MINUTES},
+            {
+                'message': "Si le numéro est éligible, un code a été envoyé par SMS.",
+                'expires_in_minutes': OtpCode.VALIDITY_MINUTES,
+            },
             status=status.HTTP_200_OK,
         )
 
@@ -167,6 +171,7 @@ class PasswordResetConfirmView(APIView):
     """CDC 3.1 : réinitialisation du mot de passe par OTP."""
 
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [OtpConfirmIpThrottle, OtpConfirmPhoneThrottle]
 
     def post(self, request):
         phone = request.data.get('phone')
@@ -194,7 +199,7 @@ class PasswordResetConfirmView(APIView):
 
         user = User.objects.filter(phone=phone).first()
         if not user:
-            return Response({'error': "Aucun compte associé à ce numéro."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': "Code invalide ou expiré."}, status=status.HTTP_400_BAD_REQUEST)
 
         user.set_password(new_password)
         user.save(update_fields=['password'])

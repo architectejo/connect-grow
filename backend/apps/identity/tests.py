@@ -1,6 +1,9 @@
 from datetime import timedelta
 
-from django.test import TestCase
+from unittest import mock
+
+from django.core.cache import cache
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -501,3 +504,82 @@ class PasswordPolicyTests(APITestCase):
             'phone': user.phone, 'code': code, 'new_password': 'cheval-agrafe-pile-47',
         })
         self.assertEqual(ok.status_code, status.HTTP_200_OK)
+
+
+LOCMEM_CACHE = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'otp-tests'}}
+
+
+class OtpGenerationAndAtomicityTests(TestCase):
+    def test_code_is_generated_with_secrets(self):
+        with mock.patch('apps.identity.models.secrets') as fake_secrets:
+            fake_secrets.choice.return_value = '7'
+            _, code = OtpCode.issue('+243811111111', OtpCode.PURPOSE_REGISTER)
+        self.assertEqual(code, '777777')
+        self.assertEqual(fake_secrets.choice.call_count, OtpCode.CODE_LENGTH)
+
+    def test_attempt_counter_is_atomic_across_stale_instances(self):
+        otp, code = OtpCode.issue('+243811111111', OtpCode.PURPOSE_REGISTER)
+        first, second = OtpCode.objects.get(pk=otp.pk), OtpCode.objects.get(pk=otp.pk)
+        for _ in range(2):
+            self.assertFalse(first.verify('000000'))
+            self.assertFalse(second.verify('000000'))
+        otp.refresh_from_db()
+        # 4 essais depuis deux copies périmées : la base n'en décompte jamais plus de 3.
+        self.assertEqual(otp.attempts, OtpCode.MAX_ATTEMPTS)
+        self.assertFalse(second.verify(code))
+
+    def test_code_is_single_use_across_stale_instances(self):
+        otp, code = OtpCode.issue('+243811111111', OtpCode.PURPOSE_REGISTER)
+        first, second = OtpCode.objects.get(pk=otp.pk), OtpCode.objects.get(pk=otp.pk)
+        self.assertTrue(first.verify(code))
+        self.assertFalse(second.verify(code))
+
+
+@override_settings(CACHES=LOCMEM_CACHE)
+class OtpRequestApiTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.existing = User.objects.create_user(phone='+243811111111', password='x', full_name='E')
+
+    def request_code(self, phone, purpose, **extra):
+        return self.client.post(reverse('otp_request'), {'phone': phone, 'purpose': purpose}, **extra)
+
+    def test_responses_are_identical_whether_or_not_the_account_exists(self):
+        with mock.patch('apps.identity.views.send_otp_sms') as sms:
+            for purpose in ('LOGIN', 'PASSWORD_RESET', 'REGISTER'):
+                known = self.request_code('+243811111111', purpose, REMOTE_ADDR='10.0.0.1')
+                unknown = self.request_code('+243899999999', purpose, REMOTE_ADDR='10.0.0.2')
+                self.assertEqual(known.status_code, status.HTTP_200_OK, purpose)
+                self.assertEqual(known.status_code, unknown.status_code, purpose)
+                self.assertEqual(known.data, unknown.data, purpose)
+        # Seules les demandes cohérentes déclenchent un SMS : LOGIN et RESET (compte connu) + REGISTER (inconnu).
+        self.assertEqual(sms.call_count, 3)
+
+    def test_invalid_input_is_still_rejected(self):
+        self.assertEqual(self.request_code('12345', 'LOGIN').status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.request_code('+243811111111', 'AUTRE').status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.client.post(reverse('otp_request'), {'phone': 12345, 'purpose': 'LOGIN'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_phone_throttle_is_per_number_across_ips(self):
+        with mock.patch('apps.identity.views.send_otp_sms'):
+            for i in range(3):
+                self.assertEqual(
+                    self.request_code('+243811111111', 'LOGIN', REMOTE_ADDR=f'10.0.1.{i}').status_code, 200,
+                )
+            blocked = self.request_code('+243811111111', 'LOGIN', REMOTE_ADDR='10.0.1.99')
+            self.assertEqual(blocked.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+            # Un autre numéro n'est pas affecté.
+            self.assertEqual(self.request_code('+243822222222', 'LOGIN', REMOTE_ADDR='10.0.1.98').status_code, 200)
+
+    def test_reset_confirmation_is_throttled_per_phone(self):
+        codes = []
+        for _ in range(10):
+            codes.append(self.client.post(reverse('password_reset_confirm'), {
+                'phone': '+243811111111', 'code': '000000', 'new_password': 'cheval-agrafe-pile-47',
+            }, REMOTE_ADDR=f'10.0.2.{len(codes)}').status_code)
+        self.assertEqual(set(codes), {status.HTTP_400_BAD_REQUEST})
+        blocked = self.client.post(reverse('password_reset_confirm'), {
+            'phone': '+243811111111', 'code': '000000', 'new_password': 'cheval-agrafe-pile-47',
+        }, REMOTE_ADDR='10.0.2.200')
+        self.assertEqual(blocked.status_code, status.HTTP_429_TOO_MANY_REQUESTS)

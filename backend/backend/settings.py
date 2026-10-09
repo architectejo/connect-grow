@@ -101,6 +101,12 @@ REST_FRAMEWORK = {
         'user': '1000/day',
         # CDC 4.2 : limitation du débit sur l'OTP (coût SMS, anti-brute-force).
         'otp': '5/hour',
+        'otp_phone': '3/hour',          # demandes de code par numéro
+        'otp_confirm': '20/hour',       # confirmations de reset par IP
+        'otp_confirm_phone': '10/hour',  # confirmations de reset par numéro
+        'login': '30/hour',             # connexions par IP
+        'login_identifier': '10/hour',  # connexions par e-mail
+        'login_phone': '10/hour',       # connexions par téléphone
     }
 }
 

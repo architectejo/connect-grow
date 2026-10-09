@@ -1,4 +1,4 @@
-import random
+import secrets
 from datetime import timedelta
 
 from django.contrib.auth.hashers import check_password, make_password
@@ -6,6 +6,7 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.core.files.storage import FileSystemStorage
 from django.core.validators import RegexValidator
 from django.db import models
+from django.db.models import F
 from django.conf import settings
 from django.utils import timezone
 
@@ -190,7 +191,7 @@ class OtpCode(BaseModel):
         """Génère un nouveau code, invalide les codes précédents non utilisés
         pour ce couple (phone, purpose), et retourne (instance, code_en_clair)."""
         cls.objects.filter(phone=phone, purpose=purpose, is_used=False).update(is_used=True)
-        code = ''.join(random.choices('0123456789', k=cls.CODE_LENGTH))
+        code = ''.join(secrets.choice('0123456789') for _ in range(cls.CODE_LENGTH))
         instance = cls.objects.create(
             phone=phone,
             purpose=purpose,
@@ -203,18 +204,27 @@ class OtpCode(BaseModel):
         return timezone.now() >= self.expires_at
 
     def verify(self, raw_code):
-        """Vérifie le code fourni. Incrémente les tentatives à chaque échec.
-        Retourne True seulement si le code est valide, non expiré, non utilisé
-        et sous la limite de tentatives ; marque le code comme utilisé si OK."""
-        if self.is_used or self.is_expired() or self.attempts >= self.MAX_ATTEMPTS:
+        """Vérifie le code fourni. Retourne True seulement si le code est valide, non
+        expiré, non utilisé et sous la limite de tentatives.
+
+        Le décompte des tentatives et l'usage unique sont atomiques (UPDATE conditionnel
+        en base) : deux requêtes simultanées ne peuvent ni dépasser la limite de
+        tentatives ni consommer deux fois le même code."""
+        if self.is_used or self.is_expired():
             return False
+        claimed = OtpCode.objects.filter(
+            pk=self.pk, is_used=False, attempts__lt=self.MAX_ATTEMPTS,
+        ).update(attempts=F('attempts') + 1)
+        if not claimed:
+            self.refresh_from_db(fields=['attempts', 'is_used'])
+            return False
+        self.refresh_from_db(fields=['attempts'])
         if not check_password(raw_code, self.code_hash):
-            self.attempts += 1
-            self.save(update_fields=['attempts'])
             return False
-        self.is_used = True
-        self.save(update_fields=['is_used'])
-        return True
+        used = OtpCode.objects.filter(pk=self.pk, is_used=False).update(is_used=True)
+        if used:
+            self.is_used = True
+        return bool(used)
 
     def __str__(self):
         return f"OTP {self.purpose} pour {self.phone}"

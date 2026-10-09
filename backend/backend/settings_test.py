@@ -26,5 +26,6 @@ _TEST_STORAGE = tempfile.mkdtemp(prefix='connecteplus-tests-')
 KYC_PRIVATE_ROOT = type(KYC_PRIVATE_ROOT)(_TEST_STORAGE) / 'kyc'  # noqa: F405
 MEDIA_ROOT = os.path.join(_TEST_STORAGE, 'media')
 
-# Cache mémoire local (throttles et compteurs) : remis à zéro par les tests concernés.
-CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
+# Cache factice : aucune limitation de débit (throttle) ne s'accumule d'un test à l'autre.
+# Les tests de throttling activent un cache mémoire avec @override_settings(CACHES=...).
+CACHES = {'default': {'BACKEND': 'django.core.cache.backends.dummy.DummyCache'}}

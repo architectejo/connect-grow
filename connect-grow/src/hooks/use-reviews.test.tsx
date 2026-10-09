@@ -18,7 +18,7 @@ const wrapperFor = (client: QueryClient) =>
 const review = (id: string, extra: Partial<Review> = {}): Review => ({
   id,
   post: "p1",
-  user_id: "u1",
+  is_mine: true,
   user_name: "Marie K.",
   offer_rating: 4,
   seller_rating: 5,
@@ -41,6 +41,12 @@ describe("useReviewEligibility", () => {
     expect(get).toHaveBeenCalledWith("interactions/reviews/eligibility/", { params: { post: "p1" } });
   });
 
+  it("ne lance aucune requête pour un anonyme (endpoint authentifié)", () => {
+    const get = vi.spyOn(apiClient, "get");
+    renderHook(() => useReviewEligibility("p1", undefined), { wrapper: wrapperFor(newClient()) });
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it("ne lance aucune requête quand il est désactivé (vendeur de l'offre)", () => {
     const get = vi.spyOn(apiClient, "get");
     renderHook(() => useReviewEligibility("p1", "u1", false), { wrapper: wrapperFor(newClient()) });
@@ -60,7 +66,7 @@ describe("useReviewMutations", () => {
     const created = review("r1");
     const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: created });
     const client = newClient();
-    client.setQueryData(reviewKeys.forPost("p1"), [review("r0", { user_id: "u9" })]);
+    client.setQueryData(reviewKeys.forPost("p1"), [review("r0", { is_mine: false })]);
     const invalidate = vi.spyOn(client, "invalidateQueries");
 
     const { result } = renderHook(() => useReviewMutations("p1"), { wrapper: wrapperFor(client) });
@@ -132,8 +138,8 @@ describe("useReportFakeContact", () => {
       await result.current.mutateAsync({ reviewId: "r1", description: "Je ne connais pas cette personne." });
     });
     expect(post).toHaveBeenCalledWith("moderation/reports/", {
-      target_type: "review",
-      target_id: "r1",
+      target_type: "REVIEW",
+      object_id: "r1",
       reason: "CONTACT_FICTIF",
       description: "Je ne connais pas cette personne.",
     });

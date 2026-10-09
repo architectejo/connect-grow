@@ -45,7 +45,7 @@ export function usePosts(filters: PostFilters = {}, limit?: number, options: { e
   return useQuery({
     queryKey: marketplaceKeys.posts(filters, limit),
     queryFn: async () => {
-      const posts = unwrapList<Post>((await apiClient.get("marketplace/posts/", { params: cleanParams(filters) })).data);
+      const posts = unwrapList<Post>((await apiClient.get("marketplace/posts/", { params: cleanParams({ ...filters, near: filters.near ?? (filters.commune || undefined) }) })).data);
       return limit ? posts.slice(0, limit) : posts;
     },
     placeholderData: keepPreviousData,

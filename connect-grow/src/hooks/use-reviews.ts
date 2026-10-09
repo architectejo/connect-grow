@@ -30,6 +30,8 @@ export function useReviews(postId?: Uuid) {
  * le bouton « Donner mon avis » n'apparaît que si `can_review` est vrai.
  */
 export function useReviewEligibility(postId?: Uuid, userId?: Uuid, enabled = true) {
+  // L'endpoint est authentifié (401 pour un anonyme) : sans compte, on ne l'appelle pas
+  enabled = enabled && !!userId;
   return useQuery({
     queryKey: reviewKeys.eligibility(postId ?? "", userId),
     queryFn: async () => (await apiClient.get<ReviewEligibility>(`${BASE}eligibility/`, { params: { post: postId } })).data,
@@ -39,7 +41,15 @@ export function useReviewEligibility(postId?: Uuid, userId?: Uuid, enabled = tru
 }
 
 /** Codes d'erreur après lesquels l'éligibilité affichée n'est plus à jour. */
-const ELIGIBILITY_CODES = new Set(["own_offer", "not_eligible", "review_too_early", "already_reviewed", "offer_unavailable"]);
+const ELIGIBILITY_CODES = new Set([
+  "own_offer",
+  "not_eligible",
+  "contact_rejected",
+  "review_too_early",
+  "already_reviewed",
+  "review_recently_deleted",
+  "offer_unavailable",
+]);
 
 /** Création, modification, suppression et réponse du vendeur, avec rafraîchissement des listes et des notes. */
 export function useReviewMutations(postId: Uuid) {
@@ -111,8 +121,8 @@ export function useReportFakeContact() {
     mutationFn: async ({ reviewId, description }: { reviewId: Uuid; description: string }) =>
       (
         await apiClient.post("moderation/reports/", {
-          target_type: "review",
-          target_id: reviewId,
+          target_type: "REVIEW",
+          object_id: reviewId,
           reason: "CONTACT_FICTIF",
           description,
         })

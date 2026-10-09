@@ -12,7 +12,7 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 const review = (extra: Partial<Review> = {}): Review => ({
   id: "r1",
   post: "p1",
-  user_id: "u2",
+  is_mine: false,
   user_name: "Marie K.",
   offer_rating: 4,
   seller_rating: 5,
@@ -67,7 +67,7 @@ describe("ReviewsSection", () => {
 
   it("propose « Donner mon avis » quand le serveur autorise, puis publie via le formulaire", async () => {
     mockApi([], eligibility({ can_review: true, reason: null }));
-    const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: review({ user_id: "u1", can_edit: true }) });
+    const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: review({ is_mine: true, can_edit: true }) });
     renderSection();
 
     fireEvent.click(await screen.findByRole("button", { name: "Donner mon avis" }));
@@ -122,14 +122,14 @@ describe("ReviewsSection", () => {
   });
 
   it("avis de l'utilisateur verrouillé (masqué ou signalé) : aucune action, une explication", async () => {
-    mockApi([review({ user_id: "u1", can_edit: false })], eligibility({ reason: "already_reviewed" }));
+    mockApi([review({ is_mine: true, can_edit: false })], eligibility({ reason: "already_reviewed" }));
     renderSection();
     expect(await screen.findByText("Cet avis ne peut plus être modifié ni supprimé.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Actions sur l'avis" })).not.toBeInTheDocument();
   });
 
   it("avis de l'utilisateur modifiable : le menu d'actions est proposé", async () => {
-    mockApi([review({ user_id: "u1", can_edit: true })], eligibility({ reason: "already_reviewed" }));
+    mockApi([review({ is_mine: true, can_edit: true })], eligibility({ reason: "already_reviewed" }));
     renderSection();
     expect(await screen.findByRole("button", { name: "Actions sur l'avis" })).toBeInTheDocument();
   });
@@ -146,5 +146,31 @@ describe("ReviewsSection", () => {
     renderSection();
     expect(await screen.findByText("Impossible de vérifier si vous pouvez donner votre avis.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Donner mon avis" })).not.toBeInTheDocument();
+  });
+});
+
+describe("ReviewsSection (visiteur anonyme)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("n'appelle pas l'endpoint d'éligibilité et propose de se connecter", async () => {
+    mockApi([review()], eligibility());
+    renderSection({ currentUserId: undefined });
+    await screen.findByRole("listitem");
+    expect(screen.getByRole("link", { name: "Se connecter" })).toBeInTheDocument();
+    expect(vi.mocked(apiClient.get).mock.calls.some(([url]) => String(url).includes("eligibility"))).toBe(false);
+  });
+
+  it("vendeur : peut signaler un contact fictif (REVIEW / CONTACT_FICTIF)", async () => {
+    mockApi([review()], eligibility());
+    const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: { id: "x", status: "OPEN", created_at: "" } });
+    renderSection({ isOwner: true, currentUserId: "u9" });
+    const menu = await screen.findByRole("button", { name: "Actions sur l'avis" });
+    fireEvent.keyDown(menu, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Signaler un contact fictif/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Envoyer le signalement" }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith("moderation/reports/", expect.objectContaining({ target_type: "REVIEW", object_id: "r1", reason: "CONTACT_FICTIF" })),
+    );
   });
 });

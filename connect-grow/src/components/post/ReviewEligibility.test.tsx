@@ -10,7 +10,7 @@ type PanelProps = Parameters<typeof ReviewEligibilityPanel>[0];
 const renderPanel = (props: Partial<PanelProps>) =>
   render(
     <MemoryRouter>
-      <ReviewEligibilityPanel postId="p1" isLoading={false} isError={false} onRetry={() => {}} onGiveReview={() => {}} {...props} />
+      <ReviewEligibilityPanel postId="p1" isAuthenticated isLoading={false} isError={false} onRetry={() => {}} onGiveReview={() => {}} {...props} />
     </MemoryRouter>,
   );
 
@@ -34,14 +34,16 @@ describe("ReviewEligibilityPanel", () => {
     ["no_contact", /après avoir contacté le vendeur/],
     ["already_reviewed", /déjà donné votre avis/],
     ["offer_unavailable", /n'accepte plus d'avis/],
+    ["contact_rejected", /contact n'a pas été retenu/],
+    ["recently_deleted", /récemment supprimé/],
   ] as const)("sans droit (%s) : pas de bouton, un texte d'explication", (reason, text) => {
     renderPanel({ eligibility: refusal(reason) });
     expect(screen.queryByRole("button", { name: "Donner mon avis" })).not.toBeInTheDocument();
     expect(screen.getByText(text)).toBeInTheDocument();
   });
 
-  it("visiteur non connecté : propose de se connecter", () => {
-    renderPanel({ eligibility: refusal("login_required") });
+  it("visiteur non connecté : propose de se connecter, sans données d'éligibilité", () => {
+    renderPanel({ isAuthenticated: false, eligibility: undefined });
     expect(screen.queryByRole("button", { name: "Donner mon avis" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Se connecter" })).toBeInTheDocument();
   });
@@ -55,6 +57,11 @@ describe("ReviewEligibilityPanel", () => {
   it("propriétaire de l'offre : rien n'est proposé", () => {
     const { container } = renderPanel({ eligibility: refusal("own_offer") });
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("404 offer_not_found : « Annonce introuvable »", () => {
+    renderPanel({ isError: true, error: { response: { status: 404, data: { code: "offer_not_found" } } } });
+    expect(screen.getByText("Annonce introuvable.")).toBeInTheDocument();
   });
 
   it("chargement : squelette sans bouton", () => {

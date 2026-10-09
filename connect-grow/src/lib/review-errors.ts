@@ -8,14 +8,19 @@ const KNOWN_CODES = [
   "offer_not_found",
   "own_offer",
   "not_eligible",
+  "contact_rejected",
   "review_too_early",
   "already_reviewed",
+  "review_recently_deleted",
   "offer_unavailable",
   "edit_window_closed",
   "review_locked",
+  "review_locked_after_reply",
   "not_author",
   "not_seller",
   "already_replied",
+  "duplicate_report",
+  "invalid_reason",
 ] as const;
 
 /** « 3 heures », « 45 minutes » à partir d'un délai en secondes. */

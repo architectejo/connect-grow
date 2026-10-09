@@ -14,6 +14,12 @@ describe("reviewErrorMessage", () => {
     [403, "edit_window_closed", "Le délai pour modifier cet avis est dépassé."],
     [403, "review_locked", "Cet avis est en cours de vérification ou masqué : il ne peut plus être modifié."],
     [409, "already_replied", "Vous avez déjà répondu à cet avis."],
+    [403, "contact_rejected", "Votre contact n'a pas été retenu : vous ne pouvez pas donner d'avis sur cette annonce."],
+    [409, "review_recently_deleted", "Vous avez récemment supprimé votre avis sur cette annonce : vous pourrez en donner un nouveau plus tard."],
+    [403, "review_locked_after_reply", "Le vendeur a répondu à cet avis : il ne peut plus être modifié ni supprimé."],
+    [409, "duplicate_report", "Vous avez déjà signalé cet avis."],
+    [400, "invalid_reason", "Ce motif de signalement n'est pas valide."],
+    [403, "not_seller", "Seul le vendeur concerné peut effectuer cette action."],
   ])("traduit %i %s à partir du code, pas du texte du serveur", (status, code, expected) => {
     expect(reviewErrorMessage(apiError(status, { detail: "Message du serveur", code }))).toBe(expected);
   });

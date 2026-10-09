@@ -167,7 +167,8 @@ export interface Review {
     id: Uuid;
     /** Offre concernée ; null si elle a été purgée. */
     post: Uuid | null;
-    user_id: Uuid;
+    /** Vrai si l'avis est celui du visiteur connecté (l'identifiant de l'auteur n'est jamais public). */
+    is_mine: boolean;
     /** Nom public de l'auteur (prénom + initiale), tel que renvoyé par l'API. */
     user_name: string;
     offer_rating: number;
@@ -180,16 +181,17 @@ export interface Review {
     /** Renseigné quand l'auteur a modifié son avis. */
     edited_at?: string | null;
     is_post_owner?: boolean;
-    /** Vrai tant que l'auteur peut modifier ou supprimer son avis (fenêtre ouverte, ni masqué ni signalé). */
+    /** Vrai tant que l'auteur peut modifier ou supprimer son avis (fenêtre ouverte, ni masqué, ni signalé, sans réponse du vendeur). */
     can_edit?: boolean;
 }
 
 export type ReviewEligibilityReason =
-    | "login_required"
     | "own_offer"
     | "no_contact"
     | "too_early"
+    | "contact_rejected"
     | "already_reviewed"
+    | "recently_deleted"
     | "offer_unavailable";
 
 /** Réponse de GET /interactions/reviews/eligibility/?post= : seul le serveur décide du droit d'avis. */

@@ -79,9 +79,11 @@ export function ReviewsSection({ postId, isOwner, currentUserId, sellerName }: R
       {!isOwner && (
         <ReviewEligibilityPanel
           postId={postId}
+          isAuthenticated={!!currentUserId}
           eligibility={eligibility.data}
           isLoading={eligibility.isLoading}
           isError={eligibility.isError}
+          error={eligibility.error}
           onRetry={() => void eligibility.refetch()}
           onGiveReview={() => setCreating(true)}
         />
@@ -114,9 +116,9 @@ export function ReviewsSection({ postId, isOwner, currentUserId, sellerName }: R
       ) : (
         <ul className="mt-6 divide-y">
           {visible.map((review) => {
-            const isAuthor = review.user_id === currentUserId;
-            // can_edit : fenêtre ouverte, avis ni masqué ni signalé (sinon l'API répond 403)
-            const canEdit = isAuthor && review.can_edit !== false;
+            const isAuthor = review.is_mine;
+            // can_edit : fenêtre ouverte, avis ni masqué, ni signalé, sans réponse du vendeur (sinon 403)
+            const canEdit = isAuthor && review.can_edit;
             const canReply = isOwner && !review.reply_content;
             const hasMenu = canEdit || isOwner;
             return (
@@ -193,7 +195,7 @@ export function ReviewsSection({ postId, isOwner, currentUserId, sellerName }: R
                   </div>
 
                   <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-foreground/90">{review.content}</p>
-                  {isAuthor && review.can_edit === false && <p className="mt-2 text-xs text-muted-foreground">{t("reviews.locked")}</p>}
+                  {isAuthor && !review.can_edit && <p className="mt-2 text-xs text-muted-foreground">{t("reviews.locked")}</p>}
 
                   {review.reply_content && (
                     <div className="mt-3 rounded-xl border-l-2 border-primary bg-primary/5 p-3">

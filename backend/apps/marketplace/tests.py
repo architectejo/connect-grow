@@ -847,7 +847,7 @@ class ContractTests(MarketplaceTestBase):
             'title', 'description', 'price', 'currency', 'condition', 'stock', 'is_price_negotiable',
             'is_exchangeable', 'main_image', 'images', 'views_count', 'likes_count', 'comments_count',
             'shares_count', 'created_at', 'status', 'expires_at', 'visibility_score', 'visibility_rank',
-            'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored',
+            'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored', 'is_hidden_by_moderation',
         })
         self.assertEqual(set(data['seller']), {
             'id', 'full_name', 'photo', 'phone', 'user_type', 'business_profile', 'date_joined',
@@ -892,3 +892,65 @@ class ServiceTests(MarketplaceTestBase):
                     self.assertIn(
                         field.related_model._meta.app_label, ('marketplace', 'identity'), f'{model.__name__}.{field.name}',
                     )
+
+
+class OwnerRetrieveInactiveOfferTests(MarketplaceTestBase):
+    """L0-19 : le vendeur retrouve ses offres non actives ; le public et les tiers non."""
+
+    def states(self):
+        return {
+            'pause': dict(status=Offer.STATUS_PAUSED, is_active=False),
+            'vendue': dict(status=Offer.STATUS_SOLD, is_active=False),
+            'expiree': dict(status=Offer.STATUS_EXPIRED, is_active=False),
+            'masquee': dict(is_active=False, is_hidden_by_moderation=True),
+            'corbeille': dict(is_deleted=True, is_active=False),
+        }
+
+    def test_owner_sees_every_state_others_get_404(self):
+        for label, fields in self.states().items():
+            offer = self.make_offer(**fields)
+            url = reverse('offer-detail', args=[offer.id])
+            self.client.force_authenticate(self.seller)
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200, label)
+            self.assertEqual(response.data['status'], offer.status, label)
+            self.assertEqual(response.data['is_hidden_by_moderation'], label == 'masquee', label)
+            self.client.force_authenticate(self.buyer)
+            self.assertEqual(self.client.get(url).status_code, 404, label)
+            self.client.force_authenticate(None)
+            self.assertEqual(self.client.get(url).status_code, 404, label)
+
+    def test_hidden_offer_cannot_be_put_back_online(self):
+        offer = self.make_offer(is_active=False, is_hidden_by_moderation=True)
+        self.client.force_authenticate(self.seller)
+        self.assertEqual(self.client.post(reverse('offer-unpause', args=[offer.id])).status_code, 403)
+        offer.refresh_from_db()
+        self.assertFalse(offer.is_active)
+
+    def test_hidden_flag_is_read_only(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.seller)
+        self.client.patch(reverse('offer-detail', args=[offer.id]), {'is_hidden_by_moderation': True}, format='json')
+        offer.refresh_from_db()
+        self.assertFalse(offer.is_hidden_by_moderation)
+
+    def test_owner_views_are_not_counted(self):
+        offer = self.make_offer()
+        paused = self.make_offer(status=Offer.STATUS_PAUSED, is_active=False)
+        self.client.force_authenticate(self.seller)
+        for o in (offer, paused):
+            self.client.get(reverse('offer-detail', args=[o.id]))
+        dispatch_outbox_now()
+        self.assertFalse(OfferUniqueView.objects.exists())
+
+    def test_query_count_is_unchanged_for_inactive_offer(self):
+        active = self.make_offer()
+        paused = self.make_offer(status=Offer.STATUS_PAUSED, is_active=False)
+        self.client.force_authenticate(self.seller)
+        counts = []
+        self.client.get(reverse('offer-detail', args=[active.id]))  # réchauffe les caches
+        for o in (active, paused):
+            with CaptureQueriesContext(connection) as ctx:
+                self.assertEqual(self.client.get(reverse('offer-detail', args=[o.id])).status_code, 200)
+            counts.append(len(ctx))
+        self.assertEqual(counts[0], counts[1])

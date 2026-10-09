@@ -97,7 +97,14 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
 
         # Filtre pour récupérer les offres de l'utilisateur connecté
         my_offers = self.request.query_params.get('my_posts')
-        if my_offers == 'true' and self.request.user.is_authenticated:
+        if self.action == 'retrieve' and self.request.user.is_authenticated:
+            # Le vendeur retrouve toutes ses offres (pause, vendue, expirée, masquée par la
+            # modération, corbeille) ; le public et les tiers restent limités aux offres actives.
+            # Même requête SQL : seule la clause WHERE change.
+            queryset = Offer.objects.filter(
+                Q(is_active=True, is_deleted=False) | Q(seller=self.request.user)
+            )
+        elif my_offers == 'true' and self.request.user.is_authenticated:
             queryset = Offer.objects.filter(seller=self.request.user, is_deleted=False)
         elif self.action == 'list':
             queryset = self.apply_filters(queryset)
@@ -287,8 +294,10 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
 
         # CDC 3.8 : une vue unique par jour et par visiteur. Un visiteur anonyme n'est compté que
         # si son cookie a été émis ET signé par le serveur (pas de fabrication d'empreintes).
+        # Le vendeur qui consulte sa propre offre ne gonfle pas ses statistiques.
         anon_id = None if request.user.is_authenticated else read_anon_id(request)
-        if request.user.is_authenticated or anon_id:
+        is_owner = request.user.is_authenticated and instance.seller_id == request.user.id
+        if (request.user.is_authenticated or anon_id) and not is_owner:
             services.register_view(instance, visibility_services.build_viewer_key(request.user, anon_id))
 
         response = Response(self.get_serializer(instance).data)

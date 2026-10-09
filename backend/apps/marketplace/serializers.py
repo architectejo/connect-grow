@@ -109,9 +109,10 @@ class OfferSerializer(serializers.ModelSerializer):
             'likes_count', 'comments_count', 'shares_count', 'created_at',
             'status', 'expires_at', 'visibility_score', 'visibility_rank',
             'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored',
+            'is_hidden_by_moderation',
         ]
         read_only_fields = [
-            'seller', 'views_count', 'likes_count', 'comments_count', 'shares_count',
+            'is_hidden_by_moderation', 'seller', 'views_count', 'likes_count', 'comments_count', 'shares_count',
             'created_at', 'status', 'expires_at', 'visibility_score',
         ]
         list_serializer_class = OfferListSerializer

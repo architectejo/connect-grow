@@ -51,7 +51,7 @@ class ReportFlowTests(ModerationTestBase):
             'target_type': 'USER', 'object_id': str(self.seller.id), 'reason': 'SPAM',
         })
         self.assertEqual(ok.status_code, status.HTTP_201_CREATED, ok.data)
-        self.assertEqual(ok.data['target_type_display'], 'USER')
+        self.assertEqual(Report.objects.get(pk=ok.data['id']).target_type, 'user')
         for bad in ('pas-un-uuid', '12'):
             response = self.client.post('/api/moderation/reports/', {
                 'target_type': 'USER', 'object_id': bad, 'reason': 'SPAM',
@@ -60,11 +60,13 @@ class ReportFlowTests(ModerationTestBase):
 
     def test_report_object_id_is_normalized(self):
         self.client.force_authenticate(self.reporter)
-        for written in (str(self.seller.id).upper(), self.seller.id.hex, f'  {self.seller.id}'.strip()):
+        written_forms = (str(self.seller.id).upper(), self.seller.id.hex, f'  {self.seller.id}'.strip())
+        for index, written in enumerate(written_forms):
             response = self.client.post('/api/moderation/reports/', {
                 'target_type': 'USER', 'object_id': written, 'reason': 'SPAM',
             })
-            self.assertEqual(response.status_code, status.HTTP_201_CREATED, written)
+            # Toutes les écritures désignent le même compte : seul le premier signalement est accepté.
+            self.assertEqual(response.status_code, 201 if index == 0 else 409, written)
         stored = set(Report.objects.values_list('target_id', flat=True))
         self.assertEqual(stored, {self.seller.id})
 
@@ -270,20 +272,23 @@ class OfferDecouplingTests(ModerationTestBase):
         conversation = Conversation.objects.create()
         conversation.participants.add(self.admin, self.seller)
         message = Message.objects.create(conversation=conversation, sender=self.seller, content='Salut')
-        self.client.force_authenticate(self.admin)
+        self.client.force_authenticate(self.reporter)
         for target_type, target in (('REVIEW', review), ('MESSAGE', message), ('USER', self.seller)):
             response = self.client.post('/api/moderation/reports/', {
                 'target_type': target_type, 'object_id': str(target.pk), 'reason': 'SPAM',
             })
             self.assertEqual(response.status_code, status.HTTP_201_CREATED, (target_type, response.data))
-            self.assertEqual(response.data['target_type_display'], target_type)
+            self.assertEqual(Report.objects.get(pk=response.data['id']).target_type, target_type.lower())
 
     def test_automatic_report_is_deduplicated(self):
         from . import services
 
-        first = services.file_automatic_report(self.post, services.REASON_CROSSED_REVIEWS, 'x')
+        from apps.reviews.models import Review
+
+        review = Review.objects.create(user=self.reporter, reviewed_user=self.seller, content='Avis assez long.', rating=3)
+        first = services.file_automatic_report(review, services.REASON_CROSSED_REVIEWS, 'x')
         self.assertIsNotNone(first)
-        self.assertIsNone(services.file_automatic_report(self.post, services.REASON_CROSSED_REVIEWS, 'x'))
+        self.assertIsNone(services.file_automatic_report(review, services.REASON_CROSSED_REVIEWS, 'x'))
 
     def test_dashboard_counts_active_offers(self):
         self.client.force_authenticate(self.admin)

@@ -136,6 +136,7 @@ REST_FRAMEWORK = {
         'share': '30/hour',
         'message': '120/hour',
         'review': '10/hour',
+        'report': '10/hour',        # signalements, par utilisateur
         'deal': '10/hour',
         'offer_upload': '30/hour',  # création / modification d'offre et envoi de photos
         'favorite': '60/hour',

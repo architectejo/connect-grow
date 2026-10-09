@@ -24,9 +24,13 @@ class TargetResolutionTests(ModerationTestBase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         report = Report.objects.get(pk=response.data['id'])
         self.assertEqual((report.target_type, report.target_id), ('offer', self.post.id))
-        self.assertEqual(response.data['object_id'], str(self.post.id))
-        self.assertEqual(response.data['target_type_display'], 'POST')
-        self.assertNotIn('target_type', response.data)
+        # L'auteur du signalement ne reçoit que le minimum (voir ReporterPrivacyTests).
+        self.assertEqual(set(response.data), {'id', 'status', 'created_at'})
+        self.client.force_authenticate(self.moderator)
+        detail = self.client.get(f'/api/moderation/reports/{report.id}/').data
+        self.assertEqual(detail['object_id'], str(self.post.id))
+        self.assertEqual(detail['target_type_display'], 'POST')
+        self.assertNotIn('target_type', detail)
 
     def test_unknown_target_type_is_refused(self):
         self.client.force_authenticate(self.reporter)
@@ -67,6 +71,7 @@ class TargetResolutionTests(ModerationTestBase):
             return len(queries)
 
         self.client.force_authenticate(self.moderator)
+        self.client.get('/api/moderation/reports/')  # réchauffe le cache de permissions de l'utilisateur
         few = count_queries(2)
         many = count_queries(5)
         self.assertEqual(few, many)

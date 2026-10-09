@@ -9,6 +9,10 @@ from apps.common.models import BaseModel
 # (`target_type`, `target_id`) et résolue par les `services.py` des domaines (ADR 0002, décision 5).
 
 
+class ReportClosedError(Exception):
+    """Transition refusée : le signalement est déjà traité ou rejeté."""
+
+
 class Report(BaseModel):
     """CDC 3.11 : file unique de signalements (annonces, avis, messages,
     utilisateurs). Un seul modèle, cible désignée par `target_type` + `target_id`."""
@@ -47,7 +51,7 @@ class Report(BaseModel):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='reports_filed',
     )
     reason = models.CharField(max_length=20, choices=REASON_CHOICES)
-    description = models.TextField(blank=True)
+    description = models.TextField(blank=True, max_length=1000)
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_EN_ATTENTE)
     assigned_to = models.ForeignKey(
@@ -61,22 +65,26 @@ class Report(BaseModel):
         ordering = ['-created_at']
         indexes = [models.Index(fields=['target_type', 'target_id'], name='report_target')]
 
+    OPEN_STATUSES = (STATUS_EN_ATTENTE, STATUS_EN_COURS)
+
+    def _transition(self, **changes):
+        """Passe le signalement à un nouvel état s'il est encore ouvert. Mise à jour conditionnelle :
+        deux décisions simultanées ne s'écrasent pas, et `resolved_at` d'un signalement clos ne
+        change jamais."""
+        changes['updated_at'] = timezone.now()
+        done = Report.objects.filter(pk=self.pk, status__in=self.OPEN_STATUSES).update(**changes)
+        if not done:
+            raise ReportClosedError("Ce signalement est déjà clos.")
+        self.refresh_from_db()
+
     def claim(self, moderator):
-        self.status = self.STATUS_EN_COURS
-        self.assigned_to = moderator
-        self.save(update_fields=['status', 'assigned_to'])
+        self._transition(status=self.STATUS_EN_COURS, assigned_to=moderator)
 
     def resolve(self, notes=''):
-        self.status = self.STATUS_TRAITE
-        self.decision_notes = notes
-        self.resolved_at = timezone.now()
-        self.save(update_fields=['status', 'decision_notes', 'resolved_at'])
+        self._transition(status=self.STATUS_TRAITE, decision_notes=notes, resolved_at=timezone.now())
 
     def reject(self, notes=''):
-        self.status = self.STATUS_REJETE
-        self.decision_notes = notes
-        self.resolved_at = timezone.now()
-        self.save(update_fields=['status', 'decision_notes', 'resolved_at'])
+        self._transition(status=self.STATUS_REJETE, decision_notes=notes, resolved_at=timezone.now())
 
     def __str__(self):
         return f"Signalement {self.id} ({self.get_reason_display()}) — {self.get_status_display()}"

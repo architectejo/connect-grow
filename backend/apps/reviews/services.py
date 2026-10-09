@@ -170,3 +170,11 @@ def get_report_labels(ids) -> dict:
 
     wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
     return {review.id: str(review) for review in Review.objects.filter(id__in=wanted)}
+
+
+def get_report_authors(ids) -> dict:
+    """Auteur de chaque avis, `{avis: auteur}` (une requête)."""
+    from apps.common.utils import parse_uuid
+
+    wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
+    return dict(Review.objects.filter(id__in=wanted).values_list('id', 'user_id'))

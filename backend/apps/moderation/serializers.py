@@ -1,8 +1,9 @@
 from rest_framework import serializers
+from rest_framework.exceptions import APIException
 
 from apps.marketplace import services as marketplace_services
 
-from . import services
+from . import permissions, services
 from .models import Report, Sanction
 
 # Codes de cible exposés par l'API (contrat conservé jusqu'à L0-11) -> `target_type` stocké.
@@ -13,6 +14,15 @@ TARGET_TYPE_MAP = {
     'USER': 'user',
 }
 TARGET_TYPE_REVERSE = {v: k for k, v in TARGET_TYPE_MAP.items()}
+# Champs renvoyés à l'auteur d'un signalement qui n'est pas du personnel de modération : jamais
+# de libellé de cible (titre d'offre non publique, nom de compte), ni de notes de décision.
+REPORTER_FIELDS = ('id', 'status', 'created_at')
+
+
+class DuplicateReport(APIException):
+    status_code = 409
+    default_detail = "Signalement déjà déposé."
+    default_code = 'duplicate_report'
 
 
 class ReportSerializer(serializers.ModelSerializer):
@@ -33,6 +43,13 @@ class ReportSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['status', 'decision_notes', 'created_at', 'resolved_at']
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        if request is None or not permissions.can_moderate(request.user):
+            return {key: data[key] for key in REPORTER_FIELDS}
+        return data
+
     def get_target_type_display(self, obj):
         return TARGET_TYPE_REVERSE.get(obj.target_type)
 
@@ -50,6 +67,13 @@ class ReportSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'object_id': "Cible introuvable."})
         # Forme canonique de la clé (UUID) : un même objet signalé sous plusieurs écritures
         # reste regroupé.
+        reporter = self.context['request'].user
+        try:
+            services.ensure_can_report(reporter, target_type, resolved[0])
+        except services.ReportRefused as error:
+            if error.duplicate:
+                raise DuplicateReport(str(error))
+            raise serializers.ValidationError({'object_id': str(error)})
         attrs['target_type'] = target_type
         attrs['target_id'] = resolved[0]
         return attrs
@@ -74,7 +98,19 @@ class SanctionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Annonce introuvable.")
         return value
 
+    def validate_user(self, user):
+        if user.is_staff or user.is_superuser or user.pk == self.context['request'].user.pk:
+            raise serializers.ValidationError(
+                "Impossible de sanctionner un compte du personnel ou votre propre compte."
+            )
+        return user
+
     def validate(self, attrs):
+        offer_id = attrs.get('related_offer_id')
+        if offer_id and 'user' in attrs and not marketplace_services.seller_owns_offer(offer_id, attrs['user'].pk):
+            raise serializers.ValidationError(
+                {'related_post': "Cette annonce n'appartient pas à l'utilisateur sanctionné."}
+            )
         if attrs.get('sanction_type') == Sanction.TYPE_MASQUAGE_ANNONCE and not attrs.get('related_offer_id'):
             raise serializers.ValidationError(
                 {'related_post': "related_post est requis pour un masquage d'annonce."}

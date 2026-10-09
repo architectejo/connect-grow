@@ -19,6 +19,36 @@ TARGET_RESOLVERS = {
 }
 
 
+class ReportRefused(Exception):
+    """Signalement refusé (message en français) ; `duplicate` distingue le doublon (409)."""
+
+    def __init__(self, message, duplicate=False):
+        super().__init__(message)
+        self.duplicate = duplicate
+
+
+def resolve_target_author(target_type, target_id):
+    """UUID de l'auteur de la cible (vendeur, rédacteur, expéditeur, compte lui-même), ou None."""
+    module = TARGET_RESOLVERS.get(target_type)
+    return import_module(module).get_report_authors([target_id]).get(target_id) if module else None
+
+
+def ensure_can_report(reporter, target_type, target_id):
+    """Règles d'un nouveau signalement : pas de signalement de sa propre cible, un seul signalement
+    ouvert par (auteur, cible). Garantie en couche service, sans contrainte conditionnelle."""
+    if resolve_target_author(target_type, target_id) == reporter.pk:
+        raise ReportRefused("Vous ne pouvez pas signaler votre propre contenu ou votre propre compte.")
+    if Report.objects.filter(
+        reporter=reporter, target_type=target_type, target_id=target_id, status__in=Report.OPEN_STATUSES,
+    ).exists():
+        raise ReportRefused("Vous avez déjà signalé cet élément ; le signalement est en cours de traitement.", True)
+
+
+# Types de cible produits par les signalements automatiques (avis croisés, CDC 3.7) ; chacun
+# doit avoir un résolveur dans TARGET_RESOLVERS (test), sinon le signalement serait illisible.
+AUTOMATIC_TARGET_TYPES = frozenset({'review'})
+
+
 def record_audit(actor, action, target=None, details=''):
     """Journalise une action sensible (règle 12) dans l'AuditLog. Synchrone, sans outbox :
     une action sensible ne doit jamais exister sans sa trace (ADR 0002, notes R1)."""
@@ -65,6 +95,8 @@ def file_automatic_report(target, reason, description=''):
     """Dépose dans la file de modération un signalement émis par le système (sans auteur).
     Un seul signalement par cible et par motif : renvoie None s'il existe déjà."""
     target_type = target._meta.model_name
+    if target_type not in AUTOMATIC_TARGET_TYPES:
+        raise ValueError(f"Type de cible non pris en charge pour un signalement automatique : {target_type}")
     if Report.objects.filter(target_type=target_type, target_id=target.pk, reason=reason).exists():
         return None
     return Report.objects.create(

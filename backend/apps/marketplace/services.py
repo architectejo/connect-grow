@@ -383,3 +383,14 @@ def get_report_labels(ids: Iterable) -> dict:
 
 def _parsed(ids: Iterable) -> set:
     return {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
+
+
+def get_report_authors(ids: Iterable) -> dict:
+    """Vendeur de chaque offre, `{offre: vendeur}` (une requête) : refuse l'auto-signalement."""
+    return dict(Offer.objects.filter(id__in=_parsed(ids)).values_list('id', 'seller_id'))
+
+
+def seller_owns_offer(offer_id, user_id) -> bool:
+    """Vrai si l'offre existe et appartient à cet utilisateur (rattachement d'une sanction)."""
+    parsed = parse_uuid(offer_id)
+    return parsed is not None and Offer.objects.filter(id=parsed, seller_id=user_id).exists()

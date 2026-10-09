@@ -187,7 +187,11 @@ def get_report_labels(ids: Iterable) -> dict:
     from .models import User
 
     wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
-    return {user.id: str(user) for user in User.objects.filter(id__in=wanted)}
+    # Jamais d'e-mail ni de téléphone dans un libellé (données personnelles par finalité).
+    return {
+        user.id: (user.full_name or '').strip() or f"Utilisateur {str(user.id)[:8]}"
+        for user in User.objects.filter(id__in=wanted)
+    }
 
 
 def count_users() -> int:
@@ -202,3 +206,8 @@ def count_pending_kyc_documents() -> int:
     from .models import KycDocument
 
     return KycDocument.objects.filter(status=KycDocument.STATUS_EN_ATTENTE).count()
+
+
+def get_report_authors(ids: Iterable) -> dict:
+    """Un compte est son propre auteur : `{compte: compte}` pour les comptes existants."""
+    return {user_id: user_id for user_id in get_report_labels(ids)}

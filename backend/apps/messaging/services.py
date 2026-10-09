@@ -50,3 +50,11 @@ def get_report_labels(ids) -> dict:
 
     wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
     return {message.id: str(message) for message in Message.objects.filter(id__in=wanted)}
+
+
+def get_report_authors(ids) -> dict:
+    """Expéditeur de chaque message, `{message: expéditeur}` (une requête)."""
+    from apps.common.utils import parse_uuid
+
+    wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
+    return dict(Message.objects.filter(id__in=wanted).values_list('id', 'sender_id'))

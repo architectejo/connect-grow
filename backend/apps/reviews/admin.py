@@ -14,6 +14,13 @@ class ReviewAdmin(admin.ModelAdmin):
     search_fields = ('user__email', 'user__phone', 'content')
     raw_id_fields = ('user', 'reviewed_user', 'deal')
 
+    def get_readonly_fields(self, request, obj=None):
+        # Le modérateur (droit `change_review`) masque ou réaffiche un avis ; seul le
+        # super-administrateur peut en réécrire le contenu ou la note.
+        if request.user.is_superuser:
+            return super().get_readonly_fields(request, obj)
+        return tuple(f.name for f in Review._meta.fields if f.name != 'is_hidden')
+
     def save_model(self, request, obj, form, change):
         hidden_changed = change and 'is_hidden' in form.changed_data
         super().save_model(request, obj, form, change)

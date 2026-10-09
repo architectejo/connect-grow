@@ -1,5 +1,4 @@
 from django.contrib.auth.models import Group
-from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -66,8 +65,8 @@ class ReportFlowTests(ModerationTestBase):
                 'target_type': 'USER', 'object_id': written, 'reason': 'SPAM',
             })
             self.assertEqual(response.status_code, status.HTTP_201_CREATED, written)
-        stored = set(Report.objects.values_list('object_id', flat=True))
-        self.assertEqual(stored, {str(self.seller.id)})
+        stored = set(Report.objects.values_list('target_id', flat=True))
+        self.assertEqual(stored, {self.seller.id})
 
     def test_report_rejects_unknown_target(self):
         self.client.force_authenticate(self.reporter)
@@ -89,7 +88,7 @@ class ReportFlowTests(ModerationTestBase):
 
     def test_moderator_can_claim_and_resolve(self):
         report = Report.objects.create(
-            content_type=ContentType.objects.get_for_model(Offer), object_id=str(self.post.id),
+            target_type='offer', target_id=self.post.id,
             reporter=self.reporter, reason=Report.REASON_ARNAQUE,
         )
         self.client.force_authenticate(self.moderator)
@@ -110,7 +109,7 @@ class ReportFlowTests(ModerationTestBase):
 
     def test_resolving_a_report_writes_an_audit_log(self):
         report = Report.objects.create(
-            content_type=ContentType.objects.get_for_model(Offer), object_id=str(self.post.id),
+            target_type='offer', target_id=self.post.id,
             reporter=self.reporter, reason=Report.REASON_ARNAQUE,
         )
         self.client.force_authenticate(self.moderator)

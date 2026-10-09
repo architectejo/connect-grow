@@ -1,7 +1,6 @@
 import uuid
 from datetime import timedelta
 
-from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
 from django.utils import timezone
 from rest_framework import status
@@ -422,12 +421,12 @@ class CrossedReviewsDetectionTests(ReviewsTestBase):
 
     def reports(self):
         return Report.objects.filter(
-            content_type=ContentType.objects.get_for_model(Review), reason=Report.REASON_AVIS_CROISES,
+            target_type='review', reason=Report.REASON_AVIS_CROISES,
         )
 
     def test_three_mutual_deals_trigger_a_report(self):
         last_review = self.exchange_reviews(3)
-        self.assertTrue(self.reports().filter(object_id=str(last_review.id)).exists())
+        self.assertTrue(self.reports().filter(target_id=last_review.id).exists())
         self.assertIsNone(self.reports().first().reporter)
 
     def test_two_mutual_deals_do_not_trigger_a_report(self):
@@ -456,7 +455,7 @@ class DecouplingTests(ReviewsTestBase):
         deal = review.deal
         Offer.objects.filter(pk=self.offer.pk).update(is_deleted=True, deleted_at=timezone.now() - timedelta(days=31))
 
-        call_command('purge_trash', verbosity=0)
+        call_command('purge_offer_trash', verbosity=0)
 
         self.assertFalse(Offer.objects.filter(pk=self.offer.pk).exists())
         review.refresh_from_db()

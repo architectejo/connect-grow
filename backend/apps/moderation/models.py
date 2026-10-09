@@ -1,14 +1,17 @@
 from django.conf import settings
-from django.contrib.contenttypes.fields import GenericForeignKey
-from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils import timezone
 
+from apps.common.models import BaseModel
 
-class Report(models.Model):
+# Types de cible d'un signalement ou d'une entrée du journal : nom de modèle en minuscules
+# (`offer`, `user`, `review`, `message`...). Aucune clé générique : la cible est désignée par
+# (`target_type`, `target_id`) et résolue par les `services.py` des domaines (ADR 0002, décision 5).
+
+
+class Report(BaseModel):
     """CDC 3.11 : file unique de signalements (annonces, avis, messages,
-    utilisateurs). Un seul modèle polymorphe via content types plutôt qu'une
-    table par type de cible signalée."""
+    utilisateurs). Un seul modèle, cible désignée par `target_type` + `target_id`."""
 
     REASON_SPAM = 'SPAM'
     REASON_ARNAQUE = 'ARNAQUE'
@@ -37,11 +40,8 @@ class Report(models.Model):
     )
 
     # La cible signalée : une annonce, un avis, un message ou un utilisateur.
-    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
-    # Chaîne (UUID ou entier selon la cible) : transitoire, remplacée par
-    # target_type / target_id en R3 (ADR 0002, décision 5).
-    object_id = models.CharField(max_length=36)
-    target = GenericForeignKey('content_type', 'object_id')
+    target_type = models.CharField(max_length=50)
+    target_id = models.UUIDField()
 
     reporter = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='reports_filed',
@@ -55,12 +55,11 @@ class Report(models.Model):
     )
     decision_notes = models.TextField(blank=True)
 
-    created_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']
-        indexes = [models.Index(fields=['content_type', 'object_id'])]
+        indexes = [models.Index(fields=['target_type', 'target_id'], name='report_target')]
 
     def claim(self, moderator):
         self.status = self.STATUS_EN_COURS
@@ -80,10 +79,10 @@ class Report(models.Model):
         self.save(update_fields=['status', 'decision_notes', 'resolved_at'])
 
     def __str__(self):
-        return f"Signalement #{self.id} ({self.get_reason_display()}) — {self.get_status_display()}"
+        return f"Signalement {self.id} ({self.get_reason_display()}) — {self.get_status_display()}"
 
 
-class Sanction(models.Model):
+class Sanction(BaseModel):
     """CDC 3.11 : avertissement, masquage d'une annonce, suspension
     temporaire, bannissement."""
 
@@ -120,8 +119,6 @@ class Sanction(models.Model):
     # d'ici là, seule une levée manuelle (lift()) est possible.
     ends_at = models.DateTimeField(null=True, blank=True)
 
-    created_at = models.DateTimeField(auto_now_add=True)
-
     class Meta:
         ordering = ['-created_at']
 
@@ -149,27 +146,27 @@ class Sanction(models.Model):
         return f"{self.get_sanction_type_display()} — {self.user}"
 
 
-class AuditLog(models.Model):
-    """CDC 3.11 : journal horodaté de toutes les actions des modérateurs et
-    administrateurs."""
+class AuditLog(BaseModel):
+    """CDC 3.11, règle 12 : journal horodaté de toutes les actions sensibles (modérateurs,
+    administrateurs, système). Cible désignée par `target_type` + `target_id`, sans clé générique."""
 
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
     action = models.CharField(max_length=50)
-    content_type = models.ForeignKey(ContentType, on_delete=models.SET_NULL, null=True, blank=True)
-    object_id = models.CharField(max_length=36, null=True, blank=True)
-    target = GenericForeignKey('content_type', 'object_id')
+    target_type = models.CharField(max_length=50, blank=True, default='')
+    target_id = models.UUIDField(null=True, blank=True)
     details = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [models.Index(fields=['target_type', 'target_id'], name='audit_target')]
 
     @classmethod
     def record(cls, actor, action, target=None, details=''):
+        """`target` : instance d'un modèle à clé UUID (son nom de modèle devient `target_type`)."""
         entry = cls(actor=actor, action=action, details=details)
         if target is not None:
-            entry.content_type = ContentType.objects.get_for_model(target)
-            entry.object_id = target.pk
+            entry.target_type = target._meta.model_name
+            entry.target_id = target.pk
         entry.save()
         return entry
 

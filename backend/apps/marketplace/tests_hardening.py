@@ -241,7 +241,7 @@ class AuditTests(MarketplaceTestBase):
         entries = AuditLog.objects.filter(action='OFFER_DELETED')
         self.assertEqual(entries.count(), 2)
         self.assertEqual({e.actor_id for e in entries}, {self.seller.id})
-        self.assertEqual({e.object_id for e in entries}, {str(first.id), str(second.id)})
+        self.assertEqual({e.target_id for e in entries}, {first.id, second.id})
 
     def test_admin_save_and_delete_are_audited_and_clean_visibility_data(self):
         from apps.visibility.models import DailyVisibilityCounter
@@ -256,7 +256,7 @@ class AuditTests(MarketplaceTestBase):
 
         form = mock.Mock(changed_data=['price'])
         model_admin.save_model(request, offer, form, True)
-        self.assertTrue(AuditLog.objects.filter(action='OFFER_ADMIN_UPDATED', object_id=str(offer.id)).exists())
+        self.assertTrue(AuditLog.objects.filter(action='OFFER_ADMIN_UPDATED', target_id=offer.id).exists())
 
         model_admin.delete_model(request, offer)
         model_admin.delete_queryset(request, Offer.objects.filter(pk=other.pk))

@@ -177,3 +177,28 @@ def set_reputation(user_id, trust_score: float, reviews_count: int) -> None:
     from .models import User
 
     User.objects.filter(pk=user_id).update(trust_score=trust_score, reviews_count=reviews_count)
+
+
+def get_report_labels(ids: Iterable) -> dict:
+    """Libellés de comptes signalables, indexés par UUID (une requête) : sert à la modération.
+    Un compte absent n'apparaît pas dans le résultat."""
+    from apps.common.utils import parse_uuid
+
+    from .models import User
+
+    wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
+    return {user.id: str(user) for user in User.objects.filter(id__in=wanted)}
+
+
+def count_users() -> int:
+    """Nombre de comptes (tableau de bord de modération)."""
+    from .models import User
+
+    return User.objects.count()
+
+
+def count_pending_kyc_documents() -> int:
+    """Nombre de pièces KYC en attente de décision (tableau de bord de modération)."""
+    from .models import KycDocument
+
+    return KycDocument.objects.filter(status=KycDocument.STATUS_EN_ATTENTE).count()

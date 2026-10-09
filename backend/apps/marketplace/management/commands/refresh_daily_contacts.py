@@ -12,7 +12,7 @@ class Command(BaseCommand):
     help = "Recalcule l'agrégat quotidien des contacts reçus par annonce (CDC 3.9, 5.6)."
 
     def handle(self, *args, **options):
-        today = timezone.now().date()
+        today = timezone.localdate()
         rows = services.count_contacts_by_offer(today)
         count = visibility_services.set_daily_contacts(today, rows)
         if options['verbosity'] > 0:

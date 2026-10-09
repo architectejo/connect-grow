@@ -4,9 +4,12 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.pagination import OptionalPagination
+from apps.identity import services as identity_services
 from apps.marketplace import services as marketplace_services
 from apps.notifications import services as notification_services
 
+from . import services
 from .models import AuditLog, Report, Sanction
 from .serializers import ReportSerializer, SanctionSerializer
 
@@ -20,6 +23,7 @@ class ReportViewSet(viewsets.ModelViewSet):
 
     serializer_class = ReportSerializer
     http_method_names = ['get', 'post', 'head', 'options']
+    pagination_class = OptionalPagination
 
     def get_permissions(self):
         if self.action == 'create':
@@ -27,11 +31,23 @@ class ReportViewSet(viewsets.ModelViewSet):
         return [permissions.IsAdminUser()]
 
     def get_queryset(self):
-        queryset = Report.objects.select_related('reporter', 'assigned_to', 'content_type')
+        queryset = Report.objects.select_related('reporter', 'assigned_to')
         status_param = self.request.query_params.get('status')
         if status_param:
             queryset = queryset.filter(status=status_param)
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        reports = list(page if page is not None else queryset)
+        serializer = self.get_serializer(
+            reports, many=True, context={**self.get_serializer_context(),
+                                         'target_labels': services.resolve_labels_for_reports(reports)},
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
 
     def perform_create(self, serializer):
         serializer.save(reporter=self.request.user)
@@ -66,6 +82,7 @@ class SanctionViewSet(viewsets.ModelViewSet):
     serializer_class = SanctionSerializer
     permission_classes = [permissions.IsAdminUser]
     http_method_names = ['get', 'post', 'head', 'options']
+    pagination_class = OptionalPagination
     queryset = Sanction.objects.select_related('user', 'issued_by')
 
     def perform_create(self, serializer):
@@ -104,10 +121,9 @@ class ModerationDashboardView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
-        from apps.identity.models import KycDocument, User
         return Response({
-            'users_count': User.objects.count(),
+            'users_count': identity_services.count_users(),
             'active_posts_count': marketplace_services.count_active_offers(),
             'pending_reports_count': Report.objects.filter(status=Report.STATUS_EN_ATTENTE).count(),
-            'pending_kyc_count': KycDocument.objects.filter(status=KycDocument.STATUS_EN_ATTENTE).count(),
+            'pending_kyc_count': identity_services.count_pending_kyc_documents(),
         })

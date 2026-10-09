@@ -76,8 +76,8 @@ class UserAdminHardeningTests(TestCase):
         request = self.request_for(staff)
         model_admin.delete_queryset(request, User.objects.filter(pk__in=[v.pk for v in victims[:2]]))
         model_admin.delete_model(request, victims[2])
-        logged = set(AuditLog.objects.filter(action='USER_ADMIN_DELETED', actor=staff).values_list('object_id', flat=True))
-        self.assertEqual(logged, set(ids))
+        logged = set(AuditLog.objects.filter(action='USER_ADMIN_DELETED', actor=staff).values_list('target_id', flat=True))
+        self.assertEqual({str(i) for i in logged}, set(ids))
         self.assertEqual(User.objects.filter(pk__in=ids).count(), 0)
 
     def test_standard_roles_cannot_change_users_or_edit_kyc(self):

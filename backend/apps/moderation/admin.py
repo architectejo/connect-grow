@@ -4,8 +4,8 @@ from .models import AuditLog, Report, Sanction
 
 @admin.register(Report)
 class ReportAdmin(admin.ModelAdmin):
-    list_display = ('id', 'content_type', 'object_id', 'reason', 'status', 'assigned_to', 'created_at')
-    list_filter = ('status', 'reason', 'content_type')
+    list_display = ('id', 'target_type', 'target_id', 'reason', 'status', 'assigned_to', 'created_at')
+    list_filter = ('status', 'reason', 'target_type')
     search_fields = ('description', 'decision_notes')
 
 
@@ -18,8 +18,8 @@ class SanctionAdmin(admin.ModelAdmin):
 
 @admin.register(AuditLog)
 class AuditLogAdmin(admin.ModelAdmin):
-    list_display = ('created_at', 'actor', 'action', 'content_type', 'object_id')
-    list_filter = ('action',)
+    list_display = ('created_at', 'actor', 'action', 'target_type', 'target_id')
+    list_filter = ('action', 'target_type')
     search_fields = ('actor__email', 'details')
     readonly_fields = [f.name for f in AuditLog._meta.fields]
 

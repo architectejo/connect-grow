@@ -135,27 +135,50 @@ class PermissionDefaultsTests(TestCase):
         self.assertGreater(len(walked), 60)
 
 
-# Domaines déjà découplés (ADR 0002). `moderation` (cible générique) et `payments` (gelé) sont
-# traités par R3.
-DECOUPLED_APPS = ('catalog', 'identity', 'marketplace', 'visibility', 'reviews', 'messaging', 'notifications')
-APPS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Tous les domaines (ADR 0002, R3) : aucun n'échappe au contrôle de découplage. Un nouveau module
+# doit être ajouté ici ; `test_every_installed_domain_is_covered` le rappelle.
 ALL_DOMAINS = {'catalog', 'identity', 'marketplace', 'visibility', 'reviews', 'messaging', 'notifications',
                'moderation', 'payments'}
+DECOUPLED_APPS = tuple(sorted(ALL_DOMAINS))
+APPS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class DomainBoundariesTests(SimpleTestCase):
+    def test_every_installed_domain_is_covered(self):
+        from django.apps import apps as django_apps
+
+        installed = {c.label for c in django_apps.get_app_configs() if c.name.startswith('apps.')} - {'common'}
+        self.assertEqual(installed, ALL_DOMAINS)
+
     def test_no_foreign_key_leaves_its_domain_except_towards_the_user(self):
         from django.apps import apps as django_apps
+        from django.contrib.contenttypes.fields import GenericForeignKey
 
         for label in DECOUPLED_APPS:
             for model in django_apps.get_app_config(label).get_models():
                 for field in model._meta.get_fields():
-                    if field.is_relation and field.concrete and field.related_model is not None:
+                    self.assertNotIn(
+                        type(field), (GenericForeignKey,), f'{label}.{model.__name__}.{field.name} : clé générique',
+                    )
+                    if field.is_relation and (field.concrete or field.many_to_many) and not field.auto_created                             and field.related_model is not None:
                         target = field.related_model._meta.app_label
                         if target == label or target == 'auth':
                             continue
                         is_user = target == 'identity' and field.related_model._meta.model_name == 'user'
                         self.assertTrue(is_user, f'{label}.{model.__name__}.{field.name} -> {target}')
+
+    def test_no_migration_depends_on_another_domain_except_identity(self):
+        from django.db.migrations.loader import MigrationLoader
+
+        loader = MigrationLoader(None, ignore_no_migrations=True)
+        offenders = []
+        for (label, name), migration in loader.disk_migrations.items():
+            if label not in ALL_DOMAINS:
+                continue
+            for dep_label, dep_name in migration.dependencies:
+                if dep_label in ALL_DOMAINS and dep_label != label and dep_label != 'identity':
+                    offenders.append(f'{label}.{name} -> {dep_label}.{dep_name}')
+        self.assertEqual(offenders, [])
 
     def test_no_domain_imports_the_models_of_another_one(self):
         offenders = []

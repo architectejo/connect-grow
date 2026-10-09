@@ -249,7 +249,7 @@ class OtpCleanupCommandTests(TestCase):
         expired.save(update_fields=['expires_at'])
         valid, _ = OtpCode.issue('+243822222222', OtpCode.PURPOSE_REGISTER)
 
-        call_command('cleanup_otp_codes', verbosity=0)
+        call_command('purge_otp_codes', verbosity=0)
 
         self.assertFalse(OtpCode.objects.filter(pk=expired.pk).exists())
         self.assertTrue(OtpCode.objects.filter(pk=valid.pk).exists())

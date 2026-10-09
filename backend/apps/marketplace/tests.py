@@ -593,50 +593,50 @@ class OfferLifecycleActionTests(MarketplaceTestBase):
 
 
 class ScheduledTasksTests(MarketplaceTestBase):
-    def test_purge_trash_deletes_only_old_soft_deleted_offers(self):
+    def test_purge_offer_trash_deletes_only_old_soft_deleted_offers(self):
         old_deleted = self.make_offer(title='Une annonce ancienne à purger')
         Offer.objects.filter(pk=old_deleted.pk).update(is_deleted=True, deleted_at=timezone.now() - timedelta(days=31))
         recent_deleted = self.make_offer(title='Une annonce récente supprimée')
         Offer.objects.filter(pk=recent_deleted.pk).update(is_deleted=True, deleted_at=timezone.now() - timedelta(days=1))
 
-        call_command('purge_trash', verbosity=0)
+        call_command('purge_offer_trash', verbosity=0)
 
         self.assertFalse(Offer.objects.filter(pk=old_deleted.pk).exists())
         self.assertTrue(Offer.objects.filter(pk=recent_deleted.pk).exists())
 
-    def test_purge_trash_also_clears_visibility_data(self):
+    def test_purge_offer_trash_also_clears_visibility_data(self):
         offer = self.make_offer()
         DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=timezone.now().date(), views=3)
         Offer.objects.filter(pk=offer.pk).update(is_deleted=True, deleted_at=timezone.now() - timedelta(days=31))
-        call_command('purge_trash', verbosity=0)
+        call_command('purge_offer_trash', verbosity=0)
         self.assertFalse(DailyVisibilityCounter.objects.filter(offer_id=offer.id).exists())
 
-    def test_expire_posts_transitions_status(self):
+    def test_expire_offers_transitions_status(self):
         offer = self.make_offer()
         Offer.objects.filter(pk=offer.pk).update(expires_at=timezone.now() - timedelta(days=1))
 
-        call_command('expire_posts', verbosity=0)
+        call_command('expire_offers', verbosity=0)
 
         offer.refresh_from_db()
         self.assertEqual(offer.status, Offer.STATUS_EXPIRED)
         self.assertFalse(offer.is_active)
 
-    def test_expire_posts_notifies_upcoming_expiration_once(self):
+    def test_expire_offers_notifies_upcoming_expiration_once(self):
         offer = self.make_offer()
         Offer.objects.filter(pk=offer.pk).update(expires_at=timezone.now() + timedelta(days=1))
 
-        call_command('expire_posts', verbosity=0)
-        call_command('expire_posts', verbosity=0)  # ne doit pas renotifier
+        call_command('expire_offers', verbosity=0)
+        call_command('expire_offers', verbosity=0)  # ne doit pas renotifier
 
         self.assertEqual(Notification.objects.filter(user=self.seller, notification_type='EXPIRATION').count(), 1)
 
-    def test_refresh_dashboard_aggregates_counts_todays_contacts(self):
+    def test_refresh_daily_contacts_counts_todays_contacts(self):
         offer = self.make_offer()
         ContactEvent.objects.create(offer=offer, sender=self.buyer, message='Bonjour')
         ContactEvent.objects.create(offer=offer, sender=self.buyer, message='Toujours disponible ?')
 
-        call_command('refresh_dashboard_aggregates', verbosity=0)
-        call_command('refresh_dashboard_aggregates', verbosity=0)  # idempotent
+        call_command('refresh_daily_contacts', verbosity=0)
+        call_command('refresh_daily_contacts', verbosity=0)  # idempotent
 
         counter = DailyVisibilityCounter.objects.get(offer_id=offer.id)
         self.assertEqual(counter.contacts, 2)

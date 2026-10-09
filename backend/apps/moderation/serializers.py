@@ -1,17 +1,16 @@
-from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from apps.marketplace import services as marketplace_services
 
+from . import services
 from .models import Report, Sanction
 
-# Cache l'implémentation ContentType derrière des identifiants stables côté API.
+# Codes de cible exposés par l'API (contrat conservé jusqu'à L0-11) -> `target_type` stocké.
 TARGET_TYPE_MAP = {
-    'POST': ('marketplace', 'offer'),
-    'REVIEW': ('reviews', 'review'),
-    'MESSAGE': ('messaging', 'message'),
-    'USER': ('identity', 'user'),
+    'POST': 'offer',
+    'REVIEW': 'review',
+    'MESSAGE': 'message',
+    'USER': 'user',
 }
 TARGET_TYPE_REVERSE = {v: k for k, v in TARGET_TYPE_MAP.items()}
 
@@ -19,6 +18,8 @@ TARGET_TYPE_REVERSE = {v: k for k, v in TARGET_TYPE_MAP.items()}
 class ReportSerializer(serializers.ModelSerializer):
     target_type = serializers.ChoiceField(choices=list(TARGET_TYPE_MAP.keys()), write_only=True)
     target_type_display = serializers.SerializerMethodField()
+    # Clé JSON `object_id` conservée jusqu'à L0-11 : UUID de la cible.
+    object_id = serializers.CharField(source='target_id')
     target_display = serializers.SerializerMethodField()
     reporter_name = serializers.ReadOnlyField(source='reporter.full_name')
     assigned_to_name = serializers.ReadOnlyField(source='assigned_to.full_name')
@@ -33,26 +34,24 @@ class ReportSerializer(serializers.ModelSerializer):
         read_only_fields = ['status', 'decision_notes', 'created_at', 'resolved_at']
 
     def get_target_type_display(self, obj):
-        return TARGET_TYPE_REVERSE.get((obj.content_type.app_label, obj.content_type.model))
+        return TARGET_TYPE_REVERSE.get(obj.target_type)
 
     def get_target_display(self, obj):
-        return str(obj.target) if obj.target else None
+        # `target_labels` : libellés résolus par lot par la vue de liste (évite une requête par ligne).
+        labels = self.context.get('target_labels')
+        if labels is None:
+            labels = services.resolve_labels_for_reports([obj])
+        return labels.get((obj.target_type, obj.target_id))
 
     def validate(self, attrs):
-        target_type = attrs.pop('target_type')
-        app_label, model_name = TARGET_TYPE_MAP[target_type]
-        content_type = ContentType.objects.get(app_label=app_label, model=model_name)
-        model_class = content_type.model_class()
-        try:
-            target = model_class.objects.filter(pk=attrs['object_id']).first()
-        except (ValueError, TypeError, DjangoValidationError):
-            target = None  # identifiant mal formé pour ce type de cible
-        if target is None:
+        target_type = TARGET_TYPE_MAP[attrs.pop('target_type')]
+        resolved = services.resolve_target(target_type, attrs['target_id'])
+        if resolved is None:
             raise serializers.ValidationError({'object_id': "Cible introuvable."})
-        # Forme canonique de la clé (UUID en minuscules avec tirets) : un même objet
-        # signalé sous plusieurs écritures reste regroupé.
-        attrs['object_id'] = str(target.pk)
-        attrs['content_type'] = content_type
+        # Forme canonique de la clé (UUID) : un même objet signalé sous plusieurs écritures
+        # reste regroupé.
+        attrs['target_type'] = target_type
+        attrs['target_id'] = resolved[0]
         return attrs
 
 

@@ -2,7 +2,6 @@
 from unittest import mock
 
 from django.contrib.admin.sites import site as admin_site
-from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.db import connection
 from django.test import RequestFactory, override_settings
@@ -30,7 +29,7 @@ class ReviewProtectionTests(ReviewsTestBase):
         detail = f'{self.url}{review.id}/'
         self.client.force_authenticate(self.buyer)
         Report.objects.create(
-            content_type=ContentType.objects.get_for_model(Review), object_id=str(review.id),
+            target_type='review', target_id=review.id,
             reporter=self.other, reason=Report.REASON_AUTRE,
         )
         self.assertEqual(self.client.patch(detail, {'content': 'Je réécris mon avis signalé.'}).status_code, 403)
@@ -135,7 +134,7 @@ class ReviewAuditTests(ReviewsTestBase):
         services.set_review_hidden(review, True, admin)
         self.seller.refresh_from_db()
         self.assertEqual(self.seller.reviews_count, 0)
-        hidden = AuditLog.objects.filter(action='REVIEW_HIDDEN', actor=admin, object_id=str(review.id))
+        hidden = AuditLog.objects.filter(action='REVIEW_HIDDEN', actor=admin, target_id=review.id)
         self.assertEqual(hidden.count(), 1)
         services.set_review_hidden(review, True, admin)  # sans changement : pas de doublon
         self.assertEqual(hidden.count(), 1)
@@ -166,9 +165,9 @@ class ReviewAuditTests(ReviewsTestBase):
         self.client.force_authenticate(self.seller)
         self.client.post(f'/api/reputation/deals/{deal.id}/confirm/')
         self.client.post(f'/api/reputation/deals/{refused.id}/decline/')
-        confirmed = AuditLog.objects.filter(action='DEAL_CONFIRMED', actor=self.seller, object_id=str(deal.id))
+        confirmed = AuditLog.objects.filter(action='DEAL_CONFIRMED', actor=self.seller, target_id=deal.id)
         self.assertTrue(confirmed.exists())
-        self.assertTrue(AuditLog.objects.filter(action='DEAL_DECLINED', object_id=str(refused.id)).exists())
+        self.assertTrue(AuditLog.objects.filter(action='DEAL_DECLINED', target_id=refused.id).exists())
 
 
 class DealAvailabilityTests(ReviewsTestBase):

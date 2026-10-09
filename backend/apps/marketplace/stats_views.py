@@ -20,7 +20,7 @@ class DashboardStatsView(APIView):
         active_offers = services.count_active_offers(request.user.id)
 
         # CDC 3.9 : contacts reçus et taux de contact par annonce (agrégat CDC 5.6,
-        # commande refresh_dashboard_aggregates).
+        # commande refresh_daily_contacts).
         contact_rate = round(stats.contacts_count / active_offers, 2) if active_offers else 0.0
 
         # CDC 3.7 : Trust Score bayésien, déjà mis en cache sur l'utilisateur par le module

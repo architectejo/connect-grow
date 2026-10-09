@@ -161,3 +161,12 @@ def reply_to_review(review: Review, replier, content: str) -> Review:
         link=f"/post/{review.offer_id}" if offer else '',
     )
     return review
+
+
+def get_report_labels(ids) -> dict:
+    """Libellés d'avis signalables, indexés par UUID (une requête) : sert à la modération.
+    Un avis absent n'apparaît pas dans le résultat."""
+    from apps.common.utils import parse_uuid
+
+    wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
+    return {review.id: str(review) for review in Review.objects.filter(id__in=wanted)}

@@ -1,5 +1,6 @@
 """Analyse statique des frontières entre domaines (ADR 0002) : un domaine ne touche pas aux
-modèles d'un autre. Utilisée par les tests ; à remplacer par import-linter en R3 (devops).
+modèles d'un autre. Utilisée par les tests (`common.tests.DomainBoundariesTests`) sur tous les domaines. import-linter
+n'a pas été ajouté : il est redondant (voir ADR 0002, section R3) et ne voit pas les chargements dynamiques.
 
 Détecte, par analyse `ast` (et non par expression régulière) :
 - `import apps.x.models`, `import apps.x.models as m` ;

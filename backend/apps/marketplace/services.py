@@ -372,3 +372,14 @@ def create_exchange_proposal(*, offer: Offer, sender, message: str) -> ExchangeP
         link='/messages',
     )
     return proposal
+
+
+def get_report_labels(ids: Iterable) -> dict:
+    """Libellés d'offres signalables, indexés par UUID (une requête) : sert à la modération.
+    Une offre absente n'apparaît pas dans le résultat."""
+    return {offer_id: f"[{offer_type}] {title}" for offer_id, offer_type, title in
+            Offer.objects.filter(id__in=_parsed(ids)).values_list('id', 'offer_type', 'title')}
+
+
+def _parsed(ids: Iterable) -> set:
+    return {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}

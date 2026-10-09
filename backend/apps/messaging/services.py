@@ -41,3 +41,12 @@ def send_message(*, conversation: Conversation, sender, content: str, notify: bo
 
 def is_participant(conversation_id, user_id) -> bool:
     return Conversation.objects.filter(pk=conversation_id, participants=user_id).exists()
+
+
+def get_report_labels(ids) -> dict:
+    """Libellés de messages signalables, indexés par UUID (une requête) : sert à la modération.
+    Un message absent n'apparaît pas dans le résultat."""
+    from apps.common.utils import parse_uuid
+
+    wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
+    return {message.id: str(message) for message in Message.objects.filter(id__in=wanted)}

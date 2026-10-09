@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
 from django.http import FileResponse
 from django.utils import timezone
-from rest_framework import generics, permissions, status
+from rest_framework import generics, permissions, serializers, status
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.settings import api_settings
@@ -14,7 +14,7 @@ from apps.common.pagination import StandardPagination
 
 from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
 from .serializers import KycDocumentSerializer, PublicBusinessSerializer, UserSerializer
-from .services import revoke_all_sessions
+from .services import revoke_all_sessions, validate_new_password
 from .sms import send_otp_sms
 
 class RegisterView(generics.CreateAPIView):
@@ -28,6 +28,12 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         return self.request.user
+
+def password_error(exc):
+    """Réponse 400 uniforme pour un mot de passe refusé (clé `error` comme ailleurs)."""
+    messages = [str(m) for m in exc.detail]
+    return Response({'error': messages[0], 'errors': messages}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class ChangePasswordView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -43,6 +49,11 @@ class ChangePasswordView(APIView):
                 {"error": "L'ancien mot de passe est incorrect."},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        try:
+            validate_new_password(new_password, user)
+        except serializers.ValidationError as exc:
+            return password_error(exc)
 
         # Mise à jour du mot de passe
         user.set_password(new_password)
@@ -166,6 +177,12 @@ class PasswordResetConfirmView(APIView):
             return Response(
                 {'error': "phone, code et new_password sont requis."}, status=status.HTTP_400_BAD_REQUEST
             )
+
+        # Avant de consommer le code : un mot de passe refusé ne doit pas brûler l'OTP.
+        try:
+            validate_new_password(new_password)
+        except serializers.ValidationError as exc:
+            return password_error(exc)
 
         otp = (
             OtpCode.objects.filter(phone=phone, purpose=OtpCode.PURPOSE_PASSWORD_RESET, is_used=False)

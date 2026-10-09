@@ -449,3 +449,55 @@ class TokenLifetimeTests(APITestCase):
         token = RefreshToken.for_user(user)
         self.assertEqual(token.access_token['exp'] - token.access_token['iat'], 15 * 60)
         self.assertEqual(token['exp'] - token['iat'], 7 * 24 * 3600)
+
+
+class PasswordPolicyTests(APITestCase):
+    def register(self, password, **extra):
+        data = {'email': 'alice@example.com', 'password': password, 'full_name': 'Alice Martin'}
+        data.update(extra)
+        return self.client.post(reverse('register'), data)
+
+    def test_registration_rejects_weak_passwords(self):
+        for weak in ('court1', 'motdepasse', '1234567890123', 'alice@example.com'):
+            response = self.register(weak)
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, weak)
+            self.assertIn('password', response.data, weak)
+        self.assertFalse(User.objects.filter(email='alice@example.com').exists())
+
+    def test_registration_rejects_blank_password(self):
+        response = self.register('   ')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('password', response.data)
+
+    def test_registration_accepts_strong_password(self):
+        self.assertEqual(self.register('cheval-agrafe-pile-47').status_code, status.HTTP_201_CREATED)
+
+    def test_change_password_applies_validators(self):
+        user = User.objects.create_user(email='c@example.com', password='ancien-solide-4242', full_name='C')
+        self.client.force_authenticate(user)
+        for weak in (None, '', 'abc', '12345678901'):
+            response = self.client.post(
+                reverse('change_password'), {'old_password': 'ancien-solide-4242', 'new_password': weak},
+                format='json',
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, weak)
+            self.assertIn('error', response.data)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password('ancien-solide-4242'))
+
+    def test_reset_applies_validators_and_keeps_the_otp(self):
+        user = User.objects.create_user(
+            phone='+243822222222', password='ancien-solide-4242', full_name='R',
+        )
+        otp, code = OtpCode.issue(user.phone, OtpCode.PURPOSE_PASSWORD_RESET)
+        for weak in ('abc', '12345678901', ''):
+            response = self.client.post(reverse('password_reset_confirm'), {
+                'phone': user.phone, 'code': code, 'new_password': weak,
+            })
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, weak)
+        otp.refresh_from_db()
+        self.assertFalse(otp.is_used)
+        ok = self.client.post(reverse('password_reset_confirm'), {
+            'phone': user.phone, 'code': code, 'new_password': 'cheval-agrafe-pile-47',
+        })
+        self.assertEqual(ok.status_code, status.HTTP_200_OK)

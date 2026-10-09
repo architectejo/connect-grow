@@ -6,6 +6,7 @@ from apps.catalog import services as catalog_services
 from apps.common.serializers import PreloadingListSerializer
 
 from .models import BusinessProfile, KycDocument, OtpCode, User
+from .services import validate_new_password
 
 
 class BusinessProfileSerializer(serializers.ModelSerializer):
@@ -117,6 +118,17 @@ class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
             'phone_verified': {'read_only': True},
         }
         list_serializer_class = UserListSerializer
+
+    def validate_password(self, value):
+        if self.instance is not None:
+            return value  # refusé dans validate() : le mot de passe ne se change pas ici
+        data = getattr(self, 'initial_data', {})
+        candidate = User(
+            email=data.get('email') or None, phone=data.get('phone') or None,
+            full_name=data.get('full_name') or '',
+        )
+        validate_new_password(value, candidate)
+        return value
 
     def validate_ville(self, value):
         if value is not None and not catalog_services.city_exists(value):

@@ -11,3 +11,19 @@ def revoke_all_sessions(user) -> int:
         _, created = BlacklistedToken.objects.get_or_create(token=token)
         revoked += created
     return revoked
+
+
+def validate_new_password(password, user=None) -> None:
+    """Applique les validateurs de mot de passe de Django (AUTH_PASSWORD_VALIDATORS).
+    Lève rest_framework.serializers.ValidationError (liste de messages en français).
+    Refuse aussi un mot de passe absent ou vide."""
+    from django.contrib.auth import password_validation
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    from rest_framework import serializers
+
+    if not isinstance(password, str) or not password.strip():
+        raise serializers.ValidationError(["Le mot de passe est requis."])
+    try:
+        password_validation.validate_password(password, user)
+    except DjangoValidationError as exc:
+        raise serializers.ValidationError(list(exc.messages))

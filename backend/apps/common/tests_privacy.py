@@ -19,7 +19,7 @@ from apps.identity.models import BusinessProfile, KycDocument, User
 from apps.marketplace.models import ContactEvent, ExchangeProposal, Favorite, Offer
 from apps.messaging.models import Conversation, Message
 from apps.moderation.models import Report, Sanction
-from apps.reviews.models import Review
+from apps.reviews.models import Review, ReviewSettings
 
 # Seul l'espace personnel d'un utilisateur renvoie ses propres coordonnées. `phone_verified`
 # est interdit partout ailleurs : il révèle qu'un numéro existe sur le compte.
@@ -205,7 +205,8 @@ class NoPersonalContactLeakTests(APITestCase):
     # --- réponses d'écriture -----------------------------------------------------------
 
     def test_write_responses_do_not_leak_either(self):
-        # Le contact de « third » (premier cas) ouvre son droit d'avis (deuxième cas).
+        # Le contact de « third » (premier cas) ouvre son droit d'avis (deuxième cas), sans délai ici.
+        ReviewSettings.objects.filter(pk=ReviewSettings.get_solo().pk).update(delay_after_contact_hours=0)
         cases = [
             ('third', 'contact-list', {'post': str(self.offer.id), 'message': 'Bonjour, toujours disponible ?'}),
             ('third', 'review-list', {

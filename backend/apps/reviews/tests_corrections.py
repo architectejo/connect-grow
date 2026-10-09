@@ -69,7 +69,8 @@ class SettingsBoundsTests(ReviewsTestBase):
             weight_views=1000, weight_favorites=1000, weight_contacts=1000, weight_shares=1000,
             recency_half_life_hours=8760, proximity_same_commune=5, proximity_same_city=5, proximity_default=5,
         ))
-        marketplace_services.create_contact_event(offer=self.offer, sender=self.buyer, message='Bonjour')
+        contact = marketplace_services.create_contact_event(offer=self.offer, sender=self.buyer, message='Bonjour')
+        type(contact).objects.filter(pk=contact.pk).update(created_at=timezone.now() - timedelta(hours=200))
         self.assertEqual(marketplace_services.refresh_all_scores(), 1)
         self.client.force_authenticate(self.buyer)
         response = self.client.post(REVIEWS_URL, {'post': str(self.offer.id), **GOOD})
@@ -202,10 +203,12 @@ class AuthorPrivacyTests(ReviewsTestBase):
         trashed.is_deleted = True
         trashed.save()
         bodies = set()
-        for offer_id in (self.offer.id, hidden.id, trashed.id, '00000000-0000-0000-0000-000000000009'):
+        for offer_id in (hidden.id, trashed.id, '00000000-0000-0000-0000-000000000009'):
             response = self.client.post(REVIEWS_URL, {'post': str(offer_id), **GOOD})
             bodies.add((response.status_code, response.data['code'], response.data['detail']))
-        self.assertEqual(len(bodies), 1)
+        self.assertEqual(bodies, {(404, 'offer_not_found', 'Annonce introuvable.')})
+        public = self.client.post(REVIEWS_URL, {'post': str(self.offer.id), **GOOD})  # offre publique : visible de tous
+        self.assertEqual((public.status_code, public.data['code']), (403, 'not_eligible'))
 
 
 class AdminCorrectionsTests(ReviewsTestBase):

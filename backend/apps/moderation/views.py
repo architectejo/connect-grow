@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import permissions as drf_permissions
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -66,15 +67,20 @@ class ReportViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def perform_create(self, serializer):
-        serializer.save(reporter=self.request.user)
+        with transaction.atomic():
+            report = serializer.save(reporter=self.request.user)
+            services.record_report_filed(report)
 
     def _decide(self, request, transition, audit_action, notes=None):
         report = self.get_object()
-        try:
-            transition(report)
-        except ReportClosedError as error:
-            return Response({"error": str(error)}, status=status.HTTP_409_CONFLICT)
-        AuditLog.record(request.user, audit_action, target=report, details=notes or '')
+        with transaction.atomic():
+            try:
+                transition(report)
+            except ReportClosedError as error:
+                return Response({"error": str(error)}, status=status.HTTP_409_CONFLICT)
+            AuditLog.record(request.user, audit_action, target=report, details=notes or '')
+            if report.status == Report.STATUS_TRAITE:
+                services.apply_resolution(report, request.user)
         return Response(ReportSerializer(report, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=['post'])

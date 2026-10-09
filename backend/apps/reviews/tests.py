@@ -28,6 +28,8 @@ GOOD = {'offer_rating': 4, 'seller_rating': 5, 'content': 'Très bon vendeur, je
 
 class ReviewsTestBase(APITestCase):
     def setUp(self):
+        # Les tests de création ne portent pas sur le délai contact -> avis (tests_eligibility.py).
+        ReviewSettings.objects.filter(pk=ReviewSettings.get_solo().pk).update(delay_after_contact_hours=0)
         city = City.objects.create(name='Kinshasa')
         self.commune = Commune.objects.create(city=city, name='Gombe')
         self.category = Category.objects.create(name='Électronique', slug='electronique')
@@ -130,8 +132,8 @@ class ReviewCreationTests(ReviewsTestBase):
     def test_unknown_offer_gives_the_uniform_refusal(self):
         self.client.force_authenticate(self.buyer)
         response = self.post_review(post_id=uuid.uuid4())
-        self.assertEqual((response.status_code, response.data['code']), (403, 'not_eligible'))
-        self.assertEqual(response.data['detail'], 'Vous pourrez donner votre avis après avoir contacté le vendeur.')
+        self.assertEqual((response.status_code, response.data['code']), (404, 'offer_not_found'))
+        self.assertEqual(response.data['detail'], 'Annonce introuvable.')
 
     def test_second_review_for_the_same_offer_is_409(self):
         self.make_contact()
@@ -146,13 +148,13 @@ class ReviewCreationTests(ReviewsTestBase):
         with self.assertRaises(IntegrityError), transaction.atomic():
             self.make_review()
 
-    def test_offer_in_the_trash_or_hidden_by_moderation_gives_the_uniform_refusal(self):
+    def test_offer_in_the_trash_or_hidden_by_moderation_is_unavailable_for_who_contacted_it(self):
         self.make_contact()
         self.client.force_authenticate(self.buyer)
         for changes in ({'is_deleted': True}, {'is_hidden_by_moderation': True, 'is_active': False}):
             Offer.objects.filter(pk=self.offer.pk).update(**changes)
             response = self.post_review()
-            self.assertEqual((response.status_code, response.data['code']), (403, 'not_eligible'), changes)
+            self.assertEqual((response.status_code, response.data['code']), (409, 'offer_unavailable'), changes)
             Offer.objects.filter(pk=self.offer.pk).update(
                 is_deleted=False, is_hidden_by_moderation=False, is_active=True,
             )
@@ -166,12 +168,12 @@ class ReviewCreationTests(ReviewsTestBase):
             Offer.objects.filter(pk=self.offer.pk).update(is_active=False, **state)
             self.assertEqual(self.post_review().status_code, status.HTTP_201_CREATED, state)
 
-    def test_review_of_a_purged_offer_gives_the_uniform_refusal(self):
+    def test_review_of_a_purged_offer_is_a_404(self):
         self.make_contact()
         offer_id = self.offer.id
         self.offer.delete()
         self.client.force_authenticate(self.buyer)
-        self.assertEqual(self.post_review(post_id=offer_id).data['code'], 'not_eligible')
+        self.assertEqual(self.post_review(post_id=offer_id).data['code'], 'offer_not_found')
 
     def test_invalid_bodies_are_rejected_with_field_errors(self):
         self.make_contact()
@@ -393,6 +395,7 @@ class ReviewVisibilityTests(ReviewsTestBase):
 
 class ReviewSettingsTests(ReviewsTestBase):
     def test_defaults_match_the_adr(self):
+        ReviewSettings.objects.all().delete()  # revient aux valeurs par défaut (la base de test les met à 0 h)
         row = ReviewSettings.get_solo()
         self.assertEqual(
             (row.min_reviews_to_display, row.daily_review_limit, row.edit_window_hours,

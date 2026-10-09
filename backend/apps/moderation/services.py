@@ -20,11 +20,14 @@ TARGET_RESOLVERS = {
 
 
 class ReportRefused(Exception):
-    """Signalement refusé (message en français) ; `duplicate` distingue le doublon (409)."""
+    """Signalement refusé (message en français) ; `duplicate` distingue le doublon (409). `code`
+    renseigné : refus codé (`{detail, code}`) au statut `status_code` plutôt qu'une erreur de champ."""
 
-    def __init__(self, message, duplicate=False):
+    def __init__(self, message, duplicate=False, code=None, status_code=400):
         super().__init__(message)
         self.duplicate = duplicate
+        self.code = code
+        self.status_code = status_code
 
 
 def resolve_target_author(target_type, target_id):
@@ -33,15 +36,37 @@ def resolve_target_author(target_type, target_id):
     return import_module(module).get_report_authors([target_id]).get(target_id) if module else None
 
 
-def ensure_can_report(reporter, target_type, target_id):
+def ensure_can_report(reporter, target_type, target_id, reason=None):
     """Règles d'un nouveau signalement : pas de signalement de sa propre cible, un seul signalement
-    ouvert par (auteur, cible). Garantie en couche service, sans contrainte conditionnelle."""
+    ouvert par (auteur, cible). Garantie en couche service, sans contrainte conditionnelle.
+    Le motif « contact fictif » est réservé au vendeur concerné par l'avis signalé (ADR 0004)."""
+    if reason == Report.REASON_CONTACT_FICTIF:
+        _ensure_can_report_fictitious_contact(reporter, target_type, target_id)
     if resolve_target_author(target_type, target_id) == reporter.pk:
         raise ReportRefused("Vous ne pouvez pas signaler votre propre contenu ou votre propre compte.")
     if Report.objects.filter(
         reporter=reporter, target_type=target_type, target_id=target_id, status__in=Report.OPEN_STATUSES,
     ).exists():
         raise ReportRefused("Vous avez déjà signalé cet élément ; le signalement est en cours de traitement.", True)
+
+
+def _ensure_can_report_fictitious_contact(reporter, target_type, target_id):
+    if target_type != 'review':
+        raise ReportRefused(
+            "Le motif « contact fictif » ne s'applique qu'à un avis.", code='invalid_reason', status_code=400,
+        )
+    if not import_module(TARGET_RESOLVERS['review']).is_review_seller(target_id, reporter):
+        raise ReportRefused(
+            "Seul le vendeur concerné peut signaler un contact fictif sur cet avis.",
+            code='not_seller', status_code=403,
+        )
+    if Report.objects.filter(
+        target_type=target_type, target_id=target_id, reason=Report.REASON_CONTACT_FICTIF,
+        status__in=Report.OPEN_STATUSES,
+    ).exists():
+        raise ReportRefused(
+            "Un signalement de contact fictif est déjà en cours de traitement pour cet avis.", True,
+        )
 
 
 # Types de cible produits par les signalements automatiques (avis croisés, CDC 3.7) ; chacun
@@ -60,6 +85,30 @@ def record_settings_change(actor, obj, old_values: dict, new_values: dict):
     nouvelle valeur de chaque champ modifié."""
     changes = '; '.join(f"{name} : {old_values.get(name)!r} -> {new_values[name]!r}" for name in new_values)
     return AuditLog.record(actor, 'SETTINGS_CHANGED', target=obj, details=f"{obj._meta.model_name} : {changes}")
+
+
+REASON_CONTACT_FICTIF = Report.REASON_CONTACT_FICTIF
+
+
+def has_resolved_report(target_type, target_id, reason) -> bool:
+    """Vrai si un signalement de ce motif sur cette cible a été validé (traité) par la modération."""
+    return Report.objects.filter(
+        target_type=target_type, target_id=target_id, reason=reason, status=Report.STATUS_TRAITE,
+    ).exists()
+
+
+def record_report_filed(report) -> None:
+    """Journalise le dépôt d'un signalement « contact fictif » (règle 12). Il n'est pas visible
+    publiquement ; il entre dans la file de modération (statut « en attente »)."""
+    if report.reason == Report.REASON_CONTACT_FICTIF:
+        AuditLog.record(report.reporter, 'CONTACT_FICTIF_REPORTED', target=report, details=report.description[:200])
+
+
+def apply_resolution(report, actor) -> None:
+    """Conséquence d'un signalement validé : un « contact fictif » retenu masque l'avis concerné
+    (le module des avis recalcule ses moyennes). Les autres motifs n'ont pas d'effet automatique."""
+    if report.reason == Report.REASON_CONTACT_FICTIF and report.target_type == 'review':
+        import_module(TARGET_RESOLVERS['review']).reject_fictitious_contact(report.target_id, actor)
 
 
 # Motif des signalements automatiques d'avis croisés (CDC 3.7), exposé sans importer le modèle.

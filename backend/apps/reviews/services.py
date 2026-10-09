@@ -8,7 +8,7 @@ d'un autre domaine.
 Aucune note agrégée n'est stockée : les moyennes sont calculées à la lecture (règle 4).
 """
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Iterable, Optional
 
@@ -171,31 +171,116 @@ def check_crossed_reviews(review: Review) -> None:
 
 # --- Création d'un avis ----------------------------------------------------------------
 
-def ensure_can_review(user, offer_id):
-    """Contrôle les conditions d'un nouvel avis et renvoie `(offre, preuve de contact)`.
+# Refus d'avis : motif d'éligibilité -> (code d'erreur de POST, statut HTTP, message). Le motif est
+# celui de `GET /reviews/eligibility/` ; le code est celui de `POST /reviews/` (ADR 0004, 7.2).
+REFUSALS = {
+    'own_offer': ('own_offer', HTTP_FORBIDDEN, "Vous ne pouvez pas noter votre propre annonce."),
+    'no_contact': ('not_eligible', HTTP_FORBIDDEN, NOT_ELIGIBLE_MESSAGE),
+    'recently_deleted': (
+        'review_recently_deleted', HTTP_CONFLICT,
+        "Vous avez supprimé votre avis pour cette annonce : vous pourrez en écrire un autre plus tard.",
+    ),
+    'contact_rejected': (
+        'contact_rejected', HTTP_FORBIDDEN,
+        "Votre contact avec ce vendeur n'a pas été retenu par la modération : vous ne pouvez pas donner votre avis pour cette annonce.",
+    ),
+    'already_reviewed': (
+        'already_reviewed', HTTP_CONFLICT, "Vous avez déjà donné votre avis pour cette annonce.",
+    ),
+    'offer_unavailable': ('offer_unavailable', HTTP_CONFLICT, "Cette annonce n'est plus disponible."),
+    'too_early': ('review_too_early', HTTP_FORBIDDEN, "Vous pourrez donner votre avis dans {delay}."),
+}
 
-    Ordre d'évaluation (ADR 0004, 7.2) : offre introuvable, propre offre, aucun contact, avis déjà
-    donné, offre indisponible. Point d'extension (L0-10 a) : le délai entre contact et avis se
-    contrôle ici, juste après « aucun contact », avec `ReviewSettings.delay_after_contact_hours`."""
+
+@dataclass(frozen=True)
+class Eligibility:
+    """Droit d'un utilisateur de noter une offre. `reason` est None si `can_review` ; `available_at`
+    n'est renseigné que pour `too_early` ; `review_id` pour `already_reviewed`."""
+
+    can_review: bool
+    reason: Optional[str] = None
+    available_at: Optional[datetime] = None
+    review_id: Optional[object] = None
+
+
+def _format_delay(delta: timedelta) -> str:
+    """Durée restante en français, arrondie à la minute supérieure : « 2 heures et 5 minutes »."""
+    minutes = max(1, -(-int(delta.total_seconds()) // 60))
+    days, rest = divmod(minutes, 1440)
+    hours, minutes = divmod(rest, 60)
+    parts = [
+        f"{value} {label}{'s' if value > 1 else ''}"
+        for value, label in ((days, 'jour'), (hours, 'heure'), (minutes, 'minute')) if value
+    ]
+    return ' et '.join(parts[:2])
+
+
+def assess_eligibility(user, offer_id):
+    """Évalue le droit de `user` de noter l'offre ; renvoie `(Eligibility, offre, preuve de contact)`.
+
+    Ordre (ADR 0004, 7.2) : offre inconnue (404), propre offre, aucun contact (404 si l'offre n'est pas
+    publique), contact écarté par la modération, avis déjà donné, avis supprimé récemment, offre
+    indisponible, délai après contact. Une offre non
+    publique (corbeille, masquée, hors ligne) n'est connue que de son vendeur et de ceux qui l'ont
+    contactée : pour les autres, elle est introuvable (404 uniforme, aucune fuite d'existence)."""
     offer = marketplace_services.get_offer(offer_id)
-    # Réponse uniforme (pas d'énumération) : offre inconnue, purgée, en corbeille ou masquée par la
-    # modération donnent le même refus que l'absence de contact.
-    if offer is None or offer.is_deleted or offer.is_hidden_by_moderation:
-        raise ReviewError(NOT_ELIGIBLE_MESSAGE, 'not_eligible')
+    if offer is None:
+        raise ReviewError("Annonce introuvable.", 'offer_not_found', HTTP_NOT_FOUND)
     if identity_services.acts_for_context(user.pk, offer.seller_context_type, offer.seller_context_id):
-        raise ReviewError("Vous ne pouvez pas noter votre propre annonce.", 'own_offer')
+        return Eligibility(False, 'own_offer'), offer, None
     contact = marketplace_services.get_review_contact(offer.id, user.pk)
     if contact is None:
-        raise ReviewError(NOT_ELIGIBLE_MESSAGE, 'not_eligible')
-    if Review.objects.filter(user=user, offer_id=offer.id).exists():
-        raise ReviewError("Vous avez déjà donné votre avis pour cette annonce.", 'already_reviewed', HTTP_CONFLICT)
+        if not offer.is_available:
+            raise ReviewError("Annonce introuvable.", 'offer_not_found', HTTP_NOT_FOUND)
+        return Eligibility(False, 'no_contact'), offer, None
+    existing_id = Review.objects.filter(user=user, offer_id=offer.id).values_list('id', flat=True).first()
+    if existing_id is not None and moderation_services.has_resolved_report(
+        'review', existing_id, moderation_services.REASON_CONTACT_FICTIF,
+    ):
+        return Eligibility(False, 'contact_rejected', review_id=existing_id), offer, contact
+    if existing_id is not None:
+        return Eligibility(False, 'already_reviewed', review_id=existing_id), offer, contact
     mark = DeletedReviewMark.objects.filter(user=user, offer_id=offer.id).first()
     if mark is not None and timezone.now() < mark.deleted_at + timedelta(hours=get_settings().edit_window_hours):
-        raise ReviewError(
-            "Vous avez supprimé votre avis pour cette annonce : vous pourrez en écrire un autre plus tard.",
-            'review_recently_deleted', HTTP_CONFLICT,
-        )
+        return Eligibility(False, 'recently_deleted'), offer, contact
+    if offer.is_deleted or offer.is_hidden_by_moderation:
+        return Eligibility(False, 'offer_unavailable'), offer, contact
+    available_at = contact.recorded_at + timedelta(hours=get_settings().delay_after_contact_hours)
+    if timezone.now() < available_at:
+        return Eligibility(False, 'too_early', available_at=available_at), offer, contact
+    return Eligibility(True), offer, contact
+
+
+def get_eligibility(user, offer_id) -> Eligibility:
+    """Éligibilité exposée par `GET /reviews/eligibility/` (lève `ReviewError` 404 si introuvable)."""
+    return assess_eligibility(user, offer_id)[0]
+
+
+def ensure_can_review(user, offer_id):
+    """Contrôle les conditions d'un nouvel avis et renvoie `(offre, preuve de contact)` ; lève
+    `ReviewError` avec le code de `POST /reviews/` sinon (même évaluation que l'éligibilité)."""
+    eligibility, offer, contact = assess_eligibility(user, offer_id)
+    if not eligibility.can_review:
+        code, status_code, message = REFUSALS[eligibility.reason]
+        if eligibility.reason == 'too_early':
+            message = message.format(delay=_format_delay(eligibility.available_at - timezone.now()))
+        raise ReviewError(message, code, status_code)
     return offer, contact
+
+
+def reject_fictitious_contact(review_id, actor) -> None:
+    """Décision de la modération sur un signalement « contact fictif » validé : l'avis est masqué
+    (ses notes sortent des moyennes) et son auteur ne peut ni le supprimer ni en écrire un autre pour
+    cette offre. Sans effet si l'avis n'existe plus."""
+    review = Review.objects.filter(pk=review_id).first()
+    if review is not None:
+        set_review_hidden(review, True, actor)
+
+
+def is_review_seller(review_id, user) -> bool:
+    """Vrai si `user` agit pour le vendeur noté par l'avis (contexte vendeur de l'avis)."""
+    row = Review.objects.filter(pk=review_id).values_list('seller_context_type', 'seller_context_id').first()
+    return row is not None and identity_services.acts_for_context(user.pk, row[0], row[1])
 
 
 def reserve_daily_slot(user) -> None:

@@ -80,10 +80,10 @@ def concrete_url(template, callback):
 
 def allowed_methods(callback):
     actions = getattr(callback, 'actions', None)
-    if actions:  # ViewSet : méthode HTTP -> action
-        return {method: action for method, action in actions.items()}
+    if actions:  # ViewSet : méthode HTTP -> action (HEAD est ajouté par DRF à la première requête : ignoré)
+        return {method: action for method, action in actions.items() if method != 'head'}
     view_class = callback.cls
-    return {m: None for m in view_class.http_method_names if m != 'options' and hasattr(view_class, m)}
+    return {m: None for m in view_class.http_method_names if m not in ('options', 'head') and hasattr(view_class, m)}
 
 
 def declares_allow_any(callback, action):

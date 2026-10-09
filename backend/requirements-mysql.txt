@@ -1,0 +1,5 @@
+# Réservé à la tâche F-01 (bascule MySQL en fin de projet, ADR 0001).
+# Non installé par défaut. Usage : pip install -r requirements.txt -r requirements-mysql.txt
+# Nécessite les paquets système build-essential, default-libmysqlclient-dev et pkg-config.
+# En repli si la compilation échoue sur un poste dev : PyMySQL==1.1.1
+mysqlclient==2.2.4

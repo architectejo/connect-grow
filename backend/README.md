@@ -76,8 +76,8 @@ Un domaine par app dans `apps/` ; clés UUID (`common.models.BaseModel`) ; aucun
 | `identity` | utilisateur, OTP, fiche entreprise (transitoire), pièces KYC, sessions |
 | `catalog` | villes, communes, catégories, produits interdits (référentiels configurables) |
 | `marketplace` | offres, photos, favoris, contacts, propositions d'échange |
-| `visibility` | compteurs journaliers, vues uniques, réglages du classement |
-| `reviews` | avis ; `Deal` et Trust Score transitoires (retrait : L0-07) |
+| `visibility` | compteurs journaliers, vues uniques, réglages du classement (`RankingSettings`) |
+| `reviews` | avis après contact (deux notes, preuve de contact), réglages `ReviewSettings` ; ni Trust Score ni `Deal` (retirés par L0-07) |
 | `messaging` | conversations et messages |
 | `notifications` | notifications |
 | `moderation` | signalements, sanctions, journal d'audit (`record_audit`) ; cibles par `target_type` + `target_id` |
@@ -94,14 +94,15 @@ Un domaine ne modifie pas un autre domaine : il écrit son changement **et** un 
 
 | Type d'événement | Émetteur | Abonnés | Contenu de la charge utile |
 |---|---|---|---|
-| `marketplace.contact_recorded` | marketplace | `messaging.open_contact_conversation`, `notifications.notify_contact` | identifiants (contact, offre, vendeur, expéditeur) et titre public de l'offre ; ni message ni nom |
+| `marketplace.contact_recorded` | marketplace | `messaging.open_contact_conversation`, `notifications.notify_contact` | identifiants (contact, offre, vendeur, expéditeur), `channel` (`MESSAGE`, `CALL`, `WHATSAPP`) et titre public de l'offre ; ni message ni nom |
 | `marketplace.exchange_proposed` | marketplace | `messaging.open_exchange_conversation`, `notifications.notify_exchange` | idem (`proposal_id`) |
 | `marketplace.offer_expiring_soon` | marketplace | `notifications.notify_offer_expiration` | offre, titre, vendeur, échéance |
 | `visibility.offer_viewed` | visibility | `marketplace.sync_offer_views` | offre, date |
 | `visibility.offer_shared` | visibility | `marketplace.sync_offer_shares` | offre, date |
-| `reviews.review_posted` | reviews | `notifications.notify_review_posted` | identifiants et titre public de l'offre ; nom de l'auteur et extrait relus à la diffusion |
+| `visibility.ranking_settings_changed` | visibility (admin) | `marketplace.refresh_scores_after_ranking_change` | liste des champs modifiés ; recalcul idempotent des scores |
+| `reviews.review_posted` (v2) | reviews | `notifications.notify_review_posted` | `recipient_id` (utilisateur à notifier), auteur, contexte vendeur, identifiants et titre public de l'offre ; nom de l'auteur et extrait relus à la diffusion |
 | `reviews.review_replied` | reviews | `notifications.notify_review_reply` | identifiants et titre public de l'offre ; nom du répondant relu à la diffusion |
-| `reviews.crossed_reviews_detected` | reviews | `moderation.file_crossed_reviews_report` | avis, deux comptes, nombre d'affaires, fenêtre |
+| `reviews.crossed_reviews_detected` (v2) | reviews | `moderation.file_crossed_reviews_report` | avis, deux comptes, `reviews_count` (couples auteur-offre), fenêtre en jours |
 
 Ajouter un événement : déclarer le type dans `platform_core/catalog.py`, publier avec `publish_event('<domaine>.<fait>', ...)` (type littéral), écrire l'abonné idempotent dans `events.py` du domaine récepteur (il n'appelle que des `services.py`). Un contrôle Django (`platform_core.E001`/`E002`) et des tests de frontières vérifient le catalogue, les émetteurs et les abonnés. Le `name` d'un abonné est stocké en base : ne jamais le renommer sans migration.
 
@@ -110,6 +111,14 @@ Exploitation : `python manage.py dispatch_outbox --stats` (décomptes ; code de 
 **Vérification manuelle de la concurrence** (hors `manage.py test`, la base de test en mémoire n'accepte pas les accès parallèles) : `SECRET_KEY=... NUM_PROXIES=1 python scripts/check_outbox_concurrency.py --events 60 --workers 3`. Elle sème une base SQLite temporaire, lance plusieurs `dispatch_outbox` en parallèle et vérifie l'absence de doublon, de perte et de « database is locked ». À refaire après toute modification de `platform_core/services.py` et avant le passage à MySQL.
 
 Les totaux `views_count` et `shares_count` d'une offre sont recalculés à la source : **les compteurs journaliers de `visibility` sont la seule source** (pas de `max()` avec la valeur stockée ; une valeur divergente est écrasée au prochain événement) : la valeur `shares_count` renvoyée par l'endpoint de partage est « au mieux » (à jour dans le cas normal, sinon le total précédent).
+
+## Avis, notes et réglages (L0-07, ADR 0004)
+
+- **Pas de score de confiance** (règle 4). Les moyennes ne sont jamais stockées : `reviews.services.get_offer_ratings` et `get_seller_ratings` les calculent à la lecture (somme et nombre en base, arrondi à une décimale, demi supérieur) ; une moyenne est `null` sous `ReviewSettings.min_reviews_to_display`, le nombre d'avis reste exact ; un avis masqué sort de toutes les notes. Les offres portent `offer_rating` et `seller_rating` (`{average, count}`), jamais fusionnés.
+- **Un avis = un visiteur, une offre** (unicité `(auteur, offre)` en base) ; il note l'offre et son vendeur, après une prise de contact (`marketplace.get_review_contact`, tous canaux). La note vendeur qui compte est la dernière non masquée de chaque auteur pour un même vendeur : drapeau `counts_for_seller` recalculé par `reviews.services.reconcile_seller_flag` (couche service, pas de contrainte conditionnelle).
+- **Réglages en base** (règle 11, modifiés dans l'admin, journalisés dans l'`AuditLog` avec ancienne et nouvelle valeur) : `reviews.ReviewSettings` (seuil d'affichage, limite quotidienne, fenêtre de modification, délai après contact, avis croisés), `marketplace.MarketplaceSettings.duplicate_contact_window_hours`, `visibility.RankingSettings` (poids vues 1, favoris 3, contacts 5, partages 8, demi-vie 72 h, proximité 1,2 / 1,1 / 1,0 ; validation dans `clean()`). Le score stocké sur l'offre est E x R ; la proximité D et le tri associé arrivent avec T2.
+- **Format d'erreur** (`common.exception_handler`) : toute erreur hors champ vaut `{"detail": "<message français>", "code": "<code_machine>"}` ; les erreurs de champs gardent le format DRF.
+- **Contextes** : `common/contexts.py` (constantes `USER` / `ORGANIZATION`), `identity.services.acts_for_context` et `public_display_name` sont les coutures que L0-09 étendra aux organisations.
 
 ## Tâches planifiées (cron)
 
@@ -137,4 +146,4 @@ Anciens noms (reset R3) : `purge_trash`, `expire_posts`, `cleanup_otp_codes`, `r
 - L'API `/api/moderation/` exige les droits Django portés par les groupes (`moderation.view_report`, `change_report`, `view_sanction`, `add_sanction`) : un compte `is_staff` sans groupe n'a aucun accès. Suspension, bannissement et leur levée : administrateur seulement. Un signalement est ouvert à tout utilisateur connecté (10 par heure) mais sa réponse reste minimale pour lui.
 - **Consigne** : ne jamais écrire de donnée personnelle (e-mail, téléphone, adresse, pièce d'identité) dans les notes de décision, les motifs de sanction (`reason`), les descriptions de signalement ni les `details` du journal d'audit. Ces textes sont libres, conservés et lus par le personnel.
 - Le groupe Modérateur a `identity.user view` : l'admin Django lui montre l'e-mail et le téléphone des comptes. Finalité : instruction des vérifications KYC et des signalements. **À valider avec LEG-PRV** (et durée de conservation du journal et des signalements, question ouverte).
-- Le Modérateur a `reviews.review change` uniquement pour masquer ou réafficher un avis : `ReviewAdmin` rend tous les autres champs en lecture seule pour lui (seul un super-administrateur réécrit un avis).
+- Le Modérateur a `reviews.review change` uniquement pour masquer ou réafficher un avis : `ReviewAdmin` rend tous les autres champs en lecture seule pour lui (seul un super-administrateur réécrit un avis, hors preuve de contact et drapeau calculé, toujours en lecture seule). Les réglages des avis (`reviews.reviewsettings`) relèvent de l'Administrateur.

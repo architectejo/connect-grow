@@ -9,7 +9,7 @@ const journeys = {
     steps: [
       { icon: MapPin, title: "Cherchez dans votre commune", description: "Filtrez par catégorie, prix, état et commune." },
       { icon: Star, title: "Vérifiez le vendeur", description: "Consultez la note de l'offre, la note du vendeur et le nombre d'avis." },
-      { icon: MessageSquare, title: "Contactez-le", description: "Par message, en un geste." },
+      { icon: MessageSquare, title: "Contactez-le", description: "Par message, ou par appel et WhatsApp si le vendeur l'accepte. Son numéro n'est jamais public." },
       { icon: Handshake, title: "Contactez puis notez", description: "Après votre contact, votre avis aide toute la communauté à choisir." },
     ],
   },

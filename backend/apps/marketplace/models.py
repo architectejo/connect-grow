@@ -9,7 +9,7 @@ dans `services.py`.
 from datetime import timedelta
 
 from django.conf import settings
-from django.core.validators import MaxLengthValidator, MinLengthValidator, MinValueValidator
+from django.core.validators import MaxLengthValidator, MaxValueValidator, MinLengthValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -28,8 +28,8 @@ class MarketplaceSettings(SingletonSettingsModel):
     # Fenêtre pendant laquelle un second contact du même expéditeur sur la même offre est refusé
     # (et, côté classement, ne compte pas deux fois dans l'engagement). Minimum 1 heure.
     duplicate_contact_window_hours = models.PositiveIntegerField(
-        default=24, validators=[MinValueValidator(1)],
-        help_text="Heures pendant lesquelles un même expéditeur ne peut contacter deux fois la même annonce.",
+        default=24, validators=[MinValueValidator(1), MaxValueValidator(8760)],
+        help_text="Heures (8760 au plus) pendant lesquelles un même expéditeur ne peut contacter deux fois la même annonce.",
     )
 
     class Meta:

@@ -5,10 +5,15 @@ UUID (`offer_id`) ; seul le vendeur est une clé étrangère vers l'utilisateur 
 """
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from apps.common.models import BaseModel, SingletonSettingsModel
+
+
+MAX_WEIGHT = 1000.0
+MAX_HALF_LIFE_HOURS = 8760.0
+MAX_PROXIMITY = 5.0
 
 
 class RankingSettings(SingletonSettingsModel):
@@ -20,18 +25,21 @@ class RankingSettings(SingletonSettingsModel):
     - D, proximité : coefficients par commune / ville / défaut, appliqués à la lecture ;
     - P : filtre strict de la recherche (pas de réglage)."""
 
-    weight_views = models.FloatField(default=1.0, validators=[MinValueValidator(0)])
-    weight_favorites = models.FloatField(default=3.0, validators=[MinValueValidator(0)])
-    weight_contacts = models.FloatField(default=5.0, validators=[MinValueValidator(0)])
-    weight_shares = models.FloatField(default=8.0, validators=[MinValueValidator(0)])
+    weight_views = models.FloatField(default=1.0, validators=[MinValueValidator(0), MaxValueValidator(MAX_WEIGHT)])
+    weight_favorites = models.FloatField(default=3.0, validators=[MinValueValidator(0), MaxValueValidator(MAX_WEIGHT)])
+    weight_contacts = models.FloatField(default=5.0, validators=[MinValueValidator(0), MaxValueValidator(MAX_WEIGHT)])
+    weight_shares = models.FloatField(default=8.0, validators=[MinValueValidator(0), MaxValueValidator(MAX_WEIGHT)])
 
     # Demi-vie de la récence, en heures (> 0).
-    recency_half_life_hours = models.FloatField(default=72.0)
+    recency_half_life_hours = models.FloatField(default=72.0, validators=[MaxValueValidator(MAX_HALF_LIFE_HOURS)])
 
     # Proximité D : même commune >= même ville >= défaut, chacun >= 1.
-    proximity_same_commune = models.FloatField(default=1.2)
-    proximity_same_city = models.FloatField(default=1.1)
-    proximity_default = models.FloatField(default=1.0)
+    proximity_same_commune = models.FloatField(
+        default=1.2, validators=[MinValueValidator(1), MaxValueValidator(MAX_PROXIMITY)])
+    proximity_same_city = models.FloatField(
+        default=1.1, validators=[MinValueValidator(1), MaxValueValidator(MAX_PROXIMITY)])
+    proximity_default = models.FloatField(
+        default=1.0, validators=[MinValueValidator(1), MaxValueValidator(MAX_PROXIMITY)])
 
     class Meta:
         verbose_name = "Paramètres de classement"
@@ -41,14 +49,14 @@ class RankingSettings(SingletonSettingsModel):
         errors = {}
         for name in ('weight_views', 'weight_favorites', 'weight_contacts', 'weight_shares'):
             value = getattr(self, name)
-            if value is None or value < 0:
-                errors[name] = "Le poids doit être supérieur ou égal à 0."
-        if self.recency_half_life_hours is None or self.recency_half_life_hours <= 0:
-            errors['recency_half_life_hours'] = "La demi-vie doit être strictement positive."
+            if value is None or not 0 <= value <= MAX_WEIGHT:
+                errors[name] = f"Le poids doit être compris entre 0 et {MAX_WEIGHT:g}."
+        if self.recency_half_life_hours is None or not 0 < self.recency_half_life_hours <= MAX_HALF_LIFE_HOURS:
+            errors['recency_half_life_hours'] = f"La demi-vie doit être comprise entre 0 (exclu) et {MAX_HALF_LIFE_HOURS:g} heures."
         for name in ('proximity_same_commune', 'proximity_same_city', 'proximity_default'):
             value = getattr(self, name)
-            if value is None or value < 1:
-                errors[name] = "Le coefficient de proximité doit être supérieur ou égal à 1."
+            if value is None or not 1 <= value <= MAX_PROXIMITY:
+                errors[name] = f"Le coefficient de proximité doit être compris entre 1 et {MAX_PROXIMITY:g}."
         if not errors and not (
             self.proximity_same_commune >= self.proximity_same_city >= self.proximity_default
         ):

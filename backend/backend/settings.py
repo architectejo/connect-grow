@@ -6,6 +6,8 @@ Version sécurisée pour la production et le développement.
 from pathlib import Path
 import os
 from datetime import timedelta
+
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # Charger les variables d'environnement depuis le fichier .env
@@ -14,11 +16,20 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # --- SÉCURITÉ CRITIQUE ---
-# Ne jamais stocker la clé secrète directement dans le code
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-fallback-key-change-me')
-
 # DEBUG doit être à False en production pour ne pas exposer la structure de la DB en cas d'erreur
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
+
+# Ne jamais stocker la clé secrète dans le code. Valeur de repli réservée au développement
+# (DEBUG=True) : hors DEBUG, une clé absente ou factice interrompt le démarrage.
+_DEV_SECRET_KEY = 'django-insecure-dev-only-key'
+SECRET_KEY = os.getenv('SECRET_KEY', '')
+if not SECRET_KEY or SECRET_KEY == 'change-me':
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "SECRET_KEY est absente ou factice : définissez une clé secrète unique dans l'environnement "
+            "(.env), ou activez DEBUG=True en développement uniquement."
+        )
+    SECRET_KEY = _DEV_SECRET_KEY
 
 # Restreindre les hôtes autorisés pour éviter les attaques par empoisonnement d'hôte HTTP
 # ALLOWED_HOSTS='localhost,127.0.0.1,api.connecteplus.cd' dans .env pour la recette/prod
@@ -88,8 +99,9 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    # Refus par défaut : toute vue publique déclare explicitement AllowAny.
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
+        'rest_framework.permissions.IsAuthenticated',
     ],
     # Protection contre le brute-force : limitation du nombre de requêtes
     'DEFAULT_THROTTLE_CLASSES': [
@@ -178,6 +190,14 @@ else:
             'OPTIONS': {'timeout': 20},
         }
     }
+
+# Derrière Nginx (TLS terminé par le proxy) : faire confiance à X-Forwarded-Proto pour que
+# Django sache que la requête est en HTTPS (sinon SECURE_SSL_REDIRECT boucle). À n'activer
+# (BEHIND_PROXY=True) que si le proxy écrase cet en-tête et que Daphne n'est pas joignable
+# directement : sinon un client pourrait le falsifier. Nginx doit envoyer
+# `proxy_set_header X-Forwarded-Proto $scheme;`.
+if os.getenv('BEHIND_PROXY', 'False') == 'True':
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Paramètres de sécurité avancés (pour HTTPS en production)
 if not DEBUG:

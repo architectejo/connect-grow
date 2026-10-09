@@ -1,6 +1,8 @@
 from django.urls import path
+from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .serializers import IdentifierTokenObtainPairSerializer
+from .throttles import LoginIdentifierThrottle, LoginIpThrottle, LoginPhoneThrottle
 from .views import (
     BusinessListView,
     ChangePasswordView,
@@ -19,8 +21,14 @@ from .views import (
 
 
 class LoginView(TokenObtainPairView):
-    # Connexion par e-mail ou par téléphone (CDC 3.1).
+    # Connexion par e-mail ou par téléphone (CDC 3.1), limitée par IP et par identifiant.
     serializer_class = IdentifierTokenObtainPairSerializer
+    permission_classes = [AllowAny]
+    throttle_classes = [LoginIpThrottle, LoginIdentifierThrottle, LoginPhoneThrottle]
+
+
+class RefreshView(TokenRefreshView):
+    permission_classes = [AllowAny]
 
 
 urlpatterns = [
@@ -31,7 +39,7 @@ urlpatterns = [
     path('login/', LoginView.as_view(), name='token_obtain_pair'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path('logout-all/', LogoutAllView.as_view(), name='logout_all'),
-    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('token/refresh/', RefreshView.as_view(), name='token_refresh'),
 
     # OTP et mot de passe
     path('otp/request/', OtpRequestView.as_view(), name='otp_request'),

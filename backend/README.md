@@ -48,6 +48,12 @@ proxy_set_header X-Forwarded-Proto $scheme;
 
 `$remote_addr` (et non `$proxy_add_x_forwarded_for`) écrase tout en-tête envoyé par le client : l'IP lue par les limites de débit n'est alors pas falsifiable. Un contrôle Django (`common.E001`, exécuté par `check`, `migrate`, `runserver`...) échoue si `DEBUG=False` et `NUM_PROXIES=0`.
 
+### Déconnexion, CORS et filtres (L0-19)
+
+- `POST /api/accounts/logout/` est public (sans jeton d'accès) : le refresh du corps est mis sur liste noire. Réponse 200 identique pour un jeton forgé, expiré ou déjà révoqué ; 400 si `refresh` est absent ; limite `logout` de 60/h par IP. `logout-all/` reste authentifié.
+- `Retry-After` est exposé aux appels inter-origines (`CORS_EXPOSE_HEADERS`) pour que le front lise les 429.
+- `GET /api/marketplace/posts/<uuid>/` renvoie au vendeur authentifié toutes ses offres (pause, vendue, expirée, masquée par la modération, corbeille) ; le public et les tiers ne voient que les offres actives. Les vues du vendeur sur sa propre offre ne sont pas comptées. Une offre masquée porte `is_hidden_by_moderation: true`.
+- `GET /api/accounts/businesses/?is_verified=true|false` filtre les entreprises ; toute autre valeur donne un 400 (`{"is_verified": [...]}`).
 
 ## Envois de fichiers et tâches planifiées
 

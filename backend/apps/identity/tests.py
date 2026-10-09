@@ -379,6 +379,45 @@ class PublicBusinessListTests(APITestCase):
         self.assertEqual(self.client.get(reverse('business_list'), {'search': 'Privée'}).data['count'], 0)
 
 
+class BusinessVerifiedFilterTests(APITestCase):
+    def make_business(self, n):
+        user = User.objects.create_user(
+            email=f'biz{n}@example.com', phone=f'+24381000000{n}', password='x',
+            full_name=f'Personne {n}', user_type='ENTREPRISE',
+        )
+        BusinessProfile.objects.create(user=user, business_name=f'Boutique {n}', bio='Vente')
+        return user
+
+    def setUp(self):
+        self.verified = self.make_business(1)
+        self.plain = self.make_business(2)
+        BusinessProfile.objects.filter(user=self.verified).update(is_verified=True)
+
+    def names(self, value):
+        response = self.client.get(reverse('business_list'), {'is_verified': value})
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        return [i['business_name'] for i in response.data['results']]
+
+    def test_filter_true_and_false(self):
+        self.assertEqual(self.names('true'), ['Boutique 1'])
+        self.assertEqual(self.names('FALSE'), ['Boutique 2'])
+        self.assertEqual(len(self.client.get(reverse('business_list')).data['results']), 2)
+
+    def test_invalid_value_is_rejected(self):
+        for value in ('1', 'yes', 'oui', ''):
+            response = self.client.get(reverse('business_list'), {'is_verified': value})
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, value)
+            self.assertIn('is_verified', response.data)
+
+    def test_keys_and_pagination_unchanged(self):
+        response = self.client.get(reverse('business_list'), {'is_verified': 'true', 'page_size': 1})
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(
+            set(response.data['results'][0]),
+            {'id', 'business_name', 'logo', 'bio', 'categories', 'ville_name', 'commune_name', 'is_verified'},
+        )
+
+
 class ProfileUpdateSecurityTests(APITestCase):
     def test_patch_me_cannot_set_password(self):
         user = User.objects.create_user(email='a@example.com', password='ancien-mot-de-passe-1', full_name='A')
@@ -420,16 +459,41 @@ class SessionRevocationTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(self.refresh_status(tokens['refresh']), status.HTTP_401_UNAUTHORIZED)
 
-    def test_logout_requires_auth_and_valid_own_token(self):
+    def test_logout_works_without_access_token(self):
         tokens = self.login()
-        self.assertEqual(self.client.post(reverse('logout'), {'refresh': tokens['refresh']}).status_code, 401)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+        response = self.client.post(reverse('logout'), {'refresh': tokens['refresh']})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self.refresh_status(tokens['refresh']), status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_works_with_expired_access_token(self):
+        from rest_framework_simplejwt.tokens import AccessToken
+        tokens = self.login()
+        expired = AccessToken(tokens['access'])
+        expired.set_exp(from_time=timezone.now() - timedelta(hours=1), lifetime=timedelta(minutes=1))
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {expired}')
+        response = self.client.post(reverse('logout'), {'refresh': tokens['refresh']})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self.refresh_status(tokens['refresh']), status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_is_uniform_for_bad_tokens_and_400_when_missing(self):
+        tokens = self.login()
         self.assertEqual(self.client.post(reverse('logout'), {}).status_code, 400)
-        self.assertEqual(self.client.post(reverse('logout'), {'refresh': 'abc'}).status_code, 400)
-        other = User.objects.create_user(email='o@example.com', password='x', full_name='O')
-        other_refresh = str(RefreshToken.for_user(other))
-        self.assertEqual(self.client.post(reverse('logout'), {'refresh': other_refresh}).status_code, 400)
-        self.assertEqual(self.refresh_status(other_refresh), status.HTTP_200_OK)
+        self.assertEqual(self.client.post(reverse('logout'), {'refresh': ''}).status_code, 400)
+        self.assertEqual(self.client.post(reverse('logout'), {'refresh': ['x']}, format='json').status_code, 400)
+        forged = self.client.post(reverse('logout'), {'refresh': 'abc'})
+        self.assertEqual((forged.status_code, forged.data), (200, {'message': "Déconnecté."}))
+        self.client.post(reverse('logout'), {'refresh': tokens['refresh']})
+        again = self.client.post(reverse('logout'), {'refresh': tokens['refresh']})  # déjà révoqué
+        self.assertEqual((again.status_code, again.data), (200, {'message': "Déconnecté."}))
+
+    @override_settings(CACHES={'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'logout-throttle'}})
+    def test_logout_is_throttled_per_ip(self):
+        cache.clear()
+        codes = [self.client.post(reverse('logout'), {'refresh': 'abc'}).status_code for _ in range(61)]
+        self.assertEqual(set(codes[:60]), {200})
+        self.assertEqual(codes[60], status.HTTP_429_TOO_MANY_REQUESTS)
+        cache.clear()
 
     def test_logout_all_revokes_every_session(self):
         first, second = self.login(), self.login()
@@ -700,3 +764,10 @@ class PhoneValidatorTests(TestCase):
     def test_otp_request_rejects_a_phone_with_trailing_newline(self):
         response = self.client.post(reverse('otp_request'), {'phone': '+243811111111\n', 'purpose': 'LOGIN'})
         self.assertEqual(response.status_code, 400)
+
+
+class CorsExposeHeadersTests(TestCase):
+    def test_retry_after_is_exposed_without_widening_origins(self):
+        from django.conf import settings
+        self.assertEqual(settings.CORS_EXPOSE_HEADERS, ['Retry-After'])
+        self.assertNotIn('*', settings.CORS_ALLOWED_ORIGINS)

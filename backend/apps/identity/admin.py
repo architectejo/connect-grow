@@ -12,7 +12,7 @@ from django.contrib import admin
 
 from apps.moderation.services import record_audit
 
-from .models import BusinessProfile, BusinessProfileCategory, KycDocument, OtpCode, User
+from .models import BusinessProfile, BusinessProfileCategory, ContactConsent, KycDocument, OtpCode, User
 
 
 @admin.register(User)
@@ -104,4 +104,26 @@ class OtpCodeAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ContactConsent)
+class ContactConsentAdmin(admin.ModelAdmin):
+    """Consultation seule (ADR 0005, C12) : jamais le numéro, seulement les 4 derniers chiffres de preuve.
+    `ContactPoint` n'est volontairement pas enregistré dans l'admin (LEG-PRV-12)."""
+
+    list_display = ('user', 'channel', 'is_granted', 'text_version', 'granted_at', 'revoked_at', 'revoked_reason')
+    list_filter = ('channel', 'is_granted', 'revoked_reason')
+    readonly_fields = (
+        'user', 'channel', 'is_granted', 'text_version', 'granted_at', 'revoked_at', 'phone_last4',
+        'revoked_reason', 'created_at', 'updated_at',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
         return False

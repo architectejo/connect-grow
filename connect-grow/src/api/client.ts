@@ -8,7 +8,6 @@ const isPublicAuthEndpoint = (url?: string) => !!url && PUBLIC_AUTH_ENDPOINTS.so
 
 const apiClient = axios.create({
   baseURL: API_URL,
-  withCredentials: true,
   headers: {
     "Content-Type": "application/json",
   },

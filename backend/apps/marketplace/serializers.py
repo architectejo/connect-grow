@@ -22,11 +22,11 @@ def _media_url(request, path):
 
 
 class SellerSerializer(serializers.Serializer):
-    """Fiche publique du vendeur, construite à partir d'identity.services.SellerSummary."""
+    """Fiche publique du vendeur, construite à partir d'identity.services.SellerSummary.
+    Jamais de téléphone ni d'e-mail (règle 10, L0-10a-a)."""
 
     id = serializers.UUIDField()
     full_name = serializers.CharField()
-    phone = serializers.CharField(allow_null=True)  # à retirer par L0-10a
     user_type = serializers.CharField()
     date_joined = serializers.DateTimeField()
     reviews_count = serializers.IntegerField()
@@ -161,6 +161,15 @@ class OfferSerializer(serializers.ModelSerializer):
             self.preload([obj], self.context)
             cache = self.context[self.CONTEXT_KEY]
         return cache
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Le masquage par la modération n'est connu que du vendeur (L0-19).
+        request = self.context.get('request')
+        is_owner = request is not None and request.user.is_authenticated and request.user.id == instance.seller_id
+        if not is_owner:
+            data.pop('is_hidden_by_moderation', None)
+        return data
 
     def get_seller(self, obj):
         summary = self._cache(obj)['sellers'].get(obj.seller_id)

@@ -847,12 +847,14 @@ class ContractTests(MarketplaceTestBase):
             'title', 'description', 'price', 'currency', 'condition', 'stock', 'is_price_negotiable',
             'is_exchangeable', 'main_image', 'images', 'views_count', 'likes_count', 'comments_count',
             'shares_count', 'created_at', 'status', 'expires_at', 'visibility_score', 'visibility_rank',
-            'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored', 'is_hidden_by_moderation',
+            'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored',
         })
         self.assertEqual(set(data['seller']), {
-            'id', 'full_name', 'photo', 'phone', 'user_type', 'business_profile', 'date_joined',
+            'id', 'full_name', 'photo', 'user_type', 'business_profile', 'date_joined',
             'trust_score', 'reviews_count', 'is_new_seller', 'is_trusted_seller',
         })
+        self.assertNotIn('phone', data['seller'])
+        self.assertNotIn('email', data['seller'])
         self.assertEqual(data['id'], str(offer.id))
         self.assertEqual(data['seller']['id'], str(self.seller.id))
         self.assertIsNone(data['seller']['business_profile'])
@@ -954,3 +956,39 @@ class OwnerRetrieveInactiveOfferTests(MarketplaceTestBase):
                 self.assertEqual(self.client.get(reverse('offer-detail', args=[o.id])).status_code, 200)
             counts.append(len(ctx))
         self.assertEqual(counts[0], counts[1])
+
+
+class OfferPrivacyTests(MarketplaceTestBase):
+    """L0-10a-a / L0-19 : pas de téléphone du vendeur, masquage connu du seul vendeur, cache privé."""
+
+    def test_seller_phone_and_email_never_in_offer_responses(self):
+        self.seller.phone = '+243970000009'
+        self.seller.save()
+        offer = self.make_offer()
+        for user in (None, self.buyer, self.seller):
+            self.client.force_authenticate(user)
+            for url in (reverse('offer-detail', args=[offer.id]), reverse('offer-list')):
+                body = self.client.get(url).content.decode()
+                self.assertNotIn('+243970000009', body)
+                self.assertNotIn('seller@example.com', body)
+                self.assertNotIn('"phone"', body)
+
+    def test_hidden_flag_is_exposed_to_the_seller_only(self):
+        offer = self.make_offer(is_hidden_by_moderation=True)
+        url = reverse('offer-detail', args=[offer.id])
+        self.client.force_authenticate(self.seller)
+        self.assertTrue(self.client.get(url).data['is_hidden_by_moderation'])
+        visible = self.make_offer(title='Une autre annonce visible')
+        for user in (None, self.buyer):
+            self.client.force_authenticate(user)
+            self.assertNotIn('is_hidden_by_moderation', self.client.get(reverse('offer-detail', args=[visible.id])).data)
+
+    def test_detail_is_private_cache_when_authenticated(self):
+        offer = self.make_offer()
+        url = reverse('offer-detail', args=[offer.id])
+        self.client.force_authenticate(self.buyer)
+        response = self.client.get(url)
+        self.assertIn('private', response['Cache-Control'])
+        self.assertIn('Authorization', response['Vary'])
+        self.client.force_authenticate(None)
+        self.assertIn('Authorization', self.client.get(url)['Vary'])

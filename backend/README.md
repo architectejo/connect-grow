@@ -53,6 +53,9 @@ proxy_set_header X-Forwarded-Proto $scheme;
 - `POST /api/accounts/logout/` est public (sans jeton d'accès) : le refresh du corps est mis sur liste noire. Réponse 200 identique pour un jeton forgé, expiré ou déjà révoqué ; 400 si `refresh` est absent ; limite `logout` de 60/h par IP. `logout-all/` reste authentifié.
 - `Retry-After` est exposé aux appels inter-origines (`CORS_EXPOSE_HEADERS`) pour que le front lise les 429.
 - `GET /api/marketplace/posts/<uuid>/` renvoie au vendeur authentifié toutes ses offres (pause, vendue, expirée, masquée par la modération, corbeille) ; le public et les tiers ne voient que les offres actives. Les vues du vendeur sur sa propre offre ne sont pas comptées. Une offre masquée porte `is_hidden_by_moderation: true`.
+- Limite `logout` par IP : derrière un NAT partagé (opérateur mobile, bureau), plusieurs utilisateurs comptent pour une seule IP et peuvent recevoir un 429. Sans conséquence : le front vide sa session locale de toute façon, seule la mise sur liste noire du refresh est différée (il expire seul au bout de 7 jours).
+- `GET /api/marketplace/posts/<uuid>/` renvoie `Cache-Control: private` à un utilisateur authentifié et `Vary: Authorization` dans tous les cas (réponse propre à l'utilisateur : favori, masquage). `is_hidden_by_moderation` n'est présent que dans la réponse au vendeur de l'offre.
+- Vie privée (L0-10a-a) : aucune réponse d'API n'expose le téléphone ni l'e-mail d'un autre utilisateur (`seller.phone` a disparu de l'offre). Le numéro ne sortira que par l'action de contact (L0-10a-c). `apps/common/tests_privacy.py` parcourt toutes les routes GET (anonyme, tiers, contrepartie, vendeur, modérateur) et échoue à la moindre clé ou valeur `phone`/`email` hors `/api/accounts/me/`.
 - `GET /api/accounts/businesses/?is_verified=true|false` filtre les entreprises ; toute autre valeur donne un 400 (`{"is_verified": [...]}`).
 
 ## Envois de fichiers et tâches planifiées

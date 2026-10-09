@@ -130,13 +130,12 @@ class SellerBusiness:
 
 @dataclass(frozen=True)
 class SellerSummary:
-    """Fiche publique d'un vendeur affichée sur ses offres. Le téléphone y figure
-    encore (contact par appel / WhatsApp) : à retirer par L0-10a (règle 10)."""
+    """Fiche publique d'un vendeur affichée sur ses offres. Ni téléphone ni e-mail
+    (règle 10) : le numéro ne sort que par l'action de contact (L0-10a-c)."""
 
     id: uuid.UUID
     full_name: str
     photo: Optional[str]
-    phone: Optional[str]
     user_type: str
     business: Optional[SellerBusiness]
     date_joined: object
@@ -164,7 +163,7 @@ def get_seller_summaries(ids: Iterable) -> dict:
             )
         summaries[user.id] = SellerSummary(
             id=user.id, full_name=user.full_name, photo=user.photo.url if user.photo else None,
-            phone=user.phone, user_type=user.user_type, business=business, date_joined=user.date_joined,
+            user_type=user.user_type, business=business, date_joined=user.date_joined,
             trust_score=user.trust_score, reviews_count=user.reviews_count,
         )
     return summaries

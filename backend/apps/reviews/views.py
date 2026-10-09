@@ -1,10 +1,13 @@
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from apps.common.pagination import OptionalPagination
+from apps.common.throttles import ActionScopedThrottleMixin
+from apps.moderation.services import record_audit
 from apps.common.utils import parse_uuid
 
 from . import services
@@ -14,7 +17,8 @@ from .serializers import DealSerializer, ReviewSerializer
 REPLY_MAX_LENGTH = 500
 
 
-class ReviewViewSet(viewsets.ModelViewSet):
+class ReviewViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
+    throttle_scopes = {'create': 'review'}
     serializer_class = ReviewSerializer
     pagination_class = OptionalPagination
 
@@ -41,18 +45,34 @@ class ReviewViewSet(viewsets.ModelViewSet):
         return queryset.order_by('-created_at')
 
     def perform_create(self, serializer):
-        review = serializer.save(user=self.request.user)
+        try:
+            with transaction.atomic():
+                services.reserve_daily_slot(self.request.user)
+                review = serializer.save(user=self.request.user)
+        except services.ReviewError as exc:
+            raise ValidationError(exc.message)
+        except IntegrityError:
+            raise ValidationError("Vous avez déjà laissé un avis pour cette affaire.")
         services.notify_review_created(review, self.request.user)
 
     def perform_destroy(self, instance):
         if instance.user_id != self.request.user.id:
             raise PermissionDenied("Vous ne pouvez pas supprimer l'avis d'un autre utilisateur.")
+        self._ensure_modifiable(instance)
         instance.delete()
 
     def perform_update(self, serializer):
         if serializer.instance.user_id != self.request.user.id:
             raise PermissionDenied("Vous ne pouvez pas modifier l'avis d'un autre utilisateur.")
+        self._ensure_modifiable(serializer.instance)
         serializer.save()
+
+    @staticmethod
+    def _ensure_modifiable(review):
+        try:
+            services.ensure_author_can_modify(review)
+        except services.ReviewError as exc:
+            raise PermissionDenied(exc.message)
 
     @action(detail=True, methods=['post'])
     def reply(self, request, pk=None):
@@ -73,17 +93,21 @@ class ReviewViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        services.reply_to_review(review, request.user, reply_content)
+        try:
+            services.reply_to_review(review, request.user, reply_content)
+        except services.ReviewError as exc:
+            return Response({"error": exc.message}, status=status.HTTP_409_CONFLICT)
         return Response(self.get_serializer(review).data)
 
 
-class DealViewSet(viewsets.ModelViewSet):
+class DealViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     """CDC 3.7 : déclaration et confirmation d'une affaire conclue."""
 
     serializer_class = DealSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = OptionalPagination
     http_method_names = ['get', 'post', 'head', 'options']
+    throttle_scopes = {'create': 'deal'}
 
     def get_queryset(self):
         user = self.request.user
@@ -92,7 +116,7 @@ class DealViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(initiator=self.request.user)
 
-    def _answer(self, request, verb, apply):
+    def _answer(self, request, verb, apply, audit_action):
         deal = self.get_object()
         if deal.counterparty_id != request.user.id:
             return Response(
@@ -102,12 +126,13 @@ class DealViewSet(viewsets.ModelViewSet):
         if deal.status != Deal.STATUS_PENDING:
             return Response({"error": "Cette affaire n'est plus en attente."}, status=status.HTTP_400_BAD_REQUEST)
         apply(deal)
+        record_audit(request.user, audit_action, target=deal, details=f"Offre {deal.offer_id}")
         return Response(self.get_serializer(deal).data)
 
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):
-        return self._answer(request, 'confirmer', Deal.confirm)
+        return self._answer(request, 'confirmer', Deal.confirm, 'DEAL_CONFIRMED')
 
     @action(detail=True, methods=['post'])
     def decline(self, request, pk=None):
-        return self._answer(request, 'refuser', Deal.decline)
+        return self._answer(request, 'refuser', Deal.decline, 'DEAL_DECLINED')

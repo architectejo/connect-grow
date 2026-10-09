@@ -115,8 +115,11 @@ class DealSerializer(OfferLookupMixin, serializers.ModelSerializer):
         return offer.title if offer else None
 
     def validate_post(self, value):
-        if not marketplace_services.offer_exists(value):
+        offer = marketplace_services.get_offer(value)
+        if offer is None:
             raise serializers.ValidationError("Annonce introuvable.")
+        if not offer.is_available:
+            raise serializers.ValidationError("Cette annonce n'est plus disponible.")
         return value
 
     def validate(self, attrs):

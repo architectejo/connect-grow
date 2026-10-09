@@ -6,6 +6,7 @@ modèle d'un autre domaine.
 """
 from datetime import timedelta
 
+from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.identity import services as identity_services
@@ -13,12 +14,13 @@ from apps.marketplace import services as marketplace_services
 from apps.moderation import services as moderation_services
 from apps.notifications import services as notification_services
 
-from .models import Deal, Review, TrustScoreSettings
+from .models import Deal, Review, ReviewDailyCount, TrustScoreSettings
 
 # CDC 3.7 (anti-abus) : 5 avis par jour et par utilisateur ; avis croisés : 3 affaires
 # distinctes entre les deux mêmes comptes en 30 jours. Valeurs du CDC, reprises telles
 # quelles au portage ; leur paramétrage relève de L0-10 (nouvelle règle d'avis).
 DAILY_REVIEW_LIMIT = 5
+LIMIT_MESSAGE = f"Vous avez atteint la limite de {DAILY_REVIEW_LIMIT} avis par jour."
 CROSSED_REVIEWS_THRESHOLD = 3
 CROSSED_REVIEWS_WINDOW_DAYS = 30
 
@@ -54,8 +56,6 @@ def check_crossed_reviews(review: Review) -> None:
     """CDC 3.7 (anti-abus) : détecte les avis croisés répétés entre les deux mêmes comptes et
     les envoie en modération plutôt que de les bloquer — un faux positif ne doit pas
     empêcher un vrai avis d'exister."""
-    from django.db.models import Q
-
     user_a, user_b = review.user_id, review.reviewed_user_id
     if not user_a or not user_b:
         return
@@ -91,10 +91,41 @@ def validate_new_review(user, deal):
         raise ReviewError("Vous ne faites pas partie de cette affaire.", 'deal')
     if Review.objects.filter(deal=deal, user=user).exists():
         raise ReviewError("Vous avez déjà laissé un avis pour cette affaire.")
-    today_count = Review.objects.filter(user=user, created_at__date=timezone.now().date()).count()
-    if today_count >= DAILY_REVIEW_LIMIT:
-        raise ReviewError(f"Vous avez atteint la limite de {DAILY_REVIEW_LIMIT} avis par jour.")
+    today_count = ReviewDailyCount.objects.filter(user=user, date=timezone.localdate()).values_list('count', flat=True).first()
+    if (today_count or 0) >= DAILY_REVIEW_LIMIT:
+        raise ReviewError(LIMIT_MESSAGE)
     return reviewed_user
+
+
+def reserve_daily_slot(user) -> None:
+    """Réserve atomiquement une place dans la limite quotidienne (à appeler dans la transaction
+    de création). Les avis supprimés ensuite restent comptés."""
+    today = timezone.localdate()
+    ReviewDailyCount.objects.get_or_create(user=user, date=today)
+    reserved = ReviewDailyCount.objects.filter(user=user, date=today, count__lt=DAILY_REVIEW_LIMIT).update(
+        count=F('count') + 1,
+    )
+    if not reserved:
+        raise ReviewError(LIMIT_MESSAGE)
+
+
+def ensure_author_can_modify(review: Review) -> None:
+    """Un avis masqué ou signalé échappe à son auteur : il ne peut ni le modifier ni le supprimer
+    (sinon il effacerait la preuve avant la décision de la modération)."""
+    if review.is_hidden:
+        raise ReviewError("Cet avis a été masqué par la modération : vous ne pouvez plus le modifier ni le supprimer.")
+    if moderation_services.has_open_report(review):
+        raise ReviewError("Cet avis fait l'objet d'un signalement en cours : vous ne pouvez plus le modifier ni le supprimer.")
+
+
+def set_review_hidden(review: Review, hidden: bool, actor) -> None:
+    """Masque ou réaffiche un avis (CDC 3.7) ; journalisé (règle 12). Le Trust Score est recalculé
+    par le signal d'enregistrement."""
+    if review.is_hidden == hidden:
+        return
+    review.is_hidden = hidden
+    review.save(update_fields=['is_hidden', 'updated_at'])
+    moderation_services.record_audit(actor, 'REVIEW_HIDDEN' if hidden else 'REVIEW_UNHIDDEN', target=review)
 
 
 def _offer_title(offer):
@@ -114,9 +145,13 @@ def notify_review_created(review: Review, author) -> None:
 
 def reply_to_review(review: Review, replier, content: str) -> Review:
     """Réponse publique de la personne évaluée ; l'auteur de l'avis en est prévenu."""
-    review.reply_content = content
-    review.reply_at = timezone.now()
-    review.save(update_fields=['reply_content', 'reply_at', 'updated_at'])
+    # Mise à jour conditionnelle : la réponse ne s'écrit qu'une fois, même en cas de requêtes simultanées.
+    written = Review.objects.filter(pk=review.pk).filter(Q(reply_content__isnull=True) | Q(reply_content='')).update(
+        reply_content=content, reply_at=timezone.now(), updated_at=timezone.now(),
+    )
+    if not written:
+        raise ReviewError("Vous avez déjà répondu à cet avis.")
+    review.refresh_from_db()
     offer = marketplace_services.get_offer(review.offer_id) if review.offer_id else None
     notification_services.notify(
         user_id=review.user_id,

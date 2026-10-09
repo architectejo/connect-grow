@@ -116,3 +116,15 @@ class Review(BaseModel):
 
     def __str__(self):
         return f"Avis de {self.user_id} sur {self.offer_id or 'une annonce supprimée'}"
+
+
+class ReviewDailyCount(BaseModel):
+    """Avis écrits par un utilisateur un jour donné (CDC 3.7 : 5 par jour). Compteur dédié : la
+    suppression d'un avis ne libère pas de place, sinon écrire puis supprimer contournerait la limite."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='review_daily_counts')
+    date = models.DateField()
+    count = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'date'], name='uniq_review_daily_user_date')]

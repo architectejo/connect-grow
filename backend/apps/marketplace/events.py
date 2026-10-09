@@ -20,3 +20,9 @@ def sync_offer_views(event):
 @subscribe('visibility.offer_shared', name='marketplace.sync_offer_shares')
 def sync_offer_shares(event):
     _sync(event)
+
+
+@subscribe('visibility.ranking_settings_changed', name='marketplace.refresh_scores_after_ranking_change')
+def refresh_scores_after_ranking_change(event):
+    """Réglages du classement modifiés : recalcul idempotent des scores depuis les compteurs."""
+    services.refresh_all_scores()

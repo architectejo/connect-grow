@@ -1,5 +1,6 @@
 from django.contrib import admin
 
+from apps.common.admin_mixins import SingletonSettingsAdminMixin
 from apps.moderation.services import record_audit
 
 from . import services
@@ -42,11 +43,7 @@ class FavoriteAdmin(admin.ModelAdmin):
 
 
 @admin.register(MarketplaceSettings)
-class MarketplaceSettingsAdmin(admin.ModelAdmin):
-    list_display = ('expiration_days', 'trash_retention_days', 'expiring_soon_warning_days')
-
-    def has_add_permission(self, request):
-        return not MarketplaceSettings.objects.exists()
-
-    def has_delete_permission(self, request, obj=None):
-        return False
+class MarketplaceSettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
+    list_display = (
+        'expiration_days', 'trash_retention_days', 'expiring_soon_warning_days', 'duplicate_contact_window_hours',
+    )

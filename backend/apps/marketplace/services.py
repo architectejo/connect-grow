@@ -14,6 +14,7 @@ from django.db import transaction
 from django.db.models import Count, F
 from django.utils import timezone
 
+from apps.common.contexts import CONTEXT_USER
 from apps.common.utils import day_bounds, parse_uuid
 from apps.platform_core.services import publish_event
 from apps.visibility import services as visibility_services
@@ -29,8 +30,6 @@ class OfferHiddenError(MarketplaceError):
     """L'offre est masquée par la modération : le vendeur ne peut pas la remettre en ligne."""
 
 
-DUPLICATE_CONTACT_WINDOW = timedelta(hours=24)
-
 
 @dataclass(frozen=True)
 class OfferInfo:
@@ -40,6 +39,16 @@ class OfferInfo:
     main_image_url: Optional[str]
     is_active: bool
     is_deleted: bool
+    is_hidden_by_moderation: bool = False
+
+    @property
+    def seller_context_type(self) -> str:
+        # Couture L0-09 : le contexte vendeur deviendra l'organisation sans changer les appelants.
+        return CONTEXT_USER
+
+    @property
+    def seller_context_id(self) -> uuid.UUID:
+        return self.seller_id
 
     @property
     def is_available(self) -> bool:
@@ -52,6 +61,7 @@ def _info(offer: Offer) -> OfferInfo:
         id=offer.id, seller_id=offer.seller_id, title=offer.title,
         main_image_url=offer.main_image.url if offer.main_image else None,
         is_active=offer.is_active, is_deleted=offer.is_deleted,
+        is_hidden_by_moderation=offer.is_hidden_by_moderation,
     )
 
 
@@ -85,9 +95,23 @@ def count_active_offers(seller_id=None) -> int:
     return queryset.count()
 
 
-def get_contact_sender_ids(offer_id) -> set:
-    """Identifiants des utilisateurs ayant contacté l'offre (historique des contacts)."""
-    return set(ContactEvent.objects.filter(offer_id=offer_id).values_list('sender_id', flat=True))
+@dataclass(frozen=True)
+class ReviewContact:
+    """Preuve de contact qui ouvre le droit d'avis (CDC 3.4) : le plus ancien contact de l'auteur
+    sur l'offre, tous canaux confondus (message, appel, WhatsApp)."""
+
+    contact_event_id: uuid.UUID
+    channel: str
+    recorded_at: object
+
+
+def get_review_contact(offer_id, user_id) -> Optional[ReviewContact]:
+    """Plus ancien contact de `user_id` sur l'offre, ou None s'il n'a jamais contacté le vendeur."""
+    row = (
+        ContactEvent.objects.filter(offer_id=offer_id, sender_id=user_id)
+        .order_by('created_at', 'id').values_list('id', 'channel', 'created_at').first()
+    )
+    return None if row is None else ReviewContact(contact_event_id=row[0], channel=row[1], recorded_at=row[2])
 
 
 def hide_by_moderation(offer_id) -> None:
@@ -115,40 +139,31 @@ def count_contacts_by_offer(day: date) -> list:
 
 # --- Score de visibilité -----------------------------------------------------
 
-def refresh_visibility_score(offer: Offer, settings_row=None) -> None:
-    """Recalcule et enregistre le score de visibilité d'une offre (CDC 3.8)."""
-    offer.visibility_score = visibility_services.compute_score(
-        views=offer.views_count, likes=offer.likes_count, comments=offer.comments_count,
-        shares=offer.shares_count, created_at=offer.created_at,
-        trust_score=offer.seller.trust_score, settings_row=settings_row,
+def _score_of(offer: Offer, settings_row, now=None) -> float:
+    return visibility_services.compute_score(
+        views=offer.views_count, favorites=offer.likes_count, contacts=offer.contacts_count,
+        shares=offer.shares_count, created_at=offer.created_at, settings_row=settings_row, now=now,
     )
+
+
+def refresh_visibility_score(offer: Offer, settings_row=None) -> None:
+    """Recalcule et enregistre le score de visibilité d'une offre (E x R, CDC 3.5), depuis les
+    compteurs : jamais d'incrément, donc rejouable."""
+    offer.visibility_score = _score_of(offer, settings_row)
     offer.last_score_update = timezone.now()
     offer.save(update_fields=['visibility_score', 'last_score_update'])
 
 
-def _refresh_scores(queryset) -> int:
-    offers = list(queryset.select_related('seller'))
+def refresh_all_scores() -> int:
+    """Recalcule le score de toutes les offres actives (action d'administration, réglages modifiés)."""
+    offers = list(Offer.objects.filter(is_active=True, is_deleted=False))
     settings_row = visibility_services.get_ranking_settings()
     now = timezone.now()
     for offer in offers:
-        offer.visibility_score = visibility_services.compute_score(
-            views=offer.views_count, likes=offer.likes_count, comments=offer.comments_count,
-            shares=offer.shares_count, created_at=offer.created_at,
-            trust_score=offer.seller.trust_score, settings_row=settings_row, now=now,
-        )
+        offer.visibility_score = _score_of(offer, settings_row, now)
         offer.last_score_update = now
     Offer.objects.bulk_update(offers, ['visibility_score', 'last_score_update'], batch_size=200)
     return len(offers)
-
-
-def refresh_seller_offer_scores(seller_id) -> int:
-    """Recalcule le score de toutes les offres actives d'un vendeur (son Trust Score a changé)."""
-    return _refresh_scores(Offer.objects.filter(seller_id=seller_id, is_active=True, is_deleted=False))
-
-
-def refresh_all_scores() -> int:
-    """Recalcule le score de toutes les offres actives (action d'administration)."""
-    return _refresh_scores(Offer.objects.filter(is_active=True, is_deleted=False))
 
 
 # --- Cycle de vie (CDC 3.2, 3.9, 3.10) ----------------------------------------
@@ -211,7 +226,7 @@ def restore_from_trash(offer: Offer) -> None:
 
 def delete_offers(queryset) -> int:
     """Suppression définitive : l'offre, sa galerie, ses favoris et contacts (cascade interne),
-    puis les compteurs de visibilité. Les avis, affaires et conversations liés sont conservés
+    puis les compteurs de visibilité. Les avis et conversations liés sont conservés
     (CDC 3.10) : ils gardent l'UUID de l'offre, qui n'existe plus."""
     ids = list(queryset.values_list('id', flat=True))
     if not ids:
@@ -270,7 +285,7 @@ def sync_offer_engagement(offer_id) -> bool:
     """Recalcule `views_count` et `shares_count` d'une offre à partir des compteurs journaliers
     de `visibility` (source de vérité), puis son score. Idempotent : rejouable sans risque
     (abonné aux événements de vue et de partage). Renvoie False si l'offre n'existe plus."""
-    offer = Offer.objects.select_related('seller').filter(pk=offer_id).first()
+    offer = Offer.objects.filter(pk=offer_id).first()
     if offer is None:
         return False
     offer.views_count = visibility_services.total_views(offer_id)
@@ -338,7 +353,7 @@ def toggle_favorite(user, offer: Offer) -> bool:
 
 def ensure_available(offer: Offer) -> None:
     """Une offre masquée, en pause, vendue, expirée ou supprimée n'accepte ni contact, ni
-    échange, ni favori, ni affaire."""
+    échange, ni favori."""
     if not offer.is_active or offer.is_deleted:
         raise MarketplaceError("Cette annonce n'est plus disponible.")
 
@@ -375,21 +390,26 @@ def _interaction_payload(offer: Offer, sender, **ids) -> dict:
     }
 
 
-def create_contact_event(*, offer: Offer, sender, message: str) -> ContactEvent:
+def create_contact_event(*, offer: Offer, sender, message: str, channel: str = ContactEvent.CHANNEL_MESSAGE) -> ContactEvent:
     """Enregistre un contact et publie `marketplace.contact_recorded` dans la même transaction :
     la conversation et la notification du vendeur sont créées par leurs domaines à la diffusion
     de l'événement (outbox), avec reprise en cas d'échec."""
     _check_can_contact(offer, sender)
+    window_hours = MarketplaceSettings.get_solo().duplicate_contact_window_hours
     recent = ContactEvent.objects.filter(
-        offer=offer, sender=sender, created_at__gte=timezone.now() - DUPLICATE_CONTACT_WINDOW,
+        offer=offer, sender=sender, created_at__gte=timezone.now() - timedelta(hours=window_hours),
     )
     if recent.exists():
-        raise MarketplaceError("Vous avez déjà contacté le vendeur pour cette annonce ces dernières 24 heures.")
+        raise MarketplaceError(
+            f"Vous avez déjà contacté le vendeur pour cette annonce ces dernières {window_hours} heures."
+        )
     with transaction.atomic():
-        event = ContactEvent.objects.create(offer=offer, sender=sender, message=message)
+        # Extension (classement) : le marquage `is_counted` et le recalcul de `contacts_count`
+        # se font ici, dans la même transaction.
+        event = ContactEvent.objects.create(offer=offer, sender=sender, message=message, channel=channel)
         publish_event(
             'marketplace.contact_recorded', aggregate_type='offer', aggregate_id=offer.id,
-            payload=_interaction_payload(offer, sender, contact_event_id=event.pk),
+            payload={**_interaction_payload(offer, sender, contact_event_id=event.pk), 'channel': event.channel},
         )
     return event
 

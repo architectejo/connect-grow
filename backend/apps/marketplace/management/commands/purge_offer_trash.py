@@ -1,5 +1,5 @@
 """CDC 3.10 / 5.6 : purge automatique de la corbeille (offres supprimées depuis plus de N
-jours), tâche quotidienne. Les avis, affaires et conversations liés restent en base : ils ne
+jours), tâche quotidienne. Les avis et conversations liés restent en base : ils ne
 portent que l'UUID de l'offre."""
 from django.core.management.base import BaseCommand
 

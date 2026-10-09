@@ -87,7 +87,7 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
             # Filtré sur le vendeur : l'offre d'un autre répond 404, comme une offre inconnue.
             return Offer.objects.filter(seller=self.request.user).select_related('seller').prefetch_related('images')
 
-        # On trie par le score de visibilité "Trust & Engage" par défaut
+        # On trie par le score de visibilité organique (E x R, ADR 0004) par défaut
         ordering = self.request.query_params.get('ordering', '-visibility_score')
         if ordering not in self.ORDERINGS:
             ordering = '-visibility_score'

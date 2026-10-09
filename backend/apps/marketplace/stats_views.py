@@ -2,6 +2,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.reviews import services as reviews_services
 from apps.visibility import services as visibility_services
 
 from . import services
@@ -23,9 +24,10 @@ class DashboardStatsView(APIView):
         # commande refresh_daily_contacts).
         contact_rate = round(stats.contacts_count / active_offers, 2) if active_offers else 0.0
 
-        # CDC 3.7 : Trust Score bayésien, déjà mis en cache sur l'utilisateur par le module
-        # `reviews`, jamais recalculé ici. Le nom de champ avg_rating est conservé (déjà
-        # consommé par le front). Transitoire : retiré par L0-07.
+        # ADR 0004, 7.3 : moyenne des notes vendeur visibles (sans seuil d'affichage : le vendeur
+        # voit ses propres chiffres), calculée à la lecture par `reviews`. Le nom de champ
+        # avg_rating est conservé (déjà consommé par le front) ; il vaut null sans avis.
+        rating = reviews_services.get_seller_dashboard_rating(request.user.id)
         return Response({
             "history": _history(stats.history),
             "summary": {
@@ -34,8 +36,8 @@ class DashboardStatsView(APIView):
                 "active_posts": active_offers,
                 "contacts_count": stats.contacts_count,
                 "contact_rate": contact_rate,
-                "avg_rating": request.user.trust_score,
-                "review_count": request.user.reviews_count,
+                "avg_rating": rating.average,
+                "review_count": rating.review_count,
             },
         })
 

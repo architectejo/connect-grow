@@ -9,10 +9,11 @@ dans `services.py`.
 from datetime import timedelta
 
 from django.conf import settings
-from django.core.validators import MaxLengthValidator, MinLengthValidator
+from django.core.validators import MaxLengthValidator, MinLengthValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
+from apps.common.contexts import CONTEXT_USER
 from apps.common.images import sanitize_uploaded_field, validate_image_pixels, validate_image_upload_size
 from apps.common.models import BaseModel, SingletonSettingsModel
 
@@ -24,6 +25,12 @@ class MarketplaceSettings(SingletonSettingsModel):
     expiration_days = models.PositiveIntegerField(default=60)
     trash_retention_days = models.PositiveIntegerField(default=30)
     expiring_soon_warning_days = models.PositiveIntegerField(default=3)
+    # Fenêtre pendant laquelle un second contact du même expéditeur sur la même offre est refusé
+    # (et, côté classement, ne compte pas deux fois dans l'engagement). Minimum 1 heure.
+    duplicate_contact_window_hours = models.PositiveIntegerField(
+        default=24, validators=[MinValueValidator(1)],
+        help_text="Heures pendant lesquelles un même expéditeur ne peut contacter deux fois la même annonce.",
+    )
 
     class Meta:
         verbose_name = "Paramètres de la marketplace"
@@ -103,8 +110,10 @@ class Offer(BaseModel):
     # Compteurs d'engagement (CDC 3.8). Les vues uniques et leurs agrégats journaliers
     # sont dans le domaine `visibility` ; ces totaux servent au tri et à la formule.
     views_count = models.PositiveIntegerField(default=0)
+    # `likes_count` = nombre de favoris (renommage renvoyé à L0-11).
     likes_count = models.PositiveIntegerField(default=0)
-    comments_count = models.PositiveIntegerField(default=0)
+    # Nombre de contacts comptés (`ContactEvent.is_counted`), recalculé depuis la source (ADR 0004, 6.3).
+    contacts_count = models.PositiveIntegerField(default=0)
     shares_count = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
     # Masquage prononcé par la modération (sanction MASQUAGE_ANNONCE). État explicite, distinct
@@ -118,6 +127,8 @@ class Offer(BaseModel):
     # Évite de renotifier chaque jour la même échéance (CDC 3.6 : « Annonce bientôt expirée »).
     expiring_soon_notified = models.BooleanField(default=False)
 
+    # Score organique stocké = E x R (engagement x récence) ; la proximité D est appliquée à la
+    # lecture et P vaut 1 (filtre strict). Aucun terme de note ni de promotion (règles 4 et 5).
     visibility_score = models.FloatField(default=0.0)
     last_score_update = models.DateTimeField(null=True, blank=True)
 
@@ -126,6 +137,15 @@ class Offer(BaseModel):
             models.Index(fields=['is_active', 'is_deleted', '-visibility_score'], name='offer_public_ranking'),
             models.Index(fields=['seller', 'is_deleted'], name='offer_seller_deleted'),
         ]
+
+    @property
+    def seller_context_type(self):
+        # Couture L0-09 : le contexte vendeur deviendra l'organisation quand elle existera.
+        return CONTEXT_USER
+
+    @property
+    def seller_context_id(self):
+        return self.seller_id
 
     def save(self, *args, **kwargs):
         self.main_image = sanitize_uploaded_field(self.main_image)
@@ -176,13 +196,26 @@ class Favorite(BaseModel):
 
 
 class ContactEvent(BaseModel):
-    """Demande de contact d'un utilisateur à propos d'une offre (CDC §11.1 ; ex-ContactRequest).
-    Sert l'historique des contacts, la condition de déclaration d'une affaire conclue
-    (module `reviews`) et l'agrégat de contacts du tableau de bord."""
+    """Prise de contact d'un utilisateur à propos d'une offre (CDC §11.1 ; ex-ContactRequest).
+    Sert l'historique des contacts, la preuve qui ouvre le droit d'avis (CDC 3.4, lue par
+    `get_review_contact`) et l'agrégat de contacts du tableau de bord."""
+
+    CHANNEL_MESSAGE = 'MESSAGE'
+    CHANNEL_CALL = 'CALL'
+    CHANNEL_WHATSAPP = 'WHATSAPP'
+    CHANNEL_CHOICES = (
+        (CHANNEL_MESSAGE, "Message"),
+        (CHANNEL_CALL, "Appel"),
+        (CHANNEL_WHATSAPP, "WhatsApp"),
+    )
 
     offer = models.ForeignKey(Offer, on_delete=models.CASCADE, related_name='contact_events')
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sent_contacts')
     message = models.TextField(validators=[MaxLengthValidator(2000)])
+    channel = models.CharField(max_length=10, choices=CHANNEL_CHOICES, default=CHANNEL_MESSAGE)
+    # Ce contact entre dans l'engagement (une fois par expéditeur, offre et fenêtre, tous canaux
+    # confondus) ; la logique de marquage est portée par le classement (ADR 0004, 6.3).
+    is_counted = models.BooleanField(default=True)
 
     class Meta:
         indexes = [models.Index(fields=['offer', 'created_at'], name='contact_offer_created')]

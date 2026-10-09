@@ -402,49 +402,42 @@ class OfferTrashTests(MarketplaceTestBase):
 
 
 class VisibilityScoreFormulaTests(MarketplaceTestBase):
-    def test_formula_matches_cdc_spec(self):
+    def test_formula_is_engagement_times_recency(self):
+        """Score stocké = E x R (ADR 0004) : vues, favoris, contacts, partages ; aucune note."""
         import math
 
-        settings_row = RankingSettings.get_solo()
+        row = RankingSettings.get_solo()
         offer = self.make_offer()
-        offer.views_count, offer.likes_count, offer.comments_count, offer.shares_count = 10, 2, 1, 0
-        offer.save(update_fields=['views_count', 'likes_count', 'comments_count', 'shares_count'])
+        offer.views_count, offer.likes_count, offer.contacts_count, offer.shares_count = 10, 2, 1, 3
+        offer.save(update_fields=['views_count', 'likes_count', 'contacts_count', 'shares_count'])
 
-        offer = Offer.objects.select_related('seller').get(pk=offer.pk)
         services.refresh_visibility_score(offer)
         offer.refresh_from_db()
 
-        engagement_raw = (
-            settings_row.weight_views * 10 + settings_row.weight_likes * 2 + settings_row.weight_comments * 1
-        )
-        expected_e = 1 + math.log(1 + engagement_raw)
-        expected_t = 0.8 + 0.4 * (self.seller.trust_score / 5.0)
+        raw = row.weight_views * 10 + row.weight_favorites * 2 + row.weight_contacts * 1 + row.weight_shares * 3
+        expected_e = 1 + math.log(1 + raw)
         age_hours = (offer.last_score_update - offer.created_at).total_seconds() / 3600
-        expected_r = math.exp(-(math.log(2) / settings_row.recency_half_life_hours) * age_hours)
+        expected_r = 0.5 ** (age_hours / row.recency_half_life_hours)
+        self.assertAlmostEqual(offer.visibility_score, expected_e * expected_r, places=6)
 
-        self.assertAlmostEqual(offer.visibility_score, expected_e * expected_t * expected_r, places=6)
-
-    def test_trust_factor_is_bounded(self):
-        settings_row = RankingSettings.get_solo()
+    def test_score_without_interaction_is_pure_recency(self):
         offer = self.make_offer()
-        self.seller.trust_score = 0.0
-        self.seller.save(update_fields=['trust_score'])
-        offer = Offer.objects.select_related('seller').get(pk=offer.pk)
         services.refresh_visibility_score(offer)
         offer.refresh_from_db()
-        # engagement E = 1 (aucune vue/like), donc visibility_score == T borné.
-        self.assertAlmostEqual(offer.visibility_score, settings_row.trust_factor_min, places=2)
+        # E = 1 sans interaction : le score ne dépasse jamais R <= 1.
+        self.assertLessEqual(offer.visibility_score, 1.0)
+        self.assertGreater(offer.visibility_score, 0.99)
 
-    def test_refresh_seller_offer_scores_only_touches_active_offers_of_that_seller(self):
+    def test_refresh_all_scores_only_touches_active_offers(self):
         mine = self.make_offer()
         hidden = self.make_offer(title='Une annonce masquée ici', is_active=False)
         other = self.make_offer(title='Annonce d un autre vendeur', seller=self.buyer)
-        self.assertEqual(services.refresh_seller_offer_scores(self.seller.id), 1)
+        self.assertEqual(services.refresh_all_scores(), 2)
         for offer in (mine, hidden, other):
             offer.refresh_from_db()
         self.assertGreater(mine.visibility_score, 0)
+        self.assertGreater(other.visibility_score, 0)
         self.assertEqual(hidden.visibility_score, 0)
-        self.assertEqual(other.visibility_score, 0)
 
 
 class UniqueViewTests(MarketplaceTestBase):
@@ -845,21 +838,20 @@ class ContractTests(MarketplaceTestBase):
         self.assertEqual(set(data), {
             'id', 'seller', 'seller_name', 'category', 'category_name', 'commune', 'commune_name', 'post_type',
             'title', 'description', 'price', 'currency', 'condition', 'stock', 'is_price_negotiable',
-            'is_exchangeable', 'main_image', 'images', 'views_count', 'likes_count', 'comments_count',
+            'is_exchangeable', 'main_image', 'images', 'views_count', 'likes_count',
             'shares_count', 'created_at', 'status', 'expires_at', 'visibility_score', 'visibility_rank',
-            'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored',
+            'offer_rating', 'seller_rating', 'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored',
         })
         self.assertEqual(set(data['seller']), {
             'id', 'full_name', 'photo', 'user_type', 'business_profile', 'date_joined',
-            'trust_score', 'reviews_count', 'is_new_seller', 'is_trusted_seller',
         })
         self.assertNotIn('phone', data['seller'])
         self.assertNotIn('email', data['seller'])
         self.assertEqual(data['id'], str(offer.id))
         self.assertEqual(data['seller']['id'], str(self.seller.id))
         self.assertIsNone(data['seller']['business_profile'])
-        self.assertTrue(data['seller']['is_new_seller'])
-        self.assertIsNone(data['seller']['trust_score'])
+        self.assertEqual(data['offer_rating'], {'average': None, 'count': 0})
+        self.assertEqual(data['seller_rating'], {'average': None, 'count': 0})
 
     def test_seller_business_profile_is_embedded(self):
         from apps.identity.models import BusinessProfile

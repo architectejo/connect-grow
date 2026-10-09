@@ -2,6 +2,7 @@ from django.db.models import Count
 from rest_framework import serializers
 
 from apps.catalog import services as catalog_services
+from apps.common.contexts import CONTEXT_USER
 from apps.common.images import validate_image_pixels, validate_image_upload_size
 from apps.common.serializers import PreloadingListSerializer
 from apps.identity import services as identity_services
@@ -9,10 +10,6 @@ from apps.reviews import services as reviews_services
 from apps.visibility import services as visibility_services
 
 from .models import ContactEvent, ExchangeProposal, Favorite, Offer, OfferImage
-
-# Seuil du badge « Vendeur fiable » (CDC 3.8) : Trust Score >= 4,5 et au moins 10 avis.
-TRUSTED_SELLER_MIN_SCORE = 4.5
-TRUSTED_SELLER_MIN_REVIEWS = 10
 
 
 def _media_url(request, path):
@@ -29,18 +26,8 @@ class SellerSerializer(serializers.Serializer):
     full_name = serializers.CharField()
     user_type = serializers.CharField()
     date_joined = serializers.DateTimeField()
-    reviews_count = serializers.IntegerField()
     photo = serializers.SerializerMethodField()
     business_profile = serializers.SerializerMethodField()
-    trust_score = serializers.SerializerMethodField()
-    is_new_seller = serializers.SerializerMethodField()
-    is_trusted_seller = serializers.SerializerMethodField()
-
-    def _min_reviews(self):
-        # Une lecture par sérialisation de liste : le contexte est partagé.
-        if 'min_reviews_to_display' not in self.context:
-            self.context['min_reviews_to_display'] = reviews_services.get_min_reviews_to_display()
-        return self.context['min_reviews_to_display']
 
     def get_photo(self, obj):
         return _media_url(self.context.get('request'), obj.photo)
@@ -54,16 +41,6 @@ class SellerSerializer(serializers.Serializer):
             'logo': _media_url(self.context.get('request'), obj.business.logo),
             'is_verified': obj.business.is_verified,
         }
-
-    def get_is_new_seller(self, obj):
-        # CDC 3.7 : le score n'est affiché publiquement qu'à partir de 3 avis.
-        return obj.reviews_count < self._min_reviews()
-
-    def get_trust_score(self, obj):
-        return None if self.get_is_new_seller(obj) else obj.trust_score
-
-    def get_is_trusted_seller(self, obj):
-        return obj.trust_score >= TRUSTED_SELLER_MIN_SCORE and obj.reviews_count >= TRUSTED_SELLER_MIN_REVIEWS
 
 
 class OfferImageSerializer(serializers.ModelSerializer):
@@ -93,6 +70,8 @@ class OfferSerializer(serializers.ModelSerializer):
     )
     images = OfferImageSerializer(many=True, read_only=True)
     visibility_rank = serializers.SerializerMethodField()
+    offer_rating = serializers.SerializerMethodField()
+    seller_rating = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
     favorites_count = serializers.SerializerMethodField()
     is_trending = serializers.SerializerMethodField()
@@ -106,13 +85,13 @@ class OfferSerializer(serializers.ModelSerializer):
             'commune', 'commune_name', 'post_type', 'title', 'description',
             'price', 'currency', 'condition', 'stock', 'is_price_negotiable',
             'is_exchangeable', 'main_image', 'images', 'views_count',
-            'likes_count', 'comments_count', 'shares_count', 'created_at',
+            'likes_count', 'shares_count', 'created_at',
             'status', 'expires_at', 'visibility_score', 'visibility_rank',
-            'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored',
+            'offer_rating', 'seller_rating', 'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored',
             'is_hidden_by_moderation',
         ]
         read_only_fields = [
-            'is_hidden_by_moderation', 'seller', 'views_count', 'likes_count', 'comments_count', 'shares_count',
+            'is_hidden_by_moderation', 'seller', 'views_count', 'likes_count', 'shares_count',
             'created_at', 'status', 'expires_at', 'visibility_score',
         ]
         list_serializer_class = OfferListSerializer
@@ -126,7 +105,7 @@ class OfferSerializer(serializers.ModelSerializer):
         ne sont pas relus."""
         cache = context.setdefault(cls.CONTEXT_KEY, {
             'categories': {}, 'communes': {}, 'sellers': {}, 'trending': set(), 'seen': set(),
-            'favorite_counts': {}, 'favorited': set(),
+            'favorite_counts': {}, 'favorited': set(), 'offer_ratings': {}, 'seller_ratings': {},
         })
         new = [o for o in offers if o.id not in cache['seen']]
         if not new:
@@ -152,6 +131,12 @@ class OfferSerializer(serializers.ModelSerializer):
             cache['favorited'] |= set(
                 Favorite.objects.filter(user=request.user, offer_id__in=ids).values_list('offer_id', flat=True)
             )
+        # Notes affichées : calculées à la lecture, jamais stockées (ADR 0004). Deux requêtes pour
+        # toute la liste ; `reviews` applique le seuil d'affichage.
+        cache['offer_ratings'].update(reviews_services.get_offer_ratings(ids))
+        cache['seller_ratings'].update(reviews_services.get_seller_ratings(
+            CONTEXT_USER, {o.seller_id for o in new} - cache['seller_ratings'].keys(),
+        ))
         cache['seen'] |= ids
 
     def _cache(self, obj):
@@ -176,6 +161,19 @@ class OfferSerializer(serializers.ModelSerializer):
         if summary is None:
             return None
         return SellerSerializer(summary, context=self.context).data
+
+    @staticmethod
+    def _rating(summary):
+        # Objet toujours présent ; `average` est null sous le seuil d'affichage.
+        if summary is None:
+            return {'average': None, 'count': 0}
+        return {'average': summary.average, 'count': summary.count}
+
+    def get_offer_rating(self, obj):
+        return self._rating(self._cache(obj)['offer_ratings'].get(obj.id))
+
+    def get_seller_rating(self, obj):
+        return self._rating(self._cache(obj)['seller_ratings'].get(obj.seller_id))
 
     def get_category_name(self, obj):
         category = self._cache(obj)['categories'].get(obj.category_id)

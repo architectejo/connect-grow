@@ -42,7 +42,7 @@ class ContactEventTests(MarketplaceTestBase):
         payload = OutboxEvent.objects.get().payload
         self.assertEqual(payload, {
             'contact_event_id': str(event.pk), 'offer_id': str(self.offer.id), 'offer_title': self.offer.title,
-            'seller_id': str(self.seller.pk), 'sender_id': str(self.buyer.pk),
+            'seller_id': str(self.seller.pk), 'sender_id': str(self.buyer.pk), 'channel': 'MESSAGE',
         })
         self.assertNotIn('Texte confidentiel', str(payload))
         self.assertNotIn('Acheteur', str(payload))

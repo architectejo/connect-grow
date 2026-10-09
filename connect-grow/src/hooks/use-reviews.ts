@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import apiClient, { unwrapList } from "@/api/client";
-import type { Review, ReviewEligibility, ReviewInput, Uuid } from "@/api/types";
+import type { AuthorResponseResult, Review, ReviewEligibility, ReviewInput, Uuid } from "@/api/types";
 import i18n from "@/i18n";
 import { apiErrorCode, shouldRetryQuery } from "@/lib/errors";
 import { reviewErrorMessage } from "@/lib/review-errors";
@@ -100,7 +100,11 @@ export function useReviewMutations(postId: Uuid) {
       void refreshEligibility();
       toast.success(i18n.t("reviews.deleted"));
     },
-    onError: (error) => toast.error(reviewErrorMessage(error)),
+    onError: (error) => {
+      toast.error(reviewErrorMessage(error, "delete"));
+      // Un signalement a pu s'ouvrir depuis le chargement : on relit l'avis pour refléter son état
+      if (apiErrorCode(error) === "review_locked") void queryClient.invalidateQueries({ queryKey: key });
+    },
   });
 
   const reply = useMutation({
@@ -124,9 +128,34 @@ export function useReportFakeContact() {
           target_type: "REVIEW",
           object_id: reviewId,
           reason: "CONTACT_FICTIF",
-          description,
+          // description facultative : n'est envoyée que si elle n'est pas vide
+          ...(description.trim() ? { description: description.trim() } : {}),
         })
       ).data,
     onSuccess: () => toast.success(i18n.t("reviews.reportSent")),
+  });
+}
+
+/** Réponse de l'auteur d'un avis contesté (une seule fois, tant que le signalement est ouvert). */
+export function useAuthorResponse(postId: Uuid) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ reportId, author_response }: { reportId: Uuid; author_response: string }) =>
+      (
+        await apiClient.post<AuthorResponseResult>(`moderation/reports/${reportId}/author-response/`, {
+          author_response: author_response.trim(),
+        })
+      ).data,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: reviewKeys.forPost(postId) });
+      toast.success(i18n.t("reviews.contest.sent"));
+    },
+    onError: (error) => {
+      // Déjà répondu ou signalement clos : l'état affiché n'est plus à jour
+      const code = apiErrorCode(error);
+      if (code === "already_responded" || code === "report_closed") {
+        void queryClient.invalidateQueries({ queryKey: reviewKeys.forPost(postId) });
+      }
+    },
   });
 }

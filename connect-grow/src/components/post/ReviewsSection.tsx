@@ -19,7 +19,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/common/StateViews";
 import { UserAvatar } from "@/components/common/UserAvatar";
-import { useReportFakeContact, useReviewEligibility, useReviewMutations, useReviews } from "@/hooks/use-reviews";
+import { useAuthorResponse, useReportFakeContact, useReviewEligibility, useReviewMutations, useReviews } from "@/hooks/use-reviews";
 import { formatRelativeDate } from "@/lib/format";
 import { reviewErrorMessage } from "@/lib/review-errors";
 import { REVIEW_MAX_LENGTH } from "@/lib/review-validation";
@@ -58,6 +58,7 @@ export function ReviewsSection({ postId, isOwner, currentUserId, sellerName }: R
   const eligibility = useReviewEligibility(postId, currentUserId, !isOwner);
   const { create, edit, remove, reply } = useReviewMutations(postId);
   const report = useReportFakeContact();
+  const authorResponse = useAuthorResponse(postId);
 
   const [showAll, setShowAll] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -67,6 +68,8 @@ export function ReviewsSection({ postId, isOwner, currentUserId, sellerName }: R
   const [reporting, setReporting] = useState<Review | null>(null);
   const [reportText, setReportText] = useState("");
   const [deleting, setDeleting] = useState<Review | null>(null);
+  const [responding, setResponding] = useState<Review | null>(null);
+  const [responseText, setResponseText] = useState("");
 
   const visible = showAll ? reviews : reviews.slice(0, INITIAL_VISIBLE);
 
@@ -119,6 +122,8 @@ export function ReviewsSection({ postId, isOwner, currentUserId, sellerName }: R
             const isAuthor = review.is_mine;
             // can_edit : fenêtre ouverte, avis ni masqué, ni signalé, sans réponse du vendeur (sinon 403)
             const canEdit = isAuthor && review.can_edit;
+            // Signalement grave ouvert : « Modifier » reste permis, « Supprimer » est désactivé (review_locked)
+            const contested = isAuthor && !!review.contest_report_id;
             const canReply = isOwner && !review.reply_content;
             const hasMenu = canEdit || isOwner;
             return (
@@ -145,9 +150,16 @@ export function ReviewsSection({ postId, isOwner, currentUserId, sellerName }: R
                               <DropdownMenuItem className="gap-2" onSelect={() => setEditing(review)}>
                                 <Pencil className="h-4 w-4" /> {t("reviews.edit")}
                               </DropdownMenuItem>
-                              <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onSelect={() => setDeleting(review)}>
+                              <DropdownMenuItem
+                                className="gap-2 text-destructive focus:text-destructive"
+                                disabled={contested}
+                                onSelect={() => setDeleting(review)}
+                              >
                                 <Trash2 className="h-4 w-4" /> {t("reviews.delete")}
                               </DropdownMenuItem>
+                              {contested && (
+                                <p className="max-w-56 px-2 pb-1.5 text-xs text-muted-foreground">{t("reviews.contest.deleteDisabled")}</p>
+                              )}
                             </>
                           )}
                           {isOwner && (
@@ -195,6 +207,25 @@ export function ReviewsSection({ postId, isOwner, currentUserId, sellerName }: R
                   </div>
 
                   <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-foreground/90">{review.content}</p>
+                  {contested && (
+                    <div role="status" className="mt-3 rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm">
+                      <p>{review.contest_responded ? t("reviews.contest.bannerResponded") : t("reviews.contest.banner")}</p>
+                      {!review.contest_responded && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="mt-2"
+                          onClick={() => {
+                            setResponding(review);
+                            setResponseText("");
+                          }}
+                        >
+                          {t("reviews.contest.respond")}
+                        </Button>
+                      )}
+                    </div>
+                  )}
                   {isAuthor && !review.can_edit && <p className="mt-2 text-xs text-muted-foreground">{t("reviews.locked")}</p>}
 
                   {review.reply_content && (
@@ -309,6 +340,54 @@ export function ReviewsSection({ postId, isOwner, currentUserId, sellerName }: R
             >
               {reply.isPending && <Loader2 className="animate-spin" aria-hidden />}
               {t("reviews.replySubmit")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Recours de l'auteur d'un avis contesté */}
+      <Dialog
+        open={!!responding}
+        onOpenChange={(open) => {
+          if (!open) {
+            setResponding(null);
+            authorResponse.reset();
+          }
+        }}
+      >
+        <DialogContent className="rounded-2xl sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t("reviews.contest.title")}</DialogTitle>
+            <DialogDescription>{t("reviews.contest.intro")}</DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={responseText}
+            onChange={(e) => setResponseText(e.target.value.slice(0, REPORT_MAX_LENGTH))}
+            className="min-h-[110px] rounded-xl"
+            aria-label={t("reviews.contest.label")}
+            placeholder={t("reviews.contest.label")}
+          />
+          {authorResponse.isError && (
+            <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+              {reviewErrorMessage(authorResponse.error)}
+            </p>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => setResponding(null)}>
+              {t("reviews.cancel")}
+            </Button>
+            <Button
+              disabled={authorResponse.isPending || !responseText.trim()}
+              onClick={() =>
+                responding?.contest_report_id &&
+                authorResponse.mutate(
+                  { reportId: responding.contest_report_id, author_response: responseText },
+                  { onSuccess: () => setResponding(null) },
+                )
+              }
+            >
+              {authorResponse.isPending && <Loader2 className="animate-spin" aria-hidden />}
+              {t("reviews.contest.submit")}
             </Button>
           </DialogFooter>
         </DialogContent>

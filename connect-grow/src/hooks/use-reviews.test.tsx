@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import "@/i18n";
 import apiClient from "@/api/client";
 import type { Review } from "@/api/types";
-import { reviewKeys, useReportFakeContact, useReviewEligibility, useReviewMutations } from "./use-reviews";
+import { reviewKeys, useAuthorResponse, useReportFakeContact, useReviewEligibility, useReviewMutations } from "./use-reviews";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -143,5 +143,45 @@ describe("useReportFakeContact", () => {
       reason: "CONTACT_FICTIF",
       description: "Je ne connais pas cette personne.",
     });
+  });
+});
+
+describe("useReportFakeContact sans description", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("n'envoie pas description quand elle est vide", async () => {
+    const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: {} });
+    const { result } = renderHook(() => useReportFakeContact(), { wrapper: wrapperFor(newClient()) });
+    await act(async () => {
+      await result.current.mutateAsync({ reviewId: "r1", description: "   " });
+    });
+    expect(post).toHaveBeenCalledWith("moderation/reports/", { target_type: "REVIEW", object_id: "r1", reason: "CONTACT_FICTIF" });
+  });
+});
+
+describe("useAuthorResponse", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("envoie la réponse au signalement et relit les avis", async () => {
+    const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: { id: "rep1", status: "EN_ATTENTE", author_responded_at: "x" } });
+    const client = newClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const { result } = renderHook(() => useAuthorResponse("p1"), { wrapper: wrapperFor(client) });
+    await act(async () => {
+      await result.current.mutateAsync({ reportId: "rep1", author_response: "  Nous avons échangé par WhatsApp.  " });
+    });
+    expect(post).toHaveBeenCalledWith("moderation/reports/rep1/author-response/", { author_response: "Nous avons échangé par WhatsApp." });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: reviewKeys.forPost("p1") });
+  });
+
+  it("409 already_responded : relit les avis", async () => {
+    vi.spyOn(apiClient, "post").mockRejectedValue({ response: { status: 409, data: { code: "already_responded" } } });
+    const client = newClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const { result } = renderHook(() => useAuthorResponse("p1"), { wrapper: wrapperFor(client) });
+    await act(async () => {
+      await result.current.mutateAsync({ reportId: "rep1", author_response: "x" }).catch(() => undefined);
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: reviewKeys.forPost("p1") });
   });
 });

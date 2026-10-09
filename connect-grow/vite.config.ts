@@ -99,7 +99,7 @@ export default defineConfig(({ mode }) => ({
             urlPattern: isCacheableApiContent,
             handler: "NetworkFirst",
             options: {
-              cacheName: "api-annonces",
+              cacheName: "api-annonces-v2",
               networkTimeoutSeconds: 6,
               expiration: { maxEntries: 150, maxAgeSeconds: 2 * ONE_DAY },
               cacheableResponse: { statuses: [200] },

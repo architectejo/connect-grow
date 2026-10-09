@@ -1,5 +1,5 @@
 /**
- * Règle de mise en cache PWA « api-annonces » : lectures publiques uniquement.
+ * Règle de mise en cache PWA « api-annonces-v2 » : lectures publiques uniquement.
  *
  * IMPORTANT : vite-plugin-pwa (Workbox generateSW) sérialise cette fonction dans le service worker
  * via toString(). Elle doit donc rester autonome : aucune référence à un import, une constante

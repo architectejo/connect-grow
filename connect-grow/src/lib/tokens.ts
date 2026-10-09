@@ -8,10 +8,13 @@ export const AUTH_EXPIRED_EVENT = "connecte:auth-expired";
 export const POST_DRAFT_KEY = "connecte:post-draft";
 
 /** Cache PWA des contenus d'annonces : purgé à la déconnexion pour ne rien laisser d'une session précédente. */
-export const API_CONTENT_CACHE = "api-annonces";
+export const API_CONTENT_CACHE = "api-annonces-v2";
+
+/** Ancien cache des annonces (réponses contenant le téléphone des vendeurs) : purgé aussi, jamais réutilisé. */
+const LEGACY_API_CONTENT_CACHE = "api-annonces";
 
 /** Caches applicatifs pouvant contenir des données de la session (voir vite.config.ts) : tous purgés à la déconnexion. */
-export const SESSION_CACHES = [API_CONTENT_CACHE, "api-referentiels", "photos"] as const;
+export const SESSION_CACHES = [API_CONTENT_CACHE, LEGACY_API_CONTENT_CACHE, "api-referentiels", "photos"] as const;
 
 const purgeApiCaches = () => {
   try {

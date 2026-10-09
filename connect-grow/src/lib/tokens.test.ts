@@ -31,7 +31,7 @@ describe("tokenStorage.clear", () => {
     const del = vi.fn().mockResolvedValue(true);
     vi.stubGlobal("caches", { delete: del });
     tokenStorage.clear();
-    expect(del.mock.calls.map((c) => c[0]).sort()).toEqual(["api-annonces", "api-referentiels", "photos"]);
+    expect(del.mock.calls.map((c) => c[0]).sort()).toEqual(["api-annonces", "api-annonces-v2", "api-referentiels", "photos"]);
   });
 
   it("ne plante pas si l'API Cache est indisponible", () => {

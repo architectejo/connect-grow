@@ -11,8 +11,8 @@ const promises = [
   { icon: Sparkles, label: "Publication gratuite" },
 ];
 
-/** Illustration de la carte de confiance : purement décorative, masquée aux lecteurs d'écran. */
-const TrustIllustration = () => (
+/** Illustration d'un profil avec une note du vendeur : purement décorative, masquée aux lecteurs d'écran. */
+const ReviewIllustration = () => (
   <div className="relative mx-auto w-full max-w-sm" aria-hidden>
     <div className="absolute -inset-10 rounded-full bg-primary/30 blur-3xl" />
     <div className="relative rotate-2 rounded-2xl border border-white/10 bg-card p-5 text-card-foreground shadow-lifted">
@@ -30,7 +30,7 @@ const TrustIllustration = () => (
       </div>
       <div className="mt-4 flex items-end justify-between rounded-xl bg-muted p-3">
         <div>
-          <p className="text-xs font-medium text-muted-foreground">Note de confiance</p>
+          <p className="text-xs font-medium text-muted-foreground">Note du vendeur</p>
           <p className="font-display text-3xl font-extrabold tabular-nums">4,8</p>
         </div>
         <div className="flex gap-0.5 pb-1.5">
@@ -39,17 +39,14 @@ const TrustIllustration = () => (
           ))}
         </div>
       </div>
-      <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-success/10 px-2.5 py-1.5 text-xs font-semibold text-success ring-1 ring-inset ring-success/25">
-        <ShieldCheck className="h-3.5 w-3.5" /> Vendeur fiable
-      </span>
     </div>
     <div className="relative -mt-6 ml-10 -rotate-3 rounded-2xl border border-white/10 bg-card p-4 text-card-foreground shadow-lifted">
       <div className="flex items-center gap-2">
         <MessageCircleHeart className="h-5 w-5 text-primary" />
-        <p className="text-sm font-semibold">Avis après une affaire conclue</p>
+        <p className="text-sm font-semibold">Avis après contact</p>
       </div>
       <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-        Seuls les acheteurs qui ont réellement traité avec le vendeur peuvent le noter.
+        Seules les personnes qui ont contacté le vendeur depuis Connecte+ peuvent noter l'offre et le vendeur.
       </p>
     </div>
   </div>
@@ -155,7 +152,7 @@ const HeroSection = () => {
         </div>
 
         <div className="hidden lg:block">
-          <TrustIllustration />
+          <ReviewIllustration />
         </div>
       </div>
     </section>

@@ -11,15 +11,15 @@ const pillars = [
   },
   {
     icon: ShieldCheck,
-    title: "Une réputation vérifiable",
+    title: "Des avis après contact",
     description:
-      "Seuls les acheteurs ayant conclu une affaire peuvent noter un vendeur. Le Trust Score se consulte avant de contacter.",
+      "Seules les personnes qui ont contacté le vendeur peuvent noter l'offre et le vendeur, séparément. Il n'y a pas de score unique.",
     tone: "bg-success/10 text-success",
   },
   {
     icon: TrendingUp,
-    title: "Les vendeurs fiables en tête",
-    description: "Le classement « Trust & Engage » met en avant les annonces récentes des vendeurs les mieux notés.",
+    title: "Un classement transparent",
+    description: "Le classement dépend de l'engagement, de la récence et de la proximité, pas des notes. Une annonce sponsorisée est toujours signalée.",
     tone: "bg-sun/15 text-sun",
   },
   {

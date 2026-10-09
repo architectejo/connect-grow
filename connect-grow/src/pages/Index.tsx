@@ -12,7 +12,7 @@ import { usePosts, useToggleFavorite } from "@/hooks/use-marketplace";
 
 const RECOMMENDED_COUNT = 8;
 
-/** Annonces les mieux classées par l'algorithme « Trust & Engage ». */
+/** Annonces les mieux classées par le classement organique (engagement, récence, proximité). */
 const RecommendedPosts = () => {
   const { data: posts = [], isLoading, isError, refetch, isRefetching } = usePosts(
     { ordering: "-visibility_score" },

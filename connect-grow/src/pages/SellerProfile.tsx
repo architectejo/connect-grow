@@ -1,21 +1,23 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
-import { CalendarDays, Eye, Package, Share2, Store } from "lucide-react";
+import { Eye, Package, Share2, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppShell } from "@/components/layout/AppShell";
-import { EmptyState, ErrorState, PostCard, PostGrid, PostGridSkeleton, StatusBadge, TrustScore, UserAvatar } from "@/components/common";
+import { EmptyState, ErrorState, PostCard, PostGrid, PostGridSkeleton, RatingBlock, StatusBadge, UserAvatar } from "@/components/common";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePosts, useToggleFavorite } from "@/hooks/use-marketplace";
 import { shareLink } from "@/lib/contact";
 import { formatCount, formatMonthYear } from "@/lib/format";
-import { getSellerTrust, sellerDisplayName } from "@/lib/trust";
+import { isSellerVerified, sellerDisplayName } from "@/lib/post";
 
 /**
  * Vitrine publique d'un vendeur ou d'une boutique (CDC 3.1 : profil public).
  * L'API n'expose pas encore de profil utilisateur seul : l'identité vient de ses annonces actives.
  */
 const SellerProfile = () => {
+  const { t } = useTranslation();
   const { id } = useParams();
   const { user } = useAuth();
   const { data: posts = [], isLoading, isError, refetch, isRefetching } = usePosts({ seller: id, ordering: "-created_at" });
@@ -63,7 +65,8 @@ const SellerProfile = () => {
   }
 
   const name = sellerDisplayName(seller);
-  const trust = getSellerTrust(seller);
+  const verified = isSellerVerified(seller);
+  const sellerRating = posts[0]?.seller_rating;
   const isBusiness = seller.user_type === "ENTREPRISE";
   const isMe = user?.id === seller.id;
 
@@ -107,11 +110,18 @@ const SellerProfile = () => {
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <TrustScore trust={trust} size="md" />
-            {trust.isVerified && <StatusBadge kind="verified" size="md" />}
-            {trust.isReliable && <StatusBadge kind="reliable" size="md" />}
-          </div>
+          {verified && (
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <StatusBadge kind="verified" size="md" />
+            </div>
+          )}
+
+          <RatingBlock
+            kind="seller"
+            rating={sellerRating}
+            className="mt-4 sm:max-w-xs"
+            footer={seller.date_joined ? t("rating.memberSince", { date: formatMonthYear(seller.date_joined) }) : undefined}
+          />
 
           {seller.business_profile?.bio && (
             <p className="mt-4 max-w-2xl whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
@@ -119,15 +129,10 @@ const SellerProfile = () => {
             </p>
           )}
 
-          <dl className="mt-6 grid grid-cols-3 gap-2 sm:max-w-lg">
+          <dl className="mt-6 grid grid-cols-2 gap-2 sm:max-w-md">
             {[
               { icon: Package, label: "Annonces", value: String(posts.length) },
               { icon: Eye, label: "Vues", value: formatCount(totalViews) },
-              {
-                icon: CalendarDays,
-                label: "Membre depuis",
-                value: seller.date_joined ? formatMonthYear(seller.date_joined) : "—",
-              },
             ].map(({ icon: Icon, label, value }) => (
               <div key={label} className="rounded-xl bg-muted/60 p-3">
                 <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">

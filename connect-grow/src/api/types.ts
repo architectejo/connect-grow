@@ -12,7 +12,16 @@ export type PostType = "PRODUIT" | "SERVICE";
 export type PostCondition = "NEUF" | "OCCASION" | "RECONDITIONNE";
 export type VisibilityRank = "Elite" | "Standard" | "Faible";
 export type PostStatus = "ACTIVE" | "PAUSED" | "SOLD" | "EXPIRED";
-export type PostBadge = "sponsored" | "trending" | "reliable";
+export type PostBadge = "sponsored" | "trending";
+
+/**
+ * Moyenne arithmétique arrondie à 1 décimale ; `average` vaut null sous le seuil d'affichage
+ * (réglage du back-office), `count` reste exact (avis masqués exclus).
+ */
+export interface RatingSummary {
+    average: number | null;
+    count: number;
+}
 
 export interface BusinessProfile {
     business_name: string;
@@ -49,8 +58,6 @@ export interface User {
     business_profile?: BusinessProfile | null;
     date_joined?: string;
     phone_verified?: boolean;
-    trust_score?: number | null;
-    reviews_count?: number;
 }
 
 /** Vendeur tel qu'imbriqué dans une annonce (SellerSerializer). Ni téléphone ni e-mail : règle 10. */
@@ -60,15 +67,8 @@ export interface Seller {
     photo?: string | null;
     user_type: UserType;
     business_profile?: Pick<BusinessProfile, "business_name" | "bio" | "logo" | "is_verified"> | null;
+    /** Source unique de l'ancienneté (« Sur Connecte+ depuis <mois année> »). */
     date_joined?: string;
-    /** Ancienne moyenne brute, remplacée par trust_score. */
-    avg_rating?: number;
-    reviews_count?: number;
-    /** Trust Score bayésien (CDC 3.7) ; null tant que le vendeur a moins de 3 avis. */
-    trust_score?: number | null;
-    is_new_seller?: boolean;
-    /** Badge « Vendeur fiable » : Trust Score ≥ 4,5 et au moins 10 avis. */
-    is_trusted_seller?: boolean;
 }
 
 export interface PostImage {
@@ -111,7 +111,10 @@ export interface Post {
     badges?: PostBadge[];
     is_trending?: boolean;
     is_sponsored?: boolean;
-    comments_count?: number;
+    /** Note de l'offre (ADR 0004 §7.1). Absente des anciennes réponses : les composants s'en passent. */
+    offer_rating?: RatingSummary;
+    /** Note du contexte vendeur de l'offre ; jamais fusionnée avec la note de l'offre. */
+    seller_rating?: RatingSummary;
     shares_count?: number;
 }
 
@@ -153,26 +156,56 @@ export interface PostFilters {
     price_max?: string;
     ordering?: PostOrdering | "";
     seller?: string;
+    /** Commune de référence pour la proximité (D) du classement ; un identifiant invalide est ignoré par l'API. */
+    near?: string;
 }
 
 export type PostOrdering = "-visibility_score" | "-created_at" | "price" | "-price";
 
+/** Avis (ADR 0004 §7.2). La seule source est le contact : libellé « Avis après contact ». */
 export interface Review {
     id: Uuid;
     /** Offre concernée ; null si elle a été purgée. */
     post: Uuid | null;
-    deal?: Uuid;
     user_id: Uuid;
-    reviewed_user_id?: Uuid;
+    /** Nom public de l'auteur (prénom + initiale), tel que renvoyé par l'API. */
     user_name: string;
+    offer_rating: number;
+    seller_rating: number;
     content: string;
-    rating: number;
+    source: "CONTACT";
     reply_content?: string | null;
     reply_at?: string | null;
     created_at: string;
+    /** Renseigné quand l'auteur a modifié son avis. */
+    edited_at?: string | null;
     is_post_owner?: boolean;
-    /** Vrai tant que l'auteur peut modifier son avis (48 h, ni masqué ni signalé). */
+    /** Vrai tant que l'auteur peut modifier ou supprimer son avis (fenêtre ouverte, ni masqué ni signalé). */
     can_edit?: boolean;
+}
+
+export type ReviewEligibilityReason =
+    | "login_required"
+    | "own_offer"
+    | "no_contact"
+    | "too_early"
+    | "already_reviewed"
+    | "offer_unavailable";
+
+/** Réponse de GET /interactions/reviews/eligibility/?post= : seul le serveur décide du droit d'avis. */
+export interface ReviewEligibility {
+    can_review: boolean;
+    reason: ReviewEligibilityReason | null;
+    /** Date à partir de laquelle l'avis sera possible (reason = too_early). */
+    available_at: string | null;
+    /** Avis déjà donné (reason = already_reviewed). */
+    review_id: Uuid | null;
+}
+
+export interface ReviewInput {
+    offer_rating: number;
+    seller_rating: number;
+    content: string;
 }
 
 export interface ViewStatPoint {
@@ -184,7 +217,8 @@ export interface DashboardSummary {
     total_views: number;
     today_views: number;
     active_posts: number;
-    avg_rating: number;
+    /** Moyenne des notes vendeur visibles (1 décimale) ; null sans avis, sans seuil d'affichage (privé au vendeur). */
+    avg_rating: number | null;
     review_count: number;
     contacts_count?: number;
     contact_rate?: number;

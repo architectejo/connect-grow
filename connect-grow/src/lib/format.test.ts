@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatClockTime, formatDayMonth, formatMonthYear } from "./format";
+import { formatClockTime, formatDateTime, formatDayMonth, formatMonthYear } from "./format";
 
 describe("dates à l'heure de Kinshasa", () => {
   it("affiche l'heure locale d'un instant avec décalage (+01:00)", () => {
@@ -22,5 +22,15 @@ describe("dates à l'heure de Kinshasa", () => {
   it("renvoie une chaîne vide pour une date invalide", () => {
     expect(formatClockTime("pas une date")).toBe("");
     expect(formatMonthYear("pas une date")).toBe("");
+  });
+});
+
+describe("formatDateTime", () => {
+  it("affiche jour, mois et heure de Kinshasa", () => {
+    expect(formatDateTime("2026-10-10T13:05:00Z")).toBe("10 octobre à 14:05");
+  });
+
+  it("renvoie une chaîne vide pour une date invalide", () => {
+    expect(formatDateTime("pas une date")).toBe("");
   });
 });

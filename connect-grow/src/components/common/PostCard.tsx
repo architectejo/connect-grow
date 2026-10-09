@@ -3,12 +3,12 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { Post } from "@/api/types";
 import { formatRelativeDate, formatShortAge } from "@/lib/format";
-import { getPostBadges, getSellerTrust, sellerDisplayName } from "@/lib/trust";
+import { getPostBadges, isSellerVerified, sellerDisplayName } from "@/lib/post";
 import { cn } from "@/lib/utils";
 import { ImageWithFallback } from "./ImageWithFallback";
 import { PriceTag } from "./PriceTag";
+import { RatingValue } from "./Rating";
 import { StatusBadge } from "./StatusBadge";
-import { TrustScore } from "./TrustScore";
 import { UserAvatar } from "./UserAvatar";
 
 interface PostCardProps {
@@ -28,7 +28,6 @@ interface PostCardProps {
 export function PostCard({ post, isFavorite, onToggleFavorite, hideSeller, className }: PostCardProps) {
   const { t } = useTranslation();
   const badges = getPostBadges(post);
-  const trust = getSellerTrust(post.seller);
   const sellerName = sellerDisplayName(post.seller);
   const sellerAvatar = post.seller?.business_profile?.logo || post.seller?.photo;
 
@@ -98,6 +97,9 @@ export function PostCard({ post, isFavorite, onToggleFavorite, hideSeller, class
           </time>
         </p>
 
+        {/* Carte d'annonce : la note de l'offre seulement, jamais la note du vendeur ni une note fusionnée */}
+        <RatingValue rating={post.offer_rating} kind="offer" />
+
         {!hideSeller && post.seller && (
           <div className="mt-auto flex items-center gap-2 border-t pt-3">
             <UserAvatar
@@ -107,8 +109,7 @@ export function PostCard({ post, isFavorite, onToggleFavorite, hideSeller, class
               shape={post.seller.user_type === "ENTREPRISE" ? "square" : "circle"}
             />
             <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{sellerName}</span>
-            {trust.isVerified && <StatusBadge kind="verified" iconOnly className="text-success" />}
-            <TrustScore trust={trust} showCount={false} compact className="shrink-0" />
+            {isSellerVerified(post.seller) && <StatusBadge kind="verified" iconOnly className="text-success" />}
           </div>
         )}
       </div>

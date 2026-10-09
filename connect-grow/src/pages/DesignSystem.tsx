@@ -11,10 +11,10 @@ import {
   PostGridSkeleton,
   PriceTag,
   SellerCard,
+  RatingBlock,
+  RatingValue,
   StatusBadge,
-  TrustScore,
 } from "@/components/common";
-import { getSellerTrust } from "@/lib/trust";
 
 // Galerie de développement (route /design, absente du build de production).
 // Les données ci-dessous sont des exemples d'affichage, pas des données réelles.
@@ -28,24 +28,18 @@ const sellers: Record<string, Seller> = {
     user_type: "ENTREPRISE",
     business_profile: { business_name: "Gombe Électronique", is_verified: true, logo: null },
     date_joined: "2025-03-12T10:00:00Z",
-    avg_rating: 4.7,
-    reviews_count: 42,
   },
   person: {
     id: "2",
     full_name: "Grâce Mbuyi",
     user_type: "PARTICULIER",
     date_joined: "2026-06-02T10:00:00Z",
-    avg_rating: 4.2,
-    reviews_count: 5,
   },
   newbie: {
     id: "3",
     full_name: "Junior Kabasele",
     user_type: "PARTICULIER",
     date_joined: "2026-09-01T10:00:00Z",
-    avg_rating: 0,
-    reviews_count: 1,
   },
 };
 
@@ -191,12 +185,15 @@ const DesignSystem = () => (
         <PriceTag amount="95000" currency="CDF" size="lg" />
       </div>
       <div className="flex flex-wrap items-center gap-6">
-        <TrustScore trust={getSellerTrust(sellers.business)} size="md" />
-        <TrustScore trust={getSellerTrust(sellers.person)} size="md" />
-        <TrustScore trust={getSellerTrust(sellers.newbie)} size="md" />
+        <RatingValue kind="offer" rating={{ average: 4.2, count: 5 }} />
+        <RatingValue kind="offer" rating={{ average: null, count: 2 }} />
+        <RatingValue kind="offer" rating={{ average: null, count: 0 }} />
+        <RatingBlock kind="offer" rating={{ average: 4.2, count: 5 }} />
+        <RatingBlock kind="seller" rating={{ average: 3.9, count: 8 }} footer="Sur Connecte+ depuis mars 2025" />
+        <RatingBlock kind="seller" rating={{ average: null, count: 2 }} />
       </div>
       <div className="flex flex-wrap gap-2">
-        {(["verified", "reliable", "trending", "sponsored", "exchangeable", "service", "NEUF", "OCCASION", "RECONDITIONNE"] as const).map(
+        {(["verified", "trending", "sponsored", "exchangeable", "service", "NEUF", "OCCASION", "RECONDITIONNE"] as const).map(
           (kind) => (
             <StatusBadge key={kind} kind={kind} size="md" />
           ),

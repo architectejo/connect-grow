@@ -7,7 +7,7 @@
  * Palette « confiance de proximité » :
  *   - primary : bleu profond (confiance, actions principales)
  *   - sun     : ocre solaire (mise en avant, tendance, appels forts)
- *   - success : vert confiance (Vérifié, Vendeur fiable)
+ *   - success : vert (Vérifié)
  *   - neutres chauds pour la lisibilité en plein soleil
  * Toutes les couleurs sont en HSL sans hsl() pour permettre l'opacité Tailwind (bg-primary/10).
  * Remplacer ces valeurs suffit à appliquer une autre charte.

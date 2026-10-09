@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { ArrowRight, BadgeCheck, CalendarDays, Eye, Package, Plus, Star, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -9,7 +10,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useDashboardStats, useKycDocuments } from "@/hooks/use-account";
 import { useMyPosts } from "@/hooks/use-marketplace";
 import { formatCount, formatRating } from "@/lib/format";
-import { TRUST_MIN_REVIEWS } from "@/lib/trust";
 
 interface StatTileProps {
   icon: LucideIcon;
@@ -66,6 +66,7 @@ function VerificationBanner() {
 }
 
 const Dashboard = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const stats = useDashboardStats();
   const myPosts = useMyPosts();
@@ -74,7 +75,8 @@ const Dashboard = () => {
   const firstName = user?.full_name?.split(" ")[0];
   const needsVerification = user?.user_type === "ENTREPRISE" && !user.business_profile?.is_verified;
   const reviewCount = summary?.review_count ?? 0;
-  const hasPublicScore = reviewCount >= TRUST_MIN_REVIEWS;
+  // Moyenne des notes vendeur visibles ; privée au vendeur, donc sans seuil d'affichage (null sans avis)
+  const avgRating = summary?.avg_rating ?? null;
 
   return (
     <AccountShell className="space-y-6">
@@ -98,13 +100,9 @@ const Dashboard = () => {
         <StatTile icon={Package} label="Annonces actives" value={String(summary?.active_posts ?? 0)} isLoading={stats.isLoading} />
         <StatTile
           icon={Star}
-          label="Note moyenne"
-          value={hasPublicScore && summary ? formatRating(summary.avg_rating) : "—"}
-          hint={
-            hasPublicScore
-              ? `${reviewCount} avis`
-              : `Visible dès ${TRUST_MIN_REVIEWS} avis (${reviewCount}/${TRUST_MIN_REVIEWS})`
-          }
+          label={t("rating.dashboardLabel")}
+          value={avgRating !== null ? formatRating(avgRating) : "—"}
+          hint={reviewCount > 0 ? t("rating.count", { count: reviewCount }) : t("rating.none")}
           isLoading={stats.isLoading}
         />
       </div>

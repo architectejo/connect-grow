@@ -8,9 +8,9 @@ const journeys = {
     label: "J'achète",
     steps: [
       { icon: MapPin, title: "Cherchez dans votre commune", description: "Filtrez par catégorie, prix, état et commune." },
-      { icon: Star, title: "Vérifiez le vendeur", description: "Consultez son Trust Score et les avis de ses clients." },
+      { icon: Star, title: "Vérifiez le vendeur", description: "Consultez la note de l'offre, la note du vendeur et le nombre d'avis." },
       { icon: MessageSquare, title: "Contactez-le", description: "Par message, en un geste." },
-      { icon: Handshake, title: "Concluez et notez", description: "Votre avis aide toute la communauté à choisir." },
+      { icon: Handshake, title: "Contactez puis notez", description: "Après votre contact, votre avis aide toute la communauté à choisir." },
     ],
   },
   sell: {
@@ -19,7 +19,7 @@ const journeys = {
       { icon: UserCheck, title: "Créez votre compte", description: "Un numéro +243 vérifié par SMS suffit." },
       { icon: Camera, title: "Publiez gratuitement", description: "Photos, prix en USD ou CDF, commune : c'est prêt." },
       { icon: Search, title: "Soyez trouvé", description: "Les acheteurs de votre ville voient votre annonce." },
-      { icon: Star, title: "Gagnez en réputation", description: "Chaque avis positif vous fait monter dans le classement." },
+      { icon: Star, title: "Construisez votre réputation", description: "Chaque avis s'affiche sur votre annonce et sur votre profil." },
     ],
   },
 } as const;

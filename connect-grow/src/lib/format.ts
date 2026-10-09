@@ -88,6 +88,21 @@ export function formatMonthYear(date: string | Date): string {
   return Number.isNaN(d.getTime()) ? "" : monthYearFormatter.format(d);
 }
 
+const dateTimeFormatter = new Intl.DateTimeFormat(LOCALE, {
+  day: "numeric",
+  month: "long",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+  timeZone: DISPLAY_TIME_ZONE,
+});
+
+/** « 10 octobre à 14:05 » à l'heure de Kinshasa ; chaîne vide si la date est invalide. */
+export function formatDateTime(date: string | Date): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  return Number.isNaN(d.getTime()) ? "" : dateTimeFormatter.format(d);
+}
+
 const dayMonthFormatter = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", timeZone: DISPLAY_TIME_ZONE });
 
 /** « 09/10 » à l'heure de Kinshasa : même jour que les points `day` du tableau de bord (calculés côté serveur). */

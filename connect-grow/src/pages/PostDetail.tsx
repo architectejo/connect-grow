@@ -5,7 +5,7 @@ import type { Post } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppShell } from "@/components/layout/AppShell";
-import { EmptyState, ErrorState, PostCard, PostGrid, PriceTag, SellerCard, StatusBadge } from "@/components/common";
+import { EmptyState, ErrorState, PostCard, PostGrid, PriceTag, RatingBlock, SellerCard, StatusBadge } from "@/components/common";
 import { ContactActions } from "@/components/post/ContactActions";
 import { ContactDialog, ExchangeDialog } from "@/components/post/ContactDialogs";
 import { PostGallery } from "@/components/post/PostGallery";
@@ -15,7 +15,7 @@ import { usePost, usePosts, useToggleFavorite } from "@/hooks/use-marketplace";
 import { loginPath } from "@/lib/auth-paths";
 import { shareLink } from "@/lib/contact";
 import { formatCount, formatRelativeDate } from "@/lib/format";
-import { getPostBadges, sellerDisplayName } from "@/lib/trust";
+import { getPostBadges, sellerDisplayName } from "@/lib/post";
 import { cn } from "@/lib/utils";
 
 // Graphique réservé au vendeur : Recharts (≈100 Ko) n'est téléchargé que par lui
@@ -178,6 +178,8 @@ const PostDetail = () => {
               <h1 className="mt-1.5 text-balance text-2xl font-extrabold leading-tight">{post.title}</h1>
               <PriceTag amount={post.price} currency={post.currency} negotiable={post.is_price_negotiable} size="lg" className="mt-4" />
 
+              <RatingBlock kind="offer" rating={post.offer_rating} className="mt-4" />
+
               <div className="mt-4 flex flex-wrap gap-1.5">
                 {post.post_type === "SERVICE" && <StatusBadge kind="service" size="md" />}
                 {post.condition && <StatusBadge kind={post.condition} size="md" />}
@@ -224,6 +226,7 @@ const PostDetail = () => {
             {post.seller && (
               <SellerCard
                 seller={post.seller}
+                rating={post.seller_rating}
                 actions={
                   isOwner ? undefined : (
                     <>
@@ -293,7 +296,6 @@ const PostDetail = () => {
           <ReviewsSection
             postId={post.id}
             isOwner={isOwner}
-            isAuthenticated={isAuthenticated}
             currentUserId={user?.id}
             sellerName={sellerName}
           />

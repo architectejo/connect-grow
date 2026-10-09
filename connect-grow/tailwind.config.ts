@@ -72,8 +72,6 @@ export default {
           DEFAULT: "hsl(var(--info))",
           foreground: "hsl(var(--info-foreground))",
         },
-        // Vert WhatsApp assombri : contraste 4,7:1 avec le texte blanc (WCAG AA)
-        whatsapp: "#1a8448",
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",

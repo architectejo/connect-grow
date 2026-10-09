@@ -1,11 +1,9 @@
 import { MessageSquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { Post } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface ContactActionsProps {
-  post: Post;
   onMessage: () => void;
   /** « stack » : boutons empilés (panneau vendeur) ; « bar » : barre compacte mobile. */
   layout?: "stack" | "bar";

@@ -227,7 +227,7 @@ const PostDetail = () => {
                 actions={
                   isOwner ? undefined : (
                     <>
-                      <ContactActions post={post} onMessage={requireAuth(() => setContactOpen(true))} />
+                      <ContactActions onMessage={requireAuth(() => setContactOpen(true))} />
                       {post.is_exchangeable && (
                         <Button variant="soft" size="lg" onClick={requireAuth(() => setExchangeOpen(true))}>
                           <Repeat aria-hidden /> Proposer un échange
@@ -311,7 +311,7 @@ const PostDetail = () => {
             </Link>
           </Button>
         ) : (
-          <ContactActions post={post} layout="bar" onMessage={requireAuth(() => setContactOpen(true))} />
+          <ContactActions layout="bar" onMessage={requireAuth(() => setContactOpen(true))} />
         )}
       </div>
 

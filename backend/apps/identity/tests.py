@@ -353,3 +353,23 @@ class PublicBusinessListTests(APITestCase):
         self.assertEqual(self.client.get(reverse('business_list'), {'search': 'Boutique 2'}).data['count'], 1)
         # Le nom de la personne n'est pas indexé par la recherche publique.
         self.assertEqual(self.client.get(reverse('business_list'), {'search': 'Privée'}).data['count'], 0)
+
+
+class ProfileUpdateSecurityTests(APITestCase):
+    def test_patch_me_cannot_set_password(self):
+        user = User.objects.create_user(email='a@example.com', password='ancien-mot-de-passe-1', full_name='A')
+        self.client.force_authenticate(user)
+        for method in (self.client.patch, self.client.put):
+            response = method(reverse('user_me'), {'password': 'nouveau', 'full_name': 'A', 'email': 'a@example.com'})
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertIn('password', response.data)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password('ancien-mot-de-passe-1'))
+
+    def test_patch_me_still_updates_profile(self):
+        user = User.objects.create_user(email='a@example.com', password='x', full_name='A')
+        self.client.force_authenticate(user)
+        response = self.client.patch(reverse('user_me'), {'full_name': 'Alice'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertEqual(user.full_name, 'Alice')

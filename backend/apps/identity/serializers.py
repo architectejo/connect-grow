@@ -131,6 +131,13 @@ class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
     def validate(self, attrs):
         """Si un téléphone est fourni (à la création ou pour le changer), il doit
         être accompagné d'un code OTP valide (purpose=REGISTER) — CDC 3.1."""
+        if self.instance is not None and 'password' in attrs:
+            # Le mot de passe ne se change que par /change-password/ (ancien mot de passe
+            # exigé) ou par la réinitialisation OTP, jamais par la mise à jour du profil.
+            raise serializers.ValidationError(
+                {'password': "Utilisez « Changer le mot de passe » pour modifier votre mot de passe."}
+            )
+
         phone = attrs.get('phone')
         otp_code = attrs.pop('otp_code', None)
 

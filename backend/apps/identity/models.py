@@ -245,6 +245,10 @@ class KycDocument(BaseModel):
         (DOC_PIECE_GERANT, "Pièce d'identité du gérant"),
     )
 
+    # Types de pièces dont la validation conjointe vaut « entreprise vérifiée » (CDC 3.1).
+    REQUIRED_TYPES = (DOC_RCCM, DOC_ID_NATIONALE, DOC_PIECE_GERANT)
+    REASON_MAX_LENGTH = 500
+
     STATUS_EN_ATTENTE = 'EN_ATTENTE'
     STATUS_VALIDE = 'VALIDE'
     STATUS_REFUSE = 'REFUSE'

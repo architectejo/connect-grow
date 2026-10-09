@@ -1,7 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
 from django.http import FileResponse
-from django.utils import timezone
 from rest_framework import generics, permissions, serializers, status
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework_simplejwt.exceptions import TokenError
@@ -18,7 +17,7 @@ from apps.moderation.services import record_audit
 
 from .kyc_files import EXTENSION_TO_CONTENT_TYPE
 from .permissions import CanReviewKyc
-from .services import revoke_all_sessions, validate_new_password
+from .services import KycError, decide_kyc_document, revoke_all_sessions, validate_new_password
 from .sms import send_otp_sms
 from .throttles import (
     OtpConfirmIpThrottle, OtpConfirmPhoneThrottle, OtpRequestIpThrottle, OtpRequestPhoneThrottle,
@@ -260,45 +259,23 @@ class KycReviewQueueView(generics.ListAPIView):
 
 
 class KycDecisionView(APIView):
-    """Validation ou refus motivé d'une pièce KYC par la modération (CDC 3.11)."""
+    """Validation ou refus motivé d'une pièce KYC par la modération (CDC 3.11).
+
+    Une pièce en attente reçoit une seule décision. Une pièce validée peut être
+    révoquée (REFUSE avec motif) ; une pièce refusée est définitive (le titulaire
+    redépose). Un examinateur ne décide jamais sur sa propre pièce."""
 
     permission_classes = [CanReviewKyc]
 
     def post(self, request, pk):
+        reason = request.data.get('reason', '')
+        if not isinstance(reason, str):
+            return Response({'error': "reason doit être un texte."}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            doc = KycDocument.objects.select_related('business_profile').get(pk=pk)
-        except KycDocument.DoesNotExist:
-            return Response({'error': "Document introuvable."}, status=status.HTTP_404_NOT_FOUND)
-
-        decision = request.data.get('decision')
-        if decision not in (KycDocument.STATUS_VALIDE, KycDocument.STATUS_REFUSE):
-            return Response({'error': "decision doit être VALIDE ou REFUSE."}, status=status.HTTP_400_BAD_REQUEST)
-
-        doc.status = decision
-        doc.rejection_reason = request.data.get('reason', '') if decision == KycDocument.STATUS_REFUSE else ''
-        doc.reviewed_by = request.user
-        doc.reviewed_at = timezone.now()
-        doc.save(update_fields=['status', 'rejection_reason', 'reviewed_by', 'reviewed_at'])
-
-        if decision == KycDocument.STATUS_VALIDE:
-            required_types = {
-                KycDocument.DOC_RCCM, KycDocument.DOC_ID_NATIONALE, KycDocument.DOC_PIECE_GERANT,
-            }
-            validated_types = set(
-                doc.business_profile.kyc_documents
-                .filter(status=KycDocument.STATUS_VALIDE)
-                .values_list('document_type', flat=True)
-            )
-            if required_types.issubset(validated_types):
-                doc.business_profile.is_verified = True
-                doc.business_profile.save(update_fields=['is_verified'])
-
-        record_audit(
-            request.user, f'KYC_{decision}', target=doc,
-            details=doc.rejection_reason or f"Document {doc.get_document_type_display()} validé.",
-        )
-
-        return Response(KycDocumentSerializer(doc).data, status=status.HTTP_200_OK)
+            doc = decide_kyc_document(pk, request.user, request.data.get('decision'), reason.strip())
+        except KycError as exc:
+            return Response({'error': exc.message}, status=exc.status_code)
+        return Response(KycDocumentSerializer(doc, context={'request': request}).data, status=status.HTTP_200_OK)
 
 
 class KycDocumentDownloadView(APIView):

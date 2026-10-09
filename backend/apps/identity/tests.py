@@ -754,3 +754,83 @@ class KycAccessControlTests(APITestCase):
         for name in ('Modérateur', 'Administrateur'):
             codenames = set(Group.objects.get(name=name).permissions.values_list('codename', flat=True))
             self.assertIn('review_kycdocument', codenames, name)
+
+
+class KycDecisionRulesTests(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(email='biz@example.com', password='x', full_name='B', user_type='ENTREPRISE')
+        self.profile = BusinessProfile.objects.create(user=self.owner, business_name='Ma Boutique')
+        self.reviewer = make_kyc_reviewer('rev@example.com')
+        self.client.force_authenticate(self.reviewer)
+
+    def make_doc(self, doc_type=KycDocument.DOC_RCCM, **extra):
+        return KycDocument.objects.create(business_profile=self.profile, document_type=doc_type, **extra)
+
+    def decide(self, doc, decision, reason=None):
+        payload = {'decision': decision}
+        if reason is not None:
+            payload['reason'] = reason
+        return self.client.post(reverse('kyc_decision', args=[doc.pk]), payload, format='json')
+
+    def validate_all(self):
+        docs = [self.make_doc(t) for t in KycDocument.REQUIRED_TYPES]
+        for doc in docs:
+            self.assertEqual(self.decide(doc, 'VALIDE').status_code, status.HTTP_200_OK)
+        return docs
+
+    def test_a_decided_document_cannot_be_decided_again(self):
+        doc = self.make_doc()
+        self.assertEqual(self.decide(doc, 'VALIDE').status_code, status.HTTP_200_OK)
+        self.assertEqual(self.decide(doc, 'VALIDE').status_code, status.HTTP_409_CONFLICT)
+        refused = self.make_doc(KycDocument.DOC_ID_NATIONALE)
+        self.assertEqual(self.decide(refused, 'REFUSE', 'Illisible').status_code, status.HTTP_200_OK)
+        self.assertEqual(self.decide(refused, 'VALIDE').status_code, status.HTTP_409_CONFLICT)
+        refused.refresh_from_db()
+        self.assertEqual(refused.status, KycDocument.STATUS_REFUSE)
+
+    def test_reviewer_cannot_decide_on_own_document(self):
+        own_profile = BusinessProfile.objects.create(user=self.reviewer, business_name='Chez le modérateur')
+        doc = KycDocument.objects.create(business_profile=own_profile, document_type=KycDocument.DOC_RCCM)
+        self.assertEqual(self.decide(doc, 'VALIDE').status_code, status.HTTP_403_FORBIDDEN)
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, KycDocument.STATUS_EN_ATTENTE)
+
+    def test_revoking_a_validated_document_recomputes_verification(self):
+        docs = self.validate_all()
+        self.profile.refresh_from_db()
+        self.assertTrue(self.profile.is_verified)
+        # Révocation sans motif refusée, puis acceptée avec motif.
+        self.assertEqual(self.decide(docs[0], 'REFUSE').status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.decide(docs[0], 'REFUSE', 'Pièce falsifiée').status_code, status.HTTP_200_OK)
+        self.profile.refresh_from_db()
+        self.assertFalse(self.profile.is_verified)
+
+    def test_revoking_the_last_validated_document_leaves_profile_unverified(self):
+        doc = self.make_doc()
+        self.decide(doc, 'VALIDE')
+        self.decide(doc, 'REFUSE', 'Erreur de saisie')
+        self.profile.refresh_from_db()
+        self.assertFalse(self.profile.is_verified)
+
+    def test_reason_is_bounded_and_must_be_text(self):
+        doc = self.make_doc()
+        too_long = 'x' * (KycDocument.REASON_MAX_LENGTH + 1)
+        self.assertEqual(self.decide(doc, 'REFUSE', too_long).status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.decide(doc, 'REFUSE', ['a']).status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.decide(doc, 'REFUSE').status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.decide(doc, 'INCONNU').status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_decision_and_audit_log_are_atomic(self):
+        from apps.moderation.models import AuditLog
+
+        doc = self.make_doc()
+        with mock.patch('apps.moderation.services.record_audit', side_effect=RuntimeError('journal indisponible')):
+            with self.assertRaises(RuntimeError):
+                self.decide(doc, 'VALIDE')
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, KycDocument.STATUS_EN_ATTENTE)
+        self.assertFalse(AuditLog.objects.filter(action='KYC_VALIDE').exists())
+
+    def test_unknown_document_is_404(self):
+        response = self.client.post(reverse('kyc_decision', args=[uuid.uuid4()]), {'decision': 'VALIDE'})
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

@@ -1,6 +1,7 @@
 from django.db.models import Q
 from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from apps.common.exception_handler import CodedAPIException
@@ -23,7 +24,7 @@ class ReviewViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     """Avis après contact (ADR 0004, 7.2). Création, modification et suppression passent par
     `services.py` ; la vue ne porte que la validation du corps et le format d'erreur."""
 
-    throttle_scopes = {'create': 'review'}
+    throttle_scopes = {'create': 'review', 'eligibility': 'review_eligibility'}
     serializer_class = ReviewSerializer
     pagination_class = OptionalPagination
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
@@ -88,6 +89,22 @@ class ReviewViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     def _ensure_author(self, review):
         if review.user_id != self.request.user.id:
             raise CodedAPIException("Vous ne pouvez pas modifier ni supprimer l'avis d'un autre utilisateur.", 'not_author', 403)
+
+    @action(detail=False, methods=['get'])
+    def eligibility(self, request):
+        """Le visiteur peut-il noter cette offre ? Seul le serveur décide (ADR 0004, 7.2). Une offre
+        inconnue ou inaccessible à l'appelant répond 404 `offer_not_found`, sans autre indication."""
+        offer_id = parse_uuid(request.query_params.get('post'))
+        if offer_id is None:
+            raise ValidationError({'post': "Identifiant d'annonce invalide ou manquant."})
+        try:
+            result = services.get_eligibility(request.user, offer_id)
+        except services.ReviewError as exc:
+            raise _api_error(exc)
+        return Response({
+            'can_review': result.can_review, 'reason': result.reason,
+            'available_at': result.available_at, 'review_id': result.review_id,
+        })
 
     @action(detail=True, methods=['post'])
     def reply(self, request, pk=None):

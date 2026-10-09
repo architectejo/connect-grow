@@ -28,6 +28,8 @@ GOOD = {'offer_rating': 4, 'seller_rating': 5, 'content': 'Très bon vendeur, je
 
 class ReviewsTestBase(APITestCase):
     def setUp(self):
+        # Les tests de création ne portent pas sur le délai contact -> avis (tests_eligibility.py).
+        ReviewSettings.objects.filter(pk=ReviewSettings.get_solo().pk).update(delay_after_contact_hours=0)
         city = City.objects.create(name='Kinshasa')
         self.commune = Commune.objects.create(city=city, name='Gombe')
         self.category = Category.objects.create(name='Électronique', slug='electronique')
@@ -391,6 +393,7 @@ class ReviewVisibilityTests(ReviewsTestBase):
 
 class ReviewSettingsTests(ReviewsTestBase):
     def test_defaults_match_the_adr(self):
+        ReviewSettings.objects.all().delete()  # revient aux valeurs par défaut (la base de test les met à 0 h)
         row = ReviewSettings.get_solo()
         self.assertEqual(
             (row.min_reviews_to_display, row.daily_review_limit, row.edit_window_hours,

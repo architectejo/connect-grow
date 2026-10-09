@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from rest_framework.exceptions import APIException
 
+from apps.common.exception_handler import CodedAPIException
 from apps.marketplace import services as marketplace_services
 
 from . import permissions, services
@@ -69,8 +70,10 @@ class ReportSerializer(serializers.ModelSerializer):
         # reste regroupé.
         reporter = self.context['request'].user
         try:
-            services.ensure_can_report(reporter, target_type, resolved[0])
+            services.ensure_can_report(reporter, target_type, resolved[0], attrs.get('reason'))
         except services.ReportRefused as error:
+            if error.code:
+                raise CodedAPIException(str(error), error.code, error.status_code)
             if error.duplicate:
                 raise DuplicateReport(str(error))
             raise serializers.ValidationError({'object_id': str(error)})

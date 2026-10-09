@@ -89,6 +89,12 @@ def commune_exists(commune_id) -> bool:
     return parsed is not None and Commune.objects.filter(id=parsed).exists()
 
 
+def commune_belongs_to_city(commune_id, city_id) -> bool:
+    """Vrai si la commune existe et appartient à cette ville."""
+    commune, city = parse_uuid(commune_id), parse_uuid(city_id)
+    return commune is not None and city is not None and Commune.objects.filter(id=commune, city_id=city).exists()
+
+
 # Plafond de la liste d'identifiants renvoyée pour une clause `IN (...)` côté appelant :
 # SQLite limite le nombre de variables d'une requête, et une ville compte quelques dizaines
 # de communes. Au-delà, il faudra un autre mécanisme (table de zones, pagination).

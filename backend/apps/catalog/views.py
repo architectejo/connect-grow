@@ -1,5 +1,7 @@
 from rest_framework import permissions, viewsets
 
+from apps.moderation.services import record_audit
+
 from .models import Category, City, Commune, ForbiddenItem
 from .serializers import CategorySerializer, CitySerializer, CommuneSerializer, ForbiddenItemSerializer
 
@@ -35,4 +37,16 @@ class ForbiddenItemViewSet(viewsets.ModelViewSet):
         return [permissions.IsAdminUser()]
 
     def perform_create(self, serializer):
-        serializer.save(added_by=self.request.user)
+        item = serializer.save(added_by=self.request.user)
+        record_audit(self.request.user, 'FORBIDDEN_ITEM_CREATED', target=item, details=item.keyword)
+
+    def perform_update(self, serializer):
+        before = serializer.instance.keyword
+        item = serializer.save()
+        record_audit(
+            self.request.user, 'FORBIDDEN_ITEM_UPDATED', target=item, details=f"{before} -> {item.keyword}",
+        )
+
+    def perform_destroy(self, instance):
+        record_audit(self.request.user, 'FORBIDDEN_ITEM_DELETED', target=instance, details=instance.keyword)
+        instance.delete()

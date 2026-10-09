@@ -247,3 +247,39 @@ class CommuneIdCapTests(TestCase):
         with mock.patch.object(services, 'MAX_COMMUNE_IDS', 3):
             self.assertEqual(len(services.get_commune_ids_for_city(city.id)), 3)
             self.assertEqual(len(services.search_commune_ids('Commune')), 3)
+
+
+class ForbiddenItemAuditTests(TestCase):
+    def setUp(self):
+        from apps.moderation.models import AuditLog
+
+        self.AuditLog = AuditLog
+        self.admin = User.objects.create_user(email='a@example.com', password='x', full_name='A', is_staff=True)
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def test_create_update_delete_are_audited(self):
+        created = self.client.post('/api/moderation/forbidden-items/', {'keyword': 'poison'})
+        self.assertEqual(created.status_code, 201)
+        item_id = created.data['id']
+        updated = self.client.patch(f'/api/moderation/forbidden-items/{item_id}/', {'keyword': 'poison fort'})
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(self.client.delete(f'/api/moderation/forbidden-items/{item_id}/').status_code, 204)
+        actions = list(self.AuditLog.objects.filter(actor=self.admin).order_by('created_at').values_list('action', flat=True))
+        self.assertEqual(actions, ['FORBIDDEN_ITEM_CREATED', 'FORBIDDEN_ITEM_UPDATED', 'FORBIDDEN_ITEM_DELETED'])
+
+    def test_admin_site_changes_are_audited(self):
+        from django.contrib import admin as django_admin
+        from django.test import RequestFactory
+
+        from .admin import ForbiddenItemAdmin
+
+        model_admin = ForbiddenItemAdmin(ForbiddenItem, django_admin.site)
+        request = RequestFactory().post('/')
+        request.user = self.admin
+        item = ForbiddenItem(keyword='explosif')
+        model_admin.save_model(request, item, form=None, change=False)
+        model_admin.delete_model(request, item)
+        actions = list(self.AuditLog.objects.filter(actor=self.admin).order_by('created_at').values_list('action', flat=True))
+        self.assertEqual(actions, ['FORBIDDEN_ITEM_CREATED', 'FORBIDDEN_ITEM_DELETED'])
+        self.assertEqual(item.added_by, self.admin)

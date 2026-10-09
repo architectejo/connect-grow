@@ -154,11 +154,22 @@ class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
                 {'password': "Utilisez « Changer le mot de passe » pour modifier votre mot de passe."}
             )
 
+        # Vides normalisés en NULL (l'unicité ne porte que sur les valeurs renseignées).
+        for field in ('email', 'phone'):
+            if field in attrs and not attrs[field]:
+                attrs[field] = None
+        if self.instance is None and not attrs.get('email') and not attrs.get('phone'):
+            raise serializers.ValidationError("Un e-mail ou un numéro de téléphone est obligatoire.")
+
+        self._validate_city_and_commune(attrs)
+
         phone = attrs.get('phone')
         otp_code = attrs.pop('otp_code', None)
 
         self._phone_just_verified = False
-        if phone:
+        # Un numéro inchangé (PATCH /me/ qui renvoie le même numéro) ne redemande pas d'OTP.
+        phone_unchanged = self.instance is not None and phone == self.instance.phone
+        if phone and not phone_unchanged:
             if not otp_code:
                 raise serializers.ValidationError(
                     {'otp_code': "Un code de vérification est requis pour ce numéro de téléphone."}
@@ -173,6 +184,20 @@ class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
             self._phone_just_verified = True
 
         return attrs
+
+    def _validate_city_and_commune(self, attrs):
+        """La commune doit appartenir à la ville (vérifié via catalog.services) et une
+        commune exige une ville. En mise à jour partielle, les valeurs actuelles complètent."""
+        if 'city_id' not in attrs and 'commune_id' not in attrs:
+            return
+        current_city = self.instance.city_id if self.instance else None
+        current_commune = self.instance.commune_id if self.instance else None
+        city_id = attrs['city_id'] if 'city_id' in attrs else current_city
+        commune_id = attrs['commune_id'] if 'commune_id' in attrs else current_commune
+        if commune_id and not city_id:
+            raise serializers.ValidationError({'ville': "Indiquez la ville de la commune."})
+        if commune_id and not catalog_services.commune_belongs_to_city(commune_id, city_id):
+            raise serializers.ValidationError({'commune': "Cette commune n'appartient pas à la ville choisie."})
 
     def create(self, validated_data):
         """

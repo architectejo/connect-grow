@@ -590,3 +590,65 @@ class OtpRequestApiTests(APITestCase):
             self.assertEqual(blocked.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
             # Un autre numéro n'est pas affecté.
             self.assertEqual(self.request_code('+243822222222', 'LOGIN', REMOTE_ADDR='10.0.1.98').status_code, 200)
+
+
+class CityCommuneConsistencyAndRegistrationTests(APITestCase):
+    def setUp(self):
+        self.kin = City.objects.create(name='Kinshasa')
+        self.gombe = Commune.objects.create(city=self.kin, name='Gombe')
+        self.other_city = City.objects.create(name='Matadi')
+
+    def register(self, **extra):
+        data = {'email': 'alice@example.com', 'password': 'cheval-agrafe-pile-47', 'full_name': 'Alice'}
+        data.update(extra)
+        return self.client.post(reverse('register'), data, format='json')
+
+    def test_commune_must_belong_to_the_city(self):
+        ok = self.register(ville=str(self.kin.id), commune=str(self.gombe.id))
+        self.assertEqual(ok.status_code, status.HTTP_201_CREATED, ok.data)
+        bad = self.register(email='b@example.com', ville=str(self.other_city.id), commune=str(self.gombe.id))
+        self.assertEqual(bad.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('commune', bad.data)
+
+    def test_commune_requires_a_city(self):
+        response = self.register(commune=str(self.gombe.id))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('ville', response.data)
+
+    def test_patch_checks_against_current_values(self):
+        user = User.objects.create_user(
+            email='p@example.com', password='x', full_name='P', city_id=self.kin.id, commune_id=self.gombe.id,
+        )
+        self.client.force_authenticate(user)
+        response = self.client.patch(reverse('user_me'), {'ville': str(self.other_city.id)}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.client.patch(reverse('user_me'), {'ville': None, 'commune': None}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+    def test_registration_without_email_or_phone_is_400_not_500(self):
+        response = self.client.post(reverse('register'), {'password': 'cheval-agrafe-pile-47', 'full_name': 'X'})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.client.post(
+            reverse('register'), {'email': '', 'password': 'cheval-agrafe-pile-47', 'full_name': 'X'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_me_with_unchanged_phone_does_not_ask_for_otp(self):
+        user = User.objects.create_user(phone='+243811111111', password='x', full_name='P')
+        self.client.force_authenticate(user)
+        response = self.client.patch(
+            reverse('user_me'), {'phone': '+243811111111', 'full_name': 'Nouveau'}, format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        # Un numéro différent exige toujours un code.
+        response = self.client.patch(reverse('user_me'), {'phone': '+243822222222'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('otp_code', response.data)
+
+    def test_sms_gateway_failure_keeps_a_uniform_200(self):
+        User.objects.create_user(phone='+243811111111', password='x', full_name='E')
+        with mock.patch('apps.identity.views.send_otp_sms', side_effect=NotImplementedError('pas de passerelle')), \n                self.assertLogs('apps.identity.views', level='ERROR'):
+            known = self.client.post(reverse('otp_request'), {'phone': '+243811111111', 'purpose': 'LOGIN'})
+            unknown = self.client.post(reverse('otp_request'), {'phone': '+243899999999', 'purpose': 'LOGIN'})
+        self.assertEqual((known.status_code, unknown.status_code), (200, 200))
+        self.assertEqual(known.data, unknown.data)

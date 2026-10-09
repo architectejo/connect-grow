@@ -129,6 +129,7 @@ REST_FRAMEWORK = {
         # (voir apps/identity/throttles.py : FailureLimiter).
         'login': '60/hour',
         'refresh': '60/hour',       # renouvellement de jeton, par IP
+        'logout': '60/hour',        # déconnexion (publique), par IP
         'change_password': '10/hour',  # par utilisateur
         'kyc_write': '20/hour',     # dépôt/suppression de pièces KYC, par utilisateur
         # Écritures du marketplace et des interactions (par utilisateur ; par IP pour la vue anonyme).
@@ -169,6 +170,9 @@ CORS_ALLOWED_ORIGINS = [
 
 # 2. Obligatoire pour withCredentials: true (cookies)
 CORS_ALLOW_CREDENTIALS = True
+
+# Le front doit pouvoir lire Retry-After sur les réponses 429 (appels inter-origines).
+CORS_EXPOSE_HEADERS = ['Retry-After']
 
 # 3. Assure-toi que ces méthodes sont autorisées
 CORS_ALLOW_METHODS = [

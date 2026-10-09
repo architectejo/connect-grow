@@ -21,3 +21,21 @@ class BaseModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+class SingletonSettingsModel(BaseModel):
+    """Ligne de réglages unique, modifiable dans le back-office (règle 11).
+
+    L'identifiant est constant (`SINGLETON_ID`) : deux créations simultanées de la ligne
+    se résolvent en une seule, sans contrainte d'unicité conditionnelle (portable MySQL).
+    """
+
+    SINGLETON_ID = uuid.UUID(int=1)
+
+    class Meta:
+        abstract = True
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=cls.SINGLETON_ID)
+        return obj

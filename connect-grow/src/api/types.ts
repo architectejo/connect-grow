@@ -46,15 +46,17 @@ export interface PublicBusiness {
 
 export interface User {
     id: Uuid;
-    email: string;
+    /** Null pour un compte inscrit par téléphone. */
+    email: string | null;
     full_name: string;
     photo?: string | null;
     user_type: UserType;
-    phone?: string;
+    /** Null pour un compte inscrit par e-mail. */
+    phone?: string | null;
     ville?: Uuid | null;
-    ville_name?: string;
+    ville_name?: string | null;
     commune?: Uuid | null;
-    commune_name?: string;
+    commune_name?: string | null;
     business_profile?: BusinessProfile | null;
     date_joined?: string;
     phone_verified?: boolean;
@@ -116,6 +118,8 @@ export interface Post {
     /** Note du contexte vendeur de l'offre ; jamais fusionnée avec la note de l'offre. */
     seller_rating?: RatingSummary;
     shares_count?: number;
+    /** Réservé au vendeur : l'offre est masquée par la modération. */
+    is_hidden_by_moderation?: boolean;
 }
 
 export interface Category {
@@ -183,12 +187,11 @@ export interface Review {
     is_post_owner?: boolean;
     /** Vrai tant que l'auteur peut modifier ou supprimer son avis (fenêtre ouverte, ni masqué, ni signalé, sans réponse du vendeur). */
     can_edit?: boolean;
-    /**
-     * Identifiant du signalement « contact fictif » ouvert qui conteste cet avis. Réservé à l'auteur ;
-     * ABSENT du backend actuel (à ajouter, voir rapport L0-10) : le recours reste masqué tant qu'il manque.
-     */
+    /** Vrai tant que l'auteur peut supprimer son avis (mêmes conditions que can_edit). */
+    can_delete?: boolean;
+    /** Identifiant du signalement « contact fictif » ouvert qui conteste cet avis. Réservé à l'auteur ; null sinon. */
     contest_report_id?: Uuid | null;
-    /** Vrai si l'auteur a déjà répondu au signalement (une seule réponse). Même réserve que ci-dessus. */
+    /** Vrai si l'auteur a déjà répondu au signalement (une seule réponse). Réservé à l'auteur. */
     contest_responded?: boolean;
 }
 
@@ -256,6 +259,8 @@ export type NotificationType = "COMMENT" | "CONTACT" | "EXCHANGE" | "MESSAGE" | 
 
 export interface AppNotification {
     id: Uuid;
+    /** Destinataire (identifiant de l'utilisateur connecté). */
+    user?: Uuid;
     notification_type: NotificationType;
     title: string;
     content: string;

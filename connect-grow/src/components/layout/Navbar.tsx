@@ -17,6 +17,7 @@ import NotificationDropdown from "@/components/landing/NotificationDropdown";
 import { ModeToggle } from "@/components/mode-toggle";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
+import { userContactLine } from "@/lib/user-contact";
 import { Logo } from "./Logo";
 
 const primaryLinks = [
@@ -105,7 +106,7 @@ const Navbar = () => {
                     <UserAvatar src={avatarSrc} name={displayName} size="sm" />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-foreground">{displayName}</p>
-                      <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
+                      <p className="truncate text-xs text-muted-foreground">{userContactLine(user)}</p>
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
@@ -171,7 +172,7 @@ const Navbar = () => {
                   <UserAvatar src={avatarSrc} name={displayName} size="md" />
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-foreground">{displayName}</p>
-                    <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
+                    <p className="truncate text-xs text-muted-foreground">{userContactLine(user)}</p>
                   </div>
                 </div>
               )}

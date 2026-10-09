@@ -55,10 +55,10 @@ const POST = {
 const REVIEW = {
   id: "uuid", post: "uuid|null", is_mine: "bool", user_name: "str", offer_rating: "num", seller_rating: "num", content: "str",
   source: "str", "reply_content?": "str|null", "reply_at?": "date|null", created_at: "date", "edited_at?": "date|null",
-  "is_post_owner?": "bool", "can_edit?": "bool", "contest_report_id?": "uuid|null", "contest_responded?": "bool",
+  "is_post_owner?": "bool", "can_edit?": "bool", "can_delete?": "bool", "contest_report_id?": "uuid|null", "contest_responded?": "bool",
 };
 const ELIGIBILITY = { can_review: "bool", reason: "str|null", available_at: "date|null", review_id: "uuid|null" };
-const NOTIFICATION = { id: "uuid", notification_type: "str", title: "str", content: "str", "link?": "str|null", is_read: "bool", created_at: "date" };
+const NOTIFICATION = { id: "uuid", "user?": "uuid", notification_type: "str", title: "str", content: "str", "link?": "str|null", is_read: "bool", created_at: "date" };
 const KYC = {
   id: "uuid", document_type: "str", "download_url?": "str|null", status: "str", "rejection_reason?": "str", created_at: "date",
   "reviewed_at?": "date|null",
@@ -68,8 +68,8 @@ const BUSINESS = {
   "commune_name?": "str|null", is_verified: "bool",
 };
 const USER = {
-  id: "uuid", email: "str", full_name: "str", "photo?": "str|null", user_type: "str", "phone?": "str", "ville?": "uuid|null",
-  "ville_name?": "str", "commune?": "uuid|null", "commune_name?": "str", "business_profile?": "obj|null", "date_joined?": "date",
+  id: "uuid", email: "str|null", full_name: "str", "photo?": "str|null", user_type: "str", "phone?": "str|null", "ville?": "uuid|null",
+  "ville_name?": "str|null", "commune?": "uuid|null", "commune_name?": "str|null", "business_profile?": "obj|null", "date_joined?": "date",
   "phone_verified?": "bool",
 };
 const PAGE = { count: "num", next: "str|null", previous: "str|null", results: "list" };
@@ -132,23 +132,10 @@ describe("contrat backend -> types.ts (réponses réelles du lot 0)", () => {
     for (const key of ["phone", "email", "nif", "full_name", "date_joined"]) expect(business).not.toHaveProperty(key);
   });
 
-  it("User : toutes les clés requises présentes, e-mail, téléphone et noms de localisation pouvant être null", () => {
-    const relaxed = { ...USER, email: "str|null", "phone?": "str|null", "ville_name?": "str|null", "commune_name?": "str|null" };
-    expect(mismatches(f.me_business as Row, relaxed)).toEqual([]);
-    expect(mismatches(f.me_phone_only as Row, relaxed)).toEqual([]);
-    expect(f.me_phone_only).toMatchObject({ email: null, ville_name: null, commune_name: null });
-  });
-
-  // ANOMALIE R0-02 (mineure) : types.ts déclare `email: string`, `phone?: string`, `ville_name?: string` et
-  // `commune_name?: string`, mais l'API renvoie null pour un compte sans e-mail (inscrit par téléphone), sans
-  // téléphone (inscrit par e-mail) ou sans localisation. `it.fails` garde le test vert tant que l'écart existe
-  // et le passe au rouge dès qu'il est corrigé (retirer alors le `.fails`).
-  it.fails("R0-02 : User conforme à types.ts tel que déclaré (compte par téléphone)", () => {
-    expect(mismatches(f.me_phone_only as Row, USER)).toEqual([]);
-  });
-
-  it.fails("R0-02 : User conforme à types.ts tel que déclaré (compte par e-mail)", () => {
+  it("User : e-mail, téléphone et noms de localisation pouvant être null (R0-02)", () => {
     expect(mismatches(f.me_business as Row, USER)).toEqual([]);
+    expect(mismatches(f.me_phone_only as Row, USER)).toEqual([]);
+    expect(f.me_phone_only).toMatchObject({ email: null, ville_name: null, commune_name: null });
   });
 
   it("ConversationItem : last_message présent, post et participant sans coordonnées", () => {

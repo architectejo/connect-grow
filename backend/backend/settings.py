@@ -138,9 +138,10 @@ CORS_ALLOW_METHODS = [
 # --- BASE DE DONNÉES & SÉCURITÉ ---
 # L'utilisation de l'ORM Django protège déjà nativement contre les Injections SQL
 #
-# CDC 2.5 : SQLite en développement, MySQL 8+ (InnoDB, utf8mb4, mode SQL strict)
-# en recette/CI et en production. Le moteur est choisi par DB_ENGINE dans .env
-# ('sqlite' par défaut, 'mysql' en recette/CI/prod) — jamais codé en dur (2.5, 4.7).
+# CDC 2.5 et ADR 0001 : SQLite seul dans tous les environnements jusqu'à la fin du
+# projet. Le moteur est choisi par DB_ENGINE dans .env ('sqlite' par défaut).
+# La branche 'mysql' ci-dessous est réservée à la tâche F-01 (requirements-mysql.txt) :
+# code non testé, ne pas l'activer avant F-01.
 if os.getenv('DB_ENGINE', 'sqlite') == 'mysql':
     DATABASES = {
         'default': {
@@ -162,6 +163,9 @@ else:
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / os.getenv('DB_NAME', 'db.sqlite3'),
+            # Le serveur et le cron écrivent dans le même fichier : on attend jusqu'à
+            # 20 s un verrou d'écriture avant « database is locked » (défaut : 5 s).
+            'OPTIONS': {'timeout': 20},
         }
     }
 

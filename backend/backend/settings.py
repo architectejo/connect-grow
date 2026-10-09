@@ -105,6 +105,8 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    # Erreurs hors champ : {"detail", "code"} (ADR 0004, section 7).
+    'EXCEPTION_HANDLER': 'apps.common.exception_handler.exception_handler',
     # Refus par défaut : toute vue publique déclare explicitement AllowAny.
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -143,7 +145,6 @@ REST_FRAMEWORK = {
         'message': '120/hour',
         'review': '10/hour',
         'report': '10/hour',        # signalements, par utilisateur
-        'deal': '10/hour',
         'offer_upload': '30/hour',  # création / modification d'offre et envoi de photos
         'favorite': '60/hour',
         'offer_view_anon': '300/hour',  # consultation anonyme d'une offre, par IP

@@ -54,6 +54,16 @@ describe("ReviewEligibilityPanel", () => {
     expect(screen.getByText(/à partir du 10 octobre.*14:05/)).toBeInTheDocument();
   });
 
+  it("compte trop récent : donne la date d'ouverture à l'heure de Kinshasa", () => {
+    renderPanel({ eligibility: refusal("account_too_new", { available_at: "2026-10-10T13:05:00Z" }) });
+    expect(screen.getByText(/compte est trop récent.*à partir du 10 octobre.*14:05/)).toBeInTheDocument();
+  });
+
+  it("compte trop récent sans date : message sans date", () => {
+    renderPanel({ eligibility: refusal("account_too_new") });
+    expect(screen.getByText(/compte est trop récent.*un peu plus tard/)).toBeInTheDocument();
+  });
+
   it("propriétaire de l'offre : rien n'est proposé", () => {
     const { container } = renderPanel({ eligibility: refusal("own_offer") });
     expect(container).toBeEmptyDOMElement();

@@ -10,6 +10,10 @@ const KNOWN_CODES = [
   "not_eligible",
   "contact_rejected",
   "review_too_early",
+  "account_too_new",
+  "report_already_rejected",
+  "already_responded",
+  "report_closed",
   "already_reviewed",
   "review_recently_deleted",
   "offer_unavailable",
@@ -34,8 +38,18 @@ export function humanizeSeconds(seconds: number): string {
  * Message en français d'une erreur de l'API des avis. Le front se fonde sur `code` (ADR 0004 §7.2),
  * jamais sur le texte du serveur. Les erreurs de champs (400) et les cas inconnus passent par apiErrorMessage.
  */
-export function reviewErrorMessage(error: unknown): string {
+export function reviewErrorMessage(error: unknown, action?: "delete"): string {
   const code = apiErrorCode(error);
+
+  // DELETE refusé alors que PATCH reste permis : l'explication porte sur la suppression seulement
+  if (action === "delete" && code === "review_locked") return i18n.t("reviews.errors.review_locked_delete");
+
+  if (httpStatus(error) === 429 && code === "report_daily_limit") {
+    const seconds = retryAfterSeconds(error);
+    return seconds === undefined
+      ? i18n.t("reviews.errors.report_daily_limit")
+      : i18n.t("reviews.errors.report_daily_limit_retry", { duration: humanizeSeconds(seconds) });
+  }
 
   if (httpStatus(error) === 429 && code === "daily_limit") {
     const seconds = retryAfterSeconds(error);

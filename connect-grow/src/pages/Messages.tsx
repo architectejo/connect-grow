@@ -48,8 +48,8 @@ const Messages = () => {
 
                 const convRes = await apiClient.get("interactions/conversations/");
                 setConversations(convRes.data);
-            } catch (error) {
-                console.error("Erreur chargement messages:", error);
+            } catch {
+                console.error("Erreur chargement messages");
             } finally {
                 setIsLoading(false);
             }
@@ -64,8 +64,8 @@ const Messages = () => {
                 try {
                     const res = await apiClient.get(`interactions/messages/?conversation=${activeConv.id}`);
                     setMessages(res.data);
-                } catch (error) {
-                    console.error("Erreur messages:", error);
+                } catch {
+                    console.error("Erreur chargement des messages de la conversation");
                 }
             };
             
@@ -103,8 +103,8 @@ const Messages = () => {
                 ? { ...c, last_message: { content: newMessage, created_at: new Date() } }
                 : c
             ));
-        } catch (error) {
-            console.error("Erreur envoi:", error);
+        } catch {
+            console.error("Erreur envoi du message");
         } finally {
             setIsSending(false);
         }

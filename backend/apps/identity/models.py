@@ -296,3 +296,63 @@ class KycDocument(BaseModel):
 
     def __str__(self):
         return f"{self.get_document_type_display()} — {self.business_profile.business_name} ({self.status})"
+
+
+# Version courante du texte de consentement au contact (ADR 0005, C4). Provisoire (LEG-PRV-03).
+CONTACT_CONSENT_TEXT_VERSION = '2026-10-v1'
+
+
+class ContactPoint(BaseModel):
+    """Numéro de contact d'un compte, distinct du numéro de connexion (ADR 0005, C1 et C3).
+
+    Donnée personnelle : jamais exposée par l'API de liste ni par les événements ; seul
+    `identity.services.get_contact_endpoint` le lit, pour un canal consenti. Pas d'unicité sur le
+    numéro (un numéro d'entreprise peut être partagé entre comptes)."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='contact_point')
+    phone = models.CharField(max_length=20, validators=[phone_validator])
+    is_verified = models.BooleanField(default=False)
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        # Jamais le numéro dans les représentations (logs, admin).
+        return f"Numéro de contact de {self.user_id}"
+
+
+class ContactConsent(BaseModel):
+    """Accord d'un compte pour un canal de contact (ADR 0005, C2 et C4). Unique par compte et canal ;
+    l'unicité est inconditionnelle (portable MySQL). Les lignes manquantes valent « désactivé »
+    (sauf MESSAGE), créées à la demande par le service."""
+
+    CHANNEL_MESSAGE = 'MESSAGE'
+    CHANNEL_CALL = 'CALL'
+    CHANNEL_WHATSAPP = 'WHATSAPP'
+    CHANNEL_CHOICES = (
+        (CHANNEL_MESSAGE, "Message"),
+        (CHANNEL_CALL, "Appel"),
+        (CHANNEL_WHATSAPP, "WhatsApp"),
+    )
+    REVOKED_USER = 'user'
+    REVOKED_PHONE_CHANGED = 'phone_changed'
+    REVOKED_MODERATION = 'moderation'
+    REVOKED_REASON_CHOICES = (
+        (REVOKED_USER, "Retrait par l'utilisateur"),
+        (REVOKED_PHONE_CHANGED, "Numéro modifié"),
+        (REVOKED_MODERATION, "Modération"),
+    )
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='contact_consents')
+    channel = models.CharField(max_length=10, choices=CHANNEL_CHOICES)
+    is_granted = models.BooleanField(default=False)
+    text_version = models.CharField(max_length=20, blank=True, default='')
+    granted_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    # Preuve d'accord : 4 derniers chiffres du numéro couvert (le numéro complet reste dans ContactPoint).
+    phone_last4 = models.CharField(max_length=4, blank=True, default='')
+    revoked_reason = models.CharField(max_length=20, blank=True, default='', choices=REVOKED_REASON_CHOICES)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'channel'], name='contact_consent_user_channel_uniq')]
+
+    def __str__(self):
+        return f"Consentement {self.channel} de {self.user_id}"

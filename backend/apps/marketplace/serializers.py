@@ -265,6 +265,8 @@ class _OfferMessageSerializer(serializers.ModelSerializer):
 class ContactEventSerializer(_OfferMessageSerializer):
     class Meta(_OfferMessageSerializer.Meta):
         model = ContactEvent
+        # Le modèle accepte un message vide (CALL/WHATSAPP) ; ce point d'entrée ne crée que des MESSAGE.
+        extra_kwargs = {'message': {'required': True, 'allow_blank': False}}
 
 
 class ExchangeProposalSerializer(_OfferMessageSerializer):

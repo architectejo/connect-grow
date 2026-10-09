@@ -36,6 +36,20 @@ class MarketplaceSettings(SingletonSettingsModel):
         help_text="Heures (8760 au plus) pendant lesquelles un même expéditeur ne peut contacter deux fois la même annonce.",
     )
 
+    # Révélation du numéro de contact (ADR 0005, C9) : plafonds sur 24 h glissantes, par compte.
+    reveal_daily_limit_account = models.PositiveIntegerField(
+        default=15, validators=[MinValueValidator(1), MaxValueValidator(1000)],
+        help_text="Nombre de numéros qu'un compte peut obtenir en 24 h (1 à 1000).",
+    )
+    reveal_daily_limit_new_account = models.PositiveIntegerField(
+        default=3, validators=[MinValueValidator(1), MaxValueValidator(1000)],
+        help_text="Même plafond pour un compte neuf (1 à 1000).",
+    )
+    new_account_hours = models.PositiveIntegerField(
+        default=24, validators=[MaxValueValidator(720)],
+        help_text="Ancienneté (en heures, 0 à 720) en dessous de laquelle un compte est considéré comme neuf.",
+    )
+
     class Meta:
         verbose_name = "Paramètres de la marketplace"
         verbose_name_plural = "Paramètres de la marketplace"
@@ -226,14 +240,21 @@ class ContactEvent(BaseModel):
 
     offer = models.ForeignKey(Offer, on_delete=models.CASCADE, related_name='contact_events')
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sent_contacts')
-    message = models.TextField(validators=[MaxLengthValidator(2000)])
+    # Obligatoire pour MESSAGE (contrôlé au serializer) ; vide pour CALL et WHATSAPP (ADR 0005, 3.3).
+    message = models.TextField(blank=True, default='', validators=[MaxLengthValidator(2000)])
     channel = models.CharField(max_length=10, choices=CHANNEL_CHOICES, default=CHANNEL_MESSAGE)
     # Ce contact entre dans l'engagement (une fois par expéditeur, offre et fenêtre, tous canaux
     # confondus) ; la logique de marquage est portée par le classement (ADR 0004, 6.3).
     is_counted = models.BooleanField(default=True)
+    # Preuve que le contact a réellement abouti (ADR 0005, C10) : message posé dans la conversation,
+    # ou numéro remis pour CALL/WHATSAPP. Nul tant que la preuve manque.
+    delivered_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        indexes = [models.Index(fields=['offer', 'created_at'], name='contact_offer_created')]
+        indexes = [
+            models.Index(fields=['offer', 'created_at'], name='contact_offer_created'),
+            models.Index(fields=['sender', 'channel', 'created_at'], name='contact_sender_channel_created'),
+        ]
 
     def __str__(self):
         return f"Contact de {self.sender_id} pour {self.offer_id}"

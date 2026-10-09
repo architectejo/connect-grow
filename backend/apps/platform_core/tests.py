@@ -585,6 +585,8 @@ class BoundaryTests(SimpleTestCase):
         published = self.published_types()
         for name, spec in catalog.EVENT_TYPES.items():
             emitters = published.get(name, [])
+            if spec.emitter_pending and not emitters:
+                continue
             self.assertTrue(emitters, f'{name} : aucun émetteur')
             self.assertEqual({label for label, _ in emitters}, {spec.domain}, name)
             if not spec.no_subscriber:

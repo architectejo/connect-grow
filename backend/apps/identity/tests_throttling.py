@@ -42,14 +42,70 @@ class LoginFailureLimiterTests(TestCase):
             self.assertEqual(self.login(ip=f'10.2.0.{i}').status_code, 401)
         self.assertEqual(self.login(PASSWORD, ip='10.2.1.1').status_code, 200)
 
-    def test_wide_identifier_ceiling_is_daily_and_still_exists(self):
-        limits = [('pair', 5, 900), ('identifier', 12, 86400)]
-        with mock.patch.object(views.LOGIN_FAILURES, 'limits', limits):
-            for i in range(12):
-                self.assertEqual(self.login(ip=f'10.3.0.{i}').status_code, 401)
-            blocked = self.login(PASSWORD, ip='10.3.1.1')
-        self.assertEqual(blocked.status_code, 429)
-        self.assertLessEqual(int(blocked['Retry-After']), 86400)
+    def test_delay_grows_with_each_tier_of_failures_and_expires(self):
+        clock = {'now': 1_000_000.0}
+        with mock.patch('apps.identity.throttles.time.time', lambda: clock['now']):
+            for _ in range(5):
+                self.assertEqual(self.login().status_code, 401)
+            first = self.login()
+            self.assertEqual(first.status_code, 429)
+            self.assertEqual(int(first['Retry-After']), 15 * 60)
+            clock['now'] += 15 * 60 + 1          # délai écoulé : une tentative est de nouveau permise
+            self.assertEqual(self.login().status_code, 401)   # 6e échec : verrou de nouveau (palier 1)
+            self.assertEqual(self.login().status_code, 429)
+            clock['now'] += 15 * 60 + 1
+            for _ in range(4):                    # échecs 7 à 10, un par délai écoulé
+                self.assertEqual(self.login().status_code, 401)
+                self.assertEqual(self.login().status_code, 429)
+                clock['now'] += 15 * 60 + 1
+            # 10 échecs au total : palier suivant. Le délai de 30 min court depuis le dernier échec ;
+            # 15 min + 1 s se sont écoulées, il reste donc 15 min - 1 s.
+            still_locked = self.login()
+            self.assertEqual(still_locked.status_code, 429)
+            self.assertEqual(int(still_locked['Retry-After']), 30 * 60 - (15 * 60 + 1))
+            clock['now'] += 15 * 60
+            self.assertEqual(self.login().status_code, 401)
+
+    def test_second_tier_doubles_the_delay_and_is_capped(self):
+        from .throttles import FailureLimiter
+
+        limiter = FailureLimiter('t', threshold=5, base_delay=900, max_delay=3600)
+        self.assertEqual([limiter.delay_for(n) for n in (5, 9, 10, 15, 20, 100)], [900, 900, 1800, 3600, 3600, 3600])
+
+    def test_a_third_party_on_other_ips_never_extends_the_victims_delay(self):
+        for i in range(30):
+            self.login(ip=f'10.9.1.{i}')
+        self.assertEqual(self.login(PASSWORD, ip='10.9.2.1').status_code, 200)
+
+    def test_spelling_variants_share_the_same_counter(self):
+        for variant in ('victime@example.com', 'Victime@Example.com', ' VICTIME@example.COM '):
+            self.assertEqual(self.login(email=variant).status_code, 401)
+        self.assertEqual(self.login(email='victime@EXAMPLE.com').status_code, 401)
+        self.assertEqual(self.login(email='VICTIME@example.com').status_code, 401)
+        self.assertEqual(self.login(email='victime@example.com').status_code, 429)
+
+    def test_phone_spelling_variants_share_the_same_counter(self):
+        from .views import failure_key
+
+        request = self.request_for()
+        keys = {
+            failure_key(request, v)
+            for v in ('+243810000000', '243810000000', '+243 81 000 0000', '0024381-000-0000', '(+243) 810.000.000')
+        }
+        self.assertEqual(len(keys), 1)
+
+    def request_for(self, ip='10.1.0.1'):
+        return Request(APIRequestFactory().post('/', REMOTE_ADDR=ip))
+
+    def test_failure_counter_is_atomic_under_concurrency(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from .throttles import FailureLimiter
+
+        limiter = FailureLimiter('atomic')
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(lambda _: limiter.failure('k'), range(40)))
+        self.assertEqual(cache.get('fail:atomic:k'), 40)
 
     def test_only_failures_count_and_success_resets(self):
         for _ in range(4):
@@ -166,14 +222,31 @@ class ResetConfirmFailureTests(TestCase):
         _, code = OtpCode.issue(self.PHONE, OtpCode.PURPOSE_PASSWORD_RESET)
         self.assertEqual(self.confirm(int(code) if not code.startswith('0') else code).status_code, 200)
 
-    def test_similarity_validator_uses_the_account_without_burning_the_otp(self):
-        User.objects.filter(pk=self.user.pk).update(email='jean.dupont@example.com', full_name='Jean Dupont')
+    def test_generic_weak_password_does_not_burn_the_otp(self):
         otp, code = OtpCode.issue(self.PHONE, OtpCode.PURPOSE_PASSWORD_RESET)
-        response = self.confirm(code, new_password='jean.dupont@example.com')
+        response = self.confirm(code, new_password='12345678901')
         self.assertEqual(response.status_code, 400)
         otp.refresh_from_db()
         self.assertFalse(otp.is_used)
         self.assertEqual(otp.attempts, 0)
+
+    def test_similarity_to_the_account_is_checked_only_after_the_otp(self):
+        User.objects.filter(pk=self.user.pk).update(email='jean.dupont@example.com', full_name='Jean Dupont')
+        _, code = OtpCode.issue(self.PHONE, OtpCode.PURPOSE_PASSWORD_RESET)
+        similar = 'jean.dupont@example.com'
+        # Sans code valide : « code invalide », jamais le message de similarité (pas d'oracle).
+        wrong = self.confirm('000000', new_password=similar)
+        self.assertEqual(wrong.data['error'], 'Code invalide ou expiré.')
+        # Avec le bon code, le titulaire apprend que son mot de passe ressemble à son compte.
+        right = self.confirm(code, new_password=similar)
+        self.assertEqual(right.status_code, 400)
+        self.assertNotEqual(right.data['error'], 'Code invalide ou expiré.')
+
+    def test_response_is_identical_for_existing_and_unknown_numbers(self):
+        User.objects.filter(pk=self.user.pk).update(email='jean.dupont@example.com', full_name='Jean Dupont')
+        known = self.confirm('000000', new_password='jean.dupont@example.com')
+        unknown = self.confirm('000000', new_password='jean.dupont@example.com', phone='+243899999999', ip='10.7.9.9')
+        self.assertEqual((known.status_code, known.data), (unknown.status_code, unknown.data))
 
 
 @override_settings(CACHES=LOCMEM_CACHE)

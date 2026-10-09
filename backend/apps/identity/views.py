@@ -17,6 +17,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from apps.common.pagination import StandardPagination
 from apps.moderation.services import record_audit
 
+from .identifiers import normalize_identifier
 from .kyc_files import EXTENSION_TO_CONTENT_TYPE
 from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
 from .permissions import CanReviewKyc
@@ -27,29 +28,28 @@ from .services import KycError, decide_kyc_document, revoke_all_sessions, valida
 from .sms import send_otp_sms
 from .throttles import (
     ChangePasswordThrottle, FailureLimiter, KycWriteThrottle, LoginIpThrottle, OtpConfirmIpThrottle,
-    OtpRequestIpThrottle, OtpRequestPhoneThrottle, RefreshIpThrottle,
+    OtpRequestIpThrottle, OtpRequestPhoneDailyThrottle, OtpRequestPhoneThrottle, RefreshIpThrottle,
 )
 
 logger = logging.getLogger(__name__)
 
-# Plafonds d'échecs : (clé, nombre d'échecs, fenêtre en secondes). Le couple identifiant+IP est
-# serré ; l'identifiant seul est large (journalier) pour qu'un tiers ne puisse pas verrouiller
-# la victime avec quelques requêtes depuis des adresses différentes.
-LOGIN_FAILURES = FailureLimiter('login', [('pair', 5, 15 * 60), ('identifier', 100, 24 * 3600)])
-RESET_FAILURES = FailureLimiter('reset', [('pair', 5, 15 * 60), ('identifier', 30, 24 * 3600)])
+# Échecs de connexion / de confirmation de reset : délai croissant par couple identifiant+IP.
+LOGIN_FAILURES = FailureLimiter('login')
+RESET_FAILURES = FailureLimiter('reset')
 
 
 def _digest(value):
     return hashlib.sha256(value.encode('utf-8')).hexdigest()[:32]
 
 
-def failure_keys(request, identifier):
-    """Clés de FailureLimiter pour (identifiant, IP), ou None sans identifiant exploitable."""
+def failure_key(request, identifier):
+    """Clé du couple (identifiant normalisé, IP), ou None sans identifiant exploitable.
+    L'identifiant est normalisé (casse, séparateurs, indicatif) pour qu'on ne contourne pas
+    le plafond en variant l'écriture."""
     if not isinstance(identifier, str) or not identifier.strip():
         return None
-    identifier = identifier.strip().lower()
     ip = LoginIpThrottle().get_ident(request)
-    return {'pair': _digest(f"{identifier}|{ip}"), 'identifier': _digest(identifier)}
+    return _digest(f"{normalize_identifier(identifier)}|{ip}")
 
 
 def as_text(value):
@@ -74,7 +74,7 @@ class LoginView(TokenObtainPairView):
 
     def post(self, request, *args, **kwargs):
         data = request.data if hasattr(request.data, 'get') else {}
-        keys = failure_keys(request, data.get('email') or data.get('phone'))
+        keys = failure_key(request, data.get('email') or data.get('phone'))
         if keys:
             LOGIN_FAILURES.check(keys)
         try:
@@ -209,7 +209,7 @@ class OtpRequestView(APIView):
     d'énumération de comptes) : le code n'est émis que si la demande est cohérente."""
 
     permission_classes = [permissions.AllowAny]
-    throttle_classes = [OtpRequestIpThrottle, OtpRequestPhoneThrottle]
+    throttle_classes = [OtpRequestIpThrottle, OtpRequestPhoneThrottle, OtpRequestPhoneDailyThrottle]
 
     def post(self, request):
         phone = request.data.get('phone', '')
@@ -263,17 +263,18 @@ class PasswordResetConfirmView(APIView):
                 {'error': "phone, code et new_password sont requis."}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        keys = failure_keys(request, phone)
+        keys = failure_key(request, phone)
         RESET_FAILURES.check(keys)
 
-        # Mot de passe contrôlé AVANT de consommer le code, avec l'utilisateur (similarité) :
-        # un mot de passe refusé ne brûle pas l'OTP.
-        user = User.objects.filter(phone=phone).first()
+        # Contrôle générique du mot de passe AVANT de consommer le code : identique que le
+        # compte existe ou non (aucun oracle d'existence), et un mot de passe trivial ne brûle
+        # pas l'OTP.
         try:
-            validate_new_password(new_password, user)
+            validate_new_password(new_password)
         except serializers.ValidationError as exc:
             return password_error(exc)
 
+        user = User.objects.filter(phone=phone).first()
         otp = (
             OtpCode.objects.filter(phone=phone, purpose=OtpCode.PURPOSE_PASSWORD_RESET, is_used=False)
             .order_by('-created_at')
@@ -282,6 +283,13 @@ class PasswordResetConfirmView(APIView):
         if not otp or not otp.verify(code) or not user:
             RESET_FAILURES.failure(keys)
             return Response({'error': "Code invalide ou expiré."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Code valide : seul le titulaire arrive ici ; la similarité avec ses données
+        # (e-mail, nom...) peut maintenant être contrôlée sans rien révéler à un tiers.
+        try:
+            validate_new_password(new_password, user)
+        except serializers.ValidationError as exc:
+            return password_error(exc)
 
         user.set_password(new_password)
         user.save(update_fields=['password'])

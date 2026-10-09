@@ -17,7 +17,7 @@ from .kyc_files import kyc_upload_to
 
 # CDC 2.3 : numéros togolais... congolais au format +243 suivi de 9 chiffres.
 phone_validator = RegexValidator(
-    regex=r'^\+243\d{9}$',
+    regex=r'^\+243[0-9]{9}\Z',  # \Z et [0-9] : ni saut de ligne final ni chiffres Unicode
     message="Le numéro doit être au format +243 suivi de 9 chiffres.",
 )
 

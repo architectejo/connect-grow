@@ -580,16 +580,31 @@ class OtpRequestApiTests(APITestCase):
         response = self.client.post(reverse('otp_request'), {'phone': 12345, 'purpose': 'LOGIN'}, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_phone_throttle_is_per_number_across_ips(self):
+    def test_phone_throttle_is_per_number_and_ip_with_a_wider_daily_cap_per_number(self):
         with mock.patch('apps.identity.views.send_otp_sms'):
-            for i in range(3):
-                self.assertEqual(
-                    self.request_code('+243811111111', 'LOGIN', REMOTE_ADDR=f'10.0.1.{i}').status_code, 200,
-                )
-            blocked = self.request_code('+243811111111', 'LOGIN', REMOTE_ADDR='10.0.1.99')
+            for _ in range(3):
+                self.assertEqual(self.request_code('+243811111111', 'LOGIN', REMOTE_ADDR='10.0.1.1').status_code, 200)
+            blocked = self.request_code('+243811111111', 'LOGIN', REMOTE_ADDR='10.0.1.1')
             self.assertEqual(blocked.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+            # Un tiers, depuis une autre IP, n'a pas épuisé le quota horaire de la victime.
+            self.assertEqual(self.request_code('+243811111111', 'LOGIN', REMOTE_ADDR='10.0.1.2').status_code, 200)
             # Un autre numéro n'est pas affecté.
-            self.assertEqual(self.request_code('+243822222222', 'LOGIN', REMOTE_ADDR='10.0.1.98').status_code, 200)
+            self.assertEqual(self.request_code('+243822222222', 'LOGIN', REMOTE_ADDR='10.0.1.1').status_code, 200)
+
+    def test_daily_cap_per_number_counts_all_addresses(self):
+        with mock.patch('apps.identity.views.send_otp_sms'):
+            codes = [
+                self.request_code('+243833333333', 'LOGIN', REMOTE_ADDR=f'10.0.3.{i}').status_code for i in range(11)
+            ]
+        self.assertEqual(codes[:10], [200] * 10)
+        self.assertEqual(codes[10], status.HTTP_429_TOO_MANY_REQUESTS)
+
+    def test_number_spelling_variants_share_the_otp_throttles(self):
+        with mock.patch('apps.identity.views.send_otp_sms'):
+            for variant in ('+243811111111', '243811111111', '+243 811 111 111'):
+                self.request_code(variant, 'LOGIN', REMOTE_ADDR='10.0.4.1')
+            blocked = self.request_code('+243811111111', 'LOGIN', REMOTE_ADDR='10.0.4.1')
+        self.assertEqual(blocked.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
 
 class CityCommuneConsistencyAndRegistrationTests(APITestCase):
@@ -669,3 +684,19 @@ class RevokeAllSessionsTests(TestCase):
         self.assertEqual(
             BlacklistedToken.objects.filter(token__user=user).count(), OutstandingToken.objects.filter(user=user).count(),
         )
+
+
+class PhoneValidatorTests(TestCase):
+    def test_trailing_newline_and_unicode_digits_are_rejected(self):
+        from django.core.exceptions import ValidationError
+
+        from .models import phone_validator
+
+        phone_validator('+243811111111')
+        for bad in ('+243811111111\n', '+243811111111 ', '+243\u0661\u0662\u0663456789', '+24381111111'):
+            with self.assertRaises(ValidationError, msg=repr(bad)):
+                phone_validator(bad)
+
+    def test_otp_request_rejects_a_phone_with_trailing_newline(self):
+        response = self.client.post(reverse('otp_request'), {'phone': '+243811111111\n', 'purpose': 'LOGIN'})
+        self.assertEqual(response.status_code, 400)

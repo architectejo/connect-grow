@@ -117,7 +117,8 @@ REST_FRAMEWORK = {
         'user': '10000/day',
         # CDC 4.2 : OTP (coût SMS, anti-brute-force).
         'otp': '5/hour',            # demandes de code, par IP
-        'otp_phone': '3/hour',      # demandes de code, par numéro
+        'otp_phone': '3/hour',      # demandes de code, par couple numéro+IP
+        'otp_phone_day': '10/day',  # demandes de code, par numéro seul (coût SMS)
         'otp_confirm': '20/hour',   # confirmations de reset, par IP
         # Connexion : toutes requêtes par IP ; les échecs par identifiant sont comptés à part
         # (voir apps/identity/throttles.py : FailureLimiter).

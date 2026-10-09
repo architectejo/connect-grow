@@ -7,7 +7,6 @@ django-cors-headers==4.9.0
 # --- Temps réel (Channels / ASGI) ---
 daphne==4.2.1
 channels==4.3.2
-channels_redis==4.3.0
 
 # --- Base de données ---
 # Pilote MySQL pour la recette et la production (CDC 5.1).

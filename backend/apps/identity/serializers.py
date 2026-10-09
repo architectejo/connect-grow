@@ -1,3 +1,5 @@
+from django.conf import settings
+from django.urls import reverse
 from rest_framework import serializers
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -6,6 +8,8 @@ from apps.catalog import services as catalog_services
 from apps.common.serializers import PreloadingListSerializer
 
 from .models import BusinessProfile, KycDocument, OtpCode, User
+from .kyc_files import validate_kyc_file
+from .permissions import REVIEW_KYC_PERMISSION
 from .services import validate_new_password
 
 
@@ -264,7 +268,43 @@ class IdentifierTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 
 class KycDocumentSerializer(serializers.ModelSerializer):
+    # Le fichier n'est qu'en écriture : aucun chemin de stockage n'est jamais renvoyé.
+    file = serializers.FileField(write_only=True, validators=[validate_kyc_file])
+    download_url = serializers.SerializerMethodField()
+
     class Meta:
         model = KycDocument
-        fields = ['id', 'document_type', 'file', 'status', 'rejection_reason', 'created_at', 'reviewed_at']
+        fields = [
+            'id', 'document_type', 'file', 'download_url', 'status', 'rejection_reason',
+            'created_at', 'reviewed_at',
+        ]
         read_only_fields = ['id', 'status', 'rejection_reason', 'created_at', 'reviewed_at']
+
+    def get_download_url(self, obj):
+        """URL de l'endpoint authentifié, pour les seuls examinateurs habilités."""
+        request = self.context.get('request')
+        if request and request.user.is_authenticated and request.user.has_perm(REVIEW_KYC_PERMISSION):
+            return reverse('kyc_download', args=[obj.pk])
+        return None
+
+    def validate(self, attrs):
+        if self.instance is not None:
+            return attrs
+        user = self.context['request'].user
+        try:
+            profile = user.business_profile
+        except BusinessProfile.DoesNotExist:
+            raise serializers.ValidationError("Un profil Business est requis avant de soumettre des pièces KYC.")
+        existing = KycDocument.objects.filter(business_profile=profile)
+        if existing.count() >= settings.KYC_MAX_DOCUMENTS_PER_PROFILE:
+            raise serializers.ValidationError(
+                "Nombre maximal de pièces atteint. Supprimez une pièce refusée avant d'en déposer une autre."
+            )
+        if existing.filter(
+            document_type=attrs['document_type'],
+            status__in=[KycDocument.STATUS_EN_ATTENTE, KycDocument.STATUS_VALIDE],
+        ).exists():
+            raise serializers.ValidationError(
+                {'document_type': "Une pièce de ce type est déjà en attente ou validée."}
+            )
+        return attrs

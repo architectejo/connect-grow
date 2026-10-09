@@ -12,6 +12,8 @@ from django.utils import timezone
 
 from apps.common.models import BaseModel
 
+from .kyc_files import kyc_upload_to
+
 # CDC 2.3 : numéros togolais... congolais au format +243 suivi de 9 chiffres.
 phone_validator = RegexValidator(
     regex=r'^\+243\d{9}$',
@@ -256,7 +258,7 @@ class KycDocument(BaseModel):
         BusinessProfile, on_delete=models.CASCADE, related_name='kyc_documents',
     )
     document_type = models.CharField(max_length=20, choices=DOC_TYPE_CHOICES)
-    file = models.FileField(upload_to='', storage=kyc_storage)
+    file = models.FileField(upload_to=kyc_upload_to, storage=kyc_storage)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_EN_ATTENTE)
     rejection_reason = models.TextField(blank=True)
     reviewed_by = models.ForeignKey(
@@ -267,6 +269,7 @@ class KycDocument(BaseModel):
 
     class Meta:
         ordering = ['-created_at']
+        permissions = [('review_kycdocument', "Peut examiner, décider et télécharger les pièces KYC")]
 
     def __str__(self):
         return f"{self.get_document_type_display()} — {self.business_profile.business_name} ({self.status})"

@@ -14,6 +14,10 @@ from apps.common.pagination import StandardPagination
 
 from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
 from .serializers import KycDocumentSerializer, PublicBusinessSerializer, UserSerializer
+from apps.moderation.services import record_audit
+
+from .kyc_files import EXTENSION_TO_CONTENT_TYPE
+from .permissions import CanReviewKyc
 from .services import revoke_all_sessions, validate_new_password
 from .sms import send_otp_sms
 from .throttles import (
@@ -217,26 +221,48 @@ class KycDocumentListCreateView(generics.ListCreateAPIView):
         return KycDocument.objects.filter(business_profile__user=self.request.user)
 
     def perform_create(self, serializer):
-        try:
-            business_profile = self.request.user.business_profile
-        except BusinessProfile.DoesNotExist:
-            from rest_framework.exceptions import ValidationError
-            raise ValidationError("Un profil Business est requis avant de soumettre des pièces KYC.")
-        serializer.save(business_profile=business_profile)
+        document = serializer.save(business_profile=self.request.user.business_profile)
+        record_audit(
+            self.request.user, 'KYC_SUBMITTED', target=document,
+            details=f"Pièce {document.get_document_type_display()} déposée.",
+        )
+
+
+class KycDocumentDeleteView(generics.DestroyAPIView):
+    """Suppression, par son propriétaire, d'une pièce non validée."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return KycDocument.objects.filter(business_profile__user=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        document = self.get_object()
+        if document.status == KycDocument.STATUS_VALIDE:
+            return Response(
+                {'error': "Une pièce validée ne peut pas être supprimée."}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        record_audit(
+            request.user, 'KYC_DELETED', target=document,
+            details=f"Pièce {document.get_document_type_display()} supprimée (statut {document.status}).",
+        )
+        document.file.delete(save=False)
+        document.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class KycReviewQueueView(generics.ListAPIView):
     """File de vérification Business pour la modération (CDC 3.11)."""
 
     serializer_class = KycDocumentSerializer
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [CanReviewKyc]
     queryset = KycDocument.objects.filter(status=KycDocument.STATUS_EN_ATTENTE).select_related('business_profile')
 
 
 class KycDecisionView(APIView):
     """Validation ou refus motivé d'une pièce KYC par la modération (CDC 3.11)."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [CanReviewKyc]
 
     def post(self, request, pk):
         try:
@@ -267,8 +293,7 @@ class KycDecisionView(APIView):
                 doc.business_profile.is_verified = True
                 doc.business_profile.save(update_fields=['is_verified'])
 
-        from apps.moderation.models import AuditLog
-        AuditLog.record(
+        record_audit(
             request.user, f'KYC_{decision}', target=doc,
             details=doc.rejection_reason or f"Document {doc.get_document_type_display()} validé.",
         )
@@ -277,13 +302,25 @@ class KycDecisionView(APIView):
 
 
 class KycDocumentDownloadView(APIView):
-    """Accès aux pièces KYC réservé aux administrateurs (CDC 4.2, 5.8)."""
+    """Accès aux pièces KYC réservé aux examinateurs habilités (CDC 4.2, 5.8), journalisé."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [CanReviewKyc]
 
     def get(self, request, pk):
         try:
             doc = KycDocument.objects.get(pk=pk)
         except KycDocument.DoesNotExist:
             return Response({'error': "Document introuvable."}, status=status.HTTP_404_NOT_FOUND)
-        return FileResponse(doc.file.open('rb'), as_attachment=True, filename=doc.file.name)
+        try:
+            handle = doc.file.open('rb')
+        except (ValueError, OSError):
+            return Response({'error': "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        record_audit(
+            request.user, 'KYC_DOWNLOADED', target=doc,
+            details=f"Pièce {doc.get_document_type_display()} consultée.",
+        )
+        extension = doc.file.name.rsplit('.', 1)[-1].lower() if '.' in doc.file.name else 'bin'
+        return FileResponse(
+            handle, as_attachment=True, filename=f"piece-kyc-{doc.pk}.{extension}",
+            content_type=EXTENSION_TO_CONTENT_TYPE.get(extension, 'application/octet-stream'),
+        )

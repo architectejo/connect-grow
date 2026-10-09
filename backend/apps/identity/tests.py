@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 
 from unittest import mock
@@ -158,6 +159,26 @@ class PasswordResetApiTests(APITestCase):
         self.assertTrue(self.user.check_password('ancien-mot-de-passe'))
 
 
+PNG_BYTES = b'\x89PNG\r\n\x1a\n' + b'\x00' * 64
+PDF_BYTES = b'%PDF-1.4\n' + b'0' * 64
+JPEG_BYTES = b'\xff\xd8\xff\xe0' + b'\x00' * 64
+
+
+def kyc_upload(content=PNG_BYTES, name='piece.png', content_type='image/png'):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    return SimpleUploadedFile(name, content, content_type=content_type)
+
+
+def make_kyc_reviewer(email, staff=True):
+    """Compte avec la permission dédiée identity.review_kycdocument."""
+    from django.contrib.auth.models import Permission
+
+    user = User.objects.create_user(email=email, password='x', full_name='Examinateur', is_staff=staff)
+    user.user_permissions.add(Permission.objects.get(codename='review_kycdocument'))
+    return user
+
+
 class KycDocumentApiTests(APITestCase):
     def setUp(self):
         self.business_user = User.objects.create_user(
@@ -166,9 +187,7 @@ class KycDocumentApiTests(APITestCase):
         self.business_profile = BusinessProfile.objects.create(
             user=self.business_user, business_name='Ma Boutique',
         )
-        self.admin = User.objects.create_user(
-            email='admin@example.com', password='x', full_name='Admin', is_staff=True,
-        )
+        self.admin = make_kyc_reviewer('admin@example.com')
 
     def test_non_business_user_cannot_submit_kyc(self):
         user = User.objects.create_user(email='particulier@example.com', password='x', full_name='Particulier')
@@ -297,7 +316,7 @@ class UuidAndCatalogReferenceTests(APITestCase):
         self.assertEqual(response.data['results'][0]['ville_name'], 'Kinshasa')
 
     def test_kyc_urls_use_uuid(self):
-        admin = User.objects.create_user(email='admin@example.com', password='x', full_name='Admin', is_staff=True)
+        admin = make_kyc_reviewer('admin@example.com')
         self.client.force_authenticate(admin)
         response = self.client.post(
             reverse('kyc_decision', args=[uuid.uuid4()]), {'decision': 'VALIDE'}, format='json',
@@ -583,3 +602,155 @@ class OtpRequestApiTests(APITestCase):
             'phone': '+243811111111', 'code': '000000', 'new_password': 'cheval-agrafe-pile-47',
         }, REMOTE_ADDR='10.0.2.200')
         self.assertEqual(blocked.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+
+class KycFileUploadTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email='biz@example.com', password='x', full_name='Boutique', user_type='ENTREPRISE',
+        )
+        self.profile = BusinessProfile.objects.create(user=self.user, business_name='Ma Boutique')
+        self.client.force_authenticate(self.user)
+
+    def submit(self, file=None, document_type=KycDocument.DOC_RCCM):
+        return self.client.post(
+            reverse('kyc_documents'), {'document_type': document_type, 'file': file or kyc_upload()},
+            format='multipart',
+        )
+
+    def test_accepts_png_jpeg_pdf_and_stores_a_server_generated_name(self):
+        from apps.moderation.models import AuditLog
+
+        cases = [
+            (PNG_BYTES, 'png', KycDocument.DOC_RCCM), (JPEG_BYTES, 'jpg', KycDocument.DOC_ID_NATIONALE),
+            (PDF_BYTES, 'pdf', KycDocument.DOC_PIECE_GERANT),
+        ]
+        for content, ext, doc_type in cases:
+            response = self.submit(kyc_upload(content, name='../../Mon CNI perso.exe'), doc_type)
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+            doc = KycDocument.objects.get(pk=response.data['id'])
+            self.assertRegex(doc.file.name, rf'^[0-9a-f]{{32}}\.{ext}$')
+            self.assertNotIn('CNI', doc.file.name)
+        self.assertEqual(AuditLog.objects.filter(action='KYC_SUBMITTED', actor=self.user).count(), 3)
+
+    def test_rejects_disguised_or_unknown_content(self):
+        for content, name, ctype in [
+            (b'MZ\x90\x00 executable', 'cni.png', 'image/png'),
+            (b'<html><script>alert(1)</script></html>', 'cni.pdf', 'application/pdf'),
+            (b'GIF89a' + b'0' * 20, 'cni.gif', 'image/gif'),
+            (b'', 'vide.png', 'image/png'),
+        ]:
+            response = self.submit(kyc_upload(content, name, ctype))
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, name)
+            self.assertIn('file', response.data, name)
+        self.assertEqual(KycDocument.objects.count(), 0)
+
+    def test_rejects_oversized_file(self):
+        with self.settings(KYC_MAX_FILE_BYTES=100):
+            response = self.submit(kyc_upload(PNG_BYTES + b'0' * 200))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('file', response.data)
+
+    def test_no_duplicate_type_while_pending_or_validated_but_refused_can_be_resent(self):
+        first = self.submit()
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(self.submit().status_code, status.HTTP_400_BAD_REQUEST)
+        KycDocument.objects.filter(pk=first.data['id']).update(status=KycDocument.STATUS_REFUSE)
+        self.assertEqual(self.submit().status_code, status.HTTP_201_CREATED)
+
+    def test_document_count_is_capped_per_profile(self):
+        with self.settings(KYC_MAX_DOCUMENTS_PER_PROFILE=2):
+            for _ in range(2):
+                KycDocument.objects.create(
+                    business_profile=self.profile, document_type=KycDocument.DOC_RCCM,
+                    status=KycDocument.STATUS_REFUSE,
+                )
+            response = self.submit()
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_response_never_exposes_a_storage_path(self):
+        response = self.submit()
+        self.assertNotIn('file', response.data)
+        self.assertIsNone(response.data['download_url'])
+        listing = self.client.get(reverse('kyc_documents'))
+        raw = listing.content.decode()
+        self.assertNotIn('private_media', raw)
+        self.assertNotIn('.png', raw)
+
+    def test_reviewer_sees_download_url_of_the_authenticated_endpoint(self):
+        doc_id = self.submit().data['id']
+        reviewer = make_kyc_reviewer('rev@example.com')
+        self.client.force_authenticate(reviewer)
+        queue = self.client.get(reverse('kyc_review_queue'))
+        self.assertEqual(queue.data[0]['download_url'], reverse('kyc_download', args=[doc_id]))
+
+    def test_owner_can_delete_unvalidated_document_with_audit(self):
+        from apps.moderation.models import AuditLog
+
+        doc = KycDocument.objects.get(pk=self.submit().data['id'])
+        path = doc.file.path
+        response = self.client.delete(reverse('kyc_document_delete', args=[doc.pk]))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(KycDocument.objects.filter(pk=doc.pk).exists())
+        self.assertFalse(os.path.exists(path))
+        self.assertTrue(AuditLog.objects.filter(action='KYC_DELETED', actor=self.user).exists())
+
+    def test_validated_document_cannot_be_deleted_and_others_cannot_delete(self):
+        doc = KycDocument.objects.get(pk=self.submit().data['id'])
+        stranger = User.objects.create_user(email='s@example.com', password='x', full_name='S')
+        self.client.force_authenticate(stranger)
+        self.assertEqual(self.client.delete(reverse('kyc_document_delete', args=[doc.pk])).status_code, 404)
+        KycDocument.objects.filter(pk=doc.pk).update(status=KycDocument.STATUS_VALIDE)
+        self.client.force_authenticate(self.user)
+        self.assertEqual(self.client.delete(reverse('kyc_document_delete', args=[doc.pk])).status_code, 400)
+        self.assertTrue(KycDocument.objects.filter(pk=doc.pk).exists())
+
+
+class KycAccessControlTests(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(email='biz@example.com', password='x', full_name='B', user_type='ENTREPRISE')
+        profile = BusinessProfile.objects.create(user=self.owner, business_name='Ma Boutique')
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            reverse('kyc_documents'), {'document_type': 'RCCM', 'file': kyc_upload(PDF_BYTES, 'x.pdf')},
+            format='multipart',
+        )
+        self.doc = KycDocument.objects.get(pk=response.data['id'])
+        self.profile = profile
+
+    def test_plain_staff_without_the_permission_is_refused_everywhere(self):
+        staff = User.objects.create_user(email='staff@example.com', password='x', full_name='S', is_staff=True)
+        self.client.force_authenticate(staff)
+        self.assertEqual(self.client.get(reverse('kyc_review_queue')).status_code, 403)
+        self.assertEqual(self.client.get(reverse('kyc_download', args=[self.doc.pk])).status_code, 403)
+        self.assertEqual(
+            self.client.post(reverse('kyc_decision', args=[self.doc.pk]), {'decision': 'VALIDE'}).status_code, 403,
+        )
+
+    def test_anonymous_and_owner_cannot_download(self):
+        self.assertEqual(self.client.get(reverse('kyc_download', args=[self.doc.pk])).status_code, 403)
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get(reverse('kyc_download', args=[self.doc.pk])).status_code, 401)
+
+    def test_reviewer_download_is_neutral_typed_and_audited(self):
+        from apps.moderation.models import AuditLog
+
+        reviewer = make_kyc_reviewer('rev@example.com')
+        self.client.force_authenticate(reviewer)
+        response = self.client.get(reverse('kyc_download', args=[self.doc.pk]))
+        self.assertEqual(response.status_code, 200)
+        disposition = response['Content-Disposition']
+        self.assertIn(f'piece-kyc-{self.doc.pk}.pdf', disposition)
+        self.assertNotIn('Ma Boutique', disposition)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        response.close()
+        self.assertTrue(AuditLog.objects.filter(action='KYC_DOWNLOADED', actor=reviewer).exists())
+
+    def test_setup_roles_grants_the_permission_to_moderators_and_administrators(self):
+        from django.contrib.auth.models import Group
+        from django.core.management import call_command
+
+        call_command('setup_roles', verbosity=0)
+        for name in ('Modérateur', 'Administrateur'):
+            codenames = set(Group.objects.get(name=name).permissions.values_list('codename', flat=True))
+            self.assertIn('review_kycdocument', codenames, name)

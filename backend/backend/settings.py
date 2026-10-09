@@ -224,3 +224,9 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
+
+
+# --- Pièces KYC (règle 10 : données d'identité) ---
+# Valeurs de départ, ajustables par variable d'environnement.
+KYC_MAX_FILE_BYTES = int(os.getenv('KYC_MAX_FILE_MB', '5')) * 1024 * 1024
+KYC_MAX_DOCUMENTS_PER_PROFILE = int(os.getenv('KYC_MAX_DOCUMENTS_PER_PROFILE', '6'))

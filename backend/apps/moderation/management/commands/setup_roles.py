@@ -11,7 +11,7 @@ MODERATOR_PERMISSIONS = {
     'moderation.report': ['view', 'add', 'change'],
     'moderation.sanction': ['view', 'add'],
     'catalog.forbiddenitem': ['view'],
-    'identity.kycdocument': ['view', 'change'],
+    'identity.kycdocument': ['view', 'change', 'review'],
     'identity.user': ['view'],
     'interactions.review': ['view', 'change'],
     'marketplace.post': ['view'],

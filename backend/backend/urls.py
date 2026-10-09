@@ -10,8 +10,12 @@ urlpatterns = [
     path('api/marketplace/', include('apps.marketplace.urls')),
     path('api/accounts/', include('apps.identity.urls')),
     path('api/payments/', include('apps.payments.urls')),
-    path('api/interactions/', include('apps.interactions.urls')),
-    path('api/reputation/', include('apps.reputation.urls')),
+    # Interactions : URL historiques conservées jusqu'à L0-11, servies par plusieurs domaines.
+    path('api/interactions/', include('apps.reviews.urls')),
+    path('api/interactions/', include('apps.marketplace.urls_interactions')),
+    path('api/interactions/', include('apps.messaging.urls')),
+    path('api/interactions/', include('apps.notifications.urls')),
+    path('api/reputation/', include('apps.reviews.urls_deals')),
     path('api/moderation/forbidden-items/', include('apps.catalog.urls_forbidden')),
     path('api/moderation/', include('apps.moderation.urls')),
 ]

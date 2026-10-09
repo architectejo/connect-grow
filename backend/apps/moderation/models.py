@@ -107,9 +107,9 @@ class Sanction(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sanctions')
     sanction_type = models.CharField(max_length=30, choices=TYPE_CHOICES)
     reason = models.TextField()
-    related_post = models.ForeignKey(
-        'marketplace.Post', on_delete=models.SET_NULL, null=True, blank=True, related_name='sanctions',
-    )
+    # Offre masquée par la sanction : référence par UUID (pas de clé étrangère entre domaines,
+    # ADR 0002) ; l'existence est vérifiée par apps.marketplace.services.
+    related_offer_id = models.UUIDField(null=True, blank=True, db_index=True)
     issued_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='sanctions_issued',
     )
@@ -126,17 +126,19 @@ class Sanction(models.Model):
         ordering = ['-created_at']
 
     def apply(self):
-        if self.sanction_type == self.TYPE_MASQUAGE_ANNONCE and self.related_post_id:
-            self.related_post.is_active = False
-            self.related_post.save(update_fields=['is_active'])
+        from apps.marketplace import services as marketplace_services
+
+        if self.sanction_type == self.TYPE_MASQUAGE_ANNONCE and self.related_offer_id:
+            marketplace_services.set_offer_active(self.related_offer_id, False)
         elif self.sanction_type in (self.TYPE_SUSPENSION_TEMPORAIRE, self.TYPE_BANNISSEMENT):
             self.user.is_active = False
             self.user.save(update_fields=['is_active'])
 
     def lift(self):
-        if self.sanction_type == self.TYPE_MASQUAGE_ANNONCE and self.related_post_id:
-            self.related_post.is_active = True
-            self.related_post.save(update_fields=['is_active'])
+        from apps.marketplace import services as marketplace_services
+
+        if self.sanction_type == self.TYPE_MASQUAGE_ANNONCE and self.related_offer_id:
+            marketplace_services.set_offer_active(self.related_offer_id, True)
         elif self.sanction_type in (self.TYPE_SUSPENSION_TEMPORAIRE, self.TYPE_BANNISSEMENT):
             self.user.is_active = True
             self.user.save(update_fields=['is_active'])

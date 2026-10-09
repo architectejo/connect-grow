@@ -45,6 +45,20 @@ MUST_BE_WALKED = {
     'api/marketplace/posts/recalculate_all_scores/',
     'api/marketplace/posts/trash/',
     'api/moderation/reports/<pk>/claim/',
+    'api/marketplace/posts/<pk>/images/',
+    'api/marketplace/posts/<pk>/hard_delete/',
+    'api/marketplace/favorites/',
+    'api/marketplace/stats/dashboard/',
+    'api/marketplace/stats/post/<pk>/',
+    'api/interactions/reviews/<pk>/reply/',
+    'api/interactions/contacts/',
+    'api/interactions/exchanges/',
+    'api/interactions/conversations/',
+    'api/interactions/messages/',
+    'api/interactions/notifications/',
+    'api/interactions/notifications/mark_all_as_read/',
+    'api/reputation/deals/',
+    'api/reputation/deals/<pk>/confirm/',
 }
 
 SAMPLE_VALUES = ('1', '8f0f5a52-3c6e-4a49-9d44-0d8a3d5f1c11')
@@ -117,6 +131,64 @@ class PermissionDefaultsTests(TestCase):
         self.assertEqual(EXPECTED_PUBLIC - public_seen, set(), "Routes publiques attendues introuvables")
         self.assertEqual(MUST_BE_WALKED - walked, set(), "Routes absentes du parcours")
         self.assertGreater(len(walked), 60)
+
+
+# Domaines déjà découplés (ADR 0002). `moderation` (cible générique) et `payments` (gelé) sont
+# traités par R3.
+DECOUPLED_APPS = ('catalog', 'identity', 'marketplace', 'visibility', 'reviews', 'messaging', 'notifications')
+APPS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_IMPORT = re.compile(r'^\s*(?:from\s+apps\.(\w+)(?:\.models)?\s+import\s+(.+)|import\s+apps\.(\w+)\.models)', re.M)
+
+
+class DomainBoundariesTests(SimpleTestCase):
+    def test_no_foreign_key_leaves_its_domain_except_towards_the_user(self):
+        from django.apps import apps as django_apps
+
+        for label in DECOUPLED_APPS:
+            for model in django_apps.get_app_config(label).get_models():
+                for field in model._meta.get_fields():
+                    if field.is_relation and field.concrete and field.related_model is not None:
+                        target = field.related_model._meta.app_label
+                        if target == label or target == 'auth':
+                            continue
+                        is_user = target == 'identity' and field.related_model._meta.model_name == 'user'
+                        self.assertTrue(is_user, f'{label}.{model.__name__}.{field.name} -> {target}')
+
+    def test_no_domain_imports_the_models_of_another_one(self):
+        offenders = []
+        for label in DECOUPLED_APPS:
+            for root, dirs, files in os.walk(os.path.join(APPS_DIR, label)):
+                dirs[:] = [d for d in dirs if d not in ('migrations', '__pycache__')]
+                for name in files:
+                    if not name.endswith('.py') or name.startswith('tests'):
+                        continue
+                    path = os.path.join(root, name)
+                    with open(path, encoding='utf-8') as handle:
+                        source = handle.read()
+                    for match in MODEL_IMPORT.finditer(source):
+                        other = match.group(1) or match.group(3)
+                        imported = match.group(2) or 'models'
+                        # `from apps.x import services` est l'interface autorisée ; `from apps.x.models import ...`
+                        # et `from apps.x import models` ne le sont pas.
+                        is_models = ('.models' in match.group(0)) or imported.strip().split(',')[0].strip() == 'models'
+                        if other not in (label, 'common') and is_models:
+                            offenders.append(f'{os.path.relpath(path, APPS_DIR)}: {match.group(0).strip()}')
+        self.assertEqual(offenders, [])
+
+    def test_import_detector_catches_model_imports(self):
+        for line in ('from apps.marketplace.models import Offer', 'from apps.marketplace import models',
+                     'import apps.marketplace.models'):
+            self.assertTrue(MODEL_IMPORT.search(line), line)
+        match = MODEL_IMPORT.search('from apps.marketplace import services as s')
+        self.assertNotIn('.models', match.group(0))
+        self.assertNotEqual(match.group(2).strip().split(',')[0].strip(), 'models')
+
+    def test_domain_models_use_uuid_primary_keys(self):
+        from django.apps import apps as django_apps
+
+        for label in DECOUPLED_APPS:
+            for model in django_apps.get_app_config(label).get_models():
+                self.assertEqual(model._meta.pk.get_internal_type(), 'UUIDField', f'{label}.{model.__name__}')
 
 
 class SecretKeySettingsTests(SimpleTestCase):

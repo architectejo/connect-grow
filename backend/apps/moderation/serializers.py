@@ -2,13 +2,15 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
+from apps.marketplace import services as marketplace_services
+
 from .models import Report, Sanction
 
 # Cache l'implémentation ContentType derrière des identifiants stables côté API.
 TARGET_TYPE_MAP = {
-    'POST': ('marketplace', 'post'),
-    'REVIEW': ('interactions', 'review'),
-    'MESSAGE': ('interactions', 'message'),
+    'POST': ('marketplace', 'offer'),
+    'REVIEW': ('reviews', 'review'),
+    'MESSAGE': ('messaging', 'message'),
     'USER': ('identity', 'user'),
 }
 TARGET_TYPE_REVERSE = {v: k for k, v in TARGET_TYPE_MAP.items()}
@@ -56,6 +58,8 @@ class ReportSerializer(serializers.ModelSerializer):
 
 class SanctionSerializer(serializers.ModelSerializer):
     user_name = serializers.ReadOnlyField(source='user.full_name')
+    # Clé JSON `related_post` conservée jusqu'à L0-11 : UUID de l'offre masquée.
+    related_post = serializers.UUIDField(source='related_offer_id', required=False, allow_null=True)
     issued_by_name = serializers.ReadOnlyField(source='issued_by.full_name')
 
     class Meta:
@@ -66,8 +70,13 @@ class SanctionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['is_active', 'starts_at', 'created_at']
 
+    def validate_related_post(self, value):
+        if value is not None and not marketplace_services.offer_exists(value):
+            raise serializers.ValidationError("Annonce introuvable.")
+        return value
+
     def validate(self, attrs):
-        if attrs.get('sanction_type') == Sanction.TYPE_MASQUAGE_ANNONCE and not attrs.get('related_post'):
+        if attrs.get('sanction_type') == Sanction.TYPE_MASQUAGE_ANNONCE and not attrs.get('related_offer_id'):
             raise serializers.ValidationError(
                 {'related_post': "related_post est requis pour un masquage d'annonce."}
             )

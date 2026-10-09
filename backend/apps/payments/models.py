@@ -14,7 +14,8 @@ class Transaction(models.Model):
     # Références
     buyer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='purchases')
     seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sales')
-    post = models.ForeignKey('marketplace.Post', on_delete=models.PROTECT)
+    # Offre achetée : référence par UUID (pas de clé étrangère entre domaines, ADR 0002).
+    offer_id = models.UUIDField(db_index=True)
 
     # Détails financiers
     amount = models.DecimalField(max_digits=10, decimal_places=2)

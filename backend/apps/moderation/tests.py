@@ -6,7 +6,7 @@ from rest_framework.test import APITestCase
 
 from apps.identity.models import User
 from apps.catalog.models import Category, City, Commune, ForbiddenItem
-from apps.marketplace.models import Post
+from apps.marketplace.models import Offer
 from apps.marketplace.tests import make_test_image
 
 from .models import AuditLog, Report, Sanction
@@ -30,7 +30,7 @@ class ModerationTestBase(APITestCase):
         )
         self.admin.groups.add(Group.objects.get(name='Administrateur'))
 
-        self.post = Post.objects.create(
+        self.post = Offer.objects.create(
             seller=self.seller, category_id=self.category.id, commune_id=self.commune.id,
             title='Un joli canapé à vendre', description='Description suffisamment longue pour le CDC.',
             price=100, main_image=make_test_image(),
@@ -41,7 +41,7 @@ class ReportFlowTests(ModerationTestBase):
     def test_any_authenticated_user_can_report_a_post(self):
         self.client.force_authenticate(self.reporter)
         response = self.client.post('/api/moderation/reports/', {
-            'target_type': 'POST', 'object_id': self.post.id, 'reason': 'ARNAQUE', 'description': 'Prix suspect.',
+            'target_type': 'POST', 'object_id': str(self.post.id), 'reason': 'ARNAQUE', 'description': 'Prix suspect.',
         })
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         self.assertEqual(response.data['status'], Report.STATUS_EN_ATTENTE)
@@ -78,7 +78,7 @@ class ReportFlowTests(ModerationTestBase):
 
     def test_anonymous_user_cannot_report(self):
         response = self.client.post('/api/moderation/reports/', {
-            'target_type': 'POST', 'object_id': self.post.id, 'reason': 'ARNAQUE',
+            'target_type': 'POST', 'object_id': str(self.post.id), 'reason': 'ARNAQUE',
         })
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
@@ -89,7 +89,7 @@ class ReportFlowTests(ModerationTestBase):
 
     def test_moderator_can_claim_and_resolve(self):
         report = Report.objects.create(
-            content_type=ContentType.objects.get_for_model(Post), object_id=self.post.id,
+            content_type=ContentType.objects.get_for_model(Offer), object_id=str(self.post.id),
             reporter=self.reporter, reason=Report.REASON_ARNAQUE,
         )
         self.client.force_authenticate(self.moderator)
@@ -110,7 +110,7 @@ class ReportFlowTests(ModerationTestBase):
 
     def test_resolving_a_report_writes_an_audit_log(self):
         report = Report.objects.create(
-            content_type=ContentType.objects.get_for_model(Post), object_id=self.post.id,
+            content_type=ContentType.objects.get_for_model(Offer), object_id=str(self.post.id),
             reporter=self.reporter, reason=Report.REASON_ARNAQUE,
         )
         self.client.force_authenticate(self.moderator)
@@ -153,7 +153,7 @@ class SanctionRoleTests(ModerationTestBase):
         self.client.force_authenticate(self.moderator)
         response = self.client.post('/api/moderation/sanctions/', {
             'user': self.seller.id, 'sanction_type': Sanction.TYPE_MASQUAGE_ANNONCE,
-            'related_post': self.post.id, 'reason': 'Produit interdit.',
+            'related_post': str(self.post.id), 'reason': 'Produit interdit.',
         })
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         self.post.refresh_from_db()
@@ -229,3 +229,63 @@ class LiftExpiredSanctionsCommandTests(ModerationTestBase):
         self.seller.refresh_from_db()
         self.assertTrue(self.seller.is_active)  # levée -> compte réactivé
         self.assertTrue(AuditLog.objects.filter(action='SANCTION_AUTO_LIFTED').exists())
+
+
+class OfferDecouplingTests(ModerationTestBase):
+    """Les sanctions et signalements désignent l'offre par UUID (ADR 0002)."""
+
+    def test_sanction_rejects_an_unknown_offer(self):
+        import uuid
+
+        self.client.force_authenticate(self.admin)
+        response = self.client.post('/api/moderation/sanctions/', {
+            'user': self.seller.id, 'sanction_type': 'MASQUAGE_ANNONCE',
+            'related_post': str(uuid.uuid4()), 'reason': 'Produit interdit.',
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('related_post', response.data)
+
+    def test_hide_then_lift_restores_the_offer_and_notifies_the_seller(self):
+        from apps.notifications.models import Notification
+
+        self.client.force_authenticate(self.admin)
+        created = self.client.post('/api/moderation/sanctions/', {
+            'user': self.seller.id, 'sanction_type': 'MASQUAGE_ANNONCE',
+            'related_post': str(self.post.id), 'reason': 'Produit interdit.',
+        })
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+        self.assertEqual(str(created.data['related_post']), str(self.post.id))
+        self.assertTrue(Notification.objects.filter(user=self.seller, notification_type='SYSTEM').exists())
+
+        self.client.post(f"/api/moderation/sanctions/{created.data['id']}/lift/")
+        self.post.refresh_from_db()
+        self.assertTrue(self.post.is_active)
+
+    def test_reports_accept_reviews_and_messages_as_targets(self):
+        from apps.messaging.models import Conversation, Message
+        from apps.reviews.models import Review
+
+        review = Review.objects.create(
+            user=self.admin, reviewed_user=self.seller, content='Avis suffisamment long.', rating=3,
+        )
+        conversation = Conversation.objects.create()
+        conversation.participants.add(self.admin, self.seller)
+        message = Message.objects.create(conversation=conversation, sender=self.seller, content='Salut')
+        self.client.force_authenticate(self.admin)
+        for target_type, target in (('REVIEW', review), ('MESSAGE', message), ('USER', self.seller)):
+            response = self.client.post('/api/moderation/reports/', {
+                'target_type': target_type, 'object_id': str(target.pk), 'reason': 'SPAM',
+            })
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED, (target_type, response.data))
+            self.assertEqual(response.data['target_type_display'], target_type)
+
+    def test_automatic_report_is_deduplicated(self):
+        from . import services
+
+        first = services.file_automatic_report(self.post, services.REASON_CROSSED_REVIEWS, 'x')
+        self.assertIsNotNone(first)
+        self.assertIsNone(services.file_automatic_report(self.post, services.REASON_CROSSED_REVIEWS, 'x'))
+
+    def test_dashboard_counts_active_offers(self):
+        self.client.force_authenticate(self.admin)
+        self.assertEqual(self.client.get('/api/moderation/dashboard/').data['active_posts_count'], 1)

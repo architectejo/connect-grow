@@ -60,11 +60,12 @@ INSTALLED_APPS = [
     'apps.common',
     'apps.identity',
     'apps.catalog',
+    'apps.visibility',
+    'apps.notifications',
+    'apps.messaging',
     'apps.marketplace',
+    'apps.reviews',
     'apps.payments',
-    'apps.interactions',
-    'apps.reputation',
-    'apps.ranking',
     'apps.moderation',
 ]
 

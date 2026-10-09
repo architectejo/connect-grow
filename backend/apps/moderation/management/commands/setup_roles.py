@@ -13,8 +13,8 @@ MODERATOR_PERMISSIONS = {
     'catalog.forbiddenitem': ['view'],
     'identity.kycdocument': ['view', 'review'],  # review : décider et télécharger, jamais éditer à la main
     'identity.user': ['view'],
-    'interactions.review': ['view', 'change'],
-    'marketplace.post': ['view'],
+    'reviews.review': ['view', 'change'],
+    'marketplace.offer': ['view'],
 }
 
 # L'administrateur hérite de tout ce que peut faire un modérateur, plus la
@@ -26,8 +26,8 @@ ADMINISTRATOR_EXTRA_PERMISSIONS = {
     'catalog.category': ['add', 'change', 'delete'],
     'catalog.city': ['add', 'change', 'delete'],
     'catalog.commune': ['add', 'change', 'delete'],
-    'ranking.rankingsettings': ['view', 'change'],
-    'reputation.trustscoresettings': ['view', 'change'],
+    'visibility.rankingsettings': ['view', 'change'],
+    'reviews.trustscoresettings': ['view', 'change'],
 }
 
 

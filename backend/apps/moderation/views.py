@@ -4,6 +4,9 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.marketplace import services as marketplace_services
+from apps.notifications import services as notification_services
+
 from .models import AuditLog, Report, Sanction
 from .serializers import ReportSerializer, SanctionSerializer
 
@@ -63,7 +66,7 @@ class SanctionViewSet(viewsets.ModelViewSet):
     serializer_class = SanctionSerializer
     permission_classes = [permissions.IsAdminUser]
     http_method_names = ['get', 'post', 'head', 'options']
-    queryset = Sanction.objects.select_related('user', 'issued_by', 'related_post')
+    queryset = Sanction.objects.select_related('user', 'issued_by')
 
     def perform_create(self, serializer):
         sanction_type = serializer.validated_data.get('sanction_type')
@@ -75,10 +78,9 @@ class SanctionViewSet(viewsets.ModelViewSet):
         sanction = serializer.save(issued_by=user)
         sanction.apply()
 
-        from apps.interactions.models import Notification
-        Notification.objects.create(
-            user=sanction.user,
-            notification_type='SYSTEM',
+        notification_services.notify(
+            user_id=sanction.user_id,
+            notification_type=notification_services.SYSTEM,
             title="Sanction appliquée à votre compte",
             content=f"{sanction.get_sanction_type_display()} : {sanction.reason[:100]}",
         )
@@ -103,11 +105,9 @@ class ModerationDashboardView(APIView):
 
     def get(self, request):
         from apps.identity.models import KycDocument, User
-        from apps.marketplace.models import Post
-
         return Response({
             'users_count': User.objects.count(),
-            'active_posts_count': Post.objects.filter(is_active=True, is_delete=False).count(),
+            'active_posts_count': marketplace_services.count_active_offers(),
             'pending_reports_count': Report.objects.filter(status=Report.STATUS_EN_ATTENTE).count(),
             'pending_kyc_count': KycDocument.objects.filter(status=KycDocument.STATUS_EN_ATTENTE).count(),
         })

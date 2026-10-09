@@ -1,4 +1,8 @@
-"""Interface publique du domaine `identity` (sessions et jetons)."""
+"""Interface publique du domaine `identity` (sessions, jetons, fiches publiques de vendeurs)."""
+import uuid
+from dataclasses import dataclass
+from typing import Iterable, Optional
+
 from django.db import transaction
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 
@@ -114,3 +118,62 @@ def decide_kyc_document(document_id, reviewer, decision, reason=''):
             details=doc.rejection_reason or f"Document {doc.get_document_type_display()} validé.",
         )
     return doc
+
+
+@dataclass(frozen=True)
+class SellerBusiness:
+    business_name: str
+    bio: str
+    logo: Optional[str]  # URL relative du média, ou None
+    is_verified: bool
+
+
+@dataclass(frozen=True)
+class SellerSummary:
+    """Fiche publique d'un vendeur affichée sur ses offres. Le téléphone y figure
+    encore (contact par appel / WhatsApp) : à retirer par L0-10a (règle 10)."""
+
+    id: uuid.UUID
+    full_name: str
+    photo: Optional[str]
+    phone: Optional[str]
+    user_type: str
+    business: Optional[SellerBusiness]
+    date_joined: object
+    trust_score: float
+    reviews_count: int
+
+
+def get_seller_summaries(ids: Iterable) -> dict:
+    """Fiches vendeur indexées par UUID, en une requête (profil business compris)."""
+    from apps.common.utils import parse_uuid
+
+    from .models import User
+
+    wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
+    if not wanted:
+        return {}
+    summaries = {}
+    for user in User.objects.filter(id__in=wanted).select_related('business_profile'):
+        profile = getattr(user, 'business_profile', None)
+        business = None
+        if profile is not None:
+            business = SellerBusiness(
+                business_name=profile.business_name, bio=profile.bio,
+                logo=profile.logo.url if profile.logo else None, is_verified=profile.is_verified,
+            )
+        summaries[user.id] = SellerSummary(
+            id=user.id, full_name=user.full_name, photo=user.photo.url if user.photo else None,
+            phone=user.phone, user_type=user.user_type, business=business, date_joined=user.date_joined,
+            trust_score=user.trust_score, reviews_count=user.reviews_count,
+        )
+    return summaries
+
+
+def set_reputation(user_id, trust_score: float, reviews_count: int) -> None:
+    """Met en cache le Trust Score et le nombre d'avis reçus (calculés par `reviews`).
+    Mise à jour par requête : sans effet (et sans erreur) si le compte vient d'être supprimé.
+    Transitoire : supprimé avec le Trust Score par L0-07."""
+    from .models import User
+
+    User.objects.filter(pk=user_id).update(trust_score=trust_score, reviews_count=reviews_count)

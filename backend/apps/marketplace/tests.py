@@ -1,28 +1,25 @@
-import uuid
 import io
+import uuid
+from datetime import timedelta
 
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.core.management import call_command
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from django.utils import timezone
 from PIL import Image
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-import math
-
-from apps.identity.models import User
-from apps.ranking.models import RankingSettings
 from apps.catalog.models import Category, City, Commune
+from apps.common.factories import make_test_image  # noqa: F401  (réexporté pour les tests des autres domaines)
+from apps.identity.models import User
+from apps.messaging.models import Conversation, Message
+from apps.notifications.models import Notification
+from apps.visibility.models import DailyVisibilityCounter, OfferUniqueView, RankingSettings
 
-from .models import Favorite, Post, PostImage, PostUniqueView, PostViewStat
-
-
-def make_test_image(name='photo.jpg', color=(255, 0, 0), fmt='JPEG'):
-    buffer = io.BytesIO()
-    Image.new('RGB', (20, 20), color=color).save(buffer, format=fmt)
-    buffer.seek(0)
-    content_type = 'image/jpeg' if fmt == 'JPEG' else f'image/{fmt.lower()}'
-    return SimpleUploadedFile(name, buffer.read(), content_type=content_type)
+from . import services
+from .models import ContactEvent, Favorite, Offer, OfferImage
 
 
 class MarketplaceTestBase(APITestCase):
@@ -33,7 +30,7 @@ class MarketplaceTestBase(APITestCase):
         self.seller = User.objects.create_user(email='seller@example.com', password='x', full_name='Vendeur')
         self.buyer = User.objects.create_user(email='buyer@example.com', password='x', full_name='Acheteur')
 
-    def make_post(self, **kwargs):
+    def make_offer(self, **kwargs):
         defaults = dict(
             seller=self.seller,
             category_id=self.category.id,
@@ -44,471 +41,825 @@ class MarketplaceTestBase(APITestCase):
             main_image=make_test_image(),
         )
         defaults.update(kwargs)
-        return Post.objects.create(**defaults)
+        return Offer.objects.create(**defaults)
+
+    def offer_payload(self, **overrides):
+        payload = {
+            'title': 'Un titre correct', 'description': 'Description suffisamment longue pour valider.',
+            'price': 10, 'category': str(self.category.id), 'commune': str(self.commune.id),
+            'main_image': make_test_image(),
+        }
+        payload.update(overrides)
+        return payload
 
 
-class WebpConversionTests(MarketplaceTestBase):
-    def test_main_image_is_converted_to_webp_on_save(self):
-        post = self.make_post()
-        self.assertTrue(post.main_image.name.lower().endswith('.webp'))
+class ImageReencodingTests(MarketplaceTestBase):
+    def test_main_image_is_reencoded_to_webp_on_save(self):
+        offer = self.make_offer()
+        self.assertTrue(offer.main_image.name.lower().endswith('.webp'))
         # Le fichier doit être un WebP valide, pas juste renommé.
-        post.main_image.open()
-        self.assertEqual(Image.open(post.main_image).format, 'WEBP')
+        offer.main_image.open()
+        self.assertEqual(Image.open(offer.main_image).format, 'WEBP')
 
-    def test_gallery_image_is_converted_to_webp_on_save(self):
-        post = self.make_post()
-        image = PostImage.objects.create(post=post, image=make_test_image('extra.png', fmt='PNG'))
+    def test_gallery_image_is_reencoded_to_webp_on_save(self):
+        offer = self.make_offer()
+        image = OfferImage.objects.create(offer=offer, image=make_test_image('extra.png', fmt='PNG'))
         self.assertTrue(image.image.name.lower().endswith('.webp'))
 
+    def test_webp_upload_is_reencoded_too_and_loses_its_exif(self):
+        """Un fichier déjà .webp n'échappe pas au ré-encodage : EXIF (GPS) retiré, nom régénéré."""
+        exif = Image.Exif()
+        exif[0x010F] = 'AppareilTest'
+        buffer = io.BytesIO()
+        Image.new('RGB', (30, 30), (10, 20, 30)).save(buffer, format='WEBP', exif=exif)
+        self.assertIn(b'AppareilTest', buffer.getvalue())
 
-class PostValidationTests(MarketplaceTestBase):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        upload = SimpleUploadedFile('mon-fichier.webp', buffer.getvalue(), content_type='image/webp')
+        offer = self.make_offer(main_image=upload)
+        offer.main_image.open()
+        raw = offer.main_image.read()
+        self.assertNotIn(b'AppareilTest', raw)
+        self.assertNotIn('mon-fichier', offer.main_image.name)
+
+    def test_gallery_endpoint_rejects_an_invalid_file_with_400(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        offer = self.make_offer()
+        self.client.force_authenticate(self.seller)
+        response = self.client.post(
+            reverse('offer-images', args=[offer.id]),
+            {'image': SimpleUploadedFile('faux.jpg', b'MZ pas une image', content_type='image/jpeg')},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(offer.images.count(), 0)
+
+    def test_create_endpoint_rejects_an_invalid_file_with_400(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.client.force_authenticate(self.seller)
+        response = self.client.post(reverse('offer-list'), self.offer_payload(
+            main_image=SimpleUploadedFile('faux.jpg', b'MZ pas une image', content_type='image/jpeg'),
+        ))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('main_image', response.data)
+
+
+class OfferValidationTests(MarketplaceTestBase):
     def test_title_shorter_than_ten_chars_is_rejected(self):
         self.client.force_authenticate(self.seller)
-        response = self.client.post(reverse('post-list'), {
-            'title': 'Trop court',
-            'description': 'Description suffisamment longue pour la validation.',
-            'category': self.category.id,
-            'commune': self.commune.id,
-            'price': 10,
-            'main_image': make_test_image(),
-        })
-        # "Trop court" fait 10 caractères pile ; on force en dessous.
-        response2 = self.client.post(reverse('post-list'), {
-            'title': 'Court',
-            'description': 'Description suffisamment longue pour la validation.',
-            'category': self.category.id,
-            'commune': self.commune.id,
-            'price': 10,
-            'main_image': make_test_image(),
-        })
-        self.assertEqual(response2.status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.client.post(reverse('offer-list'), self.offer_payload(title='Court'))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('title', response.data)
 
     def test_description_shorter_than_twenty_chars_is_rejected(self):
         self.client.force_authenticate(self.seller)
-        response = self.client.post(reverse('post-list'), {
-            'title': 'Un titre correct',
-            'description': 'Trop court',
-            'category': self.category.id,
-            'commune': self.commune.id,
-            'price': 10,
-            'main_image': make_test_image(),
-        })
+        response = self.client.post(reverse('offer-list'), self.offer_payload(description='Trop court'))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_main_image_is_required_on_creation(self):
+        self.client.force_authenticate(self.seller)
+        payload = self.offer_payload()
+        del payload['main_image']
+        response = self.client.post(reverse('offer-list'), payload)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('main_image', response.data)
 
-class PostGalleryTests(MarketplaceTestBase):
-    def test_owner_can_add_images_up_to_the_limit(self):
-        post = self.make_post()
+    def test_valid_creation_sets_seller_and_expiration(self):
+        self.client.force_authenticate(self.seller)
+        response = self.client.post(reverse('offer-list'), self.offer_payload(post_type='SERVICE'))
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        offer = Offer.objects.get(pk=response.data['id'])
+        self.assertEqual(offer.seller, self.seller)
+        self.assertEqual(offer.offer_type, 'SERVICE')
+        self.assertEqual(response.data['post_type'], 'SERVICE')
+        self.assertIsNotNone(offer.expires_at)
+
+    def test_anonymous_cannot_create(self):
+        response = self.client.post(reverse('offer-list'), self.offer_payload())
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class OfferOwnershipTests(MarketplaceTestBase):
+    """Seul le vendeur modifie, supprime ou gère le cycle de vie de son offre."""
+
+    def test_owner_can_update(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.seller)
+        response = self.client.patch(reverse('offer-detail', args=[offer.id]), {'price': 250})
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        offer.refresh_from_db()
+        self.assertEqual(offer.price, 250)
+
+    def test_other_user_cannot_update_or_delete(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.buyer)
+        url = reverse('offer-detail', args=[offer.id])
+        self.assertEqual(self.client.patch(url, {'price': 1}).status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(self.client.put(url, {}).status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(self.client.delete(url).status_code, status.HTTP_403_FORBIDDEN)
+        offer.refresh_from_db()
+        self.assertEqual(offer.price, 100)
+
+    def test_other_user_cannot_use_owner_actions(self):
+        offer = self.make_offer()
+        Offer.objects.filter(pk=offer.pk).update(is_deleted=True)
+        self.client.force_authenticate(self.buyer)
+        for name in ('restore', 'soft-delete', 'pause', 'unpause', 'mark-sold', 'renew'):
+            response = self.client.post(reverse(f'offer-{name}', args=[offer.id]))
+            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, name)
+        response = self.client.delete(reverse('offer-hard-delete', args=[offer.id]))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(Offer.objects.filter(pk=offer.pk).exists())
+
+    def test_unknown_offer_gives_404_not_500(self):
+        self.client.force_authenticate(self.seller)
+        ghost = uuid.uuid4()
+        self.assertEqual(self.client.post(reverse('offer-restore', args=[ghost])).status_code, 404)
+        self.assertEqual(self.client.delete(reverse('offer-hard-delete', args=[ghost])).status_code, 404)
+
+    def test_owner_destroy_removes_offer_and_visibility_data(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.buyer)
+        self.client.get(reverse('offer-detail', args=[offer.id]))
+        self.assertTrue(DailyVisibilityCounter.objects.filter(offer_id=offer.id).exists())
+
+        self.client.force_authenticate(self.seller)
+        response = self.client.delete(reverse('offer-detail', args=[offer.id]))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Offer.objects.filter(pk=offer.pk).exists())
+        self.assertFalse(DailyVisibilityCounter.objects.filter(offer_id=offer.id).exists())
+        self.assertFalse(OfferUniqueView.objects.filter(offer_id=offer.id).exists())
+
+    def test_recalculate_all_scores_is_admin_only(self):
+        self.make_offer()
+        url = reverse('offer-recalculate-all-scores')
+        self.client.force_authenticate(self.buyer)
+        self.assertEqual(self.client.post(url).status_code, status.HTTP_403_FORBIDDEN)
+        admin = User.objects.create_user(email='admin@example.com', password='x', full_name='Admin', is_staff=True)
+        self.client.force_authenticate(admin)
+        self.assertEqual(self.client.post(url).status_code, status.HTTP_200_OK)
+
+
+class OfferGalleryTests(MarketplaceTestBase):
+    def test_owner_cannot_exceed_the_image_limit(self):
+        offer = self.make_offer()
         self.client.force_authenticate(self.seller)
         # main_image compte pour 1 : il reste 7 places.
         for _ in range(7):
-            PostImage.objects.create(post=post, image=make_test_image())
+            OfferImage.objects.create(offer=offer, image=make_test_image())
         response = self.client.post(
-            reverse('post-images', args=[post.id]),
+            reverse('offer-images', args=[offer.id]),
             {'image': make_test_image('one_too_many.jpg')},
             format='multipart',
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_owner_can_add_an_image(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.seller)
+        response = self.client.post(
+            reverse('offer-images', args=[offer.id]), {'image': make_test_image()}, format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(offer.images.count(), 1)
+
     def test_non_owner_cannot_add_images(self):
-        post = self.make_post()
+        offer = self.make_offer()
         self.client.force_authenticate(self.buyer)
         response = self.client.post(
-            reverse('post-images', args=[post.id]),
-            {'image': make_test_image()},
-            format='multipart',
+            reverse('offer-images', args=[offer.id]), {'image': make_test_image()}, format='multipart',
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_owner_can_delete_a_gallery_image(self):
-        post = self.make_post()
-        image = PostImage.objects.create(post=post, image=make_test_image())
+        offer = self.make_offer()
+        image = OfferImage.objects.create(offer=offer, image=make_test_image())
         self.client.force_authenticate(self.seller)
-        response = self.client.delete(f"{reverse('post-images', args=[post.id])}?image_id={image.id}")
+        response = self.client.delete(f"{reverse('offer-images', args=[offer.id])}?image_id={image.id}")
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(PostImage.objects.filter(id=image.id).exists())
+        self.assertFalse(OfferImage.objects.filter(id=image.id).exists())
+
+    def test_deleting_an_unknown_image_gives_404(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.seller)
+        for image_id in (str(uuid.uuid4()), 'pas-un-uuid', ''):
+            response = self.client.delete(f"{reverse('offer-images', args=[offer.id])}?image_id={image_id}")
+            self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND, image_id)
 
 
 class FavoriteTests(MarketplaceTestBase):
     def test_toggle_favorite_adds_then_removes(self):
-        post = self.make_post()
+        offer = self.make_offer()
         self.client.force_authenticate(self.buyer)
-        response = self.client.post(reverse('post-favorite', args=[post.id]))
+        response = self.client.post(reverse('offer-favorite', args=[offer.id]))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['favorited'])
-        self.assertTrue(Favorite.objects.filter(user=self.buyer, post=post).exists())
+        self.assertTrue(Favorite.objects.filter(user=self.buyer, offer=offer).exists())
 
-        response = self.client.post(reverse('post-favorite', args=[post.id]))
+        response = self.client.post(reverse('offer-favorite', args=[offer.id]))
         self.assertFalse(response.data['favorited'])
-        self.assertFalse(Favorite.objects.filter(user=self.buyer, post=post).exists())
+        self.assertFalse(Favorite.objects.filter(user=self.buyer, offer=offer).exists())
 
     def test_favorites_list_only_shows_own_favorites(self):
-        post = self.make_post()
-        Favorite.objects.create(user=self.buyer, post=post)
+        offer = self.make_offer()
+        Favorite.objects.create(user=self.buyer, offer=offer)
         self.client.force_authenticate(self.seller)
         response = self.client.get(reverse('favorite-list'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 0)
 
-    def test_is_favorited_flag_on_post_detail(self):
-        post = self.make_post()
-        Favorite.objects.create(user=self.buyer, post=post)
         self.client.force_authenticate(self.buyer)
-        response = self.client.get(reverse('post-detail', args=[post.id]))
+        response = self.client.get(reverse('favorite-list'))
+        self.assertEqual(len(response.data), 1)
+        item = response.data[0]
+        self.assertEqual(set(item), {'id', 'post', 'created_at'})
+        self.assertEqual(item['post']['id'], str(offer.id))
+        self.assertTrue(item['post']['is_favorited'])
+        self.assertEqual(item['post']['favorites_count'], 1)
+
+    def test_create_favorite_through_the_collection_endpoint(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.buyer)
+        response = self.client.post(reverse('favorite-list'), {'post_id': str(offer.id)})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        # Un second ajout est refusé proprement (400), pas une erreur 500.
+        response = self.client.post(reverse('favorite-list'), {'post_id': str(offer.id)})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_cannot_favorite_a_deleted_offer_through_the_collection_endpoint(self):
+        offer = self.make_offer()
+        Offer.objects.filter(pk=offer.pk).update(is_deleted=True)
+        self.client.force_authenticate(self.buyer)
+        response = self.client.post(reverse('favorite-list'), {'post_id': str(offer.id)})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_is_favorited_flag_on_offer_detail(self):
+        offer = self.make_offer()
+        Favorite.objects.create(user=self.buyer, offer=offer)
+        self.client.force_authenticate(self.buyer)
+        response = self.client.get(reverse('offer-detail', args=[offer.id]))
         self.assertTrue(response.data['is_favorited'])
+        self.client.force_authenticate(None)
+        self.assertFalse(self.client.get(reverse('offer-detail', args=[offer.id])).data['is_favorited'])
 
 
-class PostFilterTests(MarketplaceTestBase):
+class OfferFilterTests(MarketplaceTestBase):
     def setUp(self):
         super().setUp()
-        self.cheap_usd = self.make_post(title='Chaise en bois massif', price=20, currency='USD')
-        self.expensive_cdf = self.make_post(
+        self.cheap_usd = self.make_offer(title='Chaise en bois massif', price=20, currency='USD')
+        self.expensive_cdf = self.make_offer(
             title='Téléviseur grand écran 4K', price=500000, currency='CDF', is_exchangeable=False,
         )
 
+    def ids(self, **params):
+        response = self.client.get(reverse('offer-list'), params)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return {p['id'] for p in response.data}
+
     def test_filter_by_currency(self):
-        response = self.client.get(reverse('post-list'), {'currency': 'CDF'})
-        ids = [p['id'] for p in response.data]
-        self.assertIn(self.expensive_cdf.id, ids)
-        self.assertNotIn(self.cheap_usd.id, ids)
+        ids = self.ids(currency='CDF')
+        self.assertIn(str(self.expensive_cdf.id), ids)
+        self.assertNotIn(str(self.cheap_usd.id), ids)
 
     def test_filter_by_price_range(self):
-        response = self.client.get(reverse('post-list'), {'price_min': 10, 'price_max': 100})
-        ids = [p['id'] for p in response.data]
-        self.assertIn(self.cheap_usd.id, ids)
-        self.assertNotIn(self.expensive_cdf.id, ids)
+        ids = self.ids(price_min=10, price_max=100)
+        self.assertIn(str(self.cheap_usd.id), ids)
+        self.assertNotIn(str(self.expensive_cdf.id), ids)
+
+    def test_invalid_price_filter_does_not_fail(self):
+        self.assertEqual(self.ids(price_min='abc'), set())
+        self.assertEqual(self.ids(price_max='NaN'), set())
+        # Valeur hors plage : bornée, sans erreur.
+        self.assertEqual(self.ids(price_max='1' * 60), {str(self.cheap_usd.id), str(self.expensive_cdf.id)})
 
     def test_filter_by_exchangeable(self):
-        response = self.client.get(reverse('post-list'), {'is_exchangeable': 'false'})
-        ids = [p['id'] for p in response.data]
-        self.assertIn(self.expensive_cdf.id, ids)
-        self.assertNotIn(self.cheap_usd.id, ids)
+        ids = self.ids(is_exchangeable='false')
+        self.assertIn(str(self.expensive_cdf.id), ids)
+        self.assertNotIn(str(self.cheap_usd.id), ids)
 
+    def test_search_by_title(self):
+        self.assertEqual(self.ids(search='chaise'), {str(self.cheap_usd.id)})
 
-class SoftDeleteTests(MarketplaceTestBase):
-    def test_soft_delete_sets_deleted_at(self):
-        post = self.make_post()
+    def test_inactive_and_trashed_offers_are_not_public(self):
+        Offer.objects.filter(pk=self.cheap_usd.pk).update(is_active=False)
+        Offer.objects.filter(pk=self.expensive_cdf.pk).update(is_deleted=True)
+        self.assertEqual(self.ids(), set())
+        detail = self.client.get(reverse('offer-detail', args=[self.cheap_usd.id]))
+        self.assertEqual(detail.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_my_offers_filter_lists_own_inactive_offers_but_not_trashed_ones(self):
+        Offer.objects.filter(pk=self.cheap_usd.pk).update(is_active=False)
+        Offer.objects.filter(pk=self.expensive_cdf.pk).update(is_deleted=True)
         self.client.force_authenticate(self.seller)
-        response = self.client.post(reverse('post-soft-delete', args=[post.id]))
+        self.assertEqual(self.ids(my_posts='true'), {str(self.cheap_usd.id)})
+
+    def test_pagination_is_optional(self):
+        response = self.client.get(reverse('offer-list'))
+        self.assertIsInstance(response.data, list)
+        response = self.client.get(reverse('offer-list'), {'page_size': 1})
+        self.assertEqual(response.data['count'], 2)
+        self.assertEqual(len(response.data['results']), 1)
+
+
+class OfferTrashTests(MarketplaceTestBase):
+    def test_soft_delete_sets_deleted_at(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.seller)
+        response = self.client.post(reverse('offer-soft-delete', args=[offer.id]))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        post.refresh_from_db()
-        self.assertTrue(post.is_delete)
-        self.assertIsNotNone(post.deleted_at)
+        offer.refresh_from_db()
+        self.assertTrue(offer.is_deleted)
+        self.assertIsNotNone(offer.deleted_at)
 
     def test_restore_clears_deleted_at(self):
-        post = self.make_post()
+        offer = self.make_offer()
         self.client.force_authenticate(self.seller)
-        self.client.post(reverse('post-soft-delete', args=[post.id]))
-        self.client.post(reverse('post-restore', args=[post.id]))
-        post.refresh_from_db()
-        self.assertFalse(post.is_delete)
-        self.assertIsNone(post.deleted_at)
+        self.client.post(reverse('offer-soft-delete', args=[offer.id]))
+        self.client.post(reverse('offer-restore', args=[offer.id]))
+        offer.refresh_from_db()
+        self.assertFalse(offer.is_deleted)
+        self.assertIsNone(offer.deleted_at)
+
+    def test_trash_lists_only_own_deleted_offers(self):
+        mine = self.make_offer(title='Mon annonce supprimée ici')
+        other = self.make_offer(title='Annonce supprimée d un autre', seller=self.buyer)
+        Offer.objects.filter(pk__in=[mine.pk, other.pk]).update(is_deleted=True)
+        self.make_offer(title='Une annonce encore en ligne')
+        self.client.force_authenticate(self.seller)
+        response = self.client.get(reverse('offer-trash'))
+        self.assertEqual([o['id'] for o in response.data], [str(mine.id)])
+
+    def test_hard_delete_removes_the_offer(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.seller)
+        response = self.client.delete(reverse('offer-hard-delete', args=[offer.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(Offer.objects.filter(pk=offer.pk).exists())
 
 
 class VisibilityScoreFormulaTests(MarketplaceTestBase):
     def test_formula_matches_cdc_spec(self):
-        settings_row = RankingSettings.get_solo()
-        post = self.make_post()
-        post.views_count = 10
-        post.likes_count = 2
-        post.comments_count = 1
-        post.shares_count = 0
-        post.save(update_fields=['views_count', 'likes_count', 'comments_count', 'shares_count'])
+        import math
 
-        post.update_visibility_score()
-        post.refresh_from_db()
+        settings_row = RankingSettings.get_solo()
+        offer = self.make_offer()
+        offer.views_count, offer.likes_count, offer.comments_count, offer.shares_count = 10, 2, 1, 0
+        offer.save(update_fields=['views_count', 'likes_count', 'comments_count', 'shares_count'])
+
+        offer = Offer.objects.select_related('seller').get(pk=offer.pk)
+        services.refresh_visibility_score(offer)
+        offer.refresh_from_db()
 
         engagement_raw = (
             settings_row.weight_views * 10 + settings_row.weight_likes * 2 + settings_row.weight_comments * 1
         )
         expected_e = 1 + math.log(1 + engagement_raw)
         expected_t = 0.8 + 0.4 * (self.seller.trust_score / 5.0)
-        age_hours = (post.last_score_update - post.created_at).total_seconds() / 3600
+        age_hours = (offer.last_score_update - offer.created_at).total_seconds() / 3600
         expected_r = math.exp(-(math.log(2) / settings_row.recency_half_life_hours) * age_hours)
-        expected = expected_e * expected_t * expected_r
 
-        self.assertAlmostEqual(post.visibility_score, expected, places=6)
+        self.assertAlmostEqual(offer.visibility_score, expected_e * expected_t * expected_r, places=6)
 
     def test_trust_factor_is_bounded(self):
         settings_row = RankingSettings.get_solo()
-        post = self.make_post()
+        offer = self.make_offer()
         self.seller.trust_score = 0.0
         self.seller.save(update_fields=['trust_score'])
-        post.update_visibility_score()
-        post.refresh_from_db()
+        offer = Offer.objects.select_related('seller').get(pk=offer.pk)
+        services.refresh_visibility_score(offer)
+        offer.refresh_from_db()
         # engagement E = 1 (aucune vue/like), donc visibility_score == T borné.
-        self.assertAlmostEqual(post.visibility_score, settings_row.trust_factor_min, places=2)
+        self.assertAlmostEqual(offer.visibility_score, settings_row.trust_factor_min, places=2)
+
+    def test_refresh_seller_offer_scores_only_touches_active_offers_of_that_seller(self):
+        mine = self.make_offer()
+        hidden = self.make_offer(title='Une annonce masquée ici', is_active=False)
+        other = self.make_offer(title='Annonce d un autre vendeur', seller=self.buyer)
+        self.assertEqual(services.refresh_seller_offer_scores(self.seller.id), 1)
+        for offer in (mine, hidden, other):
+            offer.refresh_from_db()
+        self.assertGreater(mine.visibility_score, 0)
+        self.assertEqual(hidden.visibility_score, 0)
+        self.assertEqual(other.visibility_score, 0)
 
 
 class UniqueViewTests(MarketplaceTestBase):
     def test_same_anonymous_visitor_counted_once_per_day(self):
-        post = self.make_post()
-        url = reverse('post-detail', args=[post.id])
+        offer = self.make_offer()
+        url = reverse('offer-detail', args=[offer.id])
 
         self.client.get(url)
         self.client.get(url)  # même client => même cookie anon_id
 
-        post.refresh_from_db()
-        self.assertEqual(post.views_count, 1)
-        self.assertEqual(PostUniqueView.objects.filter(post=post).count(), 1)
+        offer.refresh_from_db()
+        self.assertEqual(offer.views_count, 1)
+        self.assertEqual(OfferUniqueView.objects.filter(offer_id=offer.id).count(), 1)
+        counter = DailyVisibilityCounter.objects.get(offer_id=offer.id)
+        self.assertEqual((counter.views, counter.seller_id), (1, self.seller.id))
 
     def test_two_different_users_both_count(self):
-        post = self.make_post()
-        url = reverse('post-detail', args=[post.id])
+        offer = self.make_offer()
+        url = reverse('offer-detail', args=[offer.id])
 
         self.client.force_authenticate(self.buyer)
         self.client.get(url)
-
         other = User.objects.create_user(email='other@example.com', password='x', full_name='Autre')
         self.client.force_authenticate(other)
         self.client.get(url)
 
-        post.refresh_from_db()
-        self.assertEqual(post.views_count, 2)
+        offer.refresh_from_db()
+        self.assertEqual(offer.views_count, 2)
+        self.assertEqual(DailyVisibilityCounter.objects.get(offer_id=offer.id).views, 2)
+
+    def test_arbitrary_anon_cookie_is_hashed_and_bounded(self):
+        offer = self.make_offer()
+        self.client.cookies['anon_id'] = 'x' * 500
+        self.client.get(reverse('offer-detail', args=[offer.id]))
+        key = OfferUniqueView.objects.get(offer_id=offer.id).viewer_key
+        self.assertLessEqual(len(key), 64)
+        self.assertTrue(key.startswith('anon:'))
+        self.assertNotIn('xxxx', key)
 
 
 class TrendingBadgeTests(MarketplaceTestBase):
+    def counter(self, offer, days_ago, views):
+        return DailyVisibilityCounter.objects.create(
+            offer_id=offer.id, seller=self.seller, views=views, date=timezone.now().date() - timedelta(days=days_ago),
+        )
+
     def test_not_trending_without_history(self):
-        post = self.make_post()
-        self.assertFalse(post.is_trending())
+        offer = self.make_offer()
+        response = self.client.get(reverse('offer-detail', args=[offer.id]))
+        self.assertFalse(response.data['is_trending'])
 
     def test_trending_when_views_spike(self):
-        from datetime import timedelta
-        from django.utils import timezone
-
-        post = self.make_post()
-        today = timezone.now().date()
-        # date est auto_now_add : on force la vraie date après coup avec un
-        # deuxième .save(), qui n'est plus soumis à auto_now_add (seul l'INSERT l'est).
+        offer = self.make_offer()
         for i in range(1, 6):
-            stat = PostViewStat.objects.create(post=post, seller=self.seller, views=1)
-            stat.date = today - timedelta(days=i)
-            stat.save(update_fields=['date'])
-
-        stat = PostViewStat.objects.create(post=post, seller=self.seller, views=10)
-        stat.date = today
-        stat.save(update_fields=['date'])
-
-        self.assertTrue(post.is_trending())
+            self.counter(offer, i, 1)
+        self.counter(offer, 0, 10)
+        response = self.client.get(reverse('offer-list'))
+        flags = {o['id']: o['is_trending'] for o in response.data}
+        self.assertTrue(flags[str(offer.id)])
 
 
 class ShareActionTests(MarketplaceTestBase):
     def test_share_increments_counter_and_requires_auth(self):
-        post = self.make_post()
-        response = self.client.post(reverse('post-share', args=[post.id]))
+        offer = self.make_offer()
+        response = self.client.post(reverse('offer-share', args=[offer.id]))
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
         self.client.force_authenticate(self.buyer)
-        response = self.client.post(reverse('post-share', args=[post.id]))
+        response = self.client.post(reverse('offer-share', args=[offer.id]))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['shares_count'], 1)
 
 
-class PostLifecycleActionTests(MarketplaceTestBase):
+class OfferLifecycleActionTests(MarketplaceTestBase):
     def test_owner_can_pause_and_unpause(self):
-        post = self.make_post()
+        offer = self.make_offer()
         self.client.force_authenticate(self.seller)
 
-        response = self.client.post(reverse('post-pause', args=[post.id]))
+        response = self.client.post(reverse('offer-pause', args=[offer.id]))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        post.refresh_from_db()
-        self.assertEqual(post.status, Post.STATUS_PAUSED)
-        self.assertFalse(post.is_active)
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, Offer.STATUS_PAUSED)
+        self.assertFalse(offer.is_active)
 
-        response = self.client.post(reverse('post-unpause', args=[post.id]))
+        response = self.client.post(reverse('offer-unpause', args=[offer.id]))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        post.refresh_from_db()
-        self.assertEqual(post.status, Post.STATUS_ACTIVE)
-        self.assertTrue(post.is_active)
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, Offer.STATUS_ACTIVE)
+        self.assertTrue(offer.is_active)
 
     def test_non_owner_cannot_pause(self):
-        post = self.make_post()
+        offer = self.make_offer()
         self.client.force_authenticate(self.buyer)
-        response = self.client.post(reverse('post-pause', args=[post.id]))
+        response = self.client.post(reverse('offer-pause', args=[offer.id]))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_mark_sold(self):
-        post = self.make_post()
+        offer = self.make_offer()
         self.client.force_authenticate(self.seller)
-        response = self.client.post(reverse('post-mark-sold', args=[post.id]))
+        response = self.client.post(reverse('offer-mark-sold', args=[offer.id]))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        post.refresh_from_db()
-        self.assertEqual(post.status, Post.STATUS_SOLD)
-        self.assertFalse(post.is_active)
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, Offer.STATUS_SOLD)
+        self.assertFalse(offer.is_active)
 
-    def test_unpause_an_expired_post_requires_renewal(self):
-        from django.utils import timezone
-
-        post = self.make_post()
-        Post.objects.filter(pk=post.pk).update(status=Post.STATUS_PAUSED, expires_at=timezone.now() - timezone.timedelta(days=1))
+    def test_unpause_an_expired_offer_requires_renewal(self):
+        offer = self.make_offer()
+        Offer.objects.filter(pk=offer.pk).update(status=Offer.STATUS_PAUSED, expires_at=timezone.now() - timedelta(days=1))
         self.client.force_authenticate(self.seller)
-        response = self.client.post(reverse('post-unpause', args=[post.id]))
+        response = self.client.post(reverse('offer-unpause', args=[offer.id]))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        post.refresh_from_db()
-        self.assertEqual(post.status, Post.STATUS_EXPIRED)
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, Offer.STATUS_EXPIRED)
 
     def test_renew_resets_expiration_and_reactivates(self):
-        from django.utils import timezone
-
-        post = self.make_post()
-        Post.objects.filter(pk=post.pk).update(status=Post.STATUS_EXPIRED, is_active=False, expires_at=timezone.now() - timezone.timedelta(days=1))
+        offer = self.make_offer()
+        Offer.objects.filter(pk=offer.pk).update(
+            status=Offer.STATUS_EXPIRED, is_active=False, expires_at=timezone.now() - timedelta(days=1),
+        )
         self.client.force_authenticate(self.seller)
-        response = self.client.post(reverse('post-renew', args=[post.id]))
+        response = self.client.post(reverse('offer-renew', args=[offer.id]))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        post.refresh_from_db()
-        self.assertEqual(post.status, Post.STATUS_ACTIVE)
-        self.assertTrue(post.is_active)
-        self.assertGreater(post.expires_at, timezone.now())
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, Offer.STATUS_ACTIVE)
+        self.assertTrue(offer.is_active)
+        self.assertGreater(offer.expires_at, timezone.now())
 
 
 class ScheduledTasksTests(MarketplaceTestBase):
-    def test_purge_trash_deletes_only_old_soft_deleted_posts(self):
-        from datetime import timedelta
-
-        from django.core.management import call_command
-        from django.utils import timezone
-
-        old_deleted = self.make_post(title='Une annonce ancienne à purger')
-        Post.objects.filter(pk=old_deleted.pk).update(
-            is_delete=True, deleted_at=timezone.now() - timedelta(days=31),
-        )
-        recent_deleted = self.make_post(title='Une annonce récente supprimée')
-        Post.objects.filter(pk=recent_deleted.pk).update(
-            is_delete=True, deleted_at=timezone.now() - timedelta(days=1),
-        )
+    def test_purge_trash_deletes_only_old_soft_deleted_offers(self):
+        old_deleted = self.make_offer(title='Une annonce ancienne à purger')
+        Offer.objects.filter(pk=old_deleted.pk).update(is_deleted=True, deleted_at=timezone.now() - timedelta(days=31))
+        recent_deleted = self.make_offer(title='Une annonce récente supprimée')
+        Offer.objects.filter(pk=recent_deleted.pk).update(is_deleted=True, deleted_at=timezone.now() - timedelta(days=1))
 
         call_command('purge_trash', verbosity=0)
 
-        self.assertFalse(Post.objects.filter(pk=old_deleted.pk).exists())
-        self.assertTrue(Post.objects.filter(pk=recent_deleted.pk).exists())
+        self.assertFalse(Offer.objects.filter(pk=old_deleted.pk).exists())
+        self.assertTrue(Offer.objects.filter(pk=recent_deleted.pk).exists())
 
-    def test_purge_trash_preserves_reviews_and_deals(self):
-        from datetime import timedelta
-
-        from django.core.management import call_command
-        from django.utils import timezone
-
-        from apps.reputation.models import Deal
-        from apps.interactions.models import Review
-
-        post = self.make_post()
-        deal = Deal.objects.create(post=post, initiator=self.buyer, counterparty=self.seller)
-        deal.confirm()
-        review = Review.objects.create(
-            deal=deal, post=post, user=self.buyer, reviewed_user=self.seller,
-            content='Vendeur très sérieux et rapide.', rating=5,
-        )
-        Post.objects.filter(pk=post.pk).update(is_delete=True, deleted_at=timezone.now() - timedelta(days=31))
-
+    def test_purge_trash_also_clears_visibility_data(self):
+        offer = self.make_offer()
+        DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=timezone.now().date(), views=3)
+        Offer.objects.filter(pk=offer.pk).update(is_deleted=True, deleted_at=timezone.now() - timedelta(days=31))
         call_command('purge_trash', verbosity=0)
-
-        self.assertFalse(Post.objects.filter(pk=post.pk).exists())
-        review.refresh_from_db()
-        deal.refresh_from_db()
-        self.assertIsNone(review.post)
-        self.assertIsNone(deal.post)
+        self.assertFalse(DailyVisibilityCounter.objects.filter(offer_id=offer.id).exists())
 
     def test_expire_posts_transitions_status(self):
-        from django.core.management import call_command
-        from django.utils import timezone
-
-        post = self.make_post()
-        Post.objects.filter(pk=post.pk).update(expires_at=timezone.now() - timezone.timedelta(days=1))
+        offer = self.make_offer()
+        Offer.objects.filter(pk=offer.pk).update(expires_at=timezone.now() - timedelta(days=1))
 
         call_command('expire_posts', verbosity=0)
 
-        post.refresh_from_db()
-        self.assertEqual(post.status, Post.STATUS_EXPIRED)
-        self.assertFalse(post.is_active)
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, Offer.STATUS_EXPIRED)
+        self.assertFalse(offer.is_active)
 
     def test_expire_posts_notifies_upcoming_expiration_once(self):
-        from django.core.management import call_command
-        from django.utils import timezone
-
-        from apps.interactions.models import Notification
-
-        post = self.make_post()
-        Post.objects.filter(pk=post.pk).update(expires_at=timezone.now() + timezone.timedelta(days=1))
+        offer = self.make_offer()
+        Offer.objects.filter(pk=offer.pk).update(expires_at=timezone.now() + timedelta(days=1))
 
         call_command('expire_posts', verbosity=0)
         call_command('expire_posts', verbosity=0)  # ne doit pas renotifier
 
-        self.assertEqual(
-            Notification.objects.filter(user=self.seller, notification_type='EXPIRATION').count(), 1,
+        self.assertEqual(Notification.objects.filter(user=self.seller, notification_type='EXPIRATION').count(), 1)
+
+    def test_refresh_dashboard_aggregates_counts_todays_contacts(self):
+        offer = self.make_offer()
+        ContactEvent.objects.create(offer=offer, sender=self.buyer, message='Bonjour')
+        ContactEvent.objects.create(offer=offer, sender=self.buyer, message='Toujours disponible ?')
+
+        call_command('refresh_dashboard_aggregates', verbosity=0)
+        call_command('refresh_dashboard_aggregates', verbosity=0)  # idempotent
+
+        counter = DailyVisibilityCounter.objects.get(offer_id=offer.id)
+        self.assertEqual(counter.contacts, 2)
+        self.assertEqual(counter.seller_id, self.seller.id)
+
+
+class DashboardStatsTests(MarketplaceTestBase):
+    def test_dashboard_summary_and_history(self):
+        offer = self.make_offer()
+        today = timezone.now().date()
+        DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=today, views=4, contacts=2)
+        DailyVisibilityCounter.objects.create(
+            offer_id=offer.id, seller=self.seller, date=today - timedelta(days=2), views=6,
         )
+        # Le compteur d'un autre vendeur n'est jamais compté.
+        DailyVisibilityCounter.objects.create(offer_id=uuid.uuid4(), seller=self.buyer, date=today, views=99)
+
+        self.client.force_authenticate(self.seller)
+        response = self.client.get(reverse('dashboard_stats'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        summary = response.data['summary']
+        self.assertEqual(
+            (summary['total_views'], summary['today_views'], summary['active_posts'], summary['contacts_count']),
+            (10, 4, 1, 2),
+        )
+        self.assertEqual(summary['contact_rate'], 2.0)
+        self.assertEqual([p['views'] for p in response.data['history']], [6, 4])
+        self.assertEqual(set(summary), {
+            'total_views', 'today_views', 'active_posts', 'contacts_count', 'contact_rate', 'avg_rating', 'review_count',
+        })
+
+    def test_offer_stats_only_for_the_seller(self):
+        offer = self.make_offer()
+        DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=timezone.now().date(), views=3)
+        url = reverse('offer_stats', args=[offer.id])
+        self.client.force_authenticate(self.seller)
+        self.assertEqual(self.client.get(url).data['history'][0]['views'], 3)
+        self.client.force_authenticate(self.buyer)
+        self.assertEqual(self.client.get(url).status_code, status.HTTP_404_NOT_FOUND)
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get(url).status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class ContactTests(MarketplaceTestBase):
+    def contact(self, offer, message='Bonjour, toujours disponible ?'):
+        return self.client.post(reverse('contact-list'), {'post': str(offer.id), 'message': message})
+
+    def test_contact_creates_event_conversation_message_and_notification(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.buyer)
+        response = self.contact(offer)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(str(response.data['post']), str(offer.id))
+
+        self.assertEqual(ContactEvent.objects.filter(offer=offer, sender=self.buyer).count(), 1)
+        conversation = Conversation.objects.get(offer_id=offer.id)
+        self.assertEqual({p.id for p in conversation.participants.all()}, {self.buyer.id, self.seller.id})
+        self.assertEqual(Message.objects.get(conversation=conversation).sender, self.buyer)
+        notification = Notification.objects.get(user=self.seller)
+        self.assertEqual(notification.notification_type, 'CONTACT')
+
+    def test_each_buyer_gets_a_private_conversation(self):
+        offer = self.make_offer()
+        other = User.objects.create_user(email='other@example.com', password='x', full_name='Autre')
+        for user in (self.buyer, other, self.buyer):
+            self.client.force_authenticate(user)
+            self.assertEqual(self.contact(offer).status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Conversation.objects.filter(offer_id=offer.id).count(), 2)
+        buyer_conversation = Conversation.objects.filter(offer_id=offer.id, participants=self.buyer).get()
+        self.assertEqual(buyer_conversation.messages.count(), 2)
+        self.assertFalse(buyer_conversation.participants.filter(pk=other.pk).exists())
+
+    def test_cannot_contact_own_offer(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.seller)
+        response = self.contact(offer)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(ContactEvent.objects.exists())
+
+    def test_cannot_contact_a_deleted_offer_or_an_unknown_one(self):
+        offer = self.make_offer()
+        Offer.objects.filter(pk=offer.pk).update(is_deleted=True)
+        self.client.force_authenticate(self.buyer)
+        self.assertEqual(self.contact(offer).status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.client.post(reverse('contact-list'), {'post': str(uuid.uuid4()), 'message': 'Bonjour'})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_message_is_required_and_bounded(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.buyer)
+        self.assertEqual(self.contact(offer, message='').status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.contact(offer, message='x' * 2001).status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_requires_authentication(self):
+        offer = self.make_offer()
+        self.assertEqual(self.contact(offer).status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_contacts_are_private_to_their_sender_and_immutable(self):
+        offer = self.make_offer()
+        event = ContactEvent.objects.create(offer=offer, sender=self.buyer, message='Bonjour')
+        self.client.force_authenticate(self.seller)
+        self.assertEqual(len(self.client.get(reverse('contact-list')).data), 0)
+        self.assertEqual(self.client.get(reverse('contact-detail', args=[event.id])).status_code, 404)
+        self.client.force_authenticate(self.buyer)
+        self.assertEqual(self.client.patch(reverse('contact-detail', args=[event.id]), {'message': 'X'}).status_code, 405)
+        self.assertEqual(self.client.delete(reverse('contact-detail', args=[event.id])).status_code, 405)
+
+    def test_exchange_proposal_flow(self):
+        offer = self.make_offer()
+        self.client.force_authenticate(self.buyer)
+        response = self.client.post(reverse('exchange-list'), {'post': str(offer.id), 'message': 'Je propose un troc.'})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        message = Message.objects.get(conversation__offer_id=offer.id)
+        self.assertTrue(message.content.startswith("[PROPOSITION D'ÉCHANGE]"))
+        self.assertEqual(Notification.objects.get(user=self.seller).notification_type, 'EXCHANGE')
 
 
 class CatalogDecouplingTests(MarketplaceTestBase):
     """ADR 0002 : catégories et communes référencées par UUID, résolues via catalog.services."""
 
-    def test_list_returns_catalog_names_with_constant_query_count(self):
+    def test_list_has_a_constant_number_of_queries(self):
         other_commune = Commune.objects.create(city=self.city, name='Limete')
         for i in range(3):
-            self.make_post(title=f'Annonce numéro {i} à vendre', commune_id=other_commune.id if i else self.commune.id)
+            self.make_offer(title=f'Annonce numéro {i} à vendre', commune_id=other_commune.id if i else self.commune.id)
 
-        def count_queries():
-            from django.db import connection
-            from django.test.utils import CaptureQueriesContext
+        def run():
             with CaptureQueriesContext(connection) as ctx:
-                response = self.client.get(reverse('post-list'))
+                response = self.client.get(reverse('offer-list'))
             self.assertEqual(response.status_code, status.HTTP_200_OK)
-            return len([q for q in ctx.captured_queries if 'catalog_' in q['sql']]), response
+            return len(ctx.captured_queries), len([q for q in ctx.captured_queries if 'catalog_' in q['sql']]), response
 
-        few, response = count_queries()
+        run()  # amorce les réglages (lignes uniques créées à la première lecture)
+        few_total, few_catalog, response = run()
         names = {(p['category_name'], p['commune_name']) for p in response.data}
         self.assertEqual(names, {('Électronique', 'Gombe'), ('Électronique', 'Limete')})
         self.assertEqual(str(self.category.id), response.data[0]['category'])
-        for i in range(3, 8):
-            self.make_post(title=f'Autre annonce numéro {i} ici')
-        many, _ = count_queries()
-        # Une requête pour les catégories, une pour les communes, quel que soit le nombre d'annonces.
-        self.assertEqual((few, many), (2, 2))
+        for i in range(3, 9):
+            self.make_offer(title=f'Autre annonce numéro {i} ici')
+        many_total, many_catalog, _ = run()
+        # Une requête pour les catégories, une pour les communes, quel que soit le nombre d'offres.
+        self.assertEqual((few_catalog, many_catalog), (2, 2))
+        self.assertEqual(few_total, many_total)
+
+    def test_authenticated_list_query_count_is_constant_too(self):
+        self.client.force_authenticate(self.buyer)
+        self.make_offer()
+        self.client.get(reverse('offer-list'))  # amorce les réglages
+        with CaptureQueriesContext(connection) as few:
+            self.client.get(reverse('offer-list'))
+        for i in range(6):
+            self.make_offer(title=f'Autre annonce numéro {i} ici')
+        with CaptureQueriesContext(connection) as many:
+            self.client.get(reverse('offer-list'))
+        self.assertEqual(len(few.captured_queries), len(many.captured_queries))
 
     def test_filters_by_category_city_commune_and_location(self):
         other_city = City.objects.create(name='Lubumbashi')
         other_commune = Commune.objects.create(city=other_city, name='Kenya')
         other_category = Category.objects.create(name='Mode', slug='mode')
-        kept = self.make_post()
-        far = self.make_post(title='Annonce à Lubumbashi ici', commune_id=other_commune.id, category_id=other_category.id)
+        kept = self.make_offer()
+        far = self.make_offer(title='Annonce à Lubumbashi ici', commune_id=other_commune.id, category_id=other_category.id)
 
         def ids(**params):
-            response = self.client.get(reverse('post-list'), params)
+            response = self.client.get(reverse('offer-list'), params)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             return {p['id'] for p in response.data}
 
-        self.assertEqual(ids(category=str(self.category.id)), {kept.id})
-        self.assertEqual(ids(city=str(other_city.id)), {far.id})
-        self.assertEqual(ids(commune=str(self.commune.id)), {kept.id})
-        self.assertEqual(ids(location='lubum'), {far.id})
-        self.assertEqual(ids(location='gombe'), {kept.id})
+        self.assertEqual(ids(category=str(self.category.id)), {str(kept.id)})
+        self.assertEqual(ids(city=str(other_city.id)), {str(far.id)})
+        self.assertEqual(ids(commune=str(self.commune.id)), {str(kept.id)})
+        self.assertEqual(ids(location='lubum'), {str(far.id)})
+        self.assertEqual(ids(location='gombe'), {str(kept.id)})
 
     def test_malformed_filter_ids_return_nothing_instead_of_failing(self):
-        self.make_post()
+        self.make_offer()
         for param in ('category', 'commune', 'city', 'seller'):
-            response = self.client.get(reverse('post-list'), {param: 'pas-un-uuid'})
+            response = self.client.get(reverse('offer-list'), {param: 'pas-un-uuid'})
             self.assertEqual(response.status_code, status.HTTP_200_OK, param)
             self.assertEqual(len(response.data), 0, param)
 
     def test_create_rejects_unknown_category_and_commune(self):
         self.client.force_authenticate(self.seller)
-        base = {
-            'title': 'Un titre correct', 'description': 'Description suffisamment longue pour valider.',
-            'price': 10, 'main_image': make_test_image(),
-        }
-        response = self.client.post(reverse('post-list'), {
-            **base, 'category': str(uuid.uuid4()), 'commune': str(self.commune.id),
-        })
+        response = self.client.post(reverse('offer-list'), self.offer_payload(category=str(uuid.uuid4())))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('category', response.data)
-        base['main_image'] = make_test_image()
-        response = self.client.post(reverse('post-list'), {
-            **base, 'category': str(self.category.id), 'commune': 'abc',
-        })
+        response = self.client.post(reverse('offer-list'), self.offer_payload(commune='abc'))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('commune', response.data)
 
-    def test_post_ids_are_not_foreign_keys_to_catalog(self):
-        self.assertEqual(
-            [f.name for f in Post._meta.get_fields() if f.is_relation and f.related_model._meta.app_label == 'catalog'],
-            [],
-        )
+
+class ContractTests(MarketplaceTestBase):
+    """Contrat JSON historique (jusqu'à L0-11) : clés de l'offre et du vendeur, ids en chaînes."""
+
+    def test_offer_and_seller_json_keys(self):
+        offer = self.make_offer()
+        data = self.client.get(reverse('offer-detail', args=[offer.id])).data
+        self.assertEqual(set(data), {
+            'id', 'seller', 'seller_name', 'category', 'category_name', 'commune', 'commune_name', 'post_type',
+            'title', 'description', 'price', 'currency', 'condition', 'stock', 'is_price_negotiable',
+            'is_exchangeable', 'main_image', 'images', 'views_count', 'likes_count', 'comments_count',
+            'shares_count', 'created_at', 'status', 'expires_at', 'visibility_score', 'visibility_rank',
+            'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored',
+        })
+        self.assertEqual(set(data['seller']), {
+            'id', 'full_name', 'photo', 'phone', 'user_type', 'business_profile', 'date_joined',
+            'trust_score', 'reviews_count', 'is_new_seller', 'is_trusted_seller',
+        })
+        self.assertEqual(data['id'], str(offer.id))
+        self.assertEqual(data['seller']['id'], str(self.seller.id))
+        self.assertIsNone(data['seller']['business_profile'])
+        self.assertTrue(data['seller']['is_new_seller'])
+        self.assertIsNone(data['seller']['trust_score'])
+
+    def test_seller_business_profile_is_embedded(self):
+        from apps.identity.models import BusinessProfile
+
+        BusinessProfile.objects.create(user=self.seller, business_name='Boutique Test', bio='Bio', is_verified=True)
+        offer = self.make_offer()
+        seller = self.client.get(reverse('offer-detail', args=[offer.id])).data['seller']
+        self.assertEqual(set(seller['business_profile']), {'business_name', 'bio', 'logo', 'is_verified'})
+        self.assertEqual(seller['business_profile']['business_name'], 'Boutique Test')
+        self.assertTrue(seller['business_profile']['is_verified'])
+
+    def test_offers_are_not_exposed_through_a_deleted_flag_name(self):
+        offer = self.make_offer()
+        data = self.client.get(reverse('offer-detail', args=[offer.id])).data
+        self.assertNotIn('is_delete', data)
+        self.assertNotIn('is_deleted', data)
+
+
+class ServiceTests(MarketplaceTestBase):
+    def test_get_offers_by_ids_ignores_malformed_ids(self):
+        offer = self.make_offer()
+        found = services.get_offers_by_ids([offer.id, 'nope', None, uuid.uuid4()])
+        self.assertEqual(set(found), {offer.id})
+        info = found[offer.id]
+        self.assertEqual((info.seller_id, info.title), (self.seller.id, offer.title))
+        self.assertTrue(info.main_image_url.endswith('.webp'))
+
+    def test_offer_has_no_foreign_key_to_another_domain(self):
+        for model in (Offer, OfferImage, Favorite, ContactEvent):
+            for field in model._meta.get_fields():
+                if field.is_relation and field.concrete:
+                    self.assertIn(
+                        field.related_model._meta.app_label, ('marketplace', 'identity'), f'{model.__name__}.{field.name}',
+                    )

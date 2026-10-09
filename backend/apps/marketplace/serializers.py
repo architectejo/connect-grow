@@ -1,79 +1,106 @@
+from django.db.models import Count
 from rest_framework import serializers
+
 from apps.catalog import services as catalog_services
+from apps.common.images import validate_image_pixels, validate_image_upload_size
 from apps.common.serializers import PreloadingListSerializer
+from apps.identity import services as identity_services
+from apps.reviews import services as reviews_services
+from apps.visibility import services as visibility_services
 
-from .models import Favorite, Post, PostImage
+from .models import ContactEvent, ExchangeProposal, Favorite, Offer, OfferImage
+
+# Seuil du badge « Vendeur fiable » (CDC 3.8) : Trust Score >= 4,5 et au moins 10 avis.
+TRUSTED_SELLER_MIN_SCORE = 4.5
+TRUSTED_SELLER_MIN_REVIEWS = 10
 
 
-class BusinessProfileSerializer(serializers.ModelSerializer):
-    class Meta:
-        from apps.identity.models import BusinessProfile
-        model = BusinessProfile
-        fields = ['business_name', 'bio', 'logo', 'is_verified']
+def _media_url(request, path):
+    if not path:
+        return None
+    return request.build_absolute_uri(path) if request else path
 
-class SellerSerializer(serializers.ModelSerializer):
-    business_profile = BusinessProfileSerializer(read_only=True)
+
+class SellerSerializer(serializers.Serializer):
+    """Fiche publique du vendeur, construite à partir d'identity.services.SellerSummary."""
+
+    id = serializers.UUIDField()
+    full_name = serializers.CharField()
+    phone = serializers.CharField(allow_null=True)  # à retirer par L0-10a
+    user_type = serializers.CharField()
+    date_joined = serializers.DateTimeField()
+    reviews_count = serializers.IntegerField()
+    photo = serializers.SerializerMethodField()
+    business_profile = serializers.SerializerMethodField()
     trust_score = serializers.SerializerMethodField()
-    reviews_count = serializers.IntegerField(read_only=True)
     is_new_seller = serializers.SerializerMethodField()
     is_trusted_seller = serializers.SerializerMethodField()
 
-    class Meta:
-        from apps.identity.models import User
-        model = User
-        fields = [
-            'id', 'full_name', 'photo', 'phone', 'user_type', 'business_profile', 'date_joined',
-            'trust_score', 'reviews_count', 'is_new_seller', 'is_trusted_seller',
-        ]
+    def _min_reviews(self):
+        # Une lecture par sérialisation de liste : le contexte est partagé.
+        if 'min_reviews_to_display' not in self.context:
+            self.context['min_reviews_to_display'] = reviews_services.get_min_reviews_to_display()
+        return self.context['min_reviews_to_display']
 
-    def _min_reviews_to_display(self):
-        from apps.reputation.models import TrustScoreSettings
-        return TrustScoreSettings.get_solo().min_reviews_to_display
+    def get_photo(self, obj):
+        return _media_url(self.context.get('request'), obj.photo)
+
+    def get_business_profile(self, obj):
+        if obj.business is None:
+            return None
+        return {
+            'business_name': obj.business.business_name,
+            'bio': obj.business.bio,
+            'logo': _media_url(self.context.get('request'), obj.business.logo),
+            'is_verified': obj.business.is_verified,
+        }
 
     def get_is_new_seller(self, obj):
         # CDC 3.7 : le score n'est affiché publiquement qu'à partir de 3 avis.
-        return obj.reviews_count < self._min_reviews_to_display()
+        return obj.reviews_count < self._min_reviews()
 
     def get_trust_score(self, obj):
-        if self.get_is_new_seller(obj):
-            return None
-        return obj.trust_score
+        return None if self.get_is_new_seller(obj) else obj.trust_score
 
     def get_is_trusted_seller(self, obj):
-        # CDC 3.8 : badge « Vendeur fiable » (Trust Score >= 4.5, au moins 10 avis).
-        return obj.trust_score >= 4.5 and obj.reviews_count >= 10
+        return obj.trust_score >= TRUSTED_SELLER_MIN_SCORE and obj.reviews_count >= TRUSTED_SELLER_MIN_REVIEWS
 
 
-class PostImageSerializer(serializers.ModelSerializer):
+class OfferImageSerializer(serializers.ModelSerializer):
     class Meta:
-        model = PostImage
+        model = OfferImage
         fields = ['id', 'image', 'order']
 
 
-class PostListSerializer(PreloadingListSerializer):
+class OfferListSerializer(PreloadingListSerializer):
     pass
 
 
-class PostSerializer(serializers.ModelSerializer):
-    # Clés JSON `category` / `commune` conservées : UUID du domaine catalog. Les noms
-    # sont lus par lot dans le catalogue (plus de jointure ORM entre domaines).
+class OfferSerializer(serializers.ModelSerializer):
+    """Contrat JSON historique conservé jusqu'à L0-11 : `post_type`, `category`, `commune`.
+    Les données des autres domaines (catalogue, vendeur, tendance) sont chargées par lot
+    pour toute la liste (`preload`), sans jointure ni requête par offre."""
+
     category = serializers.UUIDField(source='category_id')
     commune = serializers.UUIDField(source='commune_id')
+    post_type = serializers.ChoiceField(source='offer_type', choices=Offer.OFFER_TYPE_CHOICES, required=False)
     category_name = serializers.SerializerMethodField()
     commune_name = serializers.SerializerMethodField()
-    seller = SellerSerializer(read_only=True)
+    seller = serializers.SerializerMethodField()
     seller_name = serializers.ReadOnlyField(source='seller.full_name')
-    main_image = serializers.ImageField(required=False, allow_null=True)
-    images = PostImageSerializer(many=True, read_only=True)
+    main_image = serializers.ImageField(
+        required=False, allow_null=True, validators=[validate_image_upload_size, validate_image_pixels],
+    )
+    images = OfferImageSerializer(many=True, read_only=True)
     visibility_rank = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
-    favorites_count = serializers.IntegerField(source='favorited_by.count', read_only=True)
+    favorites_count = serializers.SerializerMethodField()
     is_trending = serializers.SerializerMethodField()
-    # CDC 3.8 : le Boost (billing, P3) n'existe pas encore ; toujours False pour l'instant.
+    # Le Boost payant (lot 1) n'existe pas encore ; toujours False pour l'instant.
     is_sponsored = serializers.SerializerMethodField()
 
     class Meta:
-        model = Post
+        model = Offer
         fields = [
             'id', 'seller', 'seller_name', 'category', 'category_name',
             'commune', 'commune_name', 'post_type', 'title', 'description',
@@ -87,44 +114,72 @@ class PostSerializer(serializers.ModelSerializer):
             'seller', 'views_count', 'likes_count', 'comments_count', 'shares_count',
             'created_at', 'status', 'expires_at', 'visibility_score',
         ]
-        list_serializer_class = PostListSerializer
+        list_serializer_class = OfferListSerializer
 
-    CATALOG_CONTEXT_KEY = 'marketplace_catalog'
+    CONTEXT_KEY = 'marketplace_preload'
 
     @classmethod
-    def preload(cls, posts, context):
-        """Charge en deux requêtes les catégories et communes des annonces données,
-        et les ajoute au cache du contexte (les ids déjà connus ne sont pas relus)."""
-        cache = context.setdefault(cls.CATALOG_CONTEXT_KEY, {'categories': {}, 'communes': {}})
-        missing_categories = {p.category_id for p in posts} - cache['categories'].keys()
-        missing_communes = {p.commune_id for p in posts} - cache['communes'].keys()
+    def preload(cls, offers, context):
+        """Charge par lot ce qui vient d'autres domaines ou d'agrégats : catégories et communes
+        (catalog), vendeurs (identity), tendance (visibility), favoris. Les ids déjà connus
+        ne sont pas relus."""
+        cache = context.setdefault(cls.CONTEXT_KEY, {
+            'categories': {}, 'communes': {}, 'sellers': {}, 'trending': set(), 'seen': set(),
+            'favorite_counts': {}, 'favorited': set(),
+        })
+        new = [o for o in offers if o.id not in cache['seen']]
+        if not new:
+            return
+        ids = {o.id for o in new}
+
+        missing_categories = {o.category_id for o in new} - cache['categories'].keys()
+        missing_communes = {o.commune_id for o in new} - cache['communes'].keys()
+        missing_sellers = {o.seller_id for o in new} - cache['sellers'].keys()
         cache['categories'].update(catalog_services.get_categories_by_ids(missing_categories))
         cache['communes'].update(catalog_services.get_communes_by_ids(missing_communes))
-        # Un id absent du catalogue est mémorisé pour ne pas être relu pour chaque annonce.
-        for category_id in missing_categories:
-            cache['categories'].setdefault(category_id, None)
-        for commune_id in missing_communes:
-            cache['communes'].setdefault(commune_id, None)
+        cache['sellers'].update(identity_services.get_seller_summaries(missing_sellers))
+        # Un id absent de son domaine est mémorisé pour ne pas être relu pour chaque offre.
+        for key, wanted in (('categories', missing_categories), ('communes', missing_communes), ('sellers', missing_sellers)):
+            for item_id in wanted:
+                cache[key].setdefault(item_id, None)
 
-    def _catalog(self, obj):
-        cache = self.context.get(self.CATALOG_CONTEXT_KEY)
-        if (
-            cache is None
-            or obj.category_id not in cache['categories']
-            or obj.commune_id not in cache['communes']
-        ):
+        cache['trending'] |= visibility_services.trending_offer_ids(ids)
+        counts = Favorite.objects.filter(offer_id__in=ids).values('offer_id').annotate(total=Count('id'))
+        cache['favorite_counts'].update({row['offer_id']: row['total'] for row in counts})
+        request = context.get('request')
+        if request is not None and request.user.is_authenticated:
+            cache['favorited'] |= set(
+                Favorite.objects.filter(user=request.user, offer_id__in=ids).values_list('offer_id', flat=True)
+            )
+        cache['seen'] |= ids
+
+    def _cache(self, obj):
+        cache = self.context.get(self.CONTEXT_KEY)
+        if cache is None or obj.id not in cache['seen']:
             # Objet isolé (ou hors liste préchargée) : chargement ciblé.
             self.preload([obj], self.context)
-            cache = self.context[self.CATALOG_CONTEXT_KEY]
+            cache = self.context[self.CONTEXT_KEY]
         return cache
 
+    def get_seller(self, obj):
+        summary = self._cache(obj)['sellers'].get(obj.seller_id)
+        if summary is None:
+            return None
+        return SellerSerializer(summary, context=self.context).data
+
     def get_category_name(self, obj):
-        category = self._catalog(obj)['categories'].get(obj.category_id)
+        category = self._cache(obj)['categories'].get(obj.category_id)
         return category.name if category else None
 
     def get_commune_name(self, obj):
-        commune = self._catalog(obj)['communes'].get(obj.commune_id)
+        commune = self._cache(obj)['communes'].get(obj.commune_id)
         return commune.name if commune else None
+
+    def validate(self, attrs):
+        # CDC 3.2 : une offre porte au moins une photo (la principale).
+        if self.instance is None and not attrs.get('main_image'):
+            raise serializers.ValidationError({'main_image': "Une photo principale est requise."})
+        return attrs
 
     def validate_category(self, value):
         if not catalog_services.category_exists(value):
@@ -138,12 +193,14 @@ class PostSerializer(serializers.ModelSerializer):
 
     def get_visibility_rank(self, obj):
         score = obj.visibility_score or 0.0
-        if score > 50: return "Elite"
-        if score > 10: return "Standard"
+        if score > 50:
+            return "Elite"
+        if score > 10:
+            return "Standard"
         return "Faible"
 
     def get_is_trending(self, obj):
-        return obj.is_trending()
+        return obj.id in self._cache(obj)['trending']
 
     def get_is_sponsored(self, obj):
         return False
@@ -152,10 +209,10 @@ class PostSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return False
-        # Nécessite d'annoter/prefetch pour éviter le N+1 sur les listes (voir la vue).
-        if hasattr(obj, 'is_favorited_by_user'):
-            return obj.is_favorited_by_user
-        return obj.favorited_by.filter(user=request.user).exists()
+        return obj.id in self._cache(obj)['favorited']
+
+    def get_favorites_count(self, obj):
+        return self._cache(obj)['favorite_counts'].get(obj.id, 0)
 
 
 class FavoriteListSerializer(PreloadingListSerializer):
@@ -163,9 +220,10 @@ class FavoriteListSerializer(PreloadingListSerializer):
 
 
 class FavoriteSerializer(serializers.ModelSerializer):
-    post = PostSerializer(read_only=True)
+    # Clés JSON `post` / `post_id` conservées jusqu'à L0-11.
+    post = OfferSerializer(source='offer', read_only=True)
     post_id = serializers.PrimaryKeyRelatedField(
-        source='post', queryset=Post.objects.filter(is_delete=False), write_only=True,
+        source='offer', queryset=Offer.objects.filter(is_deleted=False), write_only=True,
     )
 
     class Meta:
@@ -175,4 +233,32 @@ class FavoriteSerializer(serializers.ModelSerializer):
 
     @classmethod
     def preload(cls, favorites, context):
-        PostSerializer.preload([f.post for f in favorites], context)
+        OfferSerializer.preload([f.offer for f in favorites], context)
+
+    def validate(self, attrs):
+        # Un même favori ne se crée pas deux fois (contrainte d'unicité en base).
+        request = self.context['request']
+        if Favorite.objects.filter(user=request.user, offer=attrs['offer']).exists():
+            raise serializers.ValidationError("Cette annonce est déjà dans vos favoris.")
+        return attrs
+
+
+class _OfferMessageSerializer(serializers.ModelSerializer):
+    """Base des demandes de contact et propositions d'échange (clé JSON `post` conservée)."""
+
+    sender_name = serializers.ReadOnlyField(source='sender.full_name')
+    post = serializers.PrimaryKeyRelatedField(source='offer', queryset=Offer.objects.filter(is_deleted=False))
+
+    class Meta:
+        fields = ['id', 'post', 'sender', 'sender_name', 'message', 'created_at']
+        read_only_fields = ['sender']
+
+
+class ContactEventSerializer(_OfferMessageSerializer):
+    class Meta(_OfferMessageSerializer.Meta):
+        model = ContactEvent
+
+
+class ExchangeProposalSerializer(_OfferMessageSerializer):
+    class Meta(_OfferMessageSerializer.Meta):
+        model = ExchangeProposal

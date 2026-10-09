@@ -1,21 +1,28 @@
 from django.contrib import admin
-from .models import Favorite, MarketplaceSettings, Post, PostImage
 
-class PostImageInline(admin.TabularInline):
-    model = PostImage
+from .models import ContactEvent, ExchangeProposal, Favorite, MarketplaceSettings, Offer, OfferImage
+
+
+class OfferImageInline(admin.TabularInline):
+    model = OfferImage
     extra = 0
 
-@admin.register(Post)
-class PostAdmin(admin.ModelAdmin):
-    list_display = ('title', 'post_type', 'status', 'price', 'currency', 'seller', 'is_delete', 'expires_at')
-    list_filter = ('post_type', 'status', 'currency', 'is_delete')
+
+@admin.register(Offer)
+class OfferAdmin(admin.ModelAdmin):
+    list_display = ('title', 'offer_type', 'status', 'price', 'currency', 'seller', 'is_deleted', 'expires_at')
+    list_filter = ('offer_type', 'status', 'currency', 'is_deleted')
     search_fields = ('title', 'description')
-    inlines = [PostImageInline]
+    raw_id_fields = ('seller',)
+    inlines = [OfferImageInline]
+
 
 @admin.register(Favorite)
 class FavoriteAdmin(admin.ModelAdmin):
-    list_display = ('user', 'post', 'created_at')
-    search_fields = ('user__email', 'user__phone', 'post__title')
+    list_display = ('user', 'offer', 'created_at')
+    search_fields = ('user__email', 'user__phone', 'offer__title')
+    raw_id_fields = ('user', 'offer')
+
 
 @admin.register(MarketplaceSettings)
 class MarketplaceSettingsAdmin(admin.ModelAdmin):

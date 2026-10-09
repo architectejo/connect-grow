@@ -983,12 +983,40 @@ class OfferPrivacyTests(MarketplaceTestBase):
             self.client.force_authenticate(user)
             self.assertNotIn('is_hidden_by_moderation', self.client.get(reverse('offer-detail', args=[visible.id])).data)
 
-    def test_detail_is_private_cache_when_authenticated(self):
+    def test_authenticated_api_responses_are_private_and_vary_on_authorization(self):
+        from rest_framework_simplejwt.tokens import RefreshToken
+
         offer = self.make_offer()
         url = reverse('offer-detail', args=[offer.id])
-        self.client.force_authenticate(self.buyer)
-        response = self.client.get(url)
+        token = str(RefreshToken.for_user(self.buyer).access_token)
+        for target in (url, reverse('offer-list')):
+            response = self.client.get(target, HTTP_AUTHORIZATION=f'Bearer {token}')
+            self.assertIn('private', response['Cache-Control'])
+            self.assertIn('Authorization', response['Vary'])
+            self.assertIn('Authorization', self.client.get(target)['Vary'])
+
+    def test_response_setting_the_anonymous_cookie_is_not_shared_cacheable(self):
+        offer = self.make_offer()
+        response = self.client.get(reverse('offer-detail', args=[offer.id]))
+        self.assertIn('anon_id', response.cookies)
         self.assertIn('private', response['Cache-Control'])
-        self.assertIn('Authorization', response['Vary'])
-        self.client.force_authenticate(None)
-        self.assertIn('Authorization', self.client.get(url)['Vary'])
+
+    def test_cors_vary_is_preserved(self):
+        response = self.client.get(reverse('offer-list'), HTTP_ORIGIN='http://localhost:8080')
+        vary = response.get('Vary', '')
+        self.assertIn('Authorization', vary)
+        self.assertIn('origin', vary.lower())
+
+    def test_mine_list_shows_hidden_flag_to_the_seller_only(self):
+        self.make_offer(is_hidden_by_moderation=True, is_active=False)
+        self.client.force_authenticate(self.seller)
+        rows = self.client.get(reverse('offer-list'), {'my_posts': 'true'}).data
+        rows = rows['results'] if isinstance(rows, dict) else rows
+        self.assertTrue(rows)
+        self.assertTrue(all('is_hidden_by_moderation' in row for row in rows))
+        self.make_offer(title='Une annonce visible de tous')
+        self.client.force_authenticate(self.buyer)
+        rows = self.client.get(reverse('offer-list')).data
+        rows = rows['results'] if isinstance(rows, dict) else rows
+        self.assertTrue(rows)
+        self.assertTrue(all('is_hidden_by_moderation' not in row for row in rows))

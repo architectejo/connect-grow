@@ -5,7 +5,6 @@ from django.conf import settings
 from django.core import signing
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
-from django.utils.cache import patch_cache_control, patch_vary_headers
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -302,11 +301,6 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
             services.register_view(instance, visibility_services.build_viewer_key(request.user, anon_id))
 
         response = Response(self.get_serializer(instance).data)
-        # La réponse dépend de l'utilisateur (favori, masquage visible du seul vendeur) :
-        # aucun cache partagé ne doit la resservir à un tiers.
-        if request.user.is_authenticated:
-            patch_cache_control(response, private=True)
-        patch_vary_headers(response, ['Authorization'])
         if not request.user.is_authenticated and anon_id is None:
             response.set_cookie(
                 ANON_COOKIE, signing.dumps(uuid.uuid4().hex, salt=ANON_COOKIE_SALT),

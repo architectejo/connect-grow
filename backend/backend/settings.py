@@ -79,6 +79,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware', # Protection contre le Clickjacking
+    'apps.common.middleware.ApiCacheHeadersMiddleware',  # Vary/Cache-Control de l'API (vie privée)
 ]
 
 ROOT_URLCONF = 'backend.urls'

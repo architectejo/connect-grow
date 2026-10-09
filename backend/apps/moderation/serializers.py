@@ -40,9 +40,11 @@ class ReportSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'target_type', 'target_type_display', 'object_id', 'target_display',
             'reporter_name', 'reason', 'description', 'status', 'assigned_to_name',
-            'decision_notes', 'created_at', 'resolved_at',
+            'decision_notes', 'created_at', 'resolved_at', 'author_response', 'author_responded_at',
         ]
-        read_only_fields = ['status', 'decision_notes', 'created_at', 'resolved_at']
+        read_only_fields = [
+            'status', 'decision_notes', 'created_at', 'resolved_at', 'author_response', 'author_responded_at',
+        ]
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

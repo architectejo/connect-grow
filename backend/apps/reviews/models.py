@@ -39,8 +39,12 @@ class ReviewSettings(SingletonSettingsModel):
         help_text="Heures pendant lesquelles un avis reste modifiable (8760 au plus).",
     )
     delay_after_contact_hours = models.PositiveIntegerField(
-        default=24, validators=[MaxValueValidator(168)],
-        help_text="Heures à attendre entre le contact et l'avis (0 : aucun délai, 168 au plus).",
+        default=24, validators=[MinValueValidator(1), MaxValueValidator(168)],
+        help_text="Heures à attendre entre le contact et l'avis (1 au moins, 168 au plus).",
+    )
+    min_account_age_hours = models.PositiveIntegerField(
+        default=24, validators=[MaxValueValidator(720)],
+        help_text="Ancienneté minimale du compte pour publier un avis, en heures (0 : aucune, 720 au plus).",
     )
     crossed_reviews_window_days = models.PositiveIntegerField(
         default=30, validators=[MinValueValidator(1), MaxValueValidator(365)],

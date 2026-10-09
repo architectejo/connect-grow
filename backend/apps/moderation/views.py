@@ -2,10 +2,11 @@ from django.db import transaction
 from rest_framework import permissions as drf_permissions
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.exception_handler import CodedAPIException
 from apps.common.pagination import OptionalPagination
 from apps.common.throttles import ActionScopedThrottleMixin
 from apps.identity import services as identity_services
@@ -35,7 +36,7 @@ class ReportViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     serializer_class = ReportSerializer
     http_method_names = ['get', 'post', 'head', 'options']
     pagination_class = OptionalPagination
-    throttle_scopes = {'create': 'report'}
+    throttle_scopes = {'create': 'report', 'author_response': 'report'}
     required_permissions = {
         'list': permissions.VIEW_REPORT, 'retrieve': permissions.VIEW_REPORT,
         'claim': permissions.CHANGE_REPORT, 'resolve': permissions.CHANGE_REPORT,
@@ -43,7 +44,7 @@ class ReportViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     }
 
     def get_permissions(self):
-        if self.action == 'create':
+        if self.action in ('create', 'author_response'):
             return [drf_permissions.IsAuthenticated()]
         return [permissions.HasModerationPermission()]
 
@@ -79,9 +80,30 @@ class ReportViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
             except ReportClosedError as error:
                 return Response({"error": str(error)}, status=status.HTTP_409_CONFLICT)
             AuditLog.record(request.user, audit_action, target=report, details=notes or '')
-            if report.status == Report.STATUS_TRAITE:
-                services.apply_resolution(report, request.user)
+            services.apply_decision(report, request.user)
         return Response(ReportSerializer(report, context=self.get_serializer_context()).data)
+
+    @action(detail=True, methods=['post'], url_path='author-response')
+    def author_response(self, request, pk=None):
+        """Recours de l'auteur d'un avis signalé « contact fictif » : une réponse (1000 caractères au
+        plus) tant que le signalement est ouvert. Toute autre personne reçoit 404, comme pour un
+        signalement inconnu."""
+        report = self.get_object()
+        if report.reason != Report.REASON_CONTACT_FICTIF or \
+                services.resolve_target_author(report.target_type, report.target_id) != request.user.pk:
+            raise NotFound()
+        text = request.data.get('author_response')
+        if not isinstance(text, str):
+            raise ValidationError({'author_response': "La réponse est requise."})
+        try:
+            report = services.submit_author_response(report, request.user, text)
+        except services.AuthorResponseRefused as error:
+            if error.code == 'invalid_response':
+                raise ValidationError({'author_response': str(error)})
+            raise CodedAPIException(str(error), error.code, error.status_code)
+        return Response({
+            'id': report.id, 'status': report.status, 'author_responded_at': report.author_responded_at,
+        })
 
     @action(detail=True, methods=['post'])
     def claim(self, request, pk=None):
@@ -157,4 +179,6 @@ class ModerationDashboardView(APIView):
             'active_posts_count': marketplace_services.count_active_offers(),
             'pending_reports_count': Report.objects.filter(status=Report.STATUS_EN_ATTENTE).count(),
             'pending_kyc_count': identity_services.count_pending_kyc_documents(),
+            # Signalements « contact fictif » ouverts au-delà du délai cible (ModerationSettings).
+            'overdue_contact_fictif_count': services.count_overdue_fictitious_reports(),
         })

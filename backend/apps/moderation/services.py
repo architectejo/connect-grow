@@ -4,11 +4,18 @@ Un signalement ou une entrée du journal désigne sa cible par (`target_type`, `
 modération ne lit jamais les modèles des autres domaines, elle interroge leur `services.py`
 (`get_report_labels`, par lot) selon le registre `TARGET_RESOLVERS`.
 """
+from datetime import timedelta
 from importlib import import_module
 
-from apps.common.utils import parse_uuid
+from django.db import transaction
+from django.utils import timezone
 
-from .models import AuditLog, Report
+from apps.common.utils import parse_uuid
+from apps.notifications import services as notification_services
+
+from .models import AuditLog, ModerationSettings, Report
+
+AUTHOR_RESPONSE_MAX_LENGTH = 1000
 
 # Type de cible -> module de services du domaine propriétaire.
 TARGET_RESOLVERS = {
@@ -60,13 +67,34 @@ def _ensure_can_report_fictitious_contact(reporter, target_type, target_id):
             "Seul le vendeur concerné peut signaler un contact fictif sur cet avis.",
             code='not_seller', status_code=403,
         )
-    if Report.objects.filter(
+    fictitious = Report.objects.filter(
         target_type=target_type, target_id=target_id, reason=Report.REASON_CONTACT_FICTIF,
-        status__in=Report.OPEN_STATUSES,
-    ).exists():
+    )
+    if fictitious.filter(status__in=Report.OPEN_STATUSES).exists():
         raise ReportRefused(
             "Un signalement de contact fictif est déjà en cours de traitement pour cet avis.", True,
         )
+    # Pas d'acharnement : un avis dont le contact a déjà été reconnu réel ne peut plus être signalé
+    # pour ce motif, et chaque vendeur a un plafond quotidien (réglage en base).
+    if fictitious.filter(status=Report.STATUS_REJETE).exists():
+        raise ReportRefused(
+            "Ce signalement a déjà été examiné et rejeté par la modération : il ne peut pas être redéposé.",
+            code='report_already_rejected', status_code=409,
+        )
+    start_of_day = timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
+    limit = get_settings().fictitious_contact_daily_limit
+    today = Report.objects.filter(
+        reporter=reporter, reason=Report.REASON_CONTACT_FICTIF, created_at__gte=start_of_day,
+    ).count()
+    if today >= limit:
+        raise ReportRefused(
+            f"Vous avez atteint la limite de {limit} signalements de contact fictif par jour.",
+            code='report_daily_limit', status_code=429,
+        )
+
+
+def get_settings() -> ModerationSettings:
+    return ModerationSettings.get_solo()
 
 
 # Types de cible produits par les signalements automatiques (avis croisés, CDC 3.7) ; chacun
@@ -98,17 +126,41 @@ def has_resolved_report(target_type, target_id, reason) -> bool:
 
 
 def record_report_filed(report) -> None:
-    """Journalise le dépôt d'un signalement « contact fictif » (règle 12). Il n'est pas visible
-    publiquement ; il entre dans la file de modération (statut « en attente »)."""
+    """Journalise le dépôt d'un signalement « contact fictif » (règle 12) et en informe l'auteur de
+    l'avis, sans révéler plus que « le vendeur ». Il n'est pas visible publiquement ; il entre dans
+    la file de modération (statut « en attente »)."""
     if report.reason == Report.REASON_CONTACT_FICTIF:
         AuditLog.record(report.reporter, 'CONTACT_FICTIF_REPORTED', target=report, details=report.description[:200])
+        _notify_review_author(
+            report, "Votre avis est contesté",
+            "Le vendeur conteste le contact à l'origine de votre avis. Vous pouvez le modifier et "
+            "répondre à la modération avant sa décision ; vous ne pouvez pas le supprimer d'ici là.",
+        )
 
 
-def apply_resolution(report, actor) -> None:
-    """Conséquence d'un signalement validé : un « contact fictif » retenu masque l'avis concerné
-    (le module des avis recalcule ses moyennes). Les autres motifs n'ont pas d'effet automatique."""
-    if report.reason == Report.REASON_CONTACT_FICTIF and report.target_type == 'review':
+def apply_decision(report, actor) -> None:
+    """Conséquences de la décision de la modération sur un signalement « contact fictif » (autres
+    motifs : aucun effet automatique). Retenu (traité) : l'avis est masqué (le module des avis
+    recalcule ses moyennes) ; rejeté : l'avis reste et le rejet est journalisé avec l'avis visé. Dans
+    les deux cas l'auteur est informé, avec un motif court et sans identité du signaleur."""
+    if report.reason != Report.REASON_CONTACT_FICTIF or report.target_type != 'review':
+        return
+    if report.status == Report.STATUS_TRAITE:
         import_module(TARGET_RESOLVERS['review']).reject_fictitious_contact(report.target_id, actor)
+        _notify_review_author(
+            report, "Votre avis a été masqué",
+            "La modération a retenu le signalement du vendeur : le contact n'a pas pu être établi. "
+            "Votre avis est masqué et ne compte plus dans les notes.",
+        )
+    elif report.status == Report.STATUS_REJETE:
+        AuditLog.objects.create(
+            actor=actor, action='CONTACT_FICTIF_REJECTED', target_type=report.target_type,
+            target_id=report.target_id, details=f"Signalement {report.pk} rejeté",
+        )
+        _notify_review_author(
+            report, "Votre avis est maintenu",
+            "La modération n'a pas retenu le signalement du vendeur : votre avis reste publié.",
+        )
 
 
 # Motif des signalements automatiques d'avis croisés (CDC 3.7), exposé sans importer le modèle.
@@ -160,9 +212,61 @@ def file_automatic_report(target_type, target_id, reason, description=''):
     )
 
 
-def has_open_report(target) -> bool:
-    """Vrai si la cible fait l'objet d'un signalement non clos (en attente ou pris en charge)."""
+def has_open_report(target, grave_only=False) -> bool:
+    """Vrai si la cible fait l'objet d'un signalement non clos (en attente ou pris en charge) ;
+    `grave_only` ne retient que les motifs de fond (`Report.GRAVE_REASONS`)."""
+    reports = Report.objects.filter(
+        target_type=target._meta.model_name, target_id=target.pk, status__in=Report.OPEN_STATUSES,
+    )
+    if grave_only:
+        reports = reports.filter(reason__in=Report.GRAVE_REASONS)
+    return reports.exists()
+
+
+def count_overdue_fictitious_reports() -> int:
+    """Signalements « contact fictif » encore ouverts au-delà du délai cible de traitement."""
+    limit = timezone.now() - timedelta(hours=get_settings().report_processing_target_hours)
     return Report.objects.filter(
-        target_type=target._meta.model_name, target_id=target.pk,
-        status__in=(Report.STATUS_EN_ATTENTE, Report.STATUS_EN_COURS),
-    ).exists()
+        reason=Report.REASON_CONTACT_FICTIF, status__in=Report.OPEN_STATUSES, created_at__lt=limit,
+    ).count()
+
+
+def _notify_review_author(report, title, content):
+    author_id = resolve_target_author(report.target_type, report.target_id)
+    if author_id is not None:
+        notification_services.notify(
+            user_id=author_id, notification_type=notification_services.SYSTEM, title=title, content=content,
+        )
+
+
+class AuthorResponseRefused(Exception):
+    """Réponse de l'auteur refusée : `code` stable et statut HTTP suggéré."""
+
+    def __init__(self, message, code, status_code=409):
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+
+
+def submit_author_response(report, user, text):
+    """Recours de l'auteur d'un avis signalé « contact fictif » : une seule réponse, tant que le
+    signalement est ouvert ; journalisé. Le contrôle « l'appelant est l'auteur » est fait par la vue
+    (`resolve_target_author`), qui répond 404 sinon."""
+    text = (text or '').strip()
+    if not text or len(text) > AUTHOR_RESPONSE_MAX_LENGTH:
+        raise AuthorResponseRefused(
+            f"La réponse doit contenir de 1 à {AUTHOR_RESPONSE_MAX_LENGTH} caractères.", 'invalid_response', 400,
+        )
+    with transaction.atomic():
+        # Mise à jour conditionnelle : une seule réponse, même en cas de requêtes simultanées.
+        done = Report.objects.filter(
+            pk=report.pk, status__in=Report.OPEN_STATUSES, author_responded_at__isnull=True,
+        ).update(author_response=text, author_responded_at=timezone.now(), updated_at=timezone.now())
+        if not done:
+            report.refresh_from_db()
+            if report.status not in Report.OPEN_STATUSES:
+                raise AuthorResponseRefused("Ce signalement est déjà clos.", 'report_closed')
+            raise AuthorResponseRefused("Vous avez déjà répondu à ce signalement.", 'already_responded')
+        report.refresh_from_db()
+        AuditLog.record(user, 'REPORT_AUTHOR_RESPONDED', target=report, details=text[:200])
+    return report

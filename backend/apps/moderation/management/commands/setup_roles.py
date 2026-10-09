@@ -35,6 +35,7 @@ ADMINISTRATOR_EXTRA_PERMISSIONS = {
     'marketplace.marketplacesettings': ['view', 'change'],
     'moderation.auditlog': ['view'],  # journal en lecture seule : jamais modifiable
     'reviews.reviewsettings': ['view', 'change'],
+    'moderation.moderationsettings': ['view', 'change'],
 }
 
 

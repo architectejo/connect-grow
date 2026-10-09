@@ -189,6 +189,10 @@ REFUSALS = {
     ),
     'offer_unavailable': ('offer_unavailable', HTTP_CONFLICT, "Cette annonce n'est plus disponible."),
     'too_early': ('review_too_early', HTTP_FORBIDDEN, "Vous pourrez donner votre avis dans {delay}."),
+    'account_too_new': (
+        'account_too_new', HTTP_FORBIDDEN,
+        "Votre compte est trop récent pour publier un avis : vous pourrez le faire dans {delay}.",
+    ),
 }
 
 
@@ -233,8 +237,11 @@ def assess_eligibility(user, offer_id):
         if not offer.is_available:
             raise ReviewError("Annonce introuvable.", 'offer_not_found', HTTP_NOT_FOUND)
         return Eligibility(False, 'no_contact'), offer, None
-    existing_id = Review.objects.filter(user=user, offer_id=offer.id).values_list('id', flat=True).first()
-    if existing_id is not None and moderation_services.has_resolved_report(
+    existing = Review.objects.filter(user=user, offer_id=offer.id).values_list('id', 'is_hidden').first()
+    existing_id = None if existing is None else existing[0]
+    # `contact_rejected` dérive de l'état réel : avis masqué ET signalement « contact fictif » traité.
+    # Réafficher l'avis (modération) le défait ; aucun indicateur n'est stocké à part.
+    if existing is not None and existing[1] and moderation_services.has_resolved_report(
         'review', existing_id, moderation_services.REASON_CONTACT_FICTIF,
     ):
         return Eligibility(False, 'contact_rejected', review_id=existing_id), offer, contact
@@ -245,9 +252,14 @@ def assess_eligibility(user, offer_id):
         return Eligibility(False, 'recently_deleted'), offer, contact
     if offer.is_deleted or offer.is_hidden_by_moderation:
         return Eligibility(False, 'offer_unavailable'), offer, contact
-    available_at = contact.recorded_at + timedelta(hours=get_settings().delay_after_contact_hours)
-    if timezone.now() < available_at:
-        return Eligibility(False, 'too_early', available_at=available_at), offer, contact
+    row = get_settings()
+    contact_ready = contact.recorded_at + timedelta(hours=row.delay_after_contact_hours)
+    account_ready = user.date_joined + timedelta(hours=row.min_account_age_hours)
+    # Un seul `available_at` : la plus tardive des deux échéances, avec le motif qui la porte.
+    if timezone.now() < max(contact_ready, account_ready):
+        if account_ready > contact_ready:
+            return Eligibility(False, 'account_too_new', available_at=account_ready), offer, contact
+        return Eligibility(False, 'too_early', available_at=contact_ready), offer, contact
     return Eligibility(True), offer, contact
 
 
@@ -262,7 +274,7 @@ def ensure_can_review(user, offer_id):
     eligibility, offer, contact = assess_eligibility(user, offer_id)
     if not eligibility.can_review:
         code, status_code, message = REFUSALS[eligibility.reason]
-        if eligibility.reason == 'too_early':
+        if eligibility.reason in ('too_early', 'account_too_new'):
             message = message.format(delay=_format_delay(eligibility.available_at - timezone.now()))
         raise ReviewError(message, code, status_code)
     return offer, contact
@@ -337,7 +349,7 @@ def update_review(review: Review, changes: dict) -> Review:
     du couple ne change pas la moyenne vendeur. Atomique, contrôles sur la ligne verrouillée."""
     with transaction.atomic():
         review = _lock_review(review)
-        ensure_author_can_modify(review)
+        ensure_author_can_modify(review, deleting=False)
         if review.reply_content:
             raise ReviewError(
                 "Le vendeur a répondu à cet avis : vous ne pouvez plus le modifier.", 'review_locked_after_reply',
@@ -361,7 +373,7 @@ def delete_review(review: Review, actor) -> None:
     offre pendant `edit_window_hours` (`DeletedReviewMark`)."""
     with transaction.atomic():
         review = _lock_review(review)
-        ensure_author_can_modify(review)
+        ensure_author_can_modify(review, deleting=True)
         if review.reply_content:
             raise ReviewError(
                 "Le vendeur a répondu à cet avis : vous ne pouvez plus le supprimer.", 'review_locked_after_reply',
@@ -377,17 +389,19 @@ def delete_review(review: Review, actor) -> None:
         reconcile_seller_flag(review.user_id, review.seller_context_type, review.seller_context_id)
 
 
-def ensure_author_can_modify(review: Review) -> None:
-    """Un avis masqué ou signalé échappe à son auteur : il ne peut ni le modifier ni le supprimer
-    (sinon il effacerait la preuve avant la décision de la modération)."""
+def ensure_author_can_modify(review: Review, deleting: bool) -> None:
+    """Un avis masqué échappe à son auteur (modification et suppression). Tant qu'un signalement
+    grave est ouvert (contact fictif et motifs de fond), l'auteur ne peut pas SUPPRIMER son avis (la
+    preuve ne s'efface pas avant la décision) mais peut encore le MODIFIER et se défendre ; un
+    signalement de motif mineur (spam, autre) ne verrouille rien."""
     if review.is_hidden:
         raise ReviewError(
             "Cet avis a été masqué par la modération : vous ne pouvez plus le modifier ni le supprimer.",
             'review_locked',
         )
-    if moderation_services.has_open_report(review):
+    if deleting and moderation_services.has_open_report(review, grave_only=True):
         raise ReviewError(
-            "Cet avis fait l'objet d'un signalement en cours : vous ne pouvez plus le modifier ni le supprimer.",
+            "Cet avis fait l'objet d'un signalement en cours : vous ne pouvez pas le supprimer avant la décision.",
             'review_locked',
         )
 

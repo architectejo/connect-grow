@@ -1,12 +1,33 @@
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
-from apps.common.models import BaseModel
+from apps.common.models import BaseModel, SingletonSettingsModel
 
 # Types de cible d'un signalement ou d'une entrée du journal : nom de modèle en minuscules
 # (`offer`, `user`, `review`, `message`...). Aucune clé générique : la cible est désignée par
 # (`target_type`, `target_id`) et résolue par les `services.py` des domaines (ADR 0002, décision 5).
+
+
+class ModerationSettings(SingletonSettingsModel):
+    """Règles de la modération modifiables dans le back-office (règle 11). Ligne unique."""
+
+    report_processing_target_hours = models.PositiveIntegerField(
+        default=72, validators=[MinValueValidator(1), MaxValueValidator(720)],
+        help_text="Délai cible de traitement d'un signalement de contact fictif, en heures (720 au plus).",
+    )
+    fictitious_contact_daily_limit = models.PositiveIntegerField(
+        default=20, validators=[MinValueValidator(1), MaxValueValidator(200)],
+        help_text="Signalements « contact fictif » maximum par vendeur et par jour.",
+    )
+
+    class Meta:
+        verbose_name = "Paramètres de modération"
+        verbose_name_plural = "Paramètres de modération"
+
+    def __str__(self):
+        return "Paramètres de modération"
 
 
 class ReportClosedError(Exception):
@@ -64,11 +85,20 @@ class Report(BaseModel):
 
     resolved_at = models.DateTimeField(null=True, blank=True)
 
+    # Recours de l'auteur du contenu visé (une seule réponse, tant que le signalement est ouvert).
+    author_response = models.TextField(blank=True, max_length=1000)
+    author_responded_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ['-created_at']
         indexes = [models.Index(fields=['target_type', 'target_id'], name='report_target')]
 
     OPEN_STATUSES = (STATUS_EN_ATTENTE, STATUS_EN_COURS)
+    # Motifs « de fond » : un signalement ouvert de l'un d'eux empêche l'auteur de supprimer le
+    # contenu visé (la preuve ne s'efface pas). Spam et « autre » ne verrouillent rien.
+    GRAVE_REASONS = (
+        REASON_ARNAQUE, REASON_CONTENU_INTERDIT, REASON_HARCELEMENT, REASON_AVIS_CROISES, REASON_CONTACT_FICTIF,
+    )
 
     def _transition(self, **changes):
         """Passe le signalement à un nouvel état s'il est encore ouvert. Mise à jour conditionnelle :

@@ -66,5 +66,6 @@ class ReviewAdmin(admin.ModelAdmin):
 class ReviewSettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
     list_display = (
         'min_reviews_to_display', 'daily_review_limit', 'edit_window_hours', 'delay_after_contact_hours',
+        'min_account_age_hours',
         'crossed_reviews_window_days', 'crossed_reviews_threshold',
     )

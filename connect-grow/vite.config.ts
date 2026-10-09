@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { VitePWA } from "vite-plugin-pwa";
+import { isCacheableApiContent } from "./src/lib/cache-rules";
 
 // Bibliothèques regroupées en fichiers stables : une mise à jour de l'application
 // ne force pas les utilisateurs à les retélécharger (forfaits de données limités, CDC 2.2).
@@ -95,12 +96,7 @@ export default defineConfig(({ mode }) => ({
           },
           {
             // Contenus publics : le réseau d'abord, le cache si la connexion tombe (contenus déjà vus consultables)
-            urlPattern: ({ url, request }) =>
-              request.method === "GET" &&
-              !request.headers.has("Authorization") &&
-              !url.searchParams.has("my_posts") &&
-              !/\/posts\/(trash|mine)\//.test(url.pathname) &&
-              /\/api\/(v1\/)?(marketplace\/posts|accounts\/businesses)\//.test(url.pathname),
+            urlPattern: isCacheableApiContent,
             handler: "NetworkFirst",
             options: {
               cacheName: "api-annonces",

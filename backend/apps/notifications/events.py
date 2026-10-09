@@ -1,4 +1,6 @@
 """Abonnés de `notifications` aux événements de domaine (ADR 0003). N'appellent que des `services.py`."""
+from datetime import datetime
+
 from apps.common.utils import parse_uuid
 from apps.identity import services as identity_services
 from apps.platform_core.registry import PermanentEventError, subscribe
@@ -60,4 +62,19 @@ def notify_review_reply(event):
         title="Réponse à votre avis",
         content=f"{payload['replier_name']} a répondu à votre avis sur {payload['offer_title']}",
         link=_post_link(payload),
+    )
+
+
+@subscribe('marketplace.offer_expiring_soon', name='notifications.notify_offer_expiration')
+def notify_offer_expiration(event):
+    payload = event.payload
+    try:
+        expires_at = datetime.fromisoformat(payload['expires_at'])
+    except (KeyError, ValueError, TypeError) as exc:
+        raise PermanentEventError("charge utile invalide") from exc
+    services.notify(
+        user_id=payload['seller_id'], notification_type=services.EXPIRATION,
+        title="Votre annonce expire bientôt",
+        content=f"« {payload['offer_title']} » expire le {expires_at:%d/%m/%Y}. Renouvelez-la pour rester visible.",
+        link=f"/post/{payload['offer_id']}",
     )

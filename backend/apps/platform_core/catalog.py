@@ -21,6 +21,7 @@ class EventType:
 _TYPES = (
     EventType('marketplace.contact_recorded'),
     EventType('marketplace.exchange_proposed'),
+    EventType('marketplace.offer_expiring_soon'),
     EventType('visibility.offer_viewed'),
     EventType('visibility.offer_shared'),
     EventType('reviews.review_posted'),

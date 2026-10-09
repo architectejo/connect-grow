@@ -3,6 +3,7 @@ from unittest import mock
 
 from django.db import transaction
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 
 from apps.messaging.models import Conversation, Message
@@ -12,7 +13,7 @@ from apps.platform_core.models import OutboxDelivery, OutboxEvent
 from apps.platform_core.testing import dispatch_outbox_now
 
 from . import services
-from .models import ContactEvent, ExchangeProposal
+from .models import ContactEvent, ExchangeProposal, Offer
 from .tests import MarketplaceTestBase
 
 
@@ -110,3 +111,50 @@ class ContactEventTests(MarketplaceTestBase):
 
     def test_marketplace_no_longer_calls_messaging_directly(self):
         self.assertFalse(hasattr(services, 'messaging_services'))
+
+
+class ExpirationEventTests(MarketplaceTestBase):
+    def expiring_offer(self, days=1):
+        from datetime import timedelta
+
+        offer = self.make_offer()
+        Offer.objects.filter(pk=offer.pk).update(expires_at=timezone.now() + timedelta(days=days))
+        offer.refresh_from_db()
+        return offer
+
+    def test_expiring_offer_publishes_one_event_and_the_notification_follows_the_diffusion(self):
+        offer = self.expiring_offer()
+        self.assertEqual(services.expire_offers(), (0, 1))
+        self.assertEqual(services.expire_offers(), (0, 0))  # déjà signalée
+        self.assertEqual(Notification.objects.count(), 0)
+        event = OutboxEvent.objects.get(event_type='marketplace.offer_expiring_soon')
+        self.assertEqual(event.payload, {
+            'offer_id': str(offer.id), 'offer_title': offer.title, 'seller_id': str(self.seller.pk),
+            'expires_at': offer.expires_at.isoformat(),
+        })
+        dispatch_outbox_now()
+        notification = Notification.objects.get()
+        self.assertEqual((notification.user, notification.notification_type), (self.seller, 'EXPIRATION'))
+        self.assertEqual(notification.title, 'Votre annonce expire bientôt')
+        self.assertEqual(
+            notification.content,
+            f'« {offer.title} » expire le {offer.expires_at:%d/%m/%Y}. Renouvelez-la pour rester visible.',
+        )
+        self.assertEqual(notification.link, f'/post/{offer.id}')
+
+    def test_a_failing_notification_does_not_prevent_the_offer_from_being_marked(self):
+        offer = self.expiring_offer()
+        original = registry.get_subscriber('notifications.notify_offer_expiration')
+        failing = registry.Subscriber(original.event_type, original.name, mock.Mock(side_effect=ValueError('x')), (1,))
+        with mock.patch.dict(registry._BY_NAME, {original.name: failing}):
+            services.expire_offers()
+            dispatch_outbox_now()
+        offer.refresh_from_db()
+        self.assertTrue(offer.expiring_soon_notified)
+        self.assertEqual(Notification.objects.count(), 0)
+        OutboxDelivery.objects.update(next_attempt_at=timezone.now())
+        dispatch_outbox_now()
+        self.assertEqual(Notification.objects.count(), 1)
+
+    def test_marketplace_no_longer_depends_on_notifications(self):
+        self.assertFalse(hasattr(services, 'notification_services'))

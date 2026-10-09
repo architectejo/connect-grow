@@ -632,6 +632,7 @@ class ScheduledTasksTests(MarketplaceTestBase):
 
         call_command('expire_offers', verbosity=0)
         call_command('expire_offers', verbosity=0)  # ne doit pas renotifier
+        dispatch_outbox_now()
 
         self.assertEqual(Notification.objects.filter(user=self.seller, notification_type='EXPIRATION').count(), 1)
 

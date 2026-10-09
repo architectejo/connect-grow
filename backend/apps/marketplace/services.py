@@ -15,7 +15,6 @@ from django.db.models import Count, F
 from django.utils import timezone
 
 from apps.common.utils import day_bounds, parse_uuid
-from apps.notifications import services as notification_services
 from apps.platform_core.services import publish_event
 from apps.visibility import services as visibility_services
 
@@ -230,8 +229,9 @@ def purge_expired_trash(retention_days: Optional[int] = None) -> int:
 
 
 def expire_offers() -> tuple:
-    """Expire les offres actives échues et notifie les échéances proches (CDC 3.2, 3.6).
-    Renvoie (nombre d'offres expirées, nombre de notifications envoyées)."""
+    """Expire les offres actives échues et publie `marketplace.offer_expiring_soon` pour les
+    échéances proches (CDC 3.2, 3.6) ; la notification est créée à la diffusion de l'événement.
+    Renvoie (nombre d'offres expirées, nombre d'échéances signalées)."""
     now = timezone.now()
     row = MarketplaceSettings.get_solo()
 
@@ -246,14 +246,20 @@ def expire_offers() -> tuple:
     )
     notified = 0
     for offer in soon:
-        notification_services.notify(
-            user_id=offer.seller_id,
-            notification_type=notification_services.EXPIRATION,
-            title="Votre annonce expire bientôt",
-            content=f"« {offer.title} » expire le {offer.expires_at:%d/%m/%Y}. Renouvelez-la pour rester visible.",
-            link=f"/post/{offer.id}",
-        )
-        Offer.objects.filter(pk=offer.pk).update(expiring_soon_notified=True)
+        with transaction.atomic():
+            # Marque conditionnelle : deux exécutions simultanées ne signalent pas deux fois la même offre.
+            marked = Offer.objects.filter(pk=offer.pk, expiring_soon_notified=False).update(
+                expiring_soon_notified=True,
+            )
+            if not marked:
+                continue
+            publish_event(
+                'marketplace.offer_expiring_soon', aggregate_type='offer', aggregate_id=offer.id,
+                payload={
+                    'offer_id': str(offer.id), 'offer_title': offer.title, 'seller_id': str(offer.seller_id),
+                    'expires_at': offer.expires_at.isoformat(),
+                },
+            )
         notified += 1
     return expired_count, notified
 

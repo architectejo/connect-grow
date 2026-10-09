@@ -88,15 +88,17 @@ Un domaine ne modifie pas un autre domaine : il écrit son changement **et** un 
 | `marketplace.offer_expiring_soon` | marketplace | `notifications.notify_offer_expiration` | offre, titre, vendeur, échéance |
 | `visibility.offer_viewed` | visibility | `marketplace.sync_offer_views` | offre, date |
 | `visibility.offer_shared` | visibility | `marketplace.sync_offer_shares` | offre, date |
-| `reviews.review_posted` | reviews | `notifications.notify_review_posted` | identifiants, nom de l'auteur, titre de l'offre, extrait (données publiques de l'avis) |
-| `reviews.review_replied` | reviews | `notifications.notify_review_reply` | identifiants, nom du répondant, titre de l'offre |
+| `reviews.review_posted` | reviews | `notifications.notify_review_posted` | identifiants et titre public de l'offre ; nom de l'auteur et extrait relus à la diffusion |
+| `reviews.review_replied` | reviews | `notifications.notify_review_reply` | identifiants et titre public de l'offre ; nom du répondant relu à la diffusion |
 | `reviews.crossed_reviews_detected` | reviews | `moderation.file_crossed_reviews_report` | avis, deux comptes, nombre d'affaires, fenêtre |
 
 Ajouter un événement : déclarer le type dans `platform_core/catalog.py`, publier avec `publish_event('<domaine>.<fait>', ...)` (type littéral), écrire l'abonné idempotent dans `events.py` du domaine récepteur (il n'appelle que des `services.py`). Un contrôle Django (`platform_core.E001`/`E002`) et des tests de frontières vérifient le catalogue, les émetteurs et les abonnés. Le `name` d'un abonné est stocké en base : ne jamais le renommer sans migration.
 
-Exploitation : `python manage.py dispatch_outbox --stats` (décomptes ; code de sortie 1 s'il existe une livraison `dead`), `--requeue <id|dead>` (relance journalisée dans l'AuditLog, comme l'action « Relancer » de l'admin Django, qui n'affiche pas les charges utiles). `purge_outbox` supprime les événements traités après 7 jours (`OUTBOX_RETENTION_DAYS`) et en échec définitif après 90 jours (`OUTBOX_DEAD_RETENTION_DAYS`). En test, utiliser `apps.platform_core.testing.dispatch_outbox_now()` pour diffuser de façon synchrone.
+Exploitation : `python manage.py dispatch_outbox --stats` (décomptes ; code de sortie 1 s'il existe une livraison `dead`), `--requeue <id|dead>` (relance journalisée dans l'AuditLog, comme l'action « Relancer » de l'admin Django, qui n'affiche pas les charges utiles). `purge_outbox` supprime les événements traités après 7 jours (`OUTBOX_RETENTION_DAYS`) et en échec définitif après 30 jours (`OUTBOX_DEAD_RETENTION_DAYS`). En test, utiliser `apps.platform_core.testing.dispatch_outbox_now()` pour diffuser de façon synchrone.
 
-Les totaux `views_count` et `shares_count` d'une offre sont recalculés à la source (compteurs journaliers de `visibility`) : la valeur `shares_count` renvoyée par l'endpoint de partage est « au mieux » (à jour dans le cas normal, sinon le total précédent).
+**Vérification manuelle de la concurrence** (hors `manage.py test`, la base de test en mémoire n'accepte pas les accès parallèles) : `SECRET_KEY=... NUM_PROXIES=1 python scripts/check_outbox_concurrency.py --events 60 --workers 3`. Elle sème une base SQLite temporaire, lance plusieurs `dispatch_outbox` en parallèle et vérifie l'absence de doublon, de perte et de « database is locked ». À refaire après toute modification de `platform_core/services.py` et avant le passage à MySQL.
+
+Les totaux `views_count` et `shares_count` d'une offre sont recalculés à la source : **les compteurs journaliers de `visibility` sont la seule source** (pas de `max()` avec la valeur stockée ; une valeur divergente est écrasée au prochain événement) : la valeur `shares_count` renvoyée par l'endpoint de partage est « au mieux » (à jour dans le cas normal, sinon le total précédent).
 
 ## Tâches planifiées (cron)
 
@@ -111,7 +113,7 @@ Déclarées dans `cron/crontab` (conteneur `cron`) ; chacune est une commande de
 | `purge_otp_codes` | identity | horaire | supprime les OTP expirés |
 | `refresh_daily_contacts` | marketplace | horaire (:05) | recalcule les contacts du jour pour les graphiques |
 | `dispatch_outbox` | platform_core | chaque minute | diffuse les événements de domaine aux abonnés |
-| `purge_outbox` | platform_core | quotidienne, 02:30 | supprime les anciens événements (7 j traités, 90 j en échec) |
+| `purge_outbox` | platform_core | quotidienne, 02:30 | supprime les anciens événements (7 j traités, 30 j en échec) |
 
 Anciens noms (reset R3) : `purge_trash`, `expire_posts`, `cleanup_otp_codes`, `refresh_dashboard_aggregates`.
 

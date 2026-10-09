@@ -174,3 +174,15 @@ Les décisions du chef de projet du 09/10/2026 priment sur les sections 2 à 6 e
 - **`last_error`** ne contient que la classe de l'exception et son point d'origine (fichier:ligne) pour les erreurs inattendues, jamais son message ; le détail va au journal serveur (`logger.exception`).
 - **L'admin Django n'affiche pas la charge utile** (`exclude = ('payload',)`).
 - Réglages techniques : `OUTBOX_INLINE_DISPATCH`, `OUTBOX_RETENTION_DAYS`, `OUTBOX_DEAD_RETENTION_DAYS`, `OUTBOX_MAX_ATTEMPTS`, `OUTBOX_LOCK_TIMEOUT_SECONDS`, `OUTBOX_BACKOFF_*` dans `settings.py` (variables d'environnement), pas de modèle de réglages : ce ne sont pas des règles métier.
+
+### Corrections après relecture et audit sécurité (aller-retour 1)
+
+- **Journaux** : plus aucun `logger.exception`. Un échec d'abonné ou de diffusion immédiate écrit seulement la classe de l'exception et son origine (`_describe`), jamais son message ni sa trace (ils peuvent citer des données personnelles).
+- **Source unique des totaux** : les compteurs journaliers de `visibility` sont la seule source de `views_count` et `shares_count` ; `sync_offer_engagement` écrase toute valeur divergente (pas de `max(valeur, total)`). Testé.
+- **Charges utiles des avis** : `review_posted` et `review_replied` ne portent plus que des identifiants et le titre public de l'offre (`replier_id` ajouté) ; le nom et l'extrait sont relus à la diffusion (`identity.get_full_names`, `reviews.get_review_excerpt`). Un avis supprimé avant la diffusion n'est pas notifié.
+- **Rétention** : événements traités 7 jours, **dead 30 jours** (`OUTBOX_DEAD_RETENTION_DAYS`). Question ouverte pour LEG-PRV : faut-il effacer ou anonymiser les événements encore présents (identifiants d'un compte) à la suppression de ce compte ? Les charges ne contiennent aucun texte libre de l'utilisateur, mais des identifiants.
+- **Relance** : l'action admin « Relancer les livraisons sélectionnées » ne touche que les livraisons `dead`. Un futur rôle d'exploitation aura besoin de `view_outboxdelivery` **et** `change_outboxdelivery` (la permission « change » commande la relance, le modèle restant en lecture seule). La relance en ligne de commande est journalisée dans l'AuditLog avec `actor=None` (« ligne de commande » dans le détail). Relance et AuditLog sont écrits dans une même transaction.
+- **Statut d'événement** : `_refresh_event_status` est composé d'UPDATE conditionnels (sous-requêtes EXISTS) évalués par la base à l'écriture, sans lecture préalable périmée.
+- **Charge invalide** : tous les abonnés de `notifications` lèvent `PermanentEventError` (clé absente, UUID ou date mal formé) ; la livraison passe `dead` sans nouvelle tentative.
+- **Préfixe du type** : `publish_event` ne vérifie pas à l'exécution que le préfixe du type est le domaine appelant ; c'est garanti par le test de frontières (types littéraux publiés par le seul domaine propriétaire, présents au catalogue).
+- **Concurrence réelle** : `backend/scripts/check_outbox_concurrency.py` (manuel, voir README), à refaire avant MySQL.

@@ -182,6 +182,10 @@ def _process(pk, seen_status, seen_locked_by, now) -> Optional[bool]:
         )
         # Effet de l'abonné et marque « traitée » validés ensemble : exactement une fois.
         with transaction.atomic():
+            # Première instruction = écriture : SQLite prend le verrou d'écriture en attendant son
+            # délai (timeout) au lieu d'échouer sur « database is locked » en promouvant une lecture.
+            if not OutboxDelivery.objects.filter(pk=pk, locked_by=token).update(locked_at=timezone.now()):
+                raise OutboxError("verrou perdu : traitement annulé")
             subscriber.func(data)
             marked = OutboxDelivery.objects.filter(
                 pk=pk, locked_by=token, status=OutboxDelivery.PROCESSING,

@@ -65,3 +65,10 @@ MEDIA_ROOT = os.path.join(_TEST_STORAGE, 'media')
 # Cache factice : aucune limitation de débit (throttle) ne s'accumule d'un test à l'autre.
 # Les tests de throttling activent un cache mémoire avec @override_settings(CACHES=...).
 CACHES = {'default': {'BACKEND': 'django.core.cache.backends.dummy.DummyCache'}}
+
+# Les échecs d'abonnés provoqués exprès par les tests ne polluent pas la sortie (assertLogs reste possible).
+LOGGING = {
+    'version': 1, 'disable_existing_loggers': False,
+    'handlers': {'null': {'class': 'logging.NullHandler'}},
+    'loggers': {'apps.platform_core': {'handlers': ['null'], 'propagate': False}},
+}

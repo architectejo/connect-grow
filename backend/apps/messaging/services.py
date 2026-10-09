@@ -39,6 +39,15 @@ def send_message(*, conversation: Conversation, sender, content: str, notify: bo
     return message
 
 
+def open_conversation_with_message(*, offer_id, sender_id, recipient_id, content: str) -> Message:
+    """Ouvre (ou retrouve) la conversation d'une offre entre l'expéditeur et le destinataire, puis
+    y dépose le message, sans notification (la demande de contact notifie déjà le vendeur)."""
+    conversation = get_or_create_offer_conversation(offer_id=offer_id, user_ids=[sender_id, recipient_id])
+    message = Message.objects.create(conversation=conversation, sender_id=sender_id, content=content)
+    conversation.save(update_fields=['updated_at'])
+    return message
+
+
 def is_participant(conversation_id, user_id) -> bool:
     return Conversation.objects.filter(pk=conversation_id, participants=user_id).exists()
 

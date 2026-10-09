@@ -170,6 +170,16 @@ def get_seller_summaries(ids: Iterable) -> dict:
     return summaries
 
 
+def get_full_names(ids: Iterable) -> dict:
+    """Noms complets indexés par UUID (une requête) ; un compte absent n'apparaît pas."""
+    from apps.common.utils import parse_uuid
+
+    from .models import User
+
+    wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
+    return dict(User.objects.filter(id__in=wanted).values_list('id', 'full_name'))
+
+
 def set_reputation(user_id, trust_score: float, reviews_count: int) -> None:
     """Met en cache le Trust Score et le nombre d'avis reçus (calculés par `reviews`).
     Mise à jour par requête : sans effet (et sans erreur) si le compte vient d'être supprimé.

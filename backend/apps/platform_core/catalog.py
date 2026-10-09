@@ -19,6 +19,8 @@ class EventType:
 
 
 _TYPES = (
+    EventType('marketplace.contact_recorded'),
+    EventType('marketplace.exchange_proposed'),
 )
 
 EVENT_TYPES = {t.name: t for t in _TYPES}

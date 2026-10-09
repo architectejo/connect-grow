@@ -15,8 +15,8 @@ from django.db.models import Count, F
 from django.utils import timezone
 
 from apps.common.utils import day_bounds, parse_uuid
-from apps.messaging import services as messaging_services
 from apps.notifications import services as notification_services
+from apps.platform_core.services import publish_event
 from apps.visibility import services as visibility_services
 
 from .models import ContactEvent, ExchangeProposal, Favorite, MarketplaceSettings, Offer
@@ -317,14 +317,6 @@ def toggle_favorite(user, offer: Offer) -> bool:
 
 # --- Contacts et échanges (CDC 3.5) ---------------------------------------------
 
-def _start_conversation(offer: Offer, sender, message: str):
-    conversation = messaging_services.get_or_create_offer_conversation(
-        offer_id=offer.id, user_ids=[sender.pk, offer.seller_id],
-    )
-    messaging_services.send_message(conversation=conversation, sender=sender, content=message, notify=False)
-    return conversation
-
-
 def ensure_available(offer: Offer) -> None:
     """Une offre masquée, en pause, vendue, expirée ou supprimée n'accepte ni contact, ni
     échange, ni favori, ni affaire."""
@@ -338,39 +330,59 @@ def _check_can_contact(offer: Offer, sender) -> None:
     ensure_available(offer)
 
 
+EXCHANGE_MESSAGE_PREFIX = "[PROPOSITION D'ÉCHANGE] "
+
+
+def get_contact_message(contact_event_id) -> Optional[str]:
+    """Texte à poser dans la conversation pour un contact, ou None si le contact n'existe plus
+    (annonce supprimée entre-temps). Lu à la diffusion : le message ne transite pas par l'outbox."""
+    return ContactEvent.objects.filter(pk=contact_event_id).values_list('message', flat=True).first()
+
+
+def get_exchange_message(proposal_id) -> Optional[str]:
+    """Idem pour une proposition d'échange (préfixée)."""
+    text = ExchangeProposal.objects.filter(pk=proposal_id).values_list('message', flat=True).first()
+    return None if text is None else f"{EXCHANGE_MESSAGE_PREFIX}{text}"
+
+
+def _interaction_payload(offer: Offer, sender, **ids) -> dict:
+    """Charge utile d'un contact ou d'un échange : identifiants et titre public de l'annonce
+    seulement. Ni le texte du message ni le nom de l'expéditeur (données personnelles) ne
+    sont copiés dans l'outbox : les abonnés les relisent par `services.py`."""
+    return {
+        **{key: str(value) for key, value in ids.items()},
+        'offer_id': str(offer.id), 'offer_title': offer.title,
+        'seller_id': str(offer.seller_id), 'sender_id': str(sender.pk),
+    }
+
+
 def create_contact_event(*, offer: Offer, sender, message: str) -> ContactEvent:
-    """Enregistre un contact, ouvre (ou alimente) la conversation avec le vendeur et le
-    prévient. Les trois écritures sont indépendantes (pas de transaction entre domaines) :
-    elles deviendront des événements de l'outbox (L0-16)."""
+    """Enregistre un contact et publie `marketplace.contact_recorded` dans la même transaction :
+    la conversation et la notification du vendeur sont créées par leurs domaines à la diffusion
+    de l'événement (outbox), avec reprise en cas d'échec."""
     _check_can_contact(offer, sender)
     recent = ContactEvent.objects.filter(
         offer=offer, sender=sender, created_at__gte=timezone.now() - DUPLICATE_CONTACT_WINDOW,
     )
     if recent.exists():
         raise MarketplaceError("Vous avez déjà contacté le vendeur pour cette annonce ces dernières 24 heures.")
-    event = ContactEvent.objects.create(offer=offer, sender=sender, message=message)
-    _start_conversation(offer, sender, message)
-    notification_services.notify(
-        user_id=offer.seller_id,
-        notification_type=notification_services.CONTACT,
-        title="Nouvelle demande de contact",
-        content=f"{sender.full_name} vous a contacté pour {offer.title}",
-        link='/messages',
-    )
+    with transaction.atomic():
+        event = ContactEvent.objects.create(offer=offer, sender=sender, message=message)
+        publish_event(
+            'marketplace.contact_recorded', aggregate_type='offer', aggregate_id=offer.id,
+            payload=_interaction_payload(offer, sender, contact_event_id=event.pk),
+        )
     return event
 
 
 def create_exchange_proposal(*, offer: Offer, sender, message: str) -> ExchangeProposal:
     _check_can_contact(offer, sender)
-    proposal = ExchangeProposal.objects.create(offer=offer, sender=sender, message=message)
-    _start_conversation(offer, sender, f"[PROPOSITION D'ÉCHANGE] {message}")
-    notification_services.notify(
-        user_id=offer.seller_id,
-        notification_type=notification_services.EXCHANGE,
-        title="Nouvelle proposition d'échange",
-        content=f"{sender.full_name} propose un échange pour {offer.title}",
-        link='/messages',
-    )
+    with transaction.atomic():
+        proposal = ExchangeProposal.objects.create(offer=offer, sender=sender, message=message)
+        publish_event(
+            'marketplace.exchange_proposed', aggregate_type='offer', aggregate_id=offer.id,
+            payload=_interaction_payload(offer, sender, proposal_id=proposal.pk),
+        )
     return proposal
 
 

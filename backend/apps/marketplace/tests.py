@@ -16,6 +16,7 @@ from apps.common.factories import make_test_image  # noqa: F401  (réexporté po
 from apps.identity.models import User
 from apps.messaging.models import Conversation, Message
 from apps.notifications.models import Notification
+from apps.platform_core.testing import dispatch_outbox_now
 from apps.visibility.models import DailyVisibilityCounter, OfferUniqueView, RankingSettings
 
 from . import services
@@ -690,6 +691,7 @@ class ContactTests(MarketplaceTestBase):
         response = self.contact(offer)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         self.assertEqual(str(response.data['post']), str(offer.id))
+        dispatch_outbox_now()  # conversation et notification sont créées par l'outbox (ADR 0003)
 
         self.assertEqual(ContactEvent.objects.filter(offer=offer, sender=self.buyer).count(), 1)
         conversation = Conversation.objects.get(offer_id=offer.id)
@@ -704,6 +706,7 @@ class ContactTests(MarketplaceTestBase):
         for user in (self.buyer, other):
             self.client.force_authenticate(user)
             self.assertEqual(self.contact(offer).status_code, status.HTTP_201_CREATED)
+        dispatch_outbox_now()
         self.assertEqual(Conversation.objects.filter(offer_id=offer.id).count(), 2)
         buyer_conversation = Conversation.objects.filter(offer_id=offer.id, participants=self.buyer).get()
         self.assertEqual(buyer_conversation.messages.count(), 1)
@@ -749,6 +752,7 @@ class ContactTests(MarketplaceTestBase):
         self.client.force_authenticate(self.buyer)
         response = self.client.post(reverse('exchange-list'), {'post': str(offer.id), 'message': 'Je propose un troc.'})
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        dispatch_outbox_now()
         message = Message.objects.get(conversation__offer_id=offer.id)
         self.assertTrue(message.content.startswith("[PROPOSITION D'ÉCHANGE]"))
         self.assertEqual(Notification.objects.get(user=self.seller).notification_type, 'EXCHANGE')

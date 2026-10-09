@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.db import transaction
 
 from apps.common.admin_mixins import SingletonSettingsAdminMixin
 from apps.moderation.services import record_audit
@@ -16,9 +17,9 @@ class ReviewAdmin(admin.ModelAdmin):
     )
     list_filter = ('is_hidden', 'contact_channel', 'offer_rating', 'seller_rating')
     search_fields = ('user__email', 'user__phone', 'content')
-    raw_id_fields = ('user',)
     # Preuve de contact et drapeau calculé : jamais modifiables à la main (la modération les consulte).
     ALWAYS_READONLY = (
+        'user', 'offer_id', 'seller_context_type', 'seller_context_id',
         'contact_event_id', 'contact_channel', 'contact_recorded_at', 'counts_for_seller', 'edited_at',
     )
 
@@ -34,26 +35,31 @@ class ReviewAdmin(admin.ModelAdmin):
         return tuple(f.name for f in Review._meta.fields if f.name != 'is_hidden')
 
     def save_model(self, request, obj, form, change):
-        hidden_changed = change and 'is_hidden' in form.changed_data
-        super().save_model(request, obj, form, change)
-        services.reconcile_seller_flag(obj.user_id, obj.seller_context_type, obj.seller_context_id)
-        record_audit(request.user, 'REVIEW_ADMIN_UPDATED' if change else 'REVIEW_ADMIN_CREATED', target=obj,
-                     details=f"Champs : {', '.join(form.changed_data)}")
-        if hidden_changed:
-            record_audit(request.user, 'REVIEW_HIDDEN' if obj.is_hidden else 'REVIEW_UNHIDDEN', target=obj)
+        with transaction.atomic():
+            hidden_changed = change and 'is_hidden' in form.changed_data
+            super().save_model(request, obj, form, change)
+            services.reconcile_seller_flag(obj.user_id, obj.seller_context_type, obj.seller_context_id)
+            changes = '; '.join(
+                f"{name} : {form.initial.get(name)!r} -> {getattr(obj, name, None)!r}" for name in form.changed_data
+            )
+            record_audit(request.user, 'REVIEW_ADMIN_UPDATED', target=obj, details=changes)
+            if hidden_changed:
+                record_audit(request.user, 'REVIEW_HIDDEN' if obj.is_hidden else 'REVIEW_UNHIDDEN', target=obj)
 
     def delete_model(self, request, obj):
-        record_audit(request.user, 'REVIEW_ADMIN_DELETED', target=obj)
-        super().delete_model(request, obj)
-        services.reconcile_seller_flag(obj.user_id, obj.seller_context_type, obj.seller_context_id)
+        with transaction.atomic():
+            record_audit(request.user, 'REVIEW_ADMIN_DELETED', target=obj)
+            super().delete_model(request, obj)
+            services.reconcile_seller_flag(obj.user_id, obj.seller_context_type, obj.seller_context_id)
 
     def delete_queryset(self, request, queryset):
-        reviews = list(queryset)
-        for review in reviews:
-            record_audit(request.user, 'REVIEW_ADMIN_DELETED', target=review)
-        super().delete_queryset(request, queryset)
-        for pair in {(r.user_id, r.seller_context_type, r.seller_context_id) for r in reviews}:
-            services.reconcile_seller_flag(*pair)
+        with transaction.atomic():
+            reviews = list(queryset)
+            for review in reviews:
+                record_audit(request.user, 'REVIEW_ADMIN_DELETED', target=review)
+            super().delete_queryset(request, queryset)
+            for pair in {(r.user_id, r.seller_context_type, r.seller_context_id) for r in reviews}:
+                services.reconcile_seller_flag(*pair)
 
 
 @admin.register(ReviewSettings)

@@ -27,23 +27,27 @@ class ReviewSettings(SingletonSettingsModel):
     Les limites de révélation de numéro relèvent du domaine `marketplace` (L0-10a)."""
 
     min_reviews_to_display = models.PositiveIntegerField(
-        default=3, validators=[MinValueValidator(1)],
+        default=3, validators=[MinValueValidator(1), MaxValueValidator(100)],
         help_text="Nombre d'avis à partir duquel une moyenne est affichée.",
     )
     daily_review_limit = models.PositiveIntegerField(
-        default=5, validators=[MinValueValidator(1)], help_text="Avis maximum par utilisateur et par jour.",
+        default=5, validators=[MinValueValidator(1), MaxValueValidator(100)],
+        help_text="Avis maximum par utilisateur et par jour.",
     )
     edit_window_hours = models.PositiveIntegerField(
-        default=48, validators=[MinValueValidator(1)], help_text="Heures pendant lesquelles un avis reste modifiable.",
+        default=48, validators=[MinValueValidator(1), MaxValueValidator(8760)],
+        help_text="Heures pendant lesquelles un avis reste modifiable (8760 au plus).",
     )
     delay_after_contact_hours = models.PositiveIntegerField(
-        default=24, help_text="Heures à attendre entre le contact et l'avis (0 : aucun délai).",
+        default=24, validators=[MaxValueValidator(168)],
+        help_text="Heures à attendre entre le contact et l'avis (0 : aucun délai, 168 au plus).",
     )
     crossed_reviews_window_days = models.PositiveIntegerField(
-        default=30, validators=[MinValueValidator(1)], help_text="Fenêtre de détection des avis croisés, en jours.",
+        default=30, validators=[MinValueValidator(1), MaxValueValidator(365)],
+        help_text="Fenêtre de détection des avis croisés, en jours (365 au plus).",
     )
     crossed_reviews_threshold = models.PositiveIntegerField(
-        default=3, validators=[MinValueValidator(2)],
+        default=3, validators=[MinValueValidator(2), MaxValueValidator(50)],
         help_text="Nombre d'avis entre les deux mêmes comptes qui déclenche un signalement automatique.",
     )
 
@@ -113,6 +117,19 @@ class Review(BaseModel):
 
     def __str__(self):
         return f"Avis de {self.user_id} sur {self.offer_id}"
+
+
+class DeletedReviewMark(BaseModel):
+    """Trace légère de la suppression d'un avis par son auteur : empêche de réécrire un avis pour la
+    même offre pendant `ReviewSettings.edit_window_hours` (supprimer puis recréer contournerait la
+    fenêtre de modification). Une ligne par (auteur, offre), mise à jour à chaque suppression."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='deleted_review_marks')
+    offer_id = models.UUIDField()
+    deleted_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'offer_id'], name='uniq_deleted_review_user_offer')]
 
 
 class ReviewDailyCount(BaseModel):

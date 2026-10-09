@@ -223,7 +223,8 @@ class ReviewAdminTests(ModerationTestBase):
         # Le super-administrateur réécrit tout sauf la preuve de contact et le drapeau calculé.
         self.assertEqual(
             set(ReviewAdmin(Review, admin.site).get_readonly_fields(request)),
-            {'contact_event_id', 'contact_channel', 'contact_recorded_at', 'counts_for_seller', 'edited_at'},
+            {'user', 'offer_id', 'seller_context_type', 'seller_context_id', 'contact_event_id',
+             'contact_channel', 'contact_recorded_at', 'counts_for_seller', 'edited_at'},
         )
 
 

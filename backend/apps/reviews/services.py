@@ -23,7 +23,7 @@ from apps.marketplace import services as marketplace_services
 from apps.moderation import services as moderation_services
 from apps.platform_core.services import publish_event
 
-from .models import Review, ReviewDailyCount, ReviewSettings
+from .models import DeletedReviewMark, Review, ReviewDailyCount, ReviewSettings
 
 # Statuts HTTP portés par les refus métier (la couche vue les traduit sans les connaître).
 HTTP_FORBIDDEN, HTTP_NOT_FOUND, HTTP_CONFLICT, HTTP_TOO_MANY = 403, 404, 409, 429
@@ -37,6 +37,9 @@ class ReviewError(Exception):
         self.message = message
         self.code = code
         self.status_code = status_code
+
+
+NOT_ELIGIBLE_MESSAGE = "Vous pourrez donner votre avis après avoir contacté le vendeur."
 
 
 def get_settings() -> ReviewSettings:
@@ -123,13 +126,16 @@ def reconcile_seller_flag(user_id, context_type, context_id) -> None:
     """Une seule note vendeur par auteur et par vendeur (D2) : `counts_for_seller` est vrai pour la
     plus récente non masquée du couple (auteur, contexte vendeur), faux pour les autres. Idempotent ;
     à appeler dans la transaction de toute création, suppression, masquage ou réaffichage d'avis."""
-    rows = Review.objects.filter(
-        user_id=user_id, seller_context_type=context_type, seller_context_id=context_id,
-    )
-    latest = rows.filter(is_hidden=False).order_by('-created_at', '-id').values_list('id', flat=True).first()
-    rows.exclude(pk=latest).filter(counts_for_seller=True).update(counts_for_seller=False)
-    if latest is not None:
-        rows.filter(pk=latest, counts_for_seller=False).update(counts_for_seller=True)
+    with transaction.atomic():
+        rows = Review.objects.filter(
+            user_id=user_id, seller_context_type=context_type, seller_context_id=context_id,
+        )
+        # Verrou sur les avis du couple : deux recalculs simultanés se suivent au lieu de se croiser.
+        list(rows.select_for_update().values_list('id', flat=True))
+        latest = rows.filter(is_hidden=False).order_by('-created_at', '-id').values_list('id', flat=True).first()
+        rows.exclude(pk=latest).filter(counts_for_seller=True).update(counts_for_seller=False)
+        if latest is not None:
+            rows.filter(pk=latest, counts_for_seller=False).update(counts_for_seller=True)
 
 
 # --- Avis croisés ----------------------------------------------------------------------
@@ -172,17 +178,23 @@ def ensure_can_review(user, offer_id):
     donné, offre indisponible. Point d'extension (L0-10 a) : le délai entre contact et avis se
     contrôle ici, juste après « aucun contact », avec `ReviewSettings.delay_after_contact_hours`."""
     offer = marketplace_services.get_offer(offer_id)
-    if offer is None:
-        raise ReviewError("Annonce introuvable.", 'offer_not_found', HTTP_NOT_FOUND)
+    # Réponse uniforme (pas d'énumération) : offre inconnue, purgée, en corbeille ou masquée par la
+    # modération donnent le même refus que l'absence de contact.
+    if offer is None or offer.is_deleted or offer.is_hidden_by_moderation:
+        raise ReviewError(NOT_ELIGIBLE_MESSAGE, 'not_eligible')
     if identity_services.acts_for_context(user.pk, offer.seller_context_type, offer.seller_context_id):
         raise ReviewError("Vous ne pouvez pas noter votre propre annonce.", 'own_offer')
     contact = marketplace_services.get_review_contact(offer.id, user.pk)
     if contact is None:
-        raise ReviewError("Vous pourrez donner votre avis après avoir contacté le vendeur.", 'not_eligible')
+        raise ReviewError(NOT_ELIGIBLE_MESSAGE, 'not_eligible')
     if Review.objects.filter(user=user, offer_id=offer.id).exists():
         raise ReviewError("Vous avez déjà donné votre avis pour cette annonce.", 'already_reviewed', HTTP_CONFLICT)
-    if offer.is_deleted or offer.is_hidden_by_moderation:
-        raise ReviewError("Cette annonce n'est plus disponible.", 'offer_unavailable', HTTP_CONFLICT)
+    mark = DeletedReviewMark.objects.filter(user=user, offer_id=offer.id).first()
+    if mark is not None and timezone.now() < mark.deleted_at + timedelta(hours=get_settings().edit_window_hours):
+        raise ReviewError(
+            "Vous avez supprimé votre avis pour cette annonce : vous pourrez en écrire un autre plus tard.",
+            'review_recently_deleted', HTTP_CONFLICT,
+        )
     return offer, contact
 
 
@@ -224,26 +236,58 @@ def create_review(user, *, offer_id, offer_rating, seller_rating, content) -> Re
     return review
 
 
+def _lock_review(review: Review) -> Review:
+    """Relit l'avis sous verrou (à appeler dans une transaction) : les contrôles d'état qui suivent
+    portent sur la ligne à jour, pas sur une copie périmée (masquage, signalement ou réponse
+    survenus entre la lecture et l'écriture)."""
+    locked = Review.objects.select_for_update().filter(pk=review.pk).first()
+    if locked is None:
+        raise ReviewError("Avis introuvable.", 'not_found', HTTP_NOT_FOUND)
+    return locked
+
+
 def update_review(review: Review, changes: dict) -> Review:
     """Modifie la note d'offre, la note vendeur ou le texte (fenêtre `edit_window_hours`) ; renseigne
-    `edited_at`. Modifier un avis qui n'est pas le plus récent du couple ne change pas la moyenne vendeur."""
-    ensure_author_can_modify(review)
-    if not review.can_still_be_edited(get_settings().edit_window_hours):
-        raise ReviewError(
-            "Cet avis n'est plus modifiable : le délai de modification est dépassé.", 'edit_window_closed',
-        )
-    for name in ('offer_rating', 'seller_rating', 'content'):
-        if name in changes:
-            setattr(review, name, changes[name].strip() if name == 'content' else changes[name])
-    review.edited_at = timezone.now()
-    review.save(update_fields=['offer_rating', 'seller_rating', 'content', 'edited_at', 'updated_at'])
+    `edited_at`. Refusé après la réponse du vendeur. Modifier un avis qui n'est pas le plus récent
+    du couple ne change pas la moyenne vendeur. Atomique, contrôles sur la ligne verrouillée."""
+    with transaction.atomic():
+        review = _lock_review(review)
+        ensure_author_can_modify(review)
+        if review.reply_content:
+            raise ReviewError(
+                "Le vendeur a répondu à cet avis : vous ne pouvez plus le modifier.", 'review_locked_after_reply',
+            )
+        if not review.can_still_be_edited(get_settings().edit_window_hours):
+            raise ReviewError(
+                "Cet avis n'est plus modifiable : le délai de modification est dépassé.", 'edit_window_closed',
+            )
+        for name in ('offer_rating', 'seller_rating', 'content'):
+            if name in changes:
+                setattr(review, name, changes[name].strip() if name == 'content' else changes[name])
+        review.edited_at = timezone.now()
+        review.save(update_fields=['offer_rating', 'seller_rating', 'content', 'edited_at', 'updated_at'])
     return review
 
 
-def delete_review(review: Review) -> None:
-    """Suppression par l'auteur ; la place de la limite quotidienne n'est pas libérée."""
-    ensure_author_can_modify(review)
+def delete_review(review: Review, actor) -> None:
+    """Suppression par l'auteur, journalisée (règle 12). Refusée si le vendeur a répondu (la réponse
+    publique ne doit pas disparaître avec l'avis) ou si l'avis est masqué ou signalé. La place de la
+    limite quotidienne n'est pas libérée, et le même auteur ne peut pas réécrire un avis pour cette
+    offre pendant `edit_window_hours` (`DeletedReviewMark`)."""
     with transaction.atomic():
+        review = _lock_review(review)
+        ensure_author_can_modify(review)
+        if review.reply_content:
+            raise ReviewError(
+                "Le vendeur a répondu à cet avis : vous ne pouvez plus le supprimer.", 'review_locked_after_reply',
+            )
+        moderation_services.record_audit(
+            actor, 'REVIEW_DELETED', target=review,
+            details=f"Avis sur l'offre {review.offer_id}, notes {review.offer_rating}/{review.seller_rating}",
+        )
+        DeletedReviewMark.objects.update_or_create(
+            user_id=review.user_id, offer_id=review.offer_id, defaults={'deleted_at': timezone.now()},
+        )
         review.delete()
         reconcile_seller_flag(review.user_id, review.seller_context_type, review.seller_context_id)
 

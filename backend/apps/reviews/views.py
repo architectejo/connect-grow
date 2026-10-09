@@ -80,7 +80,7 @@ class ReviewViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
         review = self.get_object()
         self._ensure_author(review)
         try:
-            services.delete_review(review)
+            services.delete_review(review, request.user)
         except services.ReviewError as exc:
             raise _api_error(exc)
         return Response(status=204)

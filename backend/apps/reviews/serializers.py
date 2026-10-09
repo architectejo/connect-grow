@@ -61,17 +61,17 @@ class ReviewSerializer(OfferLookupMixin, serializers.ModelSerializer):
     ne sont pas exposés publiquement (modération seulement)."""
 
     post = serializers.SerializerMethodField()
-    user_id = serializers.ReadOnlyField()
     user_name = serializers.SerializerMethodField()
     source = serializers.SerializerMethodField()
     is_post_owner = serializers.SerializerMethodField()
+    is_mine = serializers.SerializerMethodField()
     can_edit = serializers.SerializerMethodField()
 
     class Meta:
         model = Review
         fields = [
-            'id', 'post', 'user_id', 'user_name', 'offer_rating', 'seller_rating', 'content', 'source',
-            'reply_content', 'reply_at', 'created_at', 'edited_at', 'is_post_owner', 'can_edit',
+            'id', 'post', 'user_name', 'offer_rating', 'seller_rating', 'content', 'source',
+            'reply_content', 'reply_at', 'created_at', 'edited_at', 'is_post_owner', 'is_mine', 'can_edit',
         ]
         read_only_fields = fields
         list_serializer_class = ReviewListSerializer
@@ -88,9 +88,14 @@ class ReviewSerializer(OfferLookupMixin, serializers.ModelSerializer):
             return False
         return services.can_reply(obj, request.user)
 
+    def get_is_mine(self, obj):
+        # L'identifiant de l'auteur n'est jamais public : seul l'auteur apprend que l'avis est le sien.
+        request = self.context.get('request')
+        return bool(request and request.user.is_authenticated and obj.user_id == request.user.id)
+
     def get_can_edit(self, obj):
         request = self.context.get('request')
-        if not request or obj.user_id != getattr(request.user, 'id', None) or obj.is_hidden:
+        if not self.get_is_mine(obj) or obj.is_hidden or obj.reply_content:
             return False
         # Une lecture par sérialisation de liste : le contexte est partagé.
         if 'review_edit_window_hours' not in self.context:
@@ -113,7 +118,9 @@ class ReviewCreateSerializer(serializers.Serializer):
 
 
 class ReviewUpdateSerializer(serializers.Serializer):
-    """Corps de `PATCH /reviews/{id}/` : sous-ensemble de notes et de commentaire ; `post` est ignoré."""
+    """Corps de `PATCH /reviews/{id}/` : sous-ensemble de notes et de commentaire ; `post` est ignoré.
+    Les trois champs sont déclarés requis, mais la vue instancie le serializer avec `partial=True` :
+    chacun est facultatif, et au moins un doit être fourni (`validate`)."""
 
     offer_rating = serializers.IntegerField(min_value=1, max_value=5, error_messages=RATING_MESSAGES)
     seller_rating = serializers.IntegerField(min_value=1, max_value=5, error_messages=RATING_MESSAGES)

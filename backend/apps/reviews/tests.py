@@ -79,9 +79,11 @@ class ReviewCreationTests(ReviewsTestBase):
         response = self.post_review()
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         self.assertEqual(set(response.data), {
-            'id', 'post', 'user_id', 'user_name', 'offer_rating', 'seller_rating', 'content', 'source',
-            'reply_content', 'reply_at', 'created_at', 'edited_at', 'is_post_owner', 'can_edit',
+            'id', 'post', 'user_name', 'offer_rating', 'seller_rating', 'content', 'source',
+            'reply_content', 'reply_at', 'created_at', 'edited_at', 'is_post_owner', 'is_mine', 'can_edit',
         })
+        self.assertTrue(response.data['is_mine'])
+        self.assertNotIn('user_id', response.data)
         self.assertEqual(response.data['post'], str(self.offer.id))
         self.assertEqual((response.data['offer_rating'], response.data['seller_rating']), (4, 5))
         self.assertEqual(response.data['source'], 'CONTACT')
@@ -125,11 +127,11 @@ class ReviewCreationTests(ReviewsTestBase):
         response = self.post_review()
         self.assertEqual((response.status_code, response.data['code']), (403, 'own_offer'))
 
-    def test_unknown_offer_is_404(self):
+    def test_unknown_offer_gives_the_uniform_refusal(self):
         self.client.force_authenticate(self.buyer)
         response = self.post_review(post_id=uuid.uuid4())
-        self.assertEqual((response.status_code, response.data['code']), (404, 'offer_not_found'))
-        self.assertEqual(response.data['detail'], 'Annonce introuvable.')
+        self.assertEqual((response.status_code, response.data['code']), (403, 'not_eligible'))
+        self.assertEqual(response.data['detail'], 'Vous pourrez donner votre avis après avoir contacté le vendeur.')
 
     def test_second_review_for_the_same_offer_is_409(self):
         self.make_contact()
@@ -144,13 +146,13 @@ class ReviewCreationTests(ReviewsTestBase):
         with self.assertRaises(IntegrityError), transaction.atomic():
             self.make_review()
 
-    def test_offer_in_the_trash_or_hidden_by_moderation_is_unavailable(self):
+    def test_offer_in_the_trash_or_hidden_by_moderation_gives_the_uniform_refusal(self):
         self.make_contact()
         self.client.force_authenticate(self.buyer)
         for changes in ({'is_deleted': True}, {'is_hidden_by_moderation': True, 'is_active': False}):
             Offer.objects.filter(pk=self.offer.pk).update(**changes)
             response = self.post_review()
-            self.assertEqual((response.status_code, response.data['code']), (409, 'offer_unavailable'), changes)
+            self.assertEqual((response.status_code, response.data['code']), (403, 'not_eligible'), changes)
             Offer.objects.filter(pk=self.offer.pk).update(
                 is_deleted=False, is_hidden_by_moderation=False, is_active=True,
             )
@@ -164,12 +166,12 @@ class ReviewCreationTests(ReviewsTestBase):
             Offer.objects.filter(pk=self.offer.pk).update(is_active=False, **state)
             self.assertEqual(self.post_review().status_code, status.HTTP_201_CREATED, state)
 
-    def test_review_of_a_purged_offer_is_404(self):
+    def test_review_of_a_purged_offer_gives_the_uniform_refusal(self):
         self.make_contact()
         offer_id = self.offer.id
         self.offer.delete()
         self.client.force_authenticate(self.buyer)
-        self.assertEqual(self.post_review(post_id=offer_id).data['code'], 'offer_not_found')
+        self.assertEqual(self.post_review(post_id=offer_id).data['code'], 'not_eligible')
 
     def test_invalid_bodies_are_rejected_with_field_errors(self):
         self.make_contact()

@@ -8,8 +8,8 @@ from . import services
 
 @subscribe('reviews.crossed_reviews_detected', name='moderation.file_crossed_reviews_report', versions=(2,))
 def file_crossed_reviews_report(event):
-    """CDC 3.4 (anti-abus) : version 2 de l'événement (`reviews_count`) ; dépose un signalement automatique sur l'avis ; idempotent (un seul
-    signalement par avis et par motif)."""
+    """CDC 3.4 (anti-abus) : version 2 de l'événement (`reviews_count`). Dépose un signalement
+    automatique sur l'avis ; idempotent (un seul signalement par avis et par motif)."""
     payload = event.payload
     try:
         review_id = uuid.UUID(payload['review_id'])

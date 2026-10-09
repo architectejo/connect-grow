@@ -66,3 +66,31 @@ export function initials(name?: string | null): string {
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
 }
+
+/**
+ * Fuseau d'affichage des dates : l'API renvoie des instants avec décalage (ex. +01:00) ;
+ * on les montre toujours à l'heure de Kinshasa, quel que soit le fuseau de l'appareil.
+ */
+export const DISPLAY_TIME_ZONE = "Africa/Kinshasa";
+
+const clockFormatter = new Intl.DateTimeFormat(LOCALE, { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: DISPLAY_TIME_ZONE });
+const monthYearFormatter = new Intl.DateTimeFormat(LOCALE, { month: "long", year: "numeric", timeZone: DISPLAY_TIME_ZONE });
+
+/** « 14:05 » à l'heure de Kinshasa ; chaîne vide si la date est invalide. */
+export function formatClockTime(date: string | Date): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  return Number.isNaN(d.getTime()) ? "" : clockFormatter.format(d);
+}
+
+/** « octobre 2026 » à l'heure de Kinshasa ; chaîne vide si la date est invalide. */
+export function formatMonthYear(date: string | Date): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  return Number.isNaN(d.getTime()) ? "" : monthYearFormatter.format(d);
+}
+
+const dayMonthFormatter = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", timeZone: DISPLAY_TIME_ZONE });
+
+/** « 09/10 » à l'heure de Kinshasa : même jour que les points `day` du tableau de bord (calculés côté serveur). */
+export function formatDayMonth(date: Date): string {
+  return dayMonthFormatter.format(date);
+}

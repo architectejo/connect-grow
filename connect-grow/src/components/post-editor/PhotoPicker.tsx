@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Camera, ImagePlus, Loader2, Star, X } from "lucide-react";
 import { toast } from "sonner";
+import type { Uuid } from "@/api/types";
 import { mediaUrl } from "@/lib/media";
 import { ACCEPTED_IMAGE_TYPES, compressImage, MAX_SOURCE_SIZE } from "@/lib/image";
 import { cn } from "@/lib/utils";
@@ -10,7 +11,7 @@ export const MAX_PHOTOS = 8;
 
 /** Photo déjà en ligne (principale ou de galerie) ou nouvelle photo choisie sur l'appareil. */
 export type EditorPhoto =
-  | { key: string; kind: "existing"; url: string; galleryId: number | null }
+  | { key: string; kind: "existing"; url: string; galleryId: Uuid | null }
   | { key: string; kind: "new"; file: File; preview: string };
 
 export const photoSrc = (photo: EditorPhoto) => (photo.kind === "new" ? photo.preview : mediaUrl(photo.url) ?? "");

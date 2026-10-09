@@ -48,7 +48,7 @@ function DetailSkeleton() {
 }
 
 function SimilarPosts({ post }: { post: Post }) {
-  const { data = [] } = usePosts({ category: String(post.category) }, 9);
+  const { data = [] } = usePosts({ category: post.category }, 9);
   const toggleFavorite = useToggleFavorite();
   const similar = data.filter((p) => p.id !== post.id).slice(0, 4);
   if (similar.length === 0) return null;

@@ -26,6 +26,7 @@ import { accountKeys } from "@/hooks/use-account";
 import { categoryIcon } from "@/lib/category-icons";
 import { mediaUrl } from "@/lib/media";
 import { POST_DRAFT_KEY } from "@/lib/tokens";
+import { apiErrorMessage } from "@/lib/errors";
 import { parseApiErrors } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
@@ -203,7 +204,7 @@ function PostEditorForm({ post }: { post?: Post }) {
     defaultValues: post
       ? {
           post_type: post.post_type,
-          category: String(post.category),
+          category: post.category,
           title: post.title,
           description: post.description,
           condition: post.condition ?? "",
@@ -212,7 +213,7 @@ function PostEditorForm({ post }: { post?: Post }) {
           currency: post.currency ?? "USD",
           is_price_negotiable: post.is_price_negotiable ?? true,
           is_exchangeable: post.is_exchangeable ?? false,
-          commune: String(post.commune),
+          commune: post.commune,
         }
       : defaultValues,
     mode: "onTouched",
@@ -320,11 +321,13 @@ function PostEditorForm({ post }: { post?: Post }) {
 
       const newGalleryFiles = photos.slice(1).flatMap((p) => (p.kind === "new" ? [p.file] : []));
       let galleryFailed = false;
+      let galleryMessage: string | undefined;
       if (newGalleryFiles.length > 0) {
         const gallery = new FormData();
         newGalleryFiles.forEach((file) => gallery.append("image", file));
-        await apiClient.post(`marketplace/posts/${saved.id}/images/`, gallery).catch(() => {
+        await apiClient.post(`marketplace/posts/${saved.id}/images/`, gallery).catch((galleryError) => {
           galleryFailed = true;
+          galleryMessage = apiErrorMessage(galleryError, "");
         });
       }
 
@@ -334,7 +337,9 @@ function PostEditorForm({ post }: { post?: Post }) {
         queryClient.invalidateQueries({ queryKey: accountKeys.dashboard }),
       ]);
 
-      if (galleryFailed) toast.warning("Annonce enregistrée, mais certaines photos n'ont pas pu être ajoutées.");
+      if (galleryFailed) {
+        toast.warning("Annonce enregistrée, mais certaines photos n'ont pas pu être ajoutées.", { description: galleryMessage || undefined });
+      }
       else toast.success(isEdit ? "Annonce mise à jour." : "Votre annonce est en ligne !");
       navigate(`/post/${saved.id}`, { replace: true });
     } catch (error) {
@@ -351,19 +356,19 @@ function PostEditorForm({ post }: { post?: Post }) {
     }
   };
 
-  const communeName = cities.flatMap((c) => c.communes).find((c) => String(c.id) === values.commune)?.name;
+  const communeName = cities.flatMap((c) => c.communes).find((c) => c.id === values.commune)?.name;
   const previewPost: Post = {
-    id: post?.id ?? 0,
+    id: post?.id ?? "",
     seller: {
-      id: user?.id ?? 0,
+      id: user?.id ?? "",
       full_name: user?.full_name ?? "",
       photo: user?.photo,
       user_type: user?.user_type ?? "PARTICULIER",
       business_profile: user?.business_profile,
     },
-    category: Number(values.category),
-    category_name: categories.find((c) => String(c.id) === values.category)?.name,
-    commune: Number(values.commune),
+    category: values.category,
+    category_name: categories.find((c) => c.id === values.category)?.name,
+    commune: values.commune,
     commune_name: communeName,
     post_type: values.post_type,
     title: values.title || "Titre de votre annonce",
@@ -462,7 +467,7 @@ function PostEditorForm({ post }: { post?: Post }) {
                       {categories.map((category) => {
                         const Icon = categoryIcon(category);
                         return (
-                          <SelectItem key={category.id} value={String(category.id)}>
+                          <SelectItem key={category.id} value={category.id}>
                             <span className="flex items-center gap-2">
                               <Icon className="h-4 w-4 text-muted-foreground" aria-hidden /> {category.name}
                             </span>

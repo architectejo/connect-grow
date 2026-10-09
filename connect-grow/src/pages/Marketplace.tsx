@@ -50,7 +50,7 @@ const Marketplace = () => {
     setFilters({ search: searchInput.trim() || undefined });
   };
 
-  const selectedCategory = categories.find((c) => String(c.id) === filters.category);
+  const selectedCategory = categories.find((c) => c.id === filters.category);
   const title = filters.search
     ? `Résultats pour « ${filters.search} »`
     : selectedCategory
@@ -155,13 +155,13 @@ const Marketplace = () => {
       {categories.length > 0 && (
         <div className="-mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-none md:mx-0 md:flex-wrap md:px-0">
           {[{ id: "", name: "Toutes" }, ...categories].map((category) => {
-            const selected = (filters.category ?? "") === String(category.id);
+            const selected = (filters.category ?? "") === category.id;
             return (
               <button
                 key={category.id || "all"}
                 type="button"
                 aria-pressed={selected}
-                onClick={() => setFilters({ category: category.id ? String(category.id) : undefined })}
+                onClick={() => setFilters({ category: category.id ? category.id : undefined })}
                 className={cn(
                   "shrink-0 rounded-full border px-4 py-2 text-sm font-semibold transition-colors",
                   selected

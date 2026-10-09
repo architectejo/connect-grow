@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Check, Loader2, MessageSquare, Package, Repeat } from "lucide-react";
 import { toast } from "sonner";
 import apiClient from "@/api/client";
-import type { Post } from "@/api/types";
+import type { Post, Uuid } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,7 +13,7 @@ import { formatPrice } from "@/lib/format";
 import { sellerDisplayName } from "@/lib/trust";
 import { cn } from "@/lib/utils";
 import { useMyPosts } from "@/hooks/use-marketplace";
-import { apiErrorMessage } from "@/hooks/use-reviews";
+import { apiErrorMessage } from "@/lib/errors";
 
 interface DialogProps {
   post: Post;
@@ -73,7 +73,7 @@ export function ContactDialog({ post, open, onOpenChange }: DialogProps) {
 /** Proposition de troc : l'acheteur choisit une de ses annonces à échanger (CDC 3.3). */
 export function ExchangeDialog({ post, open, onOpenChange }: DialogProps) {
   const { data: myPosts = [], isLoading } = useMyPosts(open);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<Uuid | null>(null);
   const [message, setMessage] = useState("");
 
   const send = useMutation({
@@ -92,7 +92,8 @@ export function ExchangeDialog({ post, open, onOpenChange }: DialogProps) {
     onError: (error) => toast.error(apiErrorMessage(error, "La proposition n'a pas pu être envoyée.")),
   });
 
-  const offerable = myPosts.filter((p) => p.id !== post.id);
+  // my_posts renvoie aussi les annonces en pause, vendues ou expirées : seules les annonces en ligne se proposent
+  const offerable = myPosts.filter((p) => p.id !== post.id && (p.status ?? "ACTIVE") === "ACTIVE");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

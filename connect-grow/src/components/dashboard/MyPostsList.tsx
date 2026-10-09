@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Eye, ExternalLink, Heart, MoreVertical, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import type { Post } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ interface MyPostsListProps {
 
 /** Liste « Mes annonces » du tableau de bord vendeur (CDC 3.9). */
 export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListProps) {
+  const { t } = useTranslation();
   const { moveToTrash } = usePostLifecycle();
   const [query, setQuery] = useState("");
   const [trashing, setTrashing] = useState<Post | null>(null);
@@ -111,6 +113,9 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
                     <span className="sr-only">favoris</span>
                   </span>
                   <span>Publiée {formatRelativeDate(post.created_at)}</span>
+                  {post.status && post.status !== "ACTIVE" && (
+                    <span className="font-semibold text-foreground">{t(`post.status.${post.status}`)}</span>
+                  )}
                 </p>
               </div>
 

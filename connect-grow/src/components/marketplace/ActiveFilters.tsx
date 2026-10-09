@@ -20,11 +20,11 @@ export function ActiveFilters({ filters, onChange, onReset }: ActiveFiltersProps
 
   if (filters.search) chips.push({ key: "search", label: `« ${filters.search} »`, clear: { search: undefined } });
   if (filters.category) {
-    const name = categories.find((c) => String(c.id) === filters.category)?.name ?? "Catégorie";
+    const name = categories.find((c) => c.id === filters.category)?.name ?? "Catégorie";
     chips.push({ key: "category", label: name, clear: { category: undefined } });
   }
   if (filters.commune) {
-    const name = cities.flatMap((city) => city.communes).find((c) => String(c.id) === filters.commune)?.name ?? "Commune";
+    const name = cities.flatMap((city) => city.communes).find((c) => c.id === filters.commune)?.name ?? "Commune";
     chips.push({ key: "commune", label: name, clear: { commune: undefined } });
   }
   if (filters.price_min || filters.price_max) {

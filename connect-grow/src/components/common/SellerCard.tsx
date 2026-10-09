@@ -1,9 +1,8 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { format } from "date-fns";
-import { fr } from "date-fns/locale";
 import type { Seller } from "@/api/types";
+import { formatMonthYear } from "@/lib/format";
 import { getSellerTrust, sellerDisplayName } from "@/lib/trust";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "./StatusBadge";
@@ -45,7 +44,7 @@ export function SellerCard({ seller, href, actions, className }: SellerCardProps
           <TrustScore trust={trust} size="md" />
           {seller.date_joined && (
             <p className="text-xs text-muted-foreground">
-              {t("trust.memberSince", { date: format(new Date(seller.date_joined), "MMMM yyyy", { locale: fr }) })}
+              {t("trust.memberSince", { date: formatMonthYear(seller.date_joined) })}
             </p>
           )}
         </div>

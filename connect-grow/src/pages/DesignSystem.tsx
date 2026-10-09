@@ -23,7 +23,7 @@ const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString(
 
 const sellers: Record<string, Seller> = {
   business: {
-    id: 1,
+    id: "1",
     full_name: "Patrick Ilunga",
     user_type: "ENTREPRISE",
     business_profile: { business_name: "Gombe Électronique", is_verified: true, logo: null },
@@ -32,7 +32,7 @@ const sellers: Record<string, Seller> = {
     reviews_count: 42,
   },
   person: {
-    id: 2,
+    id: "2",
     full_name: "Grâce Mbuyi",
     user_type: "PARTICULIER",
     date_joined: "2026-06-02T10:00:00Z",
@@ -40,7 +40,7 @@ const sellers: Record<string, Seller> = {
     reviews_count: 5,
   },
   newbie: {
-    id: 3,
+    id: "3",
     full_name: "Junior Kabasele",
     user_type: "PARTICULIER",
     date_joined: "2026-09-01T10:00:00Z",
@@ -50,8 +50,8 @@ const sellers: Record<string, Seller> = {
 };
 
 const basePost = {
-  category: 1,
-  commune: 1,
+  category: "cat-1",
+  commune: "com-1",
   description: "",
   views_count: 0,
   likes_count: 0,
@@ -61,7 +61,7 @@ const basePost = {
 const samplePosts: Post[] = [
   {
     ...basePost,
-    id: 101,
+    id: "101",
     seller: sellers.business,
     post_type: "PRODUIT",
     title: "iPhone 14 Pro 256 Go, excellent état, avec facture",
@@ -75,7 +75,7 @@ const samplePosts: Post[] = [
   },
   {
     ...basePost,
-    id: 102,
+    id: "102",
     seller: sellers.person,
     post_type: "PRODUIT",
     title: "Pagnes wax hollandais, lot de 6 yards",
@@ -88,7 +88,7 @@ const samplePosts: Post[] = [
   },
   {
     ...basePost,
-    id: 103,
+    id: "103",
     seller: sellers.newbie,
     post_type: "SERVICE",
     title: "Plombier disponible 7j/7, dépannage rapide",
@@ -100,7 +100,7 @@ const samplePosts: Post[] = [
   },
   {
     ...basePost,
-    id: 104,
+    id: "104",
     seller: sellers.business,
     post_type: "PRODUIT",
     title: "Groupe électrogène 5 kVA silencieux",

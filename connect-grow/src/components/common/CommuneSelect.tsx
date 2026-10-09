@@ -53,7 +53,7 @@ export function CommuneSelect({
           <SelectGroup key={city.id}>
             {cities.length > 1 && <SelectLabel>{city.name}</SelectLabel>}
             {city.communes.map((commune) => (
-              <SelectItem key={commune.id} value={String(commune.id)}>
+              <SelectItem key={commune.id} value={commune.id}>
                 {commune.name}
               </SelectItem>
             ))}

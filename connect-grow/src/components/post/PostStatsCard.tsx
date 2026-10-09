@@ -1,10 +1,11 @@
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { TrendingUp } from "lucide-react";
+import type { Uuid } from "@/api/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePostStats } from "@/hooks/use-marketplace";
 
 /** Vues des 30 derniers jours, visibles uniquement par le vendeur de l'annonce. */
-export function PostStatsCard({ postId }: { postId: number }) {
+export function PostStatsCard({ postId }: { postId: Uuid }) {
   const { data: history = [], isLoading } = usePostStats(postId, true);
   const total = history.reduce((sum, point) => sum + point.views, 0);
 

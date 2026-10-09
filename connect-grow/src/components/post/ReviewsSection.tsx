@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Loader2, Lock, MessageSquareReply, MoreHorizontal, Pencil, Star, Trash2 } from "lucide-react";
-import type { Review } from "@/api/types";
+import type { Review, Uuid } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -82,10 +82,10 @@ function ReviewTextarea({ value, onChange, placeholder }: { value: string; onCha
 const isValidComment = (text: string) => text.trim().length >= MIN_LENGTH;
 
 interface ReviewsSectionProps {
-  postId: number;
+  postId: Uuid;
   isOwner: boolean;
   isAuthenticated: boolean;
-  currentUserId?: number;
+  currentUserId?: Uuid;
   sellerName: string;
 }
 
@@ -185,7 +185,8 @@ export function ReviewsSection({ postId, isOwner, isAuthenticated, currentUserId
       ) : (
         <ul className="mt-6 divide-y">
           {visible.map((review) => {
-            const isAuthor = review.user_id === currentUserId;
+            // can_edit : fenêtre de 48 h, avis ni masqué ni signalé (sinon l'API répond 403)
+            const isAuthor = review.user_id === currentUserId && review.can_edit !== false;
             return (
               <li key={review.id} className="flex gap-3 py-5 first:pt-0 last:pb-0">
                 <UserAvatar name={review.user_name} size="sm" />

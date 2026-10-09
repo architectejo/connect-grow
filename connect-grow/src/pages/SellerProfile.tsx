@@ -1,7 +1,5 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
-import { format } from "date-fns";
-import { fr } from "date-fns/locale";
 import { CalendarDays, Eye, Package, Phone, Share2, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,7 +9,7 @@ import { WhatsAppIcon } from "@/components/post/ContactActions";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePosts, useToggleFavorite } from "@/hooks/use-marketplace";
 import { shareLink, telLink, whatsappLink } from "@/lib/contact";
-import { formatCount } from "@/lib/format";
+import { formatCount, formatMonthYear } from "@/lib/format";
 import { getSellerTrust, sellerDisplayName } from "@/lib/trust";
 
 /**
@@ -148,7 +146,7 @@ const SellerProfile = () => {
               {
                 icon: CalendarDays,
                 label: "Membre depuis",
-                value: seller.date_joined ? format(new Date(seller.date_joined), "MMM yyyy", { locale: fr }) : "—",
+                value: seller.date_joined ? formatMonthYear(seller.date_joined) : "—",
               },
             ].map(({ icon: Icon, label, value }) => (
               <div key={label} className="rounded-xl bg-muted/60 p-3">

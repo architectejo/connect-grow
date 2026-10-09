@@ -1,10 +1,11 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import apiClient, { unwrapList } from "@/api/client";
-import type { Category, City, Post, PostFilters, User, ViewStatPoint } from "@/api/types";
+import type { Category, City, Paginated, Post, PostFilters, PublicBusiness, Uuid, ViewStatPoint } from "@/api/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { loginPath } from "@/lib/auth-paths";
+import { apiErrorMessage, shouldRetryQuery } from "@/lib/errors";
 
 export const marketplaceKeys = {
   all: ["marketplace"] as const,
@@ -12,9 +13,9 @@ export const marketplaceKeys = {
   cities: () => [...marketplaceKeys.all, "cities"] as const,
   postLists: () => [...marketplaceKeys.all, "posts"] as const,
   posts: (filters: PostFilters, limit?: number) => [...marketplaceKeys.postLists(), filters, limit ?? null] as const,
-  post: (id: string | number) => [...marketplaceKeys.all, "post", String(id)] as const,
+  post: (id: Uuid) => [...marketplaceKeys.all, "post", id] as const,
   myPosts: () => [...marketplaceKeys.all, "my-posts"] as const,
-  postStats: (id: string | number) => [...marketplaceKeys.all, "post-stats", String(id)] as const,
+  postStats: (id: Uuid) => [...marketplaceKeys.all, "post-stats", id] as const,
   businesses: (search: string) => [...marketplaceKeys.all, "businesses", search] as const,
 };
 
@@ -52,12 +53,12 @@ export function usePosts(filters: PostFilters = {}, limit?: number, options: { e
   });
 }
 
-export function usePost(id?: string | number) {
+export function usePost(id?: Uuid) {
   return useQuery({
     queryKey: marketplaceKeys.post(id ?? ""),
     queryFn: async () => (await apiClient.get<Post>(`marketplace/posts/${id}/`)).data,
     enabled: id !== undefined && id !== "",
-    retry: (count, error: { response?: { status?: number } }) => error?.response?.status !== 404 && count < 1,
+    retry: shouldRetryQuery,
   });
 }
 
@@ -71,7 +72,7 @@ export function useMyPosts(enabled = true) {
 }
 
 /** Vues des 30 derniers jours d'une annonce, pour son propriétaire. */
-export function usePostStats(id: string | number | undefined, enabled: boolean) {
+export function usePostStats(id: Uuid | undefined, enabled: boolean) {
   return useQuery({
     queryKey: marketplaceKeys.postStats(id ?? ""),
     queryFn: async () => ((await apiClient.get(`marketplace/stats/post/${id}/`)).data.history ?? []) as ViewStatPoint[],
@@ -79,11 +80,15 @@ export function usePostStats(id: string | number | undefined, enabled: boolean) 
   });
 }
 
+/** Entreprises (fiche publique restreinte), paginées par pages de 20 : « Voir plus » charge la suivante. */
 export function useBusinesses(search: string) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: marketplaceKeys.businesses(search),
-    queryFn: async () =>
-      unwrapList<User>((await apiClient.get("accounts/businesses/", { params: cleanParams({ search }) })).data),
+    queryFn: async ({ pageParam }) =>
+      (await apiClient.get<Paginated<PublicBusiness>>("accounts/businesses/", { params: cleanParams({ search, page: pageParam }) })).data,
+    initialPageParam: 1,
+    getNextPageParam: (last, _pages, lastPage) => (last.next ? lastPage + 1 : undefined),
+    select: (data) => ({ businesses: data.pages.flatMap((page) => page.results), count: data.pages[0]?.count ?? 0 }),
     placeholderData: keepPreviousData,
   });
 }
@@ -91,7 +96,7 @@ export function useBusinesses(search: string) {
 // --- Favoris ---
 
 /** Applique is_favorited à une annonce partout où elle est en cache (listes et fiche). */
-function setFavoriteInCache(queryClient: QueryClient, postId: number, favorited: boolean) {
+function setFavoriteInCache(queryClient: QueryClient, postId: Uuid, favorited: boolean) {
   const patch = (post: Post): Post =>
     post.id === postId
       ? {
@@ -125,9 +130,9 @@ export function useToggleFavorite() {
       if (data.favorited !== !post.is_favorited) setFavoriteInCache(queryClient, post.id, data.favorited);
       toast.success(data.favorited ? "Ajoutée à vos favoris" : "Retirée de vos favoris");
     },
-    onError: (_error, post) => {
+    onError: (error, post) => {
       setFavoriteInCache(queryClient, post.id, !!post.is_favorited);
-      toast.error("Impossible de modifier vos favoris. Réessayez.");
+      toast.error(apiErrorMessage(error, "Impossible de modifier vos favoris. Réessayez."));
     },
   });
 

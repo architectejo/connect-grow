@@ -1,33 +1,50 @@
-// Types alignés sur les serializers Django (apps/accounts, apps/marketplace).
-// Les champs marqués « prévu » viennent du cahier des charges et ne sont pas encore
-// renvoyés par l'API : les composants doivent fonctionner sans eux.
+// Types alignés sur les serializers Django (apps/identity, marketplace, reviews, messaging,
+// notifications, catalog). Tous les identifiants sont des UUID transportés en chaînes (ADR 0002).
+// Les champs marqués optionnels ne sont pas toujours renvoyés par l'API : les composants
+// doivent fonctionner sans eux.
+
+/** Identifiant UUID (chaîne) de toute ressource de l'API. */
+export type Uuid = string;
 
 export type UserType = "PARTICULIER" | "ENTREPRISE";
 export type Currency = "USD" | "CDF";
 export type PostType = "PRODUIT" | "SERVICE";
 export type PostCondition = "NEUF" | "OCCASION" | "RECONDITIONNE";
 export type VisibilityRank = "Elite" | "Standard" | "Faible";
+export type PostStatus = "ACTIVE" | "PAUSED" | "SOLD" | "EXPIRED";
 export type PostBadge = "sponsored" | "trending" | "reliable";
 
 export interface BusinessProfile {
     business_name: string;
-    categories?: number[];
+    categories?: Uuid[];
     bio?: string;
     logo?: string | null;
     nif?: string;
     is_verified?: boolean;
 }
 
+/** Fiche publique d'une entreprise (PublicBusinessSerializer) : liste blanche, plus de téléphone, e-mail ni NIF. */
+export interface PublicBusiness {
+    id: Uuid;
+    business_name: string;
+    logo?: string | null;
+    bio?: string;
+    categories?: Uuid[];
+    ville_name?: string | null;
+    commune_name?: string | null;
+    is_verified: boolean;
+}
+
 export interface User {
-    id: number;
+    id: Uuid;
     email: string;
     full_name: string;
     photo?: string | null;
     user_type: UserType;
     phone?: string;
-    ville?: number | null;
+    ville?: Uuid | null;
     ville_name?: string;
-    commune?: number | null;
+    commune?: Uuid | null;
     commune_name?: string;
     business_profile?: BusinessProfile | null;
     date_joined?: string;
@@ -38,7 +55,7 @@ export interface User {
 
 /** Vendeur tel qu'imbriqué dans une annonce (SellerSerializer). */
 export interface Seller {
-    id: number;
+    id: Uuid;
     full_name: string;
     photo?: string | null;
     phone?: string;
@@ -56,18 +73,18 @@ export interface Seller {
 }
 
 export interface PostImage {
-    id: number;
+    id: Uuid;
     image: string;
     order?: number;
 }
 
 export interface Post {
-    id: number;
+    id: Uuid;
     seller: Seller;
     seller_name?: string;
-    category: number;
+    category: Uuid;
     category_name?: string;
-    commune: number;
+    commune: Uuid;
     commune_name?: string;
     post_type: PostType;
     title: string;
@@ -86,7 +103,9 @@ export interface Post {
     views_count: number;
     likes_count: number;
     created_at: string;
-    is_active?: boolean;
+    /** Cycle de vie de l'offre (remplace is_active, absent de l'API). */
+    status?: PostStatus;
+    expires_at?: string | null;
     visibility_score?: number;
     visibility_rank?: VisibilityRank;
     /** Badges fournis par le module ranking (prioritaires sur is_trending / is_sponsored). */
@@ -98,20 +117,20 @@ export interface Post {
 }
 
 export interface Category {
-    id: number;
+    id: Uuid;
     name: string;
     icon?: string;
     slug: string;
 }
 
 export interface Commune {
-    id: number;
+    id: Uuid;
     name: string;
-    city: number;
+    city: Uuid;
 }
 
 export interface City {
-    id: number;
+    id: Uuid;
     name: string;
     communes: Commune[];
 }
@@ -140,9 +159,12 @@ export interface PostFilters {
 export type PostOrdering = "-visibility_score" | "-created_at" | "price" | "-price";
 
 export interface Review {
-    id: number;
-    post: number;
-    user_id: number;
+    id: Uuid;
+    /** Offre concernée ; null si elle a été purgée. */
+    post: Uuid | null;
+    deal?: Uuid;
+    user_id: Uuid;
+    reviewed_user_id?: Uuid;
     user_name: string;
     content: string;
     rating: number;
@@ -150,6 +172,8 @@ export interface Review {
     reply_at?: string | null;
     created_at: string;
     is_post_owner?: boolean;
+    /** Vrai tant que l'auteur peut modifier son avis (48 h, ni masqué ni signalé). */
+    can_edit?: boolean;
 }
 
 export interface ViewStatPoint {
@@ -163,6 +187,8 @@ export interface DashboardSummary {
     active_posts: number;
     avg_rating: number;
     review_count: number;
+    contacts_count?: number;
+    contact_rate?: number;
 }
 
 export interface DashboardStats {
@@ -171,7 +197,7 @@ export interface DashboardStats {
 }
 
 export interface Favorite {
-    id: number;
+    id: Uuid;
     post: Post;
     created_at: string;
 }
@@ -179,7 +205,7 @@ export interface Favorite {
 export type NotificationType = "COMMENT" | "CONTACT" | "EXCHANGE" | "MESSAGE" | "SYSTEM";
 
 export interface AppNotification {
-    id: number;
+    id: Uuid;
     notification_type: NotificationType;
     title: string;
     content: string;
@@ -192,9 +218,10 @@ export type KycDocumentType = "RCCM" | "ID_NATIONALE" | "PIECE_GERANT";
 export type KycStatus = "EN_ATTENTE" | "VALIDE" | "REFUSE";
 
 export interface KycDocument {
-    id: number;
+    id: Uuid;
     document_type: KycDocumentType;
-    file?: string;
+    /** URL authentifiée de téléchargement, renvoyée aux seuls examinateurs habilités (sinon null). */
+    download_url?: string | null;
     status: KycStatus;
     rejection_reason?: string;
     created_at: string;

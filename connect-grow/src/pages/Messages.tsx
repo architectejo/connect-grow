@@ -4,26 +4,28 @@ import Navbar from "@/components/landing/Navbar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
-import apiClient from "@/api/client";
+import { toast } from "sonner";
+import apiClient, { unwrapList } from "@/api/client";
+import type { Uuid } from "@/api/types";
+import { apiErrorMessage, isRateLimited, rateLimitMessage } from "@/lib/errors";
+import { formatClockTime } from "@/lib/format";
 import { 
     MessageSquare, Send, Search, User as UserIcon, 
     ArrowLeft, MoreVertical, Package, Loader2, Clock
 } from "lucide-react";
-import { format } from "date-fns";
-import { fr } from "date-fns/locale";
 
 import { mediaUrl } from "@/lib/media";
 
 interface ConversationItem {
-    id: number | string;
+    id: Uuid;
     other_participant?: { photo?: string | null; full_name?: string };
     post_title?: string;
     last_message?: { content: string; created_at: string | Date } | null;
 }
 
 interface MessageItem {
-    id: number | string;
-    sender: number | string;
+    id: Uuid;
+    sender: Uuid;
     content: string;
     created_at: string;
 }
@@ -36,7 +38,7 @@ const Messages = () => {
     const [newMessage, setNewMessage] = useState("");
     const [isLoading, setIsLoading] = useState(true);
     const [isSending, setIsSending] = useState(false);
-    const [userData, setUserData] = useState<{ id?: number | string } | null>(null);
+    const [userData, setUserData] = useState<{ id?: Uuid } | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
 
     // Fetch user and conversations
@@ -47,7 +49,7 @@ const Messages = () => {
                 setUserData(userRes.data);
 
                 const convRes = await apiClient.get("interactions/conversations/");
-                setConversations(convRes.data);
+                setConversations(unwrapList<ConversationItem>(convRes.data));
             } catch {
                 console.error("Erreur chargement messages");
             } finally {
@@ -62,17 +64,23 @@ const Messages = () => {
         if (activeConv) {
             const fetchMessages = async () => {
                 try {
-                    const res = await apiClient.get(`interactions/messages/?conversation=${activeConv.id}`);
-                    setMessages(res.data);
-                } catch {
-                    console.error("Erreur chargement des messages de la conversation");
+                    const res = await apiClient.get("interactions/messages/", { params: { conversation: activeConv.id } });
+                    setMessages(unwrapList<MessageItem>(res.data));
+                } catch (error) {
+                    // 429 : on arrête l'interrogation périodique (pas de boucle) et on prévient l'utilisateur
+                    if (isRateLimited(error)) {
+                        clearInterval(interval);
+                        toast.error(rateLimitMessage(error));
+                    } else {
+                        console.error("Erreur chargement des messages de la conversation");
+                    }
                 }
             };
-            
+
             setMessages([]); // Nettoyer les messages précédents lors du changement de conversation
-            fetchMessages();
             // Polling simple (on pourrait utiliser WebSockets/Ably/Pusher si dispo)
             const interval = setInterval(fetchMessages, 5000);
+            fetchMessages();
             return () => clearInterval(interval);
         }
     }, [activeConv]);
@@ -103,8 +111,9 @@ const Messages = () => {
                 ? { ...c, last_message: { content: newMessage, created_at: new Date() } }
                 : c
             ));
-        } catch {
-            console.error("Erreur envoi du message");
+        } catch (error) {
+            // 429 : « Trop de tentatives, réessayez dans N secondes » ; l'envoi n'est pas relancé
+            toast.error(apiErrorMessage(error, "Le message n'a pas pu être envoyé."));
         } finally {
             setIsSending(false);
         }
@@ -162,7 +171,7 @@ const Messages = () => {
                                                 <div className="flex justify-between items-center mb-1">
                                                     <span className="font-bold text-sm truncate">{conv.other_participant?.full_name}</span>
                                                     <span className="text-[10px] text-muted-foreground">
-                                                        {conv.last_message && format(new Date(conv.last_message.created_at), 'HH:mm')}
+                                                        {conv.last_message && formatClockTime(conv.last_message.created_at)}
                                                     </span>
                                                 </div>
                                                 <p className="text-xs text-muted-foreground truncate font-medium">
@@ -230,7 +239,7 @@ const Messages = () => {
                                                             {msg.content}
                                                         </div>
                                                         <span className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
-                                                            <Clock size={10} /> {format(new Date(msg.created_at), 'HH:mm', { locale: fr })}
+                                                            <Clock size={10} /> {formatClockTime(msg.created_at)}
                                                         </span>
                                                     </div>
                                                 </div>

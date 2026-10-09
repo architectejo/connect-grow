@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { format, subDays } from "date-fns";
+import { formatDayMonth } from "@/lib/format";
 import type { ViewStatPoint } from "@/api/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -16,9 +16,10 @@ const RANGES = [
  */
 function fillDays(history: ViewStatPoint[], days: number): ViewStatPoint[] {
   const byDay = new Map(history.map((point) => [point.day, point.views]));
-  const today = new Date();
+  const now = Date.now();
   return Array.from({ length: days }, (_, i) => {
-    const day = format(subDays(today, days - 1 - i), "dd/MM");
+    // Jours calculés à l'heure de Kinshasa, comme côté serveur (pas de décalage selon l'appareil)
+    const day = formatDayMonth(new Date(now - (days - 1 - i) * 86_400_000));
     return { day, views: byDay.get(day) ?? 0 };
   });
 }

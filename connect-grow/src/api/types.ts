@@ -282,3 +282,30 @@ export interface KycDocument {
     created_at: string;
     reviewed_at?: string | null;
 }
+
+// --- Contact du vendeur et consentement par canal (ADR 0005 §5.1) ---
+
+export type ContactChannel = "MESSAGE" | "CALL" | "WHATSAPP";
+
+export interface ContactPhoneState {
+    /** Toujours masqué par le serveur (jamais le numéro complet). */
+    masked: string;
+    is_verified: boolean;
+    login_phone_masked: string;
+    can_use_login_phone: boolean;
+}
+
+export interface ContactChannelState {
+    enabled: boolean;
+    granted_at?: string | null;
+    text_version?: string;
+}
+
+export interface ContactSettings {
+    /** null tant qu'aucun numéro de contact n'existe. */
+    phone: ContactPhoneState | null;
+    channels: Record<ContactChannel, ContactChannelState>;
+    current_text_version: string;
+}
+
+export type ContactPhoneInput = { use_login_phone: true } | { phone: string };

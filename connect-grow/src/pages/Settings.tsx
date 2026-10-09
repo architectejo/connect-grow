@@ -25,6 +25,7 @@ import { AccountShell } from "@/components/layout/AccountShell";
 import { PageHeader, StatusBadge, UserAvatar } from "@/components/common";
 import { CommuneSelect } from "@/components/common/CommuneSelect";
 import { errorProps, Field, fieldInputClass, FormAlert, PasswordInput, PhoneInput } from "@/components/auth/FormFields";
+import { ContactSettingsSection } from "@/components/settings/ContactSettingsSection";
 import { OtpStep } from "@/components/auth/OtpStep";
 import { useAuth } from "@/contexts/AuthContext";
 import { useChangePassword, useUpdateProfile } from "@/hooks/use-account";
@@ -358,6 +359,7 @@ function ContactTab() {
         {t("settings.phonePurpose")}
       </p>
       <ChangePhoneDialog open={open} onOpenChange={setOpen} />
+      <ContactSettingsSection />
     </div>
   );
 }

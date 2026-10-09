@@ -228,7 +228,11 @@ class LiftExpiredSanctionsCommandTests(ModerationTestBase):
         self.assertFalse(expired.is_active)
         self.assertTrue(still_running.is_active)
         self.seller.refresh_from_db()
-        self.assertTrue(self.seller.is_active)  # levée -> compte réactivé
+        # L0-21 (R0-03) : une autre suspension court toujours, le compte reste bloqué.
+        self.assertFalse(self.seller.is_active)
+        still_running.lift()
+        self.seller.refresh_from_db()
+        self.assertTrue(self.seller.is_active)  # plus aucune sanction bloquante -> compte réactivé
         self.assertTrue(AuditLog.objects.filter(action='SANCTION_AUTO_LIFTED').exists())
 
 

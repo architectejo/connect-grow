@@ -18,6 +18,10 @@ from apps.common.images import sanitize_uploaded_field, validate_image_pixels, v
 from apps.common.models import BaseModel, SingletonSettingsModel
 
 
+# Garde-fou contre les valeurs absurdes (saisie erronée) ; pas une règle commerciale.
+MAX_STOCK = 1_000_000
+
+
 class MarketplaceSettings(SingletonSettingsModel):
     """CDC 3.2 : durée d'expiration d'une offre sans renouvellement, « valeur paramétrable »
     dans le back-office (règle 11). Ligne unique."""
@@ -86,13 +90,24 @@ class Offer(BaseModel):
     description = models.TextField(
         validators=[MinLengthValidator(20), MaxLengthValidator(3000)],
     )
-    price = models.DecimalField(max_digits=10, decimal_places=2)
+    # Le prix ne peut pas être négatif. 0 reste accepté : le CDC prévoit « Sur devis » (§3.2) sans
+    # champ dédié à ce jour ; l'interdire bloquerait ce cas (arbitrage à confirmer avec le client).
+    price = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        validators=[MinValueValidator(0, message="Le prix ne peut pas être négatif.")],
+    )
     # CDC 2.3 : prix en USD ou en CDF, au choix du vendeur.
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
 
     # Champs spécifiques aux produits
     condition = models.CharField(max_length=20, choices=CONDITION_CHOICES, null=True, blank=True)
-    stock = models.PositiveIntegerField(default=1, help_text="Quantité disponible (si produit)")
+    stock = models.PositiveIntegerField(
+        default=1, help_text="Quantité disponible (si produit)",
+        validators=[
+            MinValueValidator(0, message="Le stock ne peut pas être négatif."),
+            MaxValueValidator(MAX_STOCK, message=f"Le stock ne peut pas dépasser {MAX_STOCK} unités."),
+        ],
+    )
 
     is_price_negotiable = models.BooleanField(default=True, verbose_name="Prix discutable")
     is_exchangeable = models.BooleanField(default=True, verbose_name="Echangeable")

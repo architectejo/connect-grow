@@ -8,7 +8,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.catalog import services as catalog_services
 from apps.common.serializers import PreloadingListSerializer
 
-from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
+from .models import BusinessProfile, KycDocument, OtpCode, User, normalize_email, phone_validator
 from .kyc_files import validate_kyc_file
 from .permissions import REVIEW_KYC_PERMISSION
 from .services import validate_new_password
@@ -98,6 +98,9 @@ class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
     commune = serializers.UUIDField(source='commune_id', required=False, allow_null=True)
     ville_name = serializers.SerializerMethodField()
     commune_name = serializers.SerializerMethodField()
+    # E-mail déclaré à la main (pas d'UniqueValidator du modèle, sensible à la casse) : l'unicité
+    # insensible à la casse est contrôlée dans validate_email sur la forme normalisée.
+    email = serializers.EmailField(required=False, allow_null=True, allow_blank=True, max_length=254)
     # Fourni uniquement lors d'une inscription/modification par téléphone (CDC 3.1) ;
     # ce n'est pas un champ du modèle, il est retiré dans validate().
     otp_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -131,6 +134,16 @@ class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
         }
         list_serializer_class = UserListSerializer
 
+    def validate_email(self, value):
+        email = normalize_email(value)
+        if email:
+            others = User.objects.filter(email__iexact=email)
+            if self.instance is not None:
+                others = others.exclude(pk=self.instance.pk)
+            if others.exists():
+                raise serializers.ValidationError("Un utilisateur avec cette adresse e-mail existe déjà.")
+        return email
+
     def validate_password(self, value):
         if self.instance is not None:
             return value  # refusé dans validate() : le mot de passe ne se change pas ici
@@ -161,6 +174,11 @@ class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {'password': "Utilisez « Changer le mot de passe » pour modifier votre mot de passe."}
             )
+
+        if self.instance is not None:
+            # Le type de compte se choisit à l'inscription ; il est en lecture seule ensuite
+            # (la valeur envoyée est ignorée, comme tout champ en lecture seule).
+            attrs.pop('user_type', None)
 
         # Vides normalisés en NULL (l'unicité ne porte que sur les valeurs renseignées).
         for field in ('email', 'phone'):
@@ -301,7 +319,13 @@ class IdentifierTokenObtainPairSerializer(TokenObtainPairSerializer):
         if not password or (not email and not phone):
             raise serializers.ValidationError("email (ou phone) et password sont requis.")
 
-        user = User.objects.filter(email=email).first() if email else User.objects.filter(phone=phone).first()
+        if email:
+            email = normalize_email(email)
+            user = User.objects.filter(email=email).first() or (
+                User.objects.filter(email__iexact=email).order_by('date_joined').first() if email else None
+            )
+        else:
+            user = User.objects.filter(phone=phone).first()
         if user is None or not user.is_active or not user.check_password(password):
             raise AuthenticationFailed(
                 "Aucun compte actif trouvé avec les identifiants fournis.", 'no_active_account'

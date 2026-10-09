@@ -17,7 +17,7 @@ from .serializers import (
 
 
 def _api_error(exc):
-    return CodedAPIException(exc.message, exc.code, exc.status_code)
+    return CodedAPIException(exc.message, exc.code, exc.status_code, wait=exc.wait)
 
 
 class ReviewViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):

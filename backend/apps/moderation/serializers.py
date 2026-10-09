@@ -75,7 +75,7 @@ class ReportSerializer(serializers.ModelSerializer):
             services.ensure_can_report(reporter, target_type, resolved[0], attrs.get('reason'))
         except services.ReportRefused as error:
             if error.code:
-                raise CodedAPIException(str(error), error.code, error.status_code)
+                raise CodedAPIException(str(error), error.code, error.status_code, wait=error.wait)
             if error.duplicate:
                 raise DuplicateReport(str(error))
             raise serializers.ValidationError({'object_id': str(error)})

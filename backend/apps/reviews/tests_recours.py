@@ -196,6 +196,7 @@ class ReportSeriesTests(RecoursBase):
         self.assertEqual(statuses, [201, 201, 429])
         refused = self.file_report(review=reviews[2])
         self.assertEqual(refused.data['code'], 'report_daily_limit')
+        self.assertTrue(0 < int(refused['Retry-After']) <= 24 * 3600)  # R0-06 : délai jusqu'à minuit
         # Un autre motif n'est pas concerné, et la veille ne compte pas.
         self.assertEqual(self.file_report(review=reviews[2], reason='SPAM', user=self.other).status_code, 201)
         Report.objects.update(created_at=timezone.now() - timedelta(days=1))

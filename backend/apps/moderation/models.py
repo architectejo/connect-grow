@@ -143,6 +143,8 @@ class Sanction(BaseModel):
     # avertir ou masquer une annonce ; seul un administrateur (ou plus) peut
     # suspendre ou bannir.
     MODERATOR_ALLOWED_TYPES = (TYPE_AVERTISSEMENT, TYPE_MASQUAGE_ANNONCE)
+    # Sanctions qui désactivent le compte tant qu'elles sont actives.
+    ACCOUNT_BLOCKING_TYPES = (TYPE_SUSPENSION_TEMPORAIRE, TYPE_BANNISSEMENT)
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sanctions')
     sanction_type = models.CharField(max_length=30, choices=TYPE_CHOICES)
@@ -168,7 +170,7 @@ class Sanction(BaseModel):
 
         if self.sanction_type == self.TYPE_MASQUAGE_ANNONCE and self.related_offer_id:
             marketplace_services.hide_by_moderation(self.related_offer_id)
-        elif self.sanction_type in (self.TYPE_SUSPENSION_TEMPORAIRE, self.TYPE_BANNISSEMENT):
+        elif self.sanction_type in self.ACCOUNT_BLOCKING_TYPES:
             self.user.is_active = False
             self.user.save(update_fields=['is_active'])
 
@@ -177,11 +179,16 @@ class Sanction(BaseModel):
 
         if self.sanction_type == self.TYPE_MASQUAGE_ANNONCE and self.related_offer_id:
             marketplace_services.lift_moderation_hiding(self.related_offer_id)
-        elif self.sanction_type in (self.TYPE_SUSPENSION_TEMPORAIRE, self.TYPE_BANNISSEMENT):
-            self.user.is_active = True
-            self.user.save(update_fields=['is_active'])
         self.is_active = False
         self.save(update_fields=['is_active'])
+        if self.sanction_type in self.ACCOUNT_BLOCKING_TYPES:
+            # Le compte n'est réactivé que s'il ne reste aucune autre sanction bloquante en cours.
+            still_blocked = Sanction.objects.filter(
+                user_id=self.user_id, is_active=True, sanction_type__in=self.ACCOUNT_BLOCKING_TYPES,
+            ).exclude(pk=self.pk).exists()
+            if not still_blocked:
+                self.user.is_active = True
+                self.user.save(update_fields=['is_active'])
 
     def __str__(self):
         return f"{self.get_sanction_type_display()} — {self.user}"

@@ -38,12 +38,19 @@ class KycPrivateStorage(FileSystemStorage):
 kyc_storage = KycPrivateStorage()
 
 
+def normalize_email(value):
+    """Forme canonique d'un e-mail : espaces retirés et minuscules (partie locale comprise).
+    Garantit qu'un e-mail est unique sans tenir compte de la casse, sur SQLite comme sur MySQL."""
+    if not value:
+        return None
+    return value.strip().lower() or None
+
+
 class UserManager(BaseUserManager):
     def create_user(self, email=None, phone=None, password=None, **extra_fields):
+        email = normalize_email(email)
         if not email and not phone:
             raise ValueError("Un email ou un numéro de téléphone est obligatoire")
-        if email:
-            email = self.normalize_email(email)
         user = self.model(email=email, phone=phone, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
@@ -112,6 +119,7 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
     )
 
     def save(self, *args, **kwargs):
+        self.email = normalize_email(self.email)
         # Photo ré-encodée (sans EXIF/GPS, taille plafonnée) avant stockage.
         self.photo = sanitize_uploaded_field(self.photo)
         super().save(*args, **kwargs)

@@ -10,7 +10,7 @@ from importlib import import_module
 from django.db import transaction
 from django.utils import timezone
 
-from apps.common.utils import parse_uuid
+from apps.common.utils import parse_uuid, seconds_until_next_day
 from apps.notifications import services as notification_services
 
 from .models import AuditLog, ModerationSettings, Report
@@ -30,8 +30,9 @@ class ReportRefused(Exception):
     """Signalement refusé (message en français) ; `duplicate` distingue le doublon (409). `code`
     renseigné : refus codé (`{detail, code}`) au statut `status_code` plutôt qu'une erreur de champ."""
 
-    def __init__(self, message, duplicate=False, code=None, status_code=400):
+    def __init__(self, message, duplicate=False, code=None, status_code=400, wait=None):
         super().__init__(message)
+        self.wait = wait  # secondes avant de pouvoir réessayer (en-tête Retry-After des 429)
         self.duplicate = duplicate
         self.code = code
         self.status_code = status_code
@@ -89,7 +90,7 @@ def _ensure_can_report_fictitious_contact(reporter, target_type, target_id):
     if today >= limit:
         raise ReportRefused(
             f"Vous avez atteint la limite de {limit} signalements de contact fictif par jour.",
-            code='report_daily_limit', status_code=429,
+            code='report_daily_limit', status_code=429, wait=seconds_until_next_day(),
         )
 
 

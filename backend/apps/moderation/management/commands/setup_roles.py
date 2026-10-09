@@ -11,7 +11,7 @@ MODERATOR_PERMISSIONS = {
     'moderation.report': ['view', 'add', 'change'],
     'moderation.sanction': ['view', 'add'],
     'catalog.forbiddenitem': ['view'],
-    'identity.kycdocument': ['view', 'change', 'review'],
+    'identity.kycdocument': ['view', 'review'],  # review : décider et télécharger, jamais éditer à la main
     'identity.user': ['view'],
     'interactions.review': ['view', 'change'],
     'marketplace.post': ['view'],
@@ -22,8 +22,7 @@ MODERATOR_PERMISSIONS = {
 ADMINISTRATOR_EXTRA_PERMISSIONS = {
     'moderation.sanction': ['change', 'delete'],
     'catalog.forbiddenitem': ['add', 'change', 'delete'],
-    'identity.user': ['change'],
-    'identity.businessprofile': ['view', 'change'],
+    'identity.businessprofile': ['view'],
     'catalog.category': ['add', 'change', 'delete'],
     'catalog.city': ['add', 'change', 'delete'],
     'catalog.commune': ['add', 'change', 'delete'],

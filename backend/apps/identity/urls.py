@@ -4,6 +4,8 @@ from .serializers import IdentifierTokenObtainPairSerializer
 from .views import (
     BusinessListView,
     ChangePasswordView,
+    LogoutAllView,
+    LogoutView,
     KycDecisionView,
     KycDocumentDownloadView,
     KycDocumentListCreateView,
@@ -26,6 +28,8 @@ urlpatterns = [
 
     # Connexion (Obtenir le Token)
     path('login/', LoginView.as_view(), name='token_obtain_pair'),
+    path('logout/', LogoutView.as_view(), name='logout'),
+    path('logout-all/', LogoutAllView.as_view(), name='logout_all'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
     # OTP et mot de passe

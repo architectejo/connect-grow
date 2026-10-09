@@ -8,6 +8,8 @@ from rest_framework.test import APITestCase
 
 import uuid
 
+from rest_framework_simplejwt.tokens import RefreshToken
+
 from apps.catalog.models import Category, City, Commune
 
 from .models import BusinessProfile, KycDocument, OtpCode, User
@@ -373,3 +375,69 @@ class ProfileUpdateSecurityTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         user.refresh_from_db()
         self.assertEqual(user.full_name, 'Alice')
+
+
+class SessionRevocationTests(APITestCase):
+    PASSWORD = 'mot-de-passe-solide-42'
+
+    def setUp(self):
+        self.user = User.objects.create_user(email='s@example.com', password=self.PASSWORD, full_name='S')
+
+    def login(self):
+        response = self.client.post(reverse('token_obtain_pair'), {'email': 's@example.com', 'password': self.PASSWORD})
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        return response.data
+
+    def refresh_status(self, refresh):
+        return self.client.post(reverse('token_refresh'), {'refresh': refresh}).status_code
+
+    def test_logout_blacklists_the_refresh_token(self):
+        tokens = self.login()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+        response = self.client.post(reverse('logout'), {'refresh': tokens['refresh']})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self.refresh_status(tokens['refresh']), status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_requires_auth_and_valid_own_token(self):
+        tokens = self.login()
+        self.assertEqual(self.client.post(reverse('logout'), {'refresh': tokens['refresh']}).status_code, 401)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+        self.assertEqual(self.client.post(reverse('logout'), {}).status_code, 400)
+        self.assertEqual(self.client.post(reverse('logout'), {'refresh': 'abc'}).status_code, 400)
+        other = User.objects.create_user(email='o@example.com', password='x', full_name='O')
+        other_refresh = str(RefreshToken.for_user(other))
+        self.assertEqual(self.client.post(reverse('logout'), {'refresh': other_refresh}).status_code, 400)
+        self.assertEqual(self.refresh_status(other_refresh), status.HTTP_200_OK)
+
+    def test_logout_all_revokes_every_session(self):
+        first, second = self.login(), self.login()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {first['access']}")
+        response = self.client.post(reverse('logout_all'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['revoked'], 2)
+        self.assertEqual(self.refresh_status(first['refresh']), status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(self.refresh_status(second['refresh']), status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_all_requires_authentication(self):
+        self.assertEqual(self.client.post(reverse('logout_all')).status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_change_password_revokes_sessions(self):
+        tokens = self.login()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+        response = self.client.post(reverse('change_password'), {
+            'old_password': self.PASSWORD, 'new_password': 'un-autre-mot-de-passe-91',
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(self.refresh_status(tokens['refresh']), status.HTTP_401_UNAUTHORIZED)
+
+    def test_password_reset_revokes_sessions(self):
+        phone = '+243811111111'
+        User.objects.filter(pk=self.user.pk).update(phone=phone)
+        tokens = self.login()
+        _, code = OtpCode.issue(phone, OtpCode.PURPOSE_PASSWORD_RESET)
+        self.client.credentials()
+        response = self.client.post(reverse('password_reset_confirm'), {
+            'phone': phone, 'code': code, 'new_password': 'reinitialise-solide-77',
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(self.refresh_status(tokens['refresh']), status.HTTP_401_UNAUTHORIZED)

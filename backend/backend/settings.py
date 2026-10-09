@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     # Bibliothèques tierces
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',  # déconnexion et révocation des refresh tokens
     'corsheaders',
     
     # Applications locales. `identity` précède `catalog` (ForbiddenItem.added_by -> utilisateur) :
@@ -104,7 +105,7 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1), # Réduit pour plus de sécurité
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),  # CLAUDE.md §5
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True, # Sécurité accrue : change le refresh token à chaque usage
     'BLACKLIST_AFTER_ROTATION': True,

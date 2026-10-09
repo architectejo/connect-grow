@@ -4,6 +4,9 @@ from django.http import FileResponse
 from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.throttling import AnonRateThrottle
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.settings import api_settings
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.views import APIView
 from rest_framework.response import Response
 
@@ -11,6 +14,7 @@ from apps.common.pagination import StandardPagination
 
 from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
 from .serializers import KycDocumentSerializer, PublicBusinessSerializer, UserSerializer
+from .services import revoke_all_sessions
 from .sms import send_otp_sms
 
 class RegisterView(generics.CreateAPIView):
@@ -43,7 +47,39 @@ class ChangePasswordView(APIView):
         # Mise à jour du mot de passe
         user.set_password(new_password)
         user.save()
+        # Les sessions ouvertes (autres appareils, jeton volé) ne survivent pas au changement.
+        revoke_all_sessions(user)
         return Response({"message": "Mot de passe mis à jour avec succès."}, status=status.HTTP_200_OK)
+
+
+class LogoutView(APIView):
+    """Déconnexion : le refresh token fourni est mis sur liste noire."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        raw = request.data.get('refresh')
+        if not raw:
+            return Response({'error': "Le jeton de rafraîchissement est requis."}, status=status.HTTP_400_BAD_REQUEST)
+        invalid = Response({'error': "Jeton invalide ou expiré."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            token = RefreshToken(raw)
+            if str(token.get(api_settings.USER_ID_CLAIM)) != str(request.user.pk):
+                return invalid
+            token.blacklist()
+        except TokenError:
+            return invalid
+        return Response({'message': "Déconnecté."}, status=status.HTTP_200_OK)
+
+
+class LogoutAllView(APIView):
+    """Déconnexion de tous les appareils : tous les refresh tokens sont révoqués."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        revoked = revoke_all_sessions(request.user)
+        return Response({'message': "Toutes les sessions ont été fermées.", 'revoked': revoked})
 
 class BusinessListView(generics.ListAPIView):
     """
@@ -145,6 +181,7 @@ class PasswordResetConfirmView(APIView):
 
         user.set_password(new_password)
         user.save(update_fields=['password'])
+        revoke_all_sessions(user)
         return Response({'message': "Mot de passe mis à jour avec succès."}, status=status.HTTP_200_OK)
 
 

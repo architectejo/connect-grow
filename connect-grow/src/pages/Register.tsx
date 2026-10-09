@@ -194,9 +194,8 @@ const Register = () => {
       setStep(2);
     } catch (error) {
       const { fields, general } = parseApiErrors(error);
-      const message = general ?? fields.phone;
-      if (message && /compte existe/i.test(message)) setError("phone", { message });
-      else setGeneralError(message ?? "L'envoi du code a échoué. Réessayez.");
+      // Réponse neutre côté serveur : aucune indication « numéro déjà utilisé » à ce stade
+      setGeneralError(general ?? fields.phone ?? "L'envoi du code a échoué. Réessayez.");
     }
   };
 

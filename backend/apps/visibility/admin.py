@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import RankingSettings
+from .models import RankingSettings, VisibilitySettings
 
 
 @admin.register(RankingSettings)
@@ -13,6 +13,17 @@ class RankingSettingsAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         # Ligne unique de paramètres.
         return not RankingSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(VisibilitySettings)
+class VisibilitySettingsAdmin(admin.ModelAdmin):
+    list_display = ('unique_view_retention_days',)
+
+    def has_add_permission(self, request):
+        return not VisibilitySettings.objects.exists()
 
     def has_delete_permission(self, request, obj=None):
         return False

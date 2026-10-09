@@ -4,6 +4,7 @@ Le module ne référence aucune table d'un autre domaine : l'offre est désigné
 UUID (`offer_id`) ; seul le vendeur est une clé étrangère vers l'utilisateur (autorisée).
 """
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
 
 from apps.common.models import BaseModel, SingletonSettingsModel
@@ -34,6 +35,24 @@ class RankingSettings(SingletonSettingsModel):
 
     def __str__(self):
         return "Paramètres de l'algorithme Trust & Engage"
+
+
+class VisibilitySettings(SingletonSettingsModel):
+    """Conservation des vues uniques (données de navigation : durée à fixer avec LEG-PRV,
+    donc réglable dans le back-office, jamais codée en dur). Ligne unique."""
+
+    # Minimum 1 jour : l'unicité d'une vue (et d'un partage) se vérifie sur la journée courante.
+    unique_view_retention_days = models.PositiveIntegerField(
+        default=2, validators=[MinValueValidator(1)],
+        help_text="Jours de conservation des vues uniques avant purge (commande purge_offer_views).",
+    )
+
+    class Meta:
+        verbose_name = "Paramètres de visibilité"
+        verbose_name_plural = "Paramètres de visibilité"
+
+    def __str__(self):
+        return "Paramètres de visibilité"
 
 
 class DailyVisibilityCounter(BaseModel):

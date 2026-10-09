@@ -13,7 +13,7 @@ from django.db import transaction
 from django.db.models import F, Sum
 from django.utils import timezone
 
-from .models import DailyVisibilityCounter, OfferUniqueView, RankingSettings
+from .models import DailyVisibilityCounter, OfferUniqueView, RankingSettings, VisibilitySettings
 
 # Fenêtres de l'historique et de la tendance (CDC 3.8, 3.9).
 HISTORY_DAYS = 30
@@ -47,7 +47,7 @@ def build_viewer_key(user, anon_fingerprint) -> str:
 
 def record_view(*, offer_id, seller_id, viewer_key: str, day: Optional[date] = None) -> bool:
     """Enregistre une vue unique (offre, jour, visiteur). Renvoie True si elle est nouvelle."""
-    day = day or timezone.now().date()
+    day = day or timezone.localdate()
     with transaction.atomic():
         _, is_new = OfferUniqueView.objects.get_or_create(offer_id=offer_id, date=day, viewer_key=viewer_key)
         if not is_new:
@@ -57,6 +57,30 @@ def record_view(*, offer_id, seller_id, viewer_key: str, day: Optional[date] = N
         )
         DailyVisibilityCounter.objects.filter(pk=counter.pk).update(views=F('views') + 1)
     return True
+
+
+SHARE_KEY_PREFIX = 'share:'
+
+
+def record_share(*, offer_id, actor_key: str, day: Optional[date] = None) -> bool:
+    """Un partage compte une fois par (offre, utilisateur, jour). Renvoie True s'il est nouveau.
+    La trace réutilise OfferUniqueView (clé préfixée « share: ») et suit la même purge.
+    `seller_id` est inutilisé ici mais gardé pour symétrie avec record_view."""
+    day = day or timezone.localdate()
+    _, is_new = OfferUniqueView.objects.get_or_create(
+        offer_id=offer_id, date=day, viewer_key=f"{SHARE_KEY_PREFIX}{actor_key}"[:64],
+    )
+    return is_new
+
+
+def purge_unique_views(retention_days: Optional[int] = None, today: Optional[date] = None) -> int:
+    """Supprime les vues uniques plus anciennes que la durée de conservation réglée en
+    back-office. Les compteurs agrégés (DailyVisibilityCounter) ne sont pas touchés."""
+    if retention_days is None:
+        retention_days = VisibilitySettings.get_solo().unique_view_retention_days
+    today = today or timezone.localdate()
+    deleted, _ = OfferUniqueView.objects.filter(date__lt=today - timedelta(days=retention_days)).delete()
+    return deleted
 
 
 def get_ranking_settings() -> RankingSettings:
@@ -103,7 +127,7 @@ def trending_offer_ids(offer_ids: Iterable, today: Optional[date] = None) -> set
     ids = {i for i in offer_ids if i}
     if not ids:
         return set()
-    today = today or timezone.now().date()
+    today = today or timezone.localdate()
     week_ago = today - timedelta(days=TRENDING_REFERENCE_DAYS)
     rows = DailyVisibilityCounter.objects.filter(offer_id__in=ids, date__gte=week_ago).values_list(
         'offer_id', 'date', 'views',
@@ -126,7 +150,7 @@ def trending_offer_ids(offer_ids: Iterable, today: Optional[date] = None) -> set
 
 def get_seller_stats(seller_id, today: Optional[date] = None) -> SellerStats:
     """Historique de vues des 30 derniers jours et totaux d'un vendeur (CDC 3.9)."""
-    today = today or timezone.now().date()
+    today = today or timezone.localdate()
     since = today - timedelta(days=HISTORY_DAYS)
     counters = DailyVisibilityCounter.objects.filter(seller_id=seller_id)
 
@@ -146,7 +170,7 @@ def get_seller_stats(seller_id, today: Optional[date] = None) -> SellerStats:
 
 def get_offer_history(offer_id, today: Optional[date] = None) -> list:
     """Historique de vues d'une offre sur 30 jours (liste de DailyViews)."""
-    today = today or timezone.now().date()
+    today = today or timezone.localdate()
     since = today - timedelta(days=HISTORY_DAYS)
     rows = DailyVisibilityCounter.objects.filter(offer_id=offer_id, date__gte=since).order_by('date')
     return [DailyViews(date=row.date, views=row.views) for row in rows]

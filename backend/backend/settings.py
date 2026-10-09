@@ -147,6 +147,7 @@ REST_FRAMEWORK = {
         'offer_list': '600/hour',  # liste des annonces (tri par pertinence non indexé), par IP ou par utilisateur
         'review_eligibility': '120/hour',  # lecture du droit d'avis, par utilisateur
         'report': '10/hour',        # signalements, par utilisateur
+        'report_response': '30/hour',  # recours de l'auteur d'un avis signalé, par utilisateur
         'offer_upload': '30/hour',  # création / modification d'offre et envoi de photos
         'favorite': '60/hour',
         'offer_view_anon': '300/hour',  # consultation anonyme d'une offre, par IP

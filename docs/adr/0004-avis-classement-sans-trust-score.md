@@ -361,3 +361,14 @@ Zones disjointes : T2 ne touche pas `reviews/` ; T3 ne touche ni `visibility/` n
 - **Liste des annonces** : `GET /api/marketplace/posts/` est limitée par la portée `offer_list` (600/h, par IP pour un anonyme, par utilisateur sinon). Le tri par pertinence (`visibility_score x D`) n'est pas indexé : à mesurer au passage MySQL, avec plafonnement au top N si besoin.
 - **Migrations** : `moderation.0003_recours_auteur_reglages_moderation`, `reviews.0004_anciennete_compte_delai_minimal` ; aucune migration existante modifiée.
 - **Adaptations de tests** : les tests fixent `delay_after_contact_hours=0` et `min_account_age_hours=0` par `update()` ; les tests de verrou attendent « suppression refusée, modification permise » pour un motif grave et « rien de verrouillé » pour spam/autre.
+
+### L0-20 : champs du recours exposés à l'auteur et mineurs de l'audit
+
+- **Contrat de lecture d'un avis (auteur seulement, `is_mine`)** : `contest_report_id` (UUID du signalement « contact fictif » ouvert, sinon `null`), `contest_responded` (booléen : l'auteur a déjà répondu) et `can_delete`. Pour tout autre lecteur : `null`, `false`, `false`. Ni le signaleur ni la description ne sont exposés. Les états sont lus en une requête par liste via `moderation.services.get_open_report_states` (chargement par lot, pas de N+1).
+- **`can_edit` / `can_delete`** : `can_edit` reste vrai pendant un signalement ouvert (le verrou ne porte que sur la suppression) ; faux si avis masqué, réponse du vendeur reçue ou fenêtre dépassée. `can_delete` est faux si avis masqué, réponse du vendeur reçue ou signalement grave ouvert (miroir de `ensure_author_can_modify`).
+- **Notifications à l'auteur** : `link` = `/post/{offer_id}` (résolu par `reviews.services.get_report_links`), texte inchangé.
+- **Débit** : portée `report_response` (30/h par utilisateur) distincte de `report` pour `author-response`.
+- **Admin des signalements** : suppression interdite ; `decision_notes` en lecture seule une fois le signalement clos ; un signalement clos entre-temps affiche un message d'erreur et non le message de succès de Django.
+- **Réglages** : `SingletonSettingsAdminMixin` journalise (`SETTINGS_CHANGED`, ancienne et nouvelle valeur) les cinq réglages (modération, avis, classement, marketplace, visibilité) ; un test couvre chacun.
+- **Limite connue** : le plafond quotidien de signalements « contact fictif » (`fictitious_contact_daily_limit`) n'est pas atomique entre deux requêtes simultanées (comptage puis création, comme `create_contact_event`) : un dépassement de quelques unités est possible, sans conséquence grave (le signalement reste modéré).
+- **Déploiement** : `NUM_PROXIES=1` est obligatoire derrière Nginx (le contrôle `common.E001` refuse le démarrage avec `DEBUG=False` et `NUM_PROXIES=0`) : il fait partie de la procédure de déploiement.

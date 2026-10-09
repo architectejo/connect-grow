@@ -36,7 +36,7 @@ class ReportViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     serializer_class = ReportSerializer
     http_method_names = ['get', 'post', 'head', 'options']
     pagination_class = OptionalPagination
-    throttle_scopes = {'create': 'report', 'author_response': 'report'}
+    throttle_scopes = {'create': 'report', 'author_response': 'report_response'}
     required_permissions = {
         'list': permissions.VIEW_REPORT, 'retrieve': permissions.VIEW_REPORT,
         'claim': permissions.CHANGE_REPORT, 'resolve': permissions.CHANGE_REPORT,

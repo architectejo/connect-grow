@@ -491,3 +491,13 @@ def get_report_authors(ids) -> dict:
     """Auteur de chaque avis, `{avis: auteur}` (une requête)."""
     wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
     return dict(Review.objects.filter(id__in=wanted).values_list('id', 'user_id'))
+
+
+def get_report_links(ids) -> dict:
+    """Lien front de l'annonce de chaque avis, `{avis: '/post/<annonce>'}` (une requête) : sert aux
+    notifications de la modération à l'auteur."""
+    wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
+    return {
+        review_id: f'/post/{offer_id}'
+        for review_id, offer_id in Review.objects.filter(id__in=wanted).values_list('id', 'offer_id') if offer_id
+    }

@@ -1,6 +1,7 @@
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db import transaction
+from django.http import HttpResponseRedirect
 
 from apps.common.admin_mixins import SingletonSettingsAdminMixin
 
@@ -44,6 +45,26 @@ class ReportAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         return False
 
+    def has_delete_permission(self, request, obj=None):
+        return False  # la file de modération est une pièce d'audit : un signalement ne se supprime pas
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = super().get_readonly_fields(request, obj)
+        if obj is not None and obj.status not in Report.OPEN_STATUSES:
+            return (*fields, 'decision_notes')  # la décision d'un signalement clos ne se réécrit pas
+        return fields
+
+    def log_change(self, request, obj, message):
+        if getattr(obj, '_closed_meanwhile', False):
+            return None  # rien n'a été modifié
+        return super().log_change(request, obj, message)
+
+    def response_change(self, request, obj):
+        if getattr(obj, '_closed_meanwhile', False):
+            # Pas du message de succès de Django : le message d'erreur a déjà été posté.
+            return HttpResponseRedirect(request.path)
+        return super().response_change(request, obj)
+
     def save_model(self, request, obj, form, change):
         """Un changement de statut suit les mêmes transitions et les mêmes conséquences que par l'API
         (un contact fictif retenu masque l'avis, l'auteur est informé) et reste journalisé (règle 12)."""
@@ -64,7 +85,8 @@ class ReportAdmin(admin.ModelAdmin):
                     obj.claim(obj.assigned_to or request.user)
             except ReportClosedError:
                 transaction.set_rollback(True)  # ni notes ni affectation n'écrasent la décision déjà prise
-                self.message_user(request, "Ce signalement a été clos entre-temps : statut inchangé.", level='error')
+                obj._closed_meanwhile = True
+                self.message_user(request, "Ce signalement a été clos entre-temps : statut inchangé.", level=messages.ERROR)
                 return
             services.record_audit(request.user, 'REPORT_STATUS_CHANGED', target=obj, details=obj.status)
             services.apply_decision(obj, request.user)

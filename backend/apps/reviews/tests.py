@@ -85,6 +85,7 @@ class ReviewCreationTests(ReviewsTestBase):
         self.assertEqual(set(response.data), {
             'id', 'post', 'user_name', 'offer_rating', 'seller_rating', 'content', 'source',
             'reply_content', 'reply_at', 'created_at', 'edited_at', 'is_post_owner', 'is_mine', 'can_edit',
+            'can_delete', 'contest_report_id', 'contest_responded',
         })
         self.assertTrue(response.data['is_mine'])
         self.assertNotIn('user_id', response.data)

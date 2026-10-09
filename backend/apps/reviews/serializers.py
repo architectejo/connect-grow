@@ -3,6 +3,7 @@ from rest_framework import serializers
 from apps.common.serializers import PreloadingListSerializer
 from apps.identity import services as identity_services
 from apps.marketplace import services as marketplace_services
+from apps.moderation import services as moderation_services
 
 from . import services
 from .models import CONTENT_MAX_LENGTH, CONTENT_MIN_LENGTH, Review
@@ -66,15 +67,42 @@ class ReviewSerializer(OfferLookupMixin, serializers.ModelSerializer):
     is_post_owner = serializers.SerializerMethodField()
     is_mine = serializers.SerializerMethodField()
     can_edit = serializers.SerializerMethodField()
+    can_delete = serializers.SerializerMethodField()
+    contest_report_id = serializers.SerializerMethodField()
+    contest_responded = serializers.SerializerMethodField()
 
     class Meta:
         model = Review
         fields = [
             'id', 'post', 'user_name', 'offer_rating', 'seller_rating', 'content', 'source',
             'reply_content', 'reply_at', 'created_at', 'edited_at', 'is_post_owner', 'is_mine', 'can_edit',
+            'can_delete', 'contest_report_id', 'contest_responded',
         ]
         read_only_fields = fields
         list_serializer_class = ReviewListSerializer
+
+    STATES_KEY = 'reviews_open_report_states'
+
+    @classmethod
+    def preload(cls, items, context):
+        super().preload(items, context)
+        # Signalements ouverts : lus en une requête, pour les seuls avis de l'appelant.
+        request = context.get('request')
+        cache = context.setdefault(cls.STATES_KEY, {})
+        if request and request.user.is_authenticated:
+            wanted = {i.id for i in items if i.user_id == request.user.id} - cache.keys()
+            if wanted:
+                found = moderation_services.get_open_report_states('review', wanted)
+                for review_id in wanted:
+                    cache[review_id] = found.get(review_id, {})
+
+    def _state(self, obj):
+        """État des signalements ouverts d'un avis de l'appelant (jamais celui d'un autre auteur)."""
+        if not self.get_is_mine(obj):
+            return {}
+        if obj.id not in self.context.get(self.STATES_KEY, {}):
+            self.preload([obj], self.context)
+        return self.context[self.STATES_KEY].get(obj.id, {})
 
     def get_user_name(self, obj):
         return identity_services.public_display_name(obj.user.full_name)
@@ -101,6 +129,19 @@ class ReviewSerializer(OfferLookupMixin, serializers.ModelSerializer):
         if 'review_edit_window_hours' not in self.context:
             self.context['review_edit_window_hours'] = services.get_settings().edit_window_hours
         return obj.can_still_be_edited(self.context['review_edit_window_hours'])
+
+    def get_can_delete(self, obj):
+        # Miroir de `ensure_author_can_modify(deleting=True)` et de la règle « réponse reçue ».
+        if not self.get_is_mine(obj) or obj.is_hidden or obj.reply_content:
+            return False
+        return not self._state(obj).get('grave', False)
+
+    def get_contest_report_id(self, obj):
+        report_id = self._state(obj).get('contest_report_id')
+        return str(report_id) if report_id else None
+
+    def get_contest_responded(self, obj):
+        return bool(self._state(obj).get('contest_responded', False))
 
 
 class ReviewCreateSerializer(serializers.Serializer):

@@ -223,6 +223,26 @@ def has_open_report(target, grave_only=False) -> bool:
     return reports.exists()
 
 
+def get_open_report_states(target_type, target_ids) -> dict:
+    """État des signalements ouverts par cible, en une requête : `{cible: {'grave', 'contest_report_id',
+    'contest_responded'}}` ; une cible sans signalement ouvert est absente. Réservé à l'auteur de la
+    cible : ne renvoie ni le signaleur ni la description (règle 10)."""
+    states = {}
+    rows = Report.objects.filter(
+        target_type=target_type, target_id__in=list(target_ids), status__in=Report.OPEN_STATUSES,
+    ).values_list('target_id', 'id', 'reason', 'author_responded_at')
+    for target_id, report_id, reason, responded_at in rows:
+        state = states.setdefault(
+            target_id, {'grave': False, 'contest_report_id': None, 'contest_responded': False},
+        )
+        if reason in Report.GRAVE_REASONS:
+            state['grave'] = True
+        if reason == Report.REASON_CONTACT_FICTIF:
+            state['contest_report_id'] = report_id
+            state['contest_responded'] = responded_at is not None
+    return states
+
+
 def count_overdue_fictitious_reports() -> int:
     """Signalements « contact fictif » encore ouverts au-delà du délai cible de traitement."""
     limit = timezone.now() - timedelta(hours=get_settings().report_processing_target_hours)
@@ -234,8 +254,13 @@ def count_overdue_fictitious_reports() -> int:
 def _notify_review_author(report, title, content):
     author_id = resolve_target_author(report.target_type, report.target_id)
     if author_id is not None:
+        # Lien vers l'annonce de l'avis (domaine des avis) ; vide si l'annonce n'existe plus.
+        link = import_module(TARGET_RESOLVERS[report.target_type]).get_report_links([report.target_id]).get(
+            report.target_id, '',
+        )
         notification_services.notify(
             user_id=author_id, notification_type=notification_services.SYSTEM, title=title, content=content,
+            link=link,
         )
 
 

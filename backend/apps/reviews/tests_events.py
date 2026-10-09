@@ -28,9 +28,10 @@ class ReviewEventTests(ReviewsTestBase):
         event = OutboxEvent.objects.get(event_type='reviews.review_posted')
         self.assertEqual(event.payload, {
             'review_id': response.data['id'], 'reviewed_user_id': str(self.seller.pk),
-            'author_id': str(self.buyer.pk), 'author_name': 'Acheteur', 'offer_id': str(self.offer.id),
-            'offer_title': self.offer.title, 'excerpt': 'Très bon vendeur, je recommande.',
+            'author_id': str(self.buyer.pk), 'offer_id': str(self.offer.id), 'offer_title': self.offer.title,
         })
+        self.assertNotIn('Acheteur', str(event.payload))  # ni nom ni extrait dans l'outbox
+        self.assertNotIn('recommande', str(event.payload))
         self.assertFalse(Notification.objects.exists())  # rien n'est écrit chez notifications avant la diffusion
         dispatch_outbox_now()
         dispatch_outbox_now()
@@ -65,11 +66,21 @@ class ReviewEventTests(ReviewsTestBase):
         url = f'/api/interactions/reviews/{review.id}/reply/'
         self.assertEqual(self.client.post(url, {'reply_content': 'Merci !'}).status_code, status.HTTP_200_OK)
         self.assertEqual(self.client.post(url, {'reply_content': 'Encore'}).status_code, status.HTTP_409_CONFLICT)
-        self.assertEqual(OutboxEvent.objects.filter(event_type='reviews.review_replied').count(), 1)  # pas de doublon
+        replied = OutboxEvent.objects.filter(event_type='reviews.review_replied')
+        self.assertEqual(replied.count(), 1)  # pas de doublon
+        self.assertEqual(replied.get().payload['replier_id'], str(self.seller.pk))
+        self.assertNotIn('Vendeur', str(replied.get().payload))
         dispatch_outbox_now()
         notification = Notification.objects.get()
         self.assertEqual((notification.user, notification.notification_type), (self.buyer, 'SYSTEM'))
         self.assertEqual(notification.content, f'Vendeur a répondu à votre avis sur {self.offer.title}')
+
+    def test_review_deleted_before_the_diffusion_sends_no_notification(self):
+        self.assertEqual(self.post_review(self.make_confirmed_deal()).status_code, status.HTTP_201_CREATED)
+        Review.objects.all().delete()
+        dispatch_outbox_now()
+        self.assertFalse(Notification.objects.exists())
+        self.assertEqual(OutboxEvent.objects.get(event_type='reviews.review_posted').status, 'done')
 
     def test_notification_for_a_review_on_a_deleted_offer_has_no_link(self):
         from apps.marketplace import services as marketplace_services

@@ -137,8 +137,8 @@ def _offer_title(offer):
 
 def publish_review_posted(review: Review, author) -> None:
     """Publie `reviews.review_posted` (à appeler dans la transaction de création de l'avis) : la
-    personne évaluée est notifiée à la diffusion. Le nom de l'auteur, le titre de l'annonce et
-    l'extrait sont des données déjà publiques avec l'avis."""
+    personne évaluée est notifiée à la diffusion. Seuls des identifiants et le titre public de
+    l'annonce sont copiés : le nom de l'auteur et l'extrait sont relus à la diffusion."""
     if not review.reviewed_user_id:
         return
     offer = marketplace_services.get_offer(review.offer_id) if review.offer_id else None
@@ -146,9 +146,8 @@ def publish_review_posted(review: Review, author) -> None:
         'reviews.review_posted', aggregate_type='review', aggregate_id=review.pk,
         payload={
             'review_id': str(review.pk), 'reviewed_user_id': str(review.reviewed_user_id),
-            'author_id': str(author.pk), 'author_name': author.full_name,
-            'offer_id': str(review.offer_id) if offer else None,
-            'offer_title': _offer_title(offer), 'excerpt': review.content[:50],
+            'author_id': str(author.pk), 'offer_id': str(review.offer_id) if offer else None,
+            'offer_title': _offer_title(offer),
         },
     )
 
@@ -168,12 +167,21 @@ def reply_to_review(review: Review, replier, content: str) -> Review:
             'reviews.review_replied', aggregate_type='review', aggregate_id=review.pk,
             payload={
                 'review_id': str(review.pk), 'review_author_id': str(review.user_id),
-                'replier_name': replier.full_name, 'offer_id': str(review.offer_id) if offer else None,
+                'replier_id': str(replier.pk), 'offer_id': str(review.offer_id) if offer else None,
                 'offer_title': _offer_title(offer),
             },
         )
     review.refresh_from_db()
     return review
+
+
+EXCERPT_LENGTH = 50
+
+
+def get_review_excerpt(review_id):
+    """Début du texte d'un avis (notification), ou None si l'avis n'existe plus."""
+    content = Review.objects.filter(pk=review_id).values_list('content', flat=True).first()
+    return None if content is None else content[:EXCERPT_LENGTH]
 
 
 def get_report_labels(ids) -> dict:

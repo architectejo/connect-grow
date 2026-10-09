@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import AuditLog, ForbiddenItem, Report, Sanction
+from .models import AuditLog, Report, Sanction
 
 
 @admin.register(Report)
@@ -14,12 +14,6 @@ class SanctionAdmin(admin.ModelAdmin):
     list_display = ('user', 'sanction_type', 'is_active', 'issued_by', 'starts_at', 'ends_at')
     list_filter = ('sanction_type', 'is_active')
     search_fields = ('user__email', 'user__phone', 'reason')
-
-
-@admin.register(ForbiddenItem)
-class ForbiddenItemAdmin(admin.ModelAdmin):
-    list_display = ('keyword', 'category', 'added_by', 'created_at')
-    search_fields = ('keyword',)
 
 
 @admin.register(AuditLog)

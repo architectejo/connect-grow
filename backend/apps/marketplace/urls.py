@@ -1,12 +1,9 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import CityViewSet, CategoryViewSet, FavoriteViewSet, PostViewSet, CommuneViewSet
+from .views import FavoriteViewSet, PostViewSet
 from .stats_views import DashboardStatsView, PostStatsView
 
 router = DefaultRouter()
-router.register(r'cities', CityViewSet, basename='city')
-router.register(r'communes', CommuneViewSet, basename='commune')
-router.register(r'categories', CategoryViewSet, basename='category')
 router.register(r'posts', PostViewSet, basename='post')
 router.register(r'favorites', FavoriteViewSet, basename='favorite')
 

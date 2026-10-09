@@ -1,14 +1,15 @@
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import ForbiddenItem, Report, Sanction
+from .models import Report, Sanction
 
 # Cache l'implémentation ContentType derrière des identifiants stables côté API.
 TARGET_TYPE_MAP = {
     'POST': ('marketplace', 'post'),
     'REVIEW': ('interactions', 'review'),
     'MESSAGE': ('interactions', 'message'),
-    'USER': ('accounts', 'user'),
+    'USER': ('identity', 'user'),
 }
 TARGET_TYPE_REVERSE = {v: k for k, v in TARGET_TYPE_MAP.items()}
 
@@ -40,7 +41,11 @@ class ReportSerializer(serializers.ModelSerializer):
         app_label, model_name = TARGET_TYPE_MAP[target_type]
         content_type = ContentType.objects.get(app_label=app_label, model=model_name)
         model_class = content_type.model_class()
-        if not model_class.objects.filter(pk=attrs['object_id']).exists():
+        try:
+            target_exists = model_class.objects.filter(pk=attrs['object_id']).exists()
+        except (ValueError, TypeError, DjangoValidationError):
+            target_exists = False  # identifiant mal formé pour ce type de cible
+        if not target_exists:
             raise serializers.ValidationError({'object_id': "Cible introuvable."})
         attrs['content_type'] = content_type
         return attrs
@@ -64,10 +69,3 @@ class SanctionSerializer(serializers.ModelSerializer):
                 {'related_post': "related_post est requis pour un masquage d'annonce."}
             )
         return attrs
-
-
-class ForbiddenItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ForbiddenItem
-        fields = ['id', 'keyword', 'category', 'created_at']
-        read_only_fields = ['created_at']

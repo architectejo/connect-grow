@@ -1,21 +1,5 @@
 from django.contrib import admin
-from .models import City, Commune, Category, Favorite, MarketplaceSettings, Post, PostImage
-
-@admin.register(City)
-class CityAdmin(admin.ModelAdmin):
-    list_display = ('name',)
-    search_fields = ('name',)
-
-@admin.register(Commune)
-class CommuneAdmin(admin.ModelAdmin):
-    list_display = ('name', 'city')
-    list_filter = ('city',)
-    search_fields = ('name',)
-
-@admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
-    list_display = ('name', 'icon')
-    prepopulated_fields = {'slug': ('name',)} # Génère le slug automatiquement
+from .models import Favorite, MarketplaceSettings, Post, PostImage
 
 class PostImageInline(admin.TabularInline):
     model = PostImage
@@ -24,7 +8,7 @@ class PostImageInline(admin.TabularInline):
 @admin.register(Post)
 class PostAdmin(admin.ModelAdmin):
     list_display = ('title', 'post_type', 'status', 'price', 'currency', 'seller', 'is_delete', 'expires_at')
-    list_filter = ('post_type', 'status', 'category', 'commune', 'currency', 'is_delete')
+    list_filter = ('post_type', 'status', 'currency', 'is_delete')
     search_fields = ('title', 'description')
     inlines = [PostImageInline]
 

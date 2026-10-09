@@ -4,8 +4,8 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import AuditLog, ForbiddenItem, Report, Sanction
-from .serializers import ForbiddenItemSerializer, ReportSerializer, SanctionSerializer
+from .models import AuditLog, Report, Sanction
+from .serializers import ReportSerializer, SanctionSerializer
 
 
 def is_administrator(user):
@@ -95,21 +95,6 @@ class SanctionViewSet(viewsets.ModelViewSet):
         return Response(SanctionSerializer(sanction).data)
 
 
-class ForbiddenItemViewSet(viewsets.ModelViewSet):
-    """CDC 2.1 / 3.11 : référentiel des produits et services interdits."""
-
-    serializer_class = ForbiddenItemSerializer
-    queryset = ForbiddenItem.objects.all()
-
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            return [permissions.AllowAny()]
-        return [permissions.IsAdminUser()]
-
-    def perform_create(self, serializer):
-        serializer.save(added_by=self.request.user)
-
-
 class ModerationDashboardView(APIView):
     """CDC 3.11 : tableau de bord (utilisateurs, annonces, signalements en
     attente). Les revenus (P3) ne sont pas encore pertinents."""
@@ -117,7 +102,7 @@ class ModerationDashboardView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
-        from apps.accounts.models import KycDocument, User
+        from apps.identity.models import KycDocument, User
         from apps.marketplace.models import Post
 
         return Response({

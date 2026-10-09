@@ -38,7 +38,9 @@ class Report(models.Model):
 
     # La cible signalée : une annonce, un avis, un message ou un utilisateur.
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
-    object_id = models.PositiveIntegerField()
+    # Chaîne (UUID ou entier selon la cible) : transitoire, remplacée par
+    # target_type / target_id en R3 (ADR 0002, décision 5).
+    object_id = models.CharField(max_length=36)
     target = GenericForeignKey('content_type', 'object_id')
 
     reporter = models.ForeignKey(
@@ -145,24 +147,6 @@ class Sanction(models.Model):
         return f"{self.get_sanction_type_display()} — {self.user}"
 
 
-class ForbiddenItem(models.Model):
-    """CDC 2.1 / 3.11 : liste des produits et services interdits, référentiel
-    consulté par la modération (médicaments, armes, contrefaçons...)."""
-
-    keyword = models.CharField(max_length=100, unique=True)
-    category = models.ForeignKey(
-        'marketplace.Category', on_delete=models.SET_NULL, null=True, blank=True, related_name='forbidden_items',
-    )
-    added_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['keyword']
-
-    def __str__(self):
-        return self.keyword
-
-
 class AuditLog(models.Model):
     """CDC 3.11 : journal horodaté de toutes les actions des modérateurs et
     administrateurs."""
@@ -170,7 +154,7 @@ class AuditLog(models.Model):
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
     action = models.CharField(max_length=50)
     content_type = models.ForeignKey(ContentType, on_delete=models.SET_NULL, null=True, blank=True)
-    object_id = models.PositiveIntegerField(null=True, blank=True)
+    object_id = models.CharField(max_length=36, null=True, blank=True)
     target = GenericForeignKey('content_type', 'object_id')
     details = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

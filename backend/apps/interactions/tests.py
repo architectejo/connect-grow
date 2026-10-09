@@ -4,8 +4,9 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.accounts.models import User
-from apps.marketplace.models import Category, City, Commune, Post
+from apps.identity.models import User
+from apps.catalog.models import Category, City, Commune
+from apps.marketplace.models import Post
 from apps.marketplace.tests import make_test_image
 from apps.reputation.models import Deal
 
@@ -20,7 +21,7 @@ class ReviewTestBase(APITestCase):
         self.seller = User.objects.create_user(email='seller@example.com', password='x', full_name='Vendeur')
         self.buyer = User.objects.create_user(email='buyer@example.com', password='x', full_name='Acheteur')
         self.post = Post.objects.create(
-            seller=self.seller, category=self.category, commune=self.commune,
+            seller=self.seller, category_id=self.category.id, commune_id=self.commune.id,
             title='Un joli canapé à vendre', description='Description suffisamment longue pour le CDC.',
             price=100, main_image=make_test_image(),
         )
@@ -115,7 +116,7 @@ class ReviewDailyLimitTests(ReviewTestBase):
         for i in range(5):
             post = Post.objects.create(
                 seller=User.objects.create_user(email=f'seller{i}@example.com', password='x', full_name=f'V{i}'),
-                category=self.category, commune=self.commune,
+                category_id=self.category.id, commune_id=self.commune.id,
                 title=f'Annonce numéro {i} à vendre', description='Description suffisamment longue pour le CDC.',
                 price=10, main_image=make_test_image(),
             )
@@ -127,7 +128,7 @@ class ReviewDailyLimitTests(ReviewTestBase):
 
         sixth_post = Post.objects.create(
             seller=User.objects.create_user(email='seller5@example.com', password='x', full_name='V5'),
-            category=self.category, commune=self.commune,
+            category_id=self.category.id, commune_id=self.commune.id,
             title='Sixième annonce du jour à vendre', description='Description suffisamment longue pour le CDC.',
             price=10, main_image=make_test_image(),
         )

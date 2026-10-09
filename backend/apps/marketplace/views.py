@@ -6,30 +6,11 @@ from django.utils.timezone import now
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status, viewsets, permissions
-from .models import City, Category, Favorite, Post, PostImage, PostUniqueView, Commune, PostViewStat
-from .serializers import (
-    CategorySerializer,
-    CitySerializer,
-    CommuneSerializer,
-    FavoriteSerializer,
-    PostImageSerializer,
-    PostSerializer,
-)
+from apps.catalog import services as catalog_services
+from apps.common.utils import parse_uuid
 
-class CityViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = City.objects.all().prefetch_related('communes')
-    serializer_class = CitySerializer
-    permission_classes = [permissions.AllowAny] # Tout le monde peut voir les villes
-
-class CommuneViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Commune.objects.all()
-    serializer_class = CommuneSerializer
-    permission_classes = [permissions.AllowAny] # Tout le monde peut voir les communes
-
-class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Category.objects.all()
-    serializer_class = CategorySerializer
-    permission_classes = [permissions.AllowAny] # Tout le monde peut voir les catégories
+from .models import Favorite, Post, PostImage, PostUniqueView, PostViewStat
+from .serializers import FavoriteSerializer, PostImageSerializer, PostSerializer
 
 class PostViewSet(viewsets.ModelViewSet):
     serializer_class = PostSerializer
@@ -63,20 +44,21 @@ class PostViewSet(viewsets.ModelViewSet):
             if search:
                 queryset = queryset.filter(Q(title__icontains=search) | Q(description__icontains=search))
 
+            # Les référentiels vivent dans `catalog` : pas de jointure, on résout en UUID
+            # via son service. Un identifiant invalide ne renvoie aucune annonce.
             if category:
-                queryset = queryset.filter(category_id=category)
+                category_uuid = parse_uuid(category)
+                queryset = queryset.filter(category_id=category_uuid) if category_uuid else queryset.none()
 
             if location:
-                queryset = queryset.filter(
-                    Q(commune__name__icontains=location) |
-                    Q(commune__city__name__icontains=location)
-                )
+                queryset = queryset.filter(commune_id__in=catalog_services.search_commune_ids(location))
 
             if city:
-                queryset = queryset.filter(commune__city_id=city)
+                queryset = queryset.filter(commune_id__in=catalog_services.get_commune_ids_for_city(city))
 
             if commune:
-                queryset = queryset.filter(commune_id=commune)
+                commune_uuid = parse_uuid(commune)
+                queryset = queryset.filter(commune_id=commune_uuid) if commune_uuid else queryset.none()
 
             if currency in ('USD', 'CDF'):
                 queryset = queryset.filter(currency=currency)
@@ -95,7 +77,8 @@ class PostViewSet(viewsets.ModelViewSet):
 
             seller = self.request.query_params.get('seller')
             if seller:
-                queryset = queryset.filter(seller_id=seller)
+                seller_uuid = parse_uuid(seller)
+                queryset = queryset.filter(seller_id=seller_uuid) if seller_uuid else queryset.none()
 
         if self.request.user.is_authenticated:
             # Évite le N+1 de is_favorited sur les listes.

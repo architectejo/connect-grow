@@ -1,9 +1,10 @@
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.accounts.models import User
+from apps.identity.models import User
 from apps.interactions.models import ContactRequest, Review
-from apps.marketplace.models import Category, City, Commune, Post
+from apps.catalog.models import Category, City, Commune
+from apps.marketplace.models import Post
 from apps.marketplace.tests import make_test_image
 
 from .models import Deal, TrustScoreSettings
@@ -18,7 +19,7 @@ class ReputationTestBase(APITestCase):
         self.buyer = User.objects.create_user(email='buyer@example.com', password='x', full_name='Acheteur')
         self.other = User.objects.create_user(email='other@example.com', password='x', full_name='Tiers')
         self.post = Post.objects.create(
-            seller=self.seller, category=self.category, commune=self.commune,
+            seller=self.seller, category_id=self.category.id, commune_id=self.commune.id,
             title='Un joli canapé à vendre', description='Description suffisamment longue pour le CDC.',
             price=100, main_image=make_test_image(),
         )
@@ -149,7 +150,7 @@ class TrustScoreSignalTests(ReputationTestBase):
 class CrossedReviewsDetectionTests(ReputationTestBase):
     def make_post(self, seller):
         return Post.objects.create(
-            seller=seller, category=self.category, commune=self.commune,
+            seller=seller, category_id=self.category.id, commune_id=self.commune.id,
             title='Une annonce quelconque à vendre', description='Description suffisamment longue pour le CDC.',
             price=50, main_image=make_test_image(),
         )

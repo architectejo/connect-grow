@@ -1,3 +1,4 @@
+import uuid
 import io
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -9,9 +10,11 @@ from rest_framework.test import APITestCase
 
 import math
 
-from apps.accounts.models import User
+from apps.identity.models import User
 from apps.ranking.models import RankingSettings
-from .models import Category, City, Commune, Favorite, Post, PostImage, PostUniqueView, PostViewStat
+from apps.catalog.models import Category, City, Commune
+
+from .models import Favorite, Post, PostImage, PostUniqueView, PostViewStat
 
 
 def make_test_image(name='photo.jpg', color=(255, 0, 0), fmt='JPEG'):
@@ -33,8 +36,8 @@ class MarketplaceTestBase(APITestCase):
     def make_post(self, **kwargs):
         defaults = dict(
             seller=self.seller,
-            category=self.category,
-            commune=self.commune,
+            category_id=self.category.id,
+            commune_id=self.commune.id,
             title='Un joli canapé à vendre',
             description='Description suffisamment longue pour passer la validation du CDC.',
             price=100,
@@ -432,4 +435,80 @@ class ScheduledTasksTests(MarketplaceTestBase):
 
         self.assertEqual(
             Notification.objects.filter(user=self.seller, notification_type='EXPIRATION').count(), 1,
+        )
+
+
+class CatalogDecouplingTests(MarketplaceTestBase):
+    """ADR 0002 : catégories et communes référencées par UUID, résolues via catalog.services."""
+
+    def test_list_returns_catalog_names_with_constant_query_count(self):
+        other_commune = Commune.objects.create(city=self.city, name='Limete')
+        for i in range(3):
+            self.make_post(title=f'Annonce numéro {i} à vendre', commune_id=other_commune.id if i else self.commune.id)
+
+        def count_queries():
+            from django.db import connection
+            from django.test.utils import CaptureQueriesContext
+            with CaptureQueriesContext(connection) as ctx:
+                response = self.client.get(reverse('post-list'))
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            return len([q for q in ctx.captured_queries if 'catalog_' in q['sql']]), response
+
+        few, response = count_queries()
+        names = {(p['category_name'], p['commune_name']) for p in response.data}
+        self.assertEqual(names, {('Électronique', 'Gombe'), ('Électronique', 'Limete')})
+        self.assertEqual(str(self.category.id), response.data[0]['category'])
+        for i in range(3, 8):
+            self.make_post(title=f'Autre annonce numéro {i} ici')
+        many, _ = count_queries()
+        # Une requête pour les catégories, une pour les communes, quel que soit le nombre d'annonces.
+        self.assertEqual((few, many), (2, 2))
+
+    def test_filters_by_category_city_commune_and_location(self):
+        other_city = City.objects.create(name='Lubumbashi')
+        other_commune = Commune.objects.create(city=other_city, name='Kenya')
+        other_category = Category.objects.create(name='Mode', slug='mode')
+        kept = self.make_post()
+        far = self.make_post(title='Annonce à Lubumbashi ici', commune_id=other_commune.id, category_id=other_category.id)
+
+        def ids(**params):
+            response = self.client.get(reverse('post-list'), params)
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            return {p['id'] for p in response.data}
+
+        self.assertEqual(ids(category=str(self.category.id)), {kept.id})
+        self.assertEqual(ids(city=str(other_city.id)), {far.id})
+        self.assertEqual(ids(commune=str(self.commune.id)), {kept.id})
+        self.assertEqual(ids(location='lubum'), {far.id})
+        self.assertEqual(ids(location='gombe'), {kept.id})
+
+    def test_malformed_filter_ids_return_nothing_instead_of_failing(self):
+        self.make_post()
+        for param in ('category', 'commune', 'city', 'seller'):
+            response = self.client.get(reverse('post-list'), {param: 'pas-un-uuid'})
+            self.assertEqual(response.status_code, status.HTTP_200_OK, param)
+            self.assertEqual(len(response.data), 0, param)
+
+    def test_create_rejects_unknown_category_and_commune(self):
+        self.client.force_authenticate(self.seller)
+        base = {
+            'title': 'Un titre correct', 'description': 'Description suffisamment longue pour valider.',
+            'price': 10, 'main_image': make_test_image(),
+        }
+        response = self.client.post(reverse('post-list'), {
+            **base, 'category': str(uuid.uuid4()), 'commune': str(self.commune.id),
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('category', response.data)
+        base['main_image'] = make_test_image()
+        response = self.client.post(reverse('post-list'), {
+            **base, 'category': str(self.category.id), 'commune': 'abc',
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('commune', response.data)
+
+    def test_post_ids_are_not_foreign_keys_to_catalog(self):
+        self.assertEqual(
+            [f.name for f in Post._meta.get_fields() if f.is_relation and f.related_model._meta.app_label == 'catalog'],
+            [],
         )

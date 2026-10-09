@@ -1,29 +1,13 @@
 from rest_framework import serializers
-from .models import City, Commune, Category, Favorite, Post, PostImage
+from apps.catalog import services as catalog_services
+from apps.common.serializers import PreloadingListSerializer
 
-class CommuneSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Commune
-        fields = ['id', 'name', 'city']  # On inclut la ville pour pouvoir filtrer côté frontend
-
-class CitySerializer(serializers.ModelSerializer):
-    # On inclut les communes à l'intérieur de la ville pour un chargement efficace
-    communes = CommuneSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = City
-        fields = ['id', 'name', 'communes']
-
-class CategorySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Category
-        fields = ['id', 'name', 'icon', 'slug']
-
+from .models import Favorite, Post, PostImage
 
 
 class BusinessProfileSerializer(serializers.ModelSerializer):
     class Meta:
-        from apps.accounts.models import BusinessProfile
+        from apps.identity.models import BusinessProfile
         model = BusinessProfile
         fields = ['business_name', 'bio', 'logo', 'is_verified']
 
@@ -35,7 +19,7 @@ class SellerSerializer(serializers.ModelSerializer):
     is_trusted_seller = serializers.SerializerMethodField()
 
     class Meta:
-        from apps.accounts.models import User
+        from apps.identity.models import User
         model = User
         fields = [
             'id', 'full_name', 'photo', 'phone', 'user_type', 'business_profile', 'date_joined',
@@ -66,9 +50,17 @@ class PostImageSerializer(serializers.ModelSerializer):
         fields = ['id', 'image', 'order']
 
 
+class PostListSerializer(PreloadingListSerializer):
+    pass
+
+
 class PostSerializer(serializers.ModelSerializer):
-    category_name = serializers.ReadOnlyField(source='category.name')
-    commune_name = serializers.ReadOnlyField(source='commune.name')
+    # Clés JSON `category` / `commune` conservées : UUID du domaine catalog. Les noms
+    # sont lus par lot dans le catalogue (plus de jointure ORM entre domaines).
+    category = serializers.UUIDField(source='category_id')
+    commune = serializers.UUIDField(source='commune_id')
+    category_name = serializers.SerializerMethodField()
+    commune_name = serializers.SerializerMethodField()
     seller = SellerSerializer(read_only=True)
     seller_name = serializers.ReadOnlyField(source='seller.full_name')
     main_image = serializers.ImageField(required=False, allow_null=True)
@@ -95,6 +87,54 @@ class PostSerializer(serializers.ModelSerializer):
             'seller', 'views_count', 'likes_count', 'comments_count', 'shares_count',
             'created_at', 'status', 'expires_at', 'visibility_score',
         ]
+        list_serializer_class = PostListSerializer
+
+    CATALOG_CONTEXT_KEY = 'marketplace_catalog'
+
+    @classmethod
+    def preload(cls, posts, context):
+        """Charge en deux requêtes les catégories et communes des annonces données,
+        et les ajoute au cache du contexte (les ids déjà connus ne sont pas relus)."""
+        cache = context.setdefault(cls.CATALOG_CONTEXT_KEY, {'categories': {}, 'communes': {}})
+        missing_categories = {p.category_id for p in posts} - cache['categories'].keys()
+        missing_communes = {p.commune_id for p in posts} - cache['communes'].keys()
+        cache['categories'].update(catalog_services.get_categories_by_ids(missing_categories))
+        cache['communes'].update(catalog_services.get_communes_by_ids(missing_communes))
+        # Un id absent du catalogue est mémorisé pour ne pas être relu pour chaque annonce.
+        for category_id in missing_categories:
+            cache['categories'].setdefault(category_id, None)
+        for commune_id in missing_communes:
+            cache['communes'].setdefault(commune_id, None)
+
+    def _catalog(self, obj):
+        cache = self.context.get(self.CATALOG_CONTEXT_KEY)
+        if (
+            cache is None
+            or obj.category_id not in cache['categories']
+            or obj.commune_id not in cache['communes']
+        ):
+            # Objet isolé (ou hors liste préchargée) : chargement ciblé.
+            self.preload([obj], self.context)
+            cache = self.context[self.CATALOG_CONTEXT_KEY]
+        return cache
+
+    def get_category_name(self, obj):
+        category = self._catalog(obj)['categories'].get(obj.category_id)
+        return category.name if category else None
+
+    def get_commune_name(self, obj):
+        commune = self._catalog(obj)['communes'].get(obj.commune_id)
+        return commune.name if commune else None
+
+    def validate_category(self, value):
+        if not catalog_services.category_exists(value):
+            raise serializers.ValidationError("Catégorie introuvable.")
+        return value
+
+    def validate_commune(self, value):
+        if not catalog_services.commune_exists(value):
+            raise serializers.ValidationError("Commune introuvable.")
+        return value
 
     def get_visibility_rank(self, obj):
         score = obj.visibility_score or 0.0
@@ -118,6 +158,10 @@ class PostSerializer(serializers.ModelSerializer):
         return obj.favorited_by.filter(user=request.user).exists()
 
 
+class FavoriteListSerializer(PreloadingListSerializer):
+    pass
+
+
 class FavoriteSerializer(serializers.ModelSerializer):
     post = PostSerializer(read_only=True)
     post_id = serializers.PrimaryKeyRelatedField(
@@ -127,3 +171,8 @@ class FavoriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Favorite
         fields = ['id', 'post', 'post_id', 'created_at']
+        list_serializer_class = FavoriteListSerializer
+
+    @classmethod
+    def preload(cls, favorites, context):
+        PostSerializer.preload([f.post for f in favorites], context)

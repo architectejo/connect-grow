@@ -10,9 +10,9 @@ from django.core.management.base import BaseCommand
 MODERATOR_PERMISSIONS = {
     'moderation.report': ['view', 'add', 'change'],
     'moderation.sanction': ['view', 'add'],
-    'moderation.forbiddenitem': ['view'],
-    'accounts.kycdocument': ['view', 'change'],
-    'accounts.user': ['view'],
+    'catalog.forbiddenitem': ['view'],
+    'identity.kycdocument': ['view', 'change'],
+    'identity.user': ['view'],
     'interactions.review': ['view', 'change'],
     'marketplace.post': ['view'],
 }
@@ -21,12 +21,12 @@ MODERATOR_PERMISSIONS = {
 # gestion des sanctions lourdes, des référentiels et des paramètres d'algorithme.
 ADMINISTRATOR_EXTRA_PERMISSIONS = {
     'moderation.sanction': ['change', 'delete'],
-    'moderation.forbiddenitem': ['add', 'change', 'delete'],
-    'accounts.user': ['change'],
-    'accounts.businessprofile': ['view', 'change'],
-    'marketplace.category': ['add', 'change', 'delete'],
-    'marketplace.city': ['add', 'change', 'delete'],
-    'marketplace.commune': ['add', 'change', 'delete'],
+    'catalog.forbiddenitem': ['add', 'change', 'delete'],
+    'identity.user': ['change'],
+    'identity.businessprofile': ['view', 'change'],
+    'catalog.category': ['add', 'change', 'delete'],
+    'catalog.city': ['add', 'change', 'delete'],
+    'catalog.commune': ['add', 'change', 'delete'],
     'ranking.rankingsettings': ['view', 'change'],
     'reputation.trustscoresettings': ['view', 'change'],
 }

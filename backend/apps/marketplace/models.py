@@ -9,39 +9,6 @@ from django.utils import timezone
 from .images import convert_to_webp
 
 
-class City(models.Model):
-    name = models.CharField(max_length=100, unique=True)
-
-    def __str__(self):
-        return self.name
-    
-    class Meta:
-        verbose_name = "Ville"
-        verbose_name_plural = "Villes"
-
-class Commune(models.Model):
-    city = models.ForeignKey(City, on_delete=models.CASCADE, related_name='communes')
-    name = models.CharField(max_length=100)
-
-    def __str__(self):
-        return f"{self.name} ({self.city.name})"
-    
-    class Meta:
-        unique_together = ('city', 'name')
-        verbose_name = "Commune"
-
-class Category(models.Model):
-    name = models.CharField(max_length=100, unique=True)
-    icon = models.CharField(max_length=50, help_text="Nom de l'icône Lucide (ex: shopping-bag)", blank=True)
-    slug = models.SlugField(max_length=100, unique=True, blank=True)
-
-    def __str__(self):
-        return self.name
-
-    class Meta:
-        verbose_name = "Catégorie"
-
-
 class MarketplaceSettings(models.Model):
     """CDC 3.2 : durée d'expiration d'une annonce sans renouvellement,
     « valeur paramétrable » dans le back-office. Ligne singleton (pk=1)."""
@@ -96,8 +63,10 @@ class Post(models.Model):
     )
 
     seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='posts')
-    category = models.ForeignKey(Category, on_delete=models.CASCADE)
-    commune = models.ForeignKey(Commune, on_delete=models.CASCADE)
+    # Références par UUID vers le domaine `catalog` (CDC §5.4, pas de clé étrangère
+    # entre domaines) ; l'existence est vérifiée par apps.catalog.services.
+    category_id = models.UUIDField(db_index=True)
+    commune_id = models.UUIDField(db_index=True)
 
     # Distinction Produit / Service
     post_type = models.CharField(max_length=10, choices=POST_TYPE_CHOICES, default='PRODUIT')

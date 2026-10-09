@@ -4,11 +4,12 @@ from django.core.management import call_command
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.accounts.models import User
-from apps.marketplace.models import Category, City, Commune, Post
+from apps.identity.models import User
+from apps.catalog.models import Category, City, Commune, ForbiddenItem
+from apps.marketplace.models import Post
 from apps.marketplace.tests import make_test_image
 
-from .models import AuditLog, ForbiddenItem, Report, Sanction
+from .models import AuditLog, Report, Sanction
 
 
 class ModerationTestBase(APITestCase):
@@ -30,7 +31,7 @@ class ModerationTestBase(APITestCase):
         self.admin.groups.add(Group.objects.get(name='Administrateur'))
 
         self.post = Post.objects.create(
-            seller=self.seller, category=self.category, commune=self.commune,
+            seller=self.seller, category_id=self.category.id, commune_id=self.commune.id,
             title='Un joli canapé à vendre', description='Description suffisamment longue pour le CDC.',
             price=100, main_image=make_test_image(),
         )
@@ -44,6 +45,19 @@ class ReportFlowTests(ModerationTestBase):
         })
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         self.assertEqual(response.data['status'], Report.STATUS_EN_ATTENTE)
+
+    def test_report_a_user_by_uuid_and_reject_malformed_id(self):
+        self.client.force_authenticate(self.reporter)
+        ok = self.client.post('/api/moderation/reports/', {
+            'target_type': 'USER', 'object_id': str(self.seller.id), 'reason': 'SPAM',
+        })
+        self.assertEqual(ok.status_code, status.HTTP_201_CREATED, ok.data)
+        self.assertEqual(ok.data['target_type_display'], 'USER')
+        for bad in ('pas-un-uuid', '12'):
+            response = self.client.post('/api/moderation/reports/', {
+                'target_type': 'USER', 'object_id': bad, 'reason': 'SPAM',
+            })
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, bad)
 
     def test_report_rejects_unknown_target(self):
         self.client.force_authenticate(self.reporter)

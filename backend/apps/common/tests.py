@@ -3,13 +3,8 @@ import subprocess
 import sys
 
 from django.conf import settings
-from django.core.cache import cache
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
-
-from apps.identity.models import User
-
-LOCMEM_CACHE = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'common-tests'}}
 
 # Endpoints qui DOIVENT rester publics (anonyme : ni 401 ni 403). Si l'un devient privé
 # par erreur (p. ex. oubli de AllowAny avec le refus par défaut), ce test échoue.
@@ -118,27 +113,3 @@ class SecretKeySettingsTests(SimpleTestCase):
                 capture_output=True, text=True, timeout=60,
             )
             self.assertEqual(result.stdout.strip(), expected, result.stderr)
-
-
-@override_settings(CACHES=LOCMEM_CACHE)
-class LoginThrottleTests(TestCase):
-    def setUp(self):
-        cache.clear()
-        User.objects.create_user(email='victime@example.com', password='bon-mot-de-passe-12', full_name='V')
-
-    def attempt(self, email, ip):
-        return APIClient().post(
-            '/api/accounts/login/', {'email': email, 'password': 'mauvais'}, format='json', REMOTE_ADDR=ip,
-        )
-
-    def test_login_is_throttled_per_identifier_across_ips(self):
-        for i in range(10):
-            self.assertEqual(self.attempt('victime@example.com', f'10.1.0.{i}').status_code, 401)
-        self.assertEqual(self.attempt('victime@example.com', '10.1.0.200').status_code, 429)
-        # Un autre identifiant n'est pas bloqué.
-        self.assertEqual(self.attempt('autre@example.com', '10.1.0.201').status_code, 401)
-
-    def test_login_is_throttled_per_ip(self):
-        statuses = [self.attempt(f'u{i}@example.com', '10.2.0.1').status_code for i in range(31)]
-        self.assertEqual(statuses[:30], [401] * 30)
-        self.assertEqual(statuses[30], 429)

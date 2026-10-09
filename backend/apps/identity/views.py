@@ -1,27 +1,99 @@
+import hashlib
+import logging
+
+from django.db import transaction
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
 from django.http import FileResponse
 from rest_framework import generics, permissions, serializers, status
-from rest_framework.throttling import AnonRateThrottle
+from rest_framework.exceptions import AuthenticationFailed, NotFound
+from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.views import APIView
-from rest_framework.response import Response
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from apps.common.pagination import StandardPagination
-
-from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
-from .serializers import KycDocumentSerializer, PublicBusinessSerializer, UserSerializer
 from apps.moderation.services import record_audit
 
 from .kyc_files import EXTENSION_TO_CONTENT_TYPE
+from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
 from .permissions import CanReviewKyc
+from .serializers import (
+    IdentifierTokenObtainPairSerializer, KycDocumentSerializer, PublicBusinessSerializer, UserSerializer,
+)
 from .services import KycError, decide_kyc_document, revoke_all_sessions, validate_new_password
 from .sms import send_otp_sms
 from .throttles import (
-    OtpConfirmIpThrottle, OtpConfirmPhoneThrottle, OtpRequestIpThrottle, OtpRequestPhoneThrottle,
+    ChangePasswordThrottle, FailureLimiter, KycWriteThrottle, LoginIpThrottle, OtpConfirmIpThrottle,
+    OtpRequestIpThrottle, OtpRequestPhoneThrottle, RefreshIpThrottle,
 )
+
+logger = logging.getLogger(__name__)
+
+# Plafonds d'échecs : (clé, nombre d'échecs, fenêtre en secondes). Le couple identifiant+IP est
+# serré ; l'identifiant seul est large (journalier) pour qu'un tiers ne puisse pas verrouiller
+# la victime avec quelques requêtes depuis des adresses différentes.
+LOGIN_FAILURES = FailureLimiter('login', [('pair', 5, 15 * 60), ('identifier', 100, 24 * 3600)])
+RESET_FAILURES = FailureLimiter('reset', [('pair', 5, 15 * 60), ('identifier', 30, 24 * 3600)])
+
+
+def _digest(value):
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()[:32]
+
+
+def failure_keys(request, identifier):
+    """Clés de FailureLimiter pour (identifiant, IP), ou None sans identifiant exploitable."""
+    if not isinstance(identifier, str) or not identifier.strip():
+        return None
+    identifier = identifier.strip().lower()
+    ip = LoginIpThrottle().get_ident(request)
+    return {'pair': _digest(f"{identifier}|{ip}"), 'identifier': _digest(identifier)}
+
+
+def as_text(value):
+    """Texte propre pour un champ attendu en chaîne ; None si le type est inexploitable
+    (liste, objet, booléen, vide) : la requête est alors refusée sans compter d'échec."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        value = str(value)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+class LoginView(TokenObtainPairView):
+    """Connexion par e-mail ou par téléphone (CDC 3.1). Limites : IP (toutes requêtes) et
+    échecs par couple identifiant+IP puis par identifiant (réinitialisés au succès)."""
+
+    serializer_class = IdentifierTokenObtainPairSerializer
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [LoginIpThrottle]
+
+    def post(self, request, *args, **kwargs):
+        data = request.data if hasattr(request.data, 'get') else {}
+        keys = failure_keys(request, data.get('email') or data.get('phone'))
+        if keys:
+            LOGIN_FAILURES.check(keys)
+        try:
+            response = super().post(request, *args, **kwargs)
+        except AuthenticationFailed:
+            if keys:
+                LOGIN_FAILURES.failure(keys)
+            raise
+        if keys and response.status_code == status.HTTP_200_OK:
+            LOGIN_FAILURES.success(keys)
+        return response
+
+
+class RefreshView(TokenRefreshView):
+    """Renouvellement du jeton d'accès : scope de limitation distinct (`refresh`)."""
+
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [RefreshIpThrottle]
+
 
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -43,6 +115,7 @@ def password_error(exc):
 
 class ChangePasswordView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ChangePasswordThrottle]
 
     def post(self, request):
         user = request.user
@@ -159,7 +232,10 @@ class OtpRequestView(APIView):
         eligible = (purpose == OtpCode.PURPOSE_REGISTER) != user_exists
         if eligible:
             _, code = OtpCode.issue(phone, purpose)
-            send_otp_sms(phone, code, purpose)
+            try:
+                send_otp_sms(phone, code, purpose)
+            except Exception:  # passerelle SMS absente ou en panne : jamais de 500 ni de différence visible
+                logger.exception("Échec d'envoi du SMS OTP (objet %s).", purpose)
 
         return Response(
             {
@@ -174,21 +250,27 @@ class PasswordResetConfirmView(APIView):
     """CDC 3.1 : réinitialisation du mot de passe par OTP."""
 
     permission_classes = [permissions.AllowAny]
-    throttle_classes = [OtpConfirmIpThrottle, OtpConfirmPhoneThrottle]
+    throttle_classes = [OtpConfirmIpThrottle]
 
     def post(self, request):
-        phone = request.data.get('phone')
-        code = request.data.get('code')
-        new_password = request.data.get('new_password')
+        data = request.data if hasattr(request.data, 'get') else {}
+        phone = as_text(data.get('phone'))
+        code = as_text(data.get('code'))
+        new_password = data.get('new_password')
 
         if not (phone and code and new_password):
             return Response(
                 {'error': "phone, code et new_password sont requis."}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Avant de consommer le code : un mot de passe refusé ne doit pas brûler l'OTP.
+        keys = failure_keys(request, phone)
+        RESET_FAILURES.check(keys)
+
+        # Mot de passe contrôlé AVANT de consommer le code, avec l'utilisateur (similarité) :
+        # un mot de passe refusé ne brûle pas l'OTP.
+        user = User.objects.filter(phone=phone).first()
         try:
-            validate_new_password(new_password)
+            validate_new_password(new_password, user)
         except serializers.ValidationError as exc:
             return password_error(exc)
 
@@ -197,16 +279,14 @@ class PasswordResetConfirmView(APIView):
             .order_by('-created_at')
             .first()
         )
-        if not otp or not otp.verify(code):
-            return Response({'error': "Code invalide ou expiré."}, status=status.HTTP_400_BAD_REQUEST)
-
-        user = User.objects.filter(phone=phone).first()
-        if not user:
+        if not otp or not otp.verify(code) or not user:
+            RESET_FAILURES.failure(keys)
             return Response({'error': "Code invalide ou expiré."}, status=status.HTTP_400_BAD_REQUEST)
 
         user.set_password(new_password)
         user.save(update_fields=['password'])
         revoke_all_sessions(user)
+        RESET_FAILURES.success(keys)
         return Response({'message': "Mot de passe mis à jour avec succès."}, status=status.HTTP_200_OK)
 
 
@@ -215,6 +295,7 @@ class KycDocumentListCreateView(generics.ListCreateAPIView):
 
     serializer_class = KycDocumentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [KycWriteThrottle]
 
     def get_queryset(self):
         return KycDocument.objects.filter(business_profile__user=self.request.user)
@@ -231,22 +312,30 @@ class KycDocumentDeleteView(generics.DestroyAPIView):
     """Suppression, par son propriétaire, d'une pièce non validée."""
 
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [KycWriteThrottle]
 
     def get_queryset(self):
         return KycDocument.objects.filter(business_profile__user=self.request.user)
 
     def destroy(self, request, *args, **kwargs):
-        document = self.get_object()
-        if document.status == KycDocument.STATUS_VALIDE:
-            return Response(
-                {'error': "Une pièce validée ne peut pas être supprimée."}, status=status.HTTP_400_BAD_REQUEST,
+        # Verrou de ligne : une décision de modération simultanée ne peut pas valider la
+        # pièce pendant qu'on la supprime.
+        with transaction.atomic():
+            try:
+                document = self.get_queryset().select_for_update().get(pk=kwargs['pk'])
+            except KycDocument.DoesNotExist:
+                raise NotFound()
+            if document.status == KycDocument.STATUS_VALIDE:
+                return Response(
+                    {'error': "Une pièce validée ne peut pas être supprimée."}, status=status.HTTP_400_BAD_REQUEST,
+                )
+            record_audit(
+                request.user, 'KYC_DELETED', target=document,
+                details=f"Pièce {document.get_document_type_display()} supprimée (statut {document.status}).",
             )
-        record_audit(
-            request.user, 'KYC_DELETED', target=document,
-            details=f"Pièce {document.get_document_type_display()} supprimée (statut {document.status}).",
-        )
-        document.file.delete(save=False)
-        document.delete()
+            stored_file = document.file
+            document.delete()
+        stored_file.delete(save=False)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -297,7 +386,9 @@ class KycDocumentDownloadView(APIView):
             details=f"Pièce {doc.get_document_type_display()} consultée.",
         )
         extension = doc.file.name.rsplit('.', 1)[-1].lower() if '.' in doc.file.name else 'bin'
-        return FileResponse(
+        response = FileResponse(
             handle, as_attachment=True, filename=f"piece-kyc-{doc.pk}.{extension}",
             content_type=EXTENSION_TO_CONTENT_TYPE.get(extension, 'application/octet-stream'),
         )
+        response['Cache-Control'] = 'private, no-store'  # pièce d'identité : jamais en cache
+        return response

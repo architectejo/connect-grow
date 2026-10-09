@@ -1,34 +1,22 @@
 from django.urls import path
-from rest_framework.permissions import AllowAny
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .serializers import IdentifierTokenObtainPairSerializer
-from .throttles import LoginIdentifierThrottle, LoginIpThrottle, LoginPhoneThrottle
+
 from .views import (
     BusinessListView,
     ChangePasswordView,
-    LogoutAllView,
-    LogoutView,
     KycDecisionView,
     KycDocumentDeleteView,
     KycDocumentDownloadView,
     KycDocumentListCreateView,
     KycReviewQueueView,
+    LoginView,
+    LogoutAllView,
+    LogoutView,
     OtpRequestView,
     PasswordResetConfirmView,
+    RefreshView,
     RegisterView,
     UserDetailView,
 )
-
-
-class LoginView(TokenObtainPairView):
-    # Connexion par e-mail ou par téléphone (CDC 3.1), limitée par IP et par identifiant.
-    serializer_class = IdentifierTokenObtainPairSerializer
-    permission_classes = [AllowAny]
-    throttle_classes = [LoginIpThrottle, LoginIdentifierThrottle, LoginPhoneThrottle]
-
-
-class RefreshView(TokenRefreshView):
-    permission_classes = [AllowAny]
 
 
 urlpatterns = [

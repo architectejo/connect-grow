@@ -108,17 +108,23 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle',
     ],
+    # Nombre de proxies de confiance devant l'application (0 = adresse de connexion directe ;
+    # 1 derrière Nginx). Détermine l'IP lue par tous les throttles (voir .env.example).
+    'NUM_PROXIES': int(os.getenv('NUM_PROXIES', '0')),
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/day',
-        'user': '1000/day',
-        # CDC 4.2 : limitation du débit sur l'OTP (coût SMS, anti-brute-force).
-        'otp': '5/hour',
-        'otp_phone': '3/hour',          # demandes de code par numéro
-        'otp_confirm': '20/hour',       # confirmations de reset par IP
-        'otp_confirm_phone': '10/hour',  # confirmations de reset par numéro
-        'login': '30/hour',             # connexions par IP
-        'login_identifier': '10/hour',  # connexions par e-mail
-        'login_phone': '10/hour',       # connexions par téléphone
+        # Navigation générale (larges : plusieurs utilisateurs derrière une même IP mobile).
+        'anon': '5000/day',
+        'user': '10000/day',
+        # CDC 4.2 : OTP (coût SMS, anti-brute-force).
+        'otp': '5/hour',            # demandes de code, par IP
+        'otp_phone': '3/hour',      # demandes de code, par numéro
+        'otp_confirm': '20/hour',   # confirmations de reset, par IP
+        # Connexion : toutes requêtes par IP ; les échecs par identifiant sont comptés à part
+        # (voir apps/identity/throttles.py : FailureLimiter).
+        'login': '60/hour',
+        'refresh': '60/hour',       # renouvellement de jeton, par IP
+        'change_password': '10/hour',  # par utilisateur
+        'kyc_write': '20/hour',     # dépôt/suppression de pièces KYC, par utilisateur
     }
 }
 

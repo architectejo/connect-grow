@@ -50,6 +50,8 @@ class PostViewSet(viewsets.ModelViewSet):
                 category_uuid = parse_uuid(category)
                 queryset = queryset.filter(category_id=category_uuid) if category_uuid else queryset.none()
 
+            # Les filtres ville/lieu deviennent `commune_id IN (...)` : la liste est plafonnée
+            # par catalog.services (MAX_COMMUNE_IDS) pour rester sous la limite de variables SQLite.
             if location:
                 queryset = queryset.filter(commune_id__in=catalog_services.search_commune_ids(location))
 

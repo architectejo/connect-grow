@@ -12,7 +12,7 @@ from pathlib import Path
 from django.core.management.base import BaseCommand, CommandError
 from django.utils.text import slugify
 
-from apps.catalog.models import Category, City, Commune, ForbiddenItem
+from apps.catalog.models import Category, City, Commune, ForbiddenItem, normalize_key
 
 DEFAULT_FILE = Path(__file__).resolve().parents[2] / 'seed' / 'initial_catalog.json'
 
@@ -33,32 +33,36 @@ class Command(BaseCommand):
         created = {'cities': 0, 'communes': 0, 'categories': 0, 'forbidden_items': 0}
 
         for city_data in data.get('cities', []):
-            city, was_created = City.objects.get_or_create(
-                slug=slugify(city_data['name']), defaults={'name': city_data['name']},
-            )
-            created['cities'] += was_created
+            city = City.objects.filter(name_key=normalize_key(city_data['name'])).first()
+            if city is None:
+                city = City.objects.create(name=city_data['name'])
+                created['cities'] += 1
             for commune_name in city_data.get('communes', []):
-                _, was_created = Commune.objects.get_or_create(city=city, name=commune_name)
-                created['communes'] += was_created
+                if not Commune.objects.filter(city=city, name_key=normalize_key(commune_name)).exists():
+                    Commune.objects.create(city=city, name=commune_name)
+                    created['communes'] += 1
 
         for category_data in data.get('categories', []):
             slug = category_data.get('slug') or slugify(category_data['name'])
-            _, was_created = Category.objects.get_or_create(
-                slug=slug,
-                defaults={'name': category_data['name'], 'icon': category_data.get('icon', '')},
+            already = Category.objects.filter(slug=slug) | Category.objects.filter(
+                name_key=normalize_key(category_data['name'])
             )
-            created['categories'] += was_created
+            if not already.exists():
+                Category.objects.create(
+                    name=category_data['name'], slug=slug, icon=category_data.get('icon', ''),
+                )
+                created['categories'] += 1
 
-        existing_keywords = {k.lower() for k in ForbiddenItem.objects.values_list('keyword', flat=True)}
+        existing_keywords = set(ForbiddenItem.objects.values_list('keyword_key', flat=True))
         for item_data in data.get('forbidden_items', []):
             keyword = item_data['keyword']
-            if keyword.lower() in existing_keywords:
+            if normalize_key(keyword) in existing_keywords:
                 continue
             category = None
             if item_data.get('category_slug'):
                 category = Category.objects.filter(slug=item_data['category_slug']).first()
             ForbiddenItem.objects.create(keyword=keyword, category=category)
-            existing_keywords.add(keyword.lower())
+            existing_keywords.add(normalize_key(keyword))
             created['forbidden_items'] += 1
 
         if options['verbosity'] > 0:

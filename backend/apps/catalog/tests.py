@@ -1,4 +1,5 @@
 import json
+from unittest import mock
 import tempfile
 import uuid
 from io import StringIO
@@ -168,3 +169,81 @@ class DomainIsolationTests(TestCase):
         for app_label in ('identity', 'catalog'):
             for model in django_apps.get_app_config(app_label).get_models():
                 self.assertEqual(model._meta.pk.get_internal_type(), 'UUIDField', model)
+
+
+class CaseInsensitiveUniquenessTests(TestCase):
+    def test_city_commune_category_and_keyword_reject_case_variants(self):
+        from django.core.exceptions import ValidationError
+
+        city = City.objects.create(name='Kinshasa')
+        with self.assertRaises(ValidationError) as ctx:
+            City(name='  KINSHASA ').full_clean()
+        self.assertIn('name', ctx.exception.message_dict)
+
+        Commune.objects.create(city=city, name='Gombe')
+        with self.assertRaises(ValidationError):
+            Commune(city=city, name='gombe').full_clean()
+        # Même nom dans une autre ville : autorisé.
+        other = City.objects.create(name='Matadi')
+        Commune(city=other, name='GOMBE').full_clean()
+
+        Category.objects.create(name='Électronique')
+        with self.assertRaises(ValidationError):
+            Category(name='ÉLECTRONIQUE').full_clean()
+
+        ForbiddenItem.objects.create(keyword='Arme à feu')
+        with self.assertRaises(ValidationError):
+            ForbiddenItem(keyword='ARME À  FEU').full_clean()
+
+    def test_database_enforces_the_normalized_key_too(self):
+        from django.db import IntegrityError, transaction
+
+        City.objects.create(name='Goma')
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            City.objects.create(name='GOMA')
+
+    def test_name_is_stored_trimmed(self):
+        self.assertEqual(City.objects.create(name='  Bukavu  ').name, 'Bukavu')
+
+    def test_forbidden_item_api_rejects_case_duplicate_with_400(self):
+        ForbiddenItem.objects.create(keyword='Poison')
+        admin = User.objects.create_user(email='a@example.com', password='x', full_name='A', is_staff=True)
+        client = APIClient()
+        client.force_authenticate(admin)
+        response = client.post('/api/moderation/forbidden-items/', {'keyword': 'POISON'})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('keyword', response.data)
+
+    def test_seed_does_not_duplicate_case_variants(self):
+        City.objects.create(name='KINSHASA')
+        Category.objects.create(name='ÉLECTRONIQUE', slug='electronique-2')
+        ForbiddenItem.objects.create(keyword='MÉDICAMENT')
+        call_command('seed_catalog', stdout=StringIO())
+        self.assertEqual(City.objects.filter(name_key='kinshasa').count(), 1)
+        self.assertEqual(Category.objects.filter(name_key='électronique').count(), 1)
+        self.assertEqual(ForbiddenItem.objects.filter(keyword_key='médicament').count(), 1)
+
+
+class SlugFallbackTests(TestCase):
+    def test_empty_slugify_result_gets_a_unique_fallback(self):
+        first = City.objects.create(name='???')
+        second = City.objects.create(name='!!!')
+        self.assertTrue(first.slug.startswith('sans-nom-'))
+        self.assertNotEqual(first.slug, second.slug)
+
+    def test_slug_collision_gets_a_suffix_instead_of_failing(self):
+        first = Category.objects.create(name='Électronique')
+        second = Category.objects.create(name='Electronique')
+        self.assertEqual(first.slug, 'electronique')
+        self.assertTrue(second.slug.startswith('electronique-'))
+        self.assertNotEqual(first.slug, second.slug)
+
+
+class CommuneIdCapTests(TestCase):
+    def test_commune_id_lists_are_capped(self):
+        city = City.objects.create(name='Grande ville')
+        for i in range(5):
+            Commune.objects.create(city=city, name=f'Commune {i}')
+        with mock.patch.object(services, 'MAX_COMMUNE_IDS', 3):
+            self.assertEqual(len(services.get_commune_ids_for_city(city.id)), 3)
+            self.assertEqual(len(services.search_commune_ids('Commune')), 3)

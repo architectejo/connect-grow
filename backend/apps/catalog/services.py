@@ -13,7 +13,7 @@ from django.db.models import Q
 
 from apps.common.utils import parse_uuid
 
-from .models import Category, City, Commune, ForbiddenItem
+from .models import Category, City, Commune, ForbiddenItem, normalize_key
 
 
 @dataclass(frozen=True)
@@ -89,20 +89,27 @@ def commune_exists(commune_id) -> bool:
     return parsed is not None and Commune.objects.filter(id=parsed).exists()
 
 
+# Plafond de la liste d'identifiants renvoyée pour une clause `IN (...)` côté appelant :
+# SQLite limite le nombre de variables d'une requête, et une ville compte quelques dizaines
+# de communes. Au-delà, il faudra un autre mécanisme (table de zones, pagination).
+MAX_COMMUNE_IDS = 500
+
+
 def get_commune_ids_for_city(city_id) -> list:
-    """UUID des communes d'une ville (remplace le filtre `commune__city`)."""
+    """UUID des communes d'une ville (remplace le filtre `commune__city`), plafonné à MAX_COMMUNE_IDS."""
     parsed = parse_uuid(city_id)
     if parsed is None:
         return []
-    return list(Commune.objects.filter(city_id=parsed).values_list('id', flat=True))
+    return list(Commune.objects.filter(city_id=parsed).values_list('id', flat=True)[:MAX_COMMUNE_IDS])
 
 
 def search_commune_ids(text: str) -> list:
     """UUID des communes dont le nom, ou celui de la ville, contient `text`
-    (remplace les filtres `commune__name__icontains` et `commune__city__name__icontains`)."""
+    (remplace les filtres `commune__name__icontains` et `commune__city__name__icontains`),
+    plafonné à MAX_COMMUNE_IDS. Note : `icontains` ne neutralise la casse qu'en ASCII sous SQLite."""
     return list(
         Commune.objects.filter(Q(name__icontains=text) | Q(city__name__icontains=text))
-        .values_list('id', flat=True)
+        .values_list('id', flat=True)[:MAX_COMMUNE_IDS]
     )
 
 
@@ -136,12 +143,12 @@ def get_category_id_by_slug(slug: str) -> Optional[uuid.UUID]:
 # --- Produits interdits ---------------------------------------------------
 
 def get_forbidden_keywords() -> list:
-    """Mots-clés interdits en minuscules (la casse est traitée ici, pas par la
-    base : SQLite et MySQL ne se comportent pas pareil)."""
-    return [k.lower() for k in ForbiddenItem.objects.values_list('keyword', flat=True)]
+    """Mots-clés interdits sous forme normalisée (casefold, espaces réduits) : la casse
+    est traitée en Python, pas par la base (SQLite et MySQL se comportent différemment)."""
+    return list(ForbiddenItem.objects.values_list('keyword_key', flat=True))
 
 
 def find_forbidden_keywords(text: str) -> list:
     """Mots-clés interdits présents dans `text`, sans tenir compte de la casse."""
-    haystack = (text or '').lower()
+    haystack = normalize_key(text)
     return [k for k in get_forbidden_keywords() if k in haystack]

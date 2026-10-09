@@ -441,3 +441,11 @@ class SessionRevocationTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertEqual(self.refresh_status(tokens['refresh']), status.HTTP_401_UNAUTHORIZED)
+
+
+class TokenLifetimeTests(APITestCase):
+    def test_access_15_minutes_refresh_7_days(self):
+        user = User.objects.create_user(email='t@example.com', password='x', full_name='T')
+        token = RefreshToken.for_user(user)
+        self.assertEqual(token.access_token['exp'] - token.access_token['iat'], 15 * 60)
+        self.assertEqual(token['exp'] - token['iat'], 7 * 24 * 3600)

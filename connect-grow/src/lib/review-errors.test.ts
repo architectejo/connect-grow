@@ -47,6 +47,28 @@ describe("reviewErrorMessage", () => {
     );
   });
 
+  it.each([
+    [403, "account_too_new", /compte est trop récent/],
+    [409, "report_already_rejected", /déjà examiné et rejeté/],
+    [409, "already_responded", /déjà répondu à ce signalement/],
+    [409, "report_closed", /déjà statué/],
+  ])("traduit le code %i %s", (status, code, expected) => {
+    expect(reviewErrorMessage(apiError(status, { detail: "Message du serveur", code }))).toMatch(expected);
+  });
+
+  it("429 report_daily_limit avec Retry-After : durée en français", () => {
+    const message = reviewErrorMessage(apiError(429, { detail: "x", code: "report_daily_limit" }, { "retry-after": "7200" }));
+    expect(message).toBe("Vous avez atteint la limite de signalements de contact fictif par jour. Réessayez dans 2 heures.");
+  });
+
+  it("429 report_daily_limit sans Retry-After : réessayer demain", () => {
+    expect(reviewErrorMessage(apiError(429, { detail: "x", code: "report_daily_limit" }))).toMatch(/Réessayez demain/);
+  });
+
+  it("DELETE refusé par review_locked : explique le signalement en cours", () => {
+    expect(reviewErrorMessage(apiError(403, { detail: "x", code: "review_locked" }), "delete")).toMatch(/signalement en cours.*supprimer/);
+  });
+
   it("erreur de champ 400 : premier message DRF", () => {
     expect(reviewErrorMessage(apiError(400, { content: ["Au moins 10 caractères."] }))).toBe("Au moins 10 caractères.");
   });

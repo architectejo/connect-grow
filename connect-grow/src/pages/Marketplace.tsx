@@ -12,6 +12,7 @@ import { ActiveFilters } from "@/components/marketplace/ActiveFilters";
 import { FiltersPanel } from "@/components/marketplace/FiltersPanel";
 import { DEFAULT_ORDERING, usePostFilters } from "@/components/marketplace/use-post-filters";
 import { useCategories, usePosts, useToggleFavorite } from "@/hooks/use-marketplace";
+import { isRateLimited, rateLimitMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 
 // L'API renvoie toute la liste : on l'affiche par tranches pour ne charger les images qu'au défilement
@@ -27,7 +28,7 @@ const orderings: { value: PostOrdering; label: string }[] = [
 const Marketplace = () => {
   const { filters, setFilters, resetFilters, activeCount } = usePostFilters();
   const { data: categories = [] } = useCategories();
-  const { data: posts = [], isLoading, isError, isFetching, refetch } = usePosts(filters);
+  const { data: posts = [], isLoading, isError, error, isFetching, refetch } = usePosts(filters);
   const toggleFavorite = useToggleFavorite();
 
   const [searchInput, setSearchInput] = useState(filters.search ?? "");
@@ -197,7 +198,11 @@ const Marketplace = () => {
           {isLoading ? (
             <PostGridSkeleton count={PAGE_SIZE} className="lg:grid-cols-3" />
           ) : isError ? (
-            <ErrorState onRetry={() => refetch()} isRetrying={isFetching} />
+            <ErrorState
+              description={isRateLimited(error) ? rateLimitMessage(error) : undefined}
+              onRetry={() => refetch()}
+              isRetrying={isFetching}
+            />
           ) : posts.length === 0 ? (
             <EmptyState
               icon={SearchX}

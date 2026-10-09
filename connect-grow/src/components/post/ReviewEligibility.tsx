@@ -74,11 +74,15 @@ export function ReviewEligibilityPanel({ postId, isAuthenticated, eligibility, i
   }
 
   switch (eligibility.reason) {
-    case "too_early": {
+    case "too_early":
+    case "account_too_new": {
+      const reason = eligibility.reason;
+      // Date formatée à l'heure de Kinshasa (formatDateTime)
       const date = eligibility.available_at ? formatDateTime(eligibility.available_at) : "";
+      const key = reason === "too_early" ? "too_early" : "account_too_new";
       return (
         <p className="mt-5 rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-          {date ? t("reviews.eligibility.too_early", { date }) : t("reviews.eligibility.too_earlyNoDate")}
+          {date ? t(`reviews.eligibility.${key}`, { date }) : t(`reviews.eligibility.${key}NoDate`)}
         </p>
       );
     }

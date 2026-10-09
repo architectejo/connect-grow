@@ -183,12 +183,20 @@ export interface Review {
     is_post_owner?: boolean;
     /** Vrai tant que l'auteur peut modifier ou supprimer son avis (fenêtre ouverte, ni masqué, ni signalé, sans réponse du vendeur). */
     can_edit?: boolean;
+    /**
+     * Identifiant du signalement « contact fictif » ouvert qui conteste cet avis. Réservé à l'auteur ;
+     * ABSENT du backend actuel (à ajouter, voir rapport L0-10) : le recours reste masqué tant qu'il manque.
+     */
+    contest_report_id?: Uuid | null;
+    /** Vrai si l'auteur a déjà répondu au signalement (une seule réponse). Même réserve que ci-dessus. */
+    contest_responded?: boolean;
 }
 
 export type ReviewEligibilityReason =
     | "own_offer"
     | "no_contact"
     | "too_early"
+    | "account_too_new"
     | "contact_rejected"
     | "already_reviewed"
     | "recently_deleted"
@@ -198,10 +206,17 @@ export type ReviewEligibilityReason =
 export interface ReviewEligibility {
     can_review: boolean;
     reason: ReviewEligibilityReason | null;
-    /** Date à partir de laquelle l'avis sera possible (reason = too_early). */
+    /** Date à partir de laquelle l'avis sera possible (reason = too_early ou account_too_new). */
     available_at: string | null;
     /** Avis déjà donné (reason = already_reviewed). */
     review_id: Uuid | null;
+}
+
+/** Réponse de POST /moderation/reports/{id}/author-response/. */
+export interface AuthorResponseResult {
+    id: Uuid;
+    status: string;
+    author_responded_at: string;
 }
 
 export interface ReviewInput {

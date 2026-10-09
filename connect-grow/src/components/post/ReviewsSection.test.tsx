@@ -160,6 +160,34 @@ describe("ReviewsSection (visiteur anonyme)", () => {
     expect(vi.mocked(apiClient.get).mock.calls.some(([url]) => String(url).includes("eligibility"))).toBe(false);
   });
 
+  it("avis contesté : « Modifier » reste proposé, « Supprimer » est désactivé avec explication", async () => {
+    mockApi([review({ is_mine: true, can_edit: true, contest_report_id: "rep1" })], eligibility({ reason: "already_reviewed" }));
+    renderSection();
+    expect(await screen.findByText(/Le vendeur conteste le contact/)).toBeInTheDocument();
+    fireEvent.keyDown(await screen.findByRole("button", { name: "Actions sur l'avis" }), { key: "Enter" });
+    expect(await screen.findByRole("menuitem", { name: "Modifier" })).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "Supprimer" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/Suppression impossible tant que le signalement est en cours/)).toBeInTheDocument();
+  });
+
+  it("avis contesté : l'auteur répond à la modération (author-response)", async () => {
+    mockApi([review({ is_mine: true, can_edit: true, contest_report_id: "rep1" })], eligibility({ reason: "already_reviewed" }));
+    const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: { id: "rep1", status: "EN_ATTENTE", author_responded_at: "x" } });
+    renderSection();
+    fireEvent.click(await screen.findByRole("button", { name: "Répondre à la modération" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Votre réponse à la modération"), { target: { value: "Nous avons échangé." } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Envoyer ma réponse" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("moderation/reports/rep1/author-response/", { author_response: "Nous avons échangé." }));
+  });
+
+  it("avis contesté déjà défendu : plus de bouton de réponse", async () => {
+    mockApi([review({ is_mine: true, can_edit: true, contest_report_id: "rep1", contest_responded: true })], eligibility({ reason: "already_reviewed" }));
+    renderSection();
+    expect(await screen.findByText(/réponse a été transmise/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Répondre à la modération" })).not.toBeInTheDocument();
+  });
+
   it("vendeur : peut signaler un contact fictif (REVIEW / CONTACT_FICTIF)", async () => {
     mockApi([review()], eligibility());
     const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: { id: "x", status: "OPEN", created_at: "" } });

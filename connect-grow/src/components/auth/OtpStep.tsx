@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
+import { useTranslation } from "react-i18next";
 import { Loader2, MessageSquareText, RotateCcw } from "lucide-react";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { Button } from "@/components/ui/button";
@@ -55,6 +56,7 @@ export function OtpStep({
   children,
   autoSubmit = true,
 }: OtpStepProps) {
+  const { t } = useTranslation();
   const [sentAt, setSentAt] = useState(0);
   const [resending, setResending] = useState(false);
   const validity = useCountdown(VALIDITY_SECONDS, sentAt);
@@ -85,11 +87,11 @@ export function OtpStep({
       <div className="flex items-start gap-3 rounded-xl bg-primary/5 p-4">
         <MessageSquareText className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden />
         <p className="text-sm text-foreground">
-          Nous avons envoyé un code à 6 chiffres au{" "}
+          {t("otp.sentBefore")}{" "}
           <span className="whitespace-nowrap font-semibold">
             {PHONE_PREFIX} {formatLocalPhone(phone)}
           </span>
-          .{" "}
+          {" "}
           <button type="button" onClick={onChangeNumber} className="font-semibold text-primary hover:underline">
             Modifier
           </button>

@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { Navigate } from "react-router-dom";
-import { BadgeCheck, CheckCircle2, Clock, FileText, Loader2, Lock, Upload, XCircle, type LucideIcon } from "lucide-react";
+import { BadgeCheck, CheckCircle2, Clock, FileText, Loader2, Lock, Trash2, Upload, XCircle, type LucideIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { KycDocument, KycDocumentType, KycStatus } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AccountShell } from "@/components/layout/AccountShell";
 import { ErrorState, PageHeader } from "@/components/common";
 import { useAuth } from "@/contexts/AuthContext";
-import { useKycDocuments, useUploadKyc } from "@/hooks/use-account";
+import { useDeleteKyc, useKycDocuments, useUploadKyc } from "@/hooks/use-account";
 import { formatRelativeDate } from "@/lib/format";
 import { formatFileSize } from "@/lib/image";
 import { cn } from "@/lib/utils";
@@ -31,7 +32,9 @@ const STATUS: Record<KycStatus, { label: string; icon: LucideIcon; tone: string 
 
 function DocumentRow({ spec, latest }: { spec: (typeof DOCUMENTS)[number]; latest?: KycDocument }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const { t } = useTranslation();
   const upload = useUploadKyc();
+  const remove = useDeleteKyc();
   const status = latest ? STATUS[latest.status] : null;
   const canUpload = !latest || latest.status === "REFUSE";
 
@@ -69,6 +72,19 @@ function DocumentRow({ spec, latest }: { spec: (typeof DOCUMENTS)[number]; lates
           </p>
         )}
       </div>
+      {latest && latest.status !== "VALIDE" && (
+        // Une pièce validée ne peut pas être supprimée (le serveur la refuse)
+        <Button
+          variant="ghost"
+          className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          onClick={() => remove.mutate(latest.id)}
+          disabled={remove.isPending}
+          aria-label={t("kyc.deleteLabel", { title: spec.title })}
+        >
+          {remove.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Trash2 aria-hidden />}
+          {t("kyc.delete")}
+        </Button>
+      )}
       {canUpload && (
         <>
           <Button variant={latest ? "default" : "outline"} className="shrink-0" onClick={() => inputRef.current?.click()} disabled={upload.isPending}>

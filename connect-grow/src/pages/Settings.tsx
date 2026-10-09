@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -82,7 +83,7 @@ function ProfileTab() {
 
   const form = useForm<z.infer<typeof profileSchema>>({
     resolver: zodResolver(profileSchema),
-    defaultValues: { full_name: user?.full_name ?? "", commune: user?.commune ? String(user.commune) : "" },
+    defaultValues: { full_name: user?.full_name ?? "", commune: user?.commune ? user.commune : "" },
   });
 
   const onSubmit = form.handleSubmit(async (values) => {
@@ -91,8 +92,8 @@ function ProfileTab() {
     data.append("full_name", values.full_name.trim());
     if (values.commune) {
       data.append("commune", values.commune);
-      const city = cities.find((c) => c.communes.some((commune) => String(commune.id) === values.commune));
-      if (city) data.append("ville", String(city.id));
+      const city = cities.find((c) => c.communes.some((commune) => commune.id === values.commune));
+      if (city) data.append("ville", city.id);
     }
     if (photo) data.append("photo", photo.file);
     try {
@@ -102,7 +103,8 @@ function ProfileTab() {
     } catch (err) {
       const { fields, general } = parseApiErrors(err);
       if (fields.full_name) form.setError("full_name", { message: fields.full_name });
-      setError(general ?? fields.photo ?? (fields.full_name ? undefined : "La mise à jour a échoué."));
+      // photo refusée : clé `photo` ; commune hors de la ville ou ville manquante : clés `commune` / `ville`
+      setError(general ?? fields.photo ?? fields.commune ?? fields.ville ?? (fields.full_name ? undefined : "La mise à jour a échoué."));
     }
   });
 
@@ -169,7 +171,9 @@ function ShopTab() {
       setLogo(null);
       toast.success("Boutique mise à jour.");
     } catch (err) {
-      setError(parseApiErrors(err).general ?? "La mise à jour a échoué.");
+      const { fields, general } = parseApiErrors(err);
+      // Image refusée (format, poids, plus de 16 millions de pixels) : clé `logo`
+      setError(general ?? fields.logo ?? fields.business_name ?? fields.bio ?? fields.nif ?? "La mise à jour a échoué.");
     }
   });
 
@@ -215,6 +219,8 @@ function ShopTab() {
 // --- Téléphone : tout changement passe par un code SMS (CDC 3.1) ---
 
 function ChangePhoneDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { t } = useTranslation();
+  const { user } = useAuth();
   const requestOtp = useRequestOtp();
   const update = useUpdateProfile();
   const [step, setStep] = useState<"phone" | "otp">("phone");
@@ -234,6 +240,11 @@ function ChangePhoneDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     const valid = localPhoneSchema.safeParse(phone);
     if (!valid.success) {
       setError(valid.error.issues[0].message);
+      return false;
+    }
+    // Un numéro déjà vérifié sur ce compte ne passe plus par un code : rien à confirmer
+    if (user?.phone_verified && user.phone === toE164(phone)) {
+      setError(t("settings.samePhone"));
       return false;
     }
     setError(undefined);
@@ -348,6 +359,7 @@ const passwordFormSchema = z
   .refine((v) => v.new_password !== v.old_password, { path: ["new_password"], message: "Choisissez un mot de passe différent de l'actuel." });
 
 function SecurityTab() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { logout } = useAuth();
   const changePassword = useChangePassword();
@@ -364,7 +376,10 @@ function SecurityTab() {
     try {
       await changePassword.mutateAsync({ old_password, new_password });
       form.reset();
-      toast.success("Mot de passe modifié.");
+      // Le serveur révoque toutes les sessions au changement de mot de passe : on repart de la connexion
+      toast.success(t("settings.passwordChanged"));
+      logout();
+      navigate("/login", { replace: true });
     } catch (err) {
       const { general } = parseApiErrors(err);
       if (general && /ancien/i.test(general)) form.setError("old_password", { message: general });
@@ -401,6 +416,16 @@ function SecurityTab() {
           }}
         >
           <LogOut aria-hidden /> Se déconnecter
+        </Button>
+        <Button
+          variant="ghost"
+          className="ml-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          onClick={() => {
+            logout({ all: true });
+            navigate("/", { replace: true });
+          }}
+        >
+          <LogOut aria-hidden /> {t("settings.logoutAll")}
         </Button>
       </div>
     </div>

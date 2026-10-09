@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import apiClient, { unwrapList } from "@/api/client";
-import type { AppNotification, DashboardStats, Favorite, KycDocument, KycDocumentType, Post, User } from "@/api/types";
+import type { AppNotification, DashboardStats, Favorite, KycDocument, KycDocumentType, Post, Uuid, User } from "@/api/types";
 import { ME_QUERY_KEY, useAuth } from "@/contexts/AuthContext";
 import { marketplaceKeys } from "./use-marketplace";
-import { apiErrorMessage } from "./use-reviews";
+import { apiErrorMessage } from "@/lib/errors";
 
 export const accountKeys = {
   dashboard: ["account", "dashboard"] as const,
@@ -50,7 +50,7 @@ export function usePostLifecycle() {
   const onError = (error: unknown) => toast.error(apiErrorMessage(error, "L'action n'a pas abouti. Réessayez."));
 
   const moveToTrash = useMutation({
-    mutationFn: (id: number) => apiClient.post(`marketplace/posts/${id}/soft_delete/`),
+    mutationFn: (id: Uuid) => apiClient.post(`marketplace/posts/${id}/soft_delete/`),
     onSuccess: () => {
       toast.success("Annonce placée dans la corbeille.", { description: "Vous pouvez la restaurer pendant 30 jours." });
       return invalidate();
@@ -59,7 +59,7 @@ export function usePostLifecycle() {
   });
 
   const restore = useMutation({
-    mutationFn: (id: number) => apiClient.post(`marketplace/posts/${id}/restore/`),
+    mutationFn: (id: Uuid) => apiClient.post(`marketplace/posts/${id}/restore/`),
     onSuccess: () => {
       toast.success("Annonce restaurée et de nouveau en ligne.");
       return invalidate();
@@ -68,7 +68,7 @@ export function usePostLifecycle() {
   });
 
   const destroy = useMutation({
-    mutationFn: (id: number) => apiClient.delete(`marketplace/posts/${id}/hard_delete/`),
+    mutationFn: (id: Uuid) => apiClient.delete(`marketplace/posts/${id}/hard_delete/`),
     onSuccess: () => {
       toast.success("Annonce supprimée définitivement.");
       return invalidate();
@@ -108,7 +108,7 @@ export function useNotificationActions() {
     queryClient.setQueryData<AppNotification[]>(accountKeys.notifications, (items) => (items ? fn(items) : items));
 
   const markRead = useMutation({
-    mutationFn: (id: number) => apiClient.patch(`interactions/notifications/${id}/`, { is_read: true }),
+    mutationFn: (id: Uuid) => apiClient.patch(`interactions/notifications/${id}/`, { is_read: true }),
     onMutate: (id) => setAll((items) => items.map((n) => (n.id === id ? { ...n, is_read: true } : n))),
   });
 
@@ -148,6 +148,19 @@ export function useUploadKyc() {
       return queryClient.invalidateQueries({ queryKey: accountKeys.kyc });
     },
     onError: (error) => toast.error(apiErrorMessage(error, "L'envoi du document a échoué.")),
+  });
+}
+
+/** Suppression d'une pièce non validée (une pièce validée ne peut pas être supprimée). */
+export function useDeleteKyc() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Uuid) => apiClient.delete(`accounts/kyc/documents/${id}/`),
+    onSuccess: () => {
+      toast.success("Document supprimé.");
+      return queryClient.invalidateQueries({ queryKey: accountKeys.kyc });
+    },
+    onError: (error) => toast.error(apiErrorMessage(error, "La suppression du document a échoué.")),
   });
 }
 

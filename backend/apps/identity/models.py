@@ -10,6 +10,7 @@ from django.db.models import F
 from django.conf import settings
 from django.utils import timezone
 
+from apps.common.images import sanitize_uploaded_field
 from apps.common.models import BaseModel
 
 from .kyc_files import kyc_upload_to
@@ -113,6 +114,11 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
         verbose_name='user permissions',
     )
 
+    def save(self, *args, **kwargs):
+        # Photo ré-encodée (sans EXIF/GPS, taille plafonnée) avant stockage.
+        self.photo = sanitize_uploaded_field(self.photo)
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.email or self.phone or f"Utilisateur #{self.pk}"
 
@@ -128,6 +134,11 @@ class BusinessProfile(BaseModel):
     logo = models.ImageField(upload_to='business_logos/', null=True, blank=True)
     is_verified = models.BooleanField(default=False)
     nif = models.CharField(max_length=50, blank=True) # Pour le côté pro client
+
+    def save(self, *args, **kwargs):
+        # Logo ré-encodé (sans EXIF/GPS, taille plafonnée) avant stockage.
+        self.logo = sanitize_uploaded_field(self.logo)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.business_name

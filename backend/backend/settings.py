@@ -256,3 +256,10 @@ AUTH_PASSWORD_VALIDATORS = [
 # Valeurs de départ, ajustables par variable d'environnement.
 KYC_MAX_FILE_BYTES = int(os.getenv('KYC_MAX_FILE_MB', '5')) * 1024 * 1024
 KYC_MAX_DOCUMENTS_PER_PROFILE = int(os.getenv('KYC_MAX_DOCUMENTS_PER_PROFILE', '6'))
+
+
+# --- Photos de profil et logos (ré-encodés sans métadonnées : apps/common/images.py) ---
+PROFILE_IMAGE_MAX_SIDE = int(os.getenv('PROFILE_IMAGE_MAX_SIDE', '1024'))      # pixels, côté le plus long
+PROFILE_IMAGE_QUALITY = int(os.getenv('PROFILE_IMAGE_QUALITY', '85'))
+PROFILE_IMAGE_MAX_BYTES = int(os.getenv('PROFILE_IMAGE_MAX_MB', '5')) * 1024 * 1024
+PROFILE_IMAGE_MAX_PIXELS = int(os.getenv('PROFILE_IMAGE_MAX_PIXELS', str(40_000_000)))  # anti « bombe » d'image

@@ -58,17 +58,19 @@ def _post_link(payload):
     return f"/post/{payload['offer_id']}" if payload.get('offer_id') else ''
 
 
-@subscribe('reviews.review_posted', name='notifications.notify_review_posted')
+@subscribe('reviews.review_posted', name='notifications.notify_review_posted', versions=(2,))
 def notify_review_posted(event):
+    """Version 2 (ADR 0004) : `recipient_id` est l'utilisateur à notifier ; la version 1
+    est refusée par le registre (`PermanentEventError`)."""
     payload = event.payload
-    review_id, reviewed_id, author_id, title = _require(
-        payload, 'review_id', 'reviewed_user_id', 'author_id', 'offer_title',
+    review_id, recipient_id, author_id, title = _require(
+        payload, 'review_id', 'recipient_id', 'author_id', 'offer_title',
     )
     excerpt = reviews_services.get_review_excerpt(_user_id(review_id))
     if excerpt is None:  # avis supprimé avant la diffusion : plus rien à annoncer
         return
     services.notify(
-        user_id=_user_id(reviewed_id), notification_type=services.COMMENT,
+        user_id=_user_id(recipient_id), notification_type=services.COMMENT,
         title=f"Nouvel avis sur {title}",
         content=f"{_name(author_id)} a laissé un avis : {excerpt}...",
         link=_post_link(payload),

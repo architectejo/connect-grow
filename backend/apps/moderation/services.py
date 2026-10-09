@@ -55,6 +55,13 @@ def record_audit(actor, action, target=None, details=''):
     return AuditLog.record(actor, action, target=target, details=details)
 
 
+def record_settings_change(actor, obj, old_values: dict, new_values: dict):
+    """Journalise la modification d'un réglage du back-office (règle 12) avec l'ancienne et la
+    nouvelle valeur de chaque champ modifié."""
+    changes = '; '.join(f"{name} : {old_values.get(name)!r} -> {new_values[name]!r}" for name in new_values)
+    return AuditLog.record(actor, 'SETTINGS_CHANGED', target=obj, details=f"{obj._meta.model_name} : {changes}")
+
+
 # Motif des signalements automatiques d'avis croisés (CDC 3.7), exposé sans importer le modèle.
 REASON_CROSSED_REVIEWS = Report.REASON_AVIS_CROISES
 

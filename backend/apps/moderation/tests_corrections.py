@@ -10,6 +10,8 @@ from apps.marketplace.models import Offer
 from apps.reviews.admin import ReviewAdmin
 from apps.reviews.models import Review
 
+from .tests import make_review
+
 from . import services
 from .models import Report, Sanction
 from .tests import ModerationTestBase
@@ -81,7 +83,7 @@ class ReportAbuseTests(ModerationTestBase):
             self.assertIn('object_id', response.data)
 
     def test_own_review_cannot_be_reported(self):
-        review = Review.objects.create(user=self.reporter, reviewed_user=self.seller, content='Avis assez long.', rating=3)
+        review = make_review(self.reporter, self.seller)
         self.client.force_authenticate(self.reporter)
         self.assertEqual(self.post_report('REVIEW', review).status_code, 400)
 
@@ -216,9 +218,13 @@ class ReviewAdminTests(ModerationTestBase):
         request.user = self.moderator
         readonly = set(ReviewAdmin(Review, admin.site).get_readonly_fields(request))
         self.assertNotIn('is_hidden', readonly)
-        self.assertTrue({'content', 'rating', 'reply_content', 'user'} <= readonly)
+        self.assertTrue({'content', 'offer_rating', 'seller_rating', 'reply_content', 'user'} <= readonly)
         request.user = make_user('root@example.com', is_superuser=True, is_staff=True)
-        self.assertEqual(set(ReviewAdmin(Review, admin.site).get_readonly_fields(request)), set())
+        # Le super-administrateur réécrit tout sauf la preuve de contact et le drapeau calculé.
+        self.assertEqual(
+            set(ReviewAdmin(Review, admin.site).get_readonly_fields(request)),
+            {'contact_event_id', 'contact_channel', 'contact_recorded_at', 'counts_for_seller', 'edited_at'},
+        )
 
 
 class AutomaticReportTypesTests(ModerationTestBase):
@@ -231,7 +237,7 @@ class AutomaticReportTypesTests(ModerationTestBase):
             services.file_automatic_report('group', uuid.uuid4(), services.REASON_CROSSED_REVIEWS)
 
     def test_automatic_report_on_a_review_is_resolvable(self):
-        review = Review.objects.create(user=self.reporter, reviewed_user=self.seller, content='Avis assez long.', rating=3)
+        review = make_review(self.reporter, self.seller)
         report = services.file_automatic_report('review', review.pk, services.REASON_CROSSED_REVIEWS, 'x')
         self.assertIn(report.target_type, services.TARGET_RESOLVERS)
         self.assertIsNotNone(services.resolve_target(report.target_type, report.target_id))

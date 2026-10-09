@@ -34,7 +34,7 @@ ADMINISTRATOR_EXTRA_PERMISSIONS = {
     'visibility.visibilitysettings': ['view', 'change'],
     'marketplace.marketplacesettings': ['view', 'change'],
     'moderation.auditlog': ['view'],  # journal en lecture seule : jamais modifiable
-    'reviews.trustscoresettings': ['view', 'change'],
+    'reviews.reviewsettings': ['view', 'change'],
 }
 
 

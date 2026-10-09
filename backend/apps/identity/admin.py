@@ -23,7 +23,7 @@ class UserAdmin(admin.ModelAdmin):
 
     ALWAYS_READONLY = (
         'password', 'last_login', 'date_joined', 'created_at', 'updated_at',
-        'trust_score', 'reviews_count', 'phone_verified',
+        'phone_verified',
     )
     SUPERUSER_ONLY = ('is_superuser', 'is_staff', 'groups', 'user_permissions')
 

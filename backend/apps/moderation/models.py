@@ -22,6 +22,8 @@ class Report(BaseModel):
     REASON_CONTENU_INTERDIT = 'CONTENU_INTERDIT'
     REASON_HARCELEMENT = 'HARCELEMENT'
     REASON_AVIS_CROISES = 'AVIS_CROISES'
+    # Réservé au signalement d'un avis par le vendeur concerné (contact jugé fictif, ADR 0004).
+    REASON_CONTACT_FICTIF = 'CONTACT_FICTIF'
     REASON_AUTRE = 'AUTRE'
     REASON_CHOICES = (
         (REASON_SPAM, "Spam"),
@@ -29,6 +31,7 @@ class Report(BaseModel):
         (REASON_CONTENU_INTERDIT, "Contenu interdit"),
         (REASON_HARCELEMENT, "Harcèlement"),
         (REASON_AVIS_CROISES, "Avis croisés suspects"),
+        (REASON_CONTACT_FICTIF, "Contact fictif"),
         (REASON_AUTRE, "Autre"),
     )
 

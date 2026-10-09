@@ -264,11 +264,7 @@ class OfferDecouplingTests(ModerationTestBase):
 
     def test_reports_accept_reviews_and_messages_as_targets(self):
         from apps.messaging.models import Conversation, Message
-        from apps.reviews.models import Review
-
-        review = Review.objects.create(
-            user=self.admin, reviewed_user=self.seller, content='Avis suffisamment long.', rating=3,
-        )
+        review = make_review(self.admin, self.seller)
         conversation = Conversation.objects.create()
         conversation.participants.add(self.admin, self.seller)
         message = Message.objects.create(conversation=conversation, sender=self.seller, content='Salut')
@@ -283,9 +279,7 @@ class OfferDecouplingTests(ModerationTestBase):
     def test_automatic_report_is_deduplicated(self):
         from . import services
 
-        from apps.reviews.models import Review
-
-        review = Review.objects.create(user=self.reporter, reviewed_user=self.seller, content='Avis assez long.', rating=3)
+        review = make_review(self.reporter, self.seller)
         first = services.file_automatic_report('review', review.pk, services.REASON_CROSSED_REVIEWS, 'x')
         self.assertIsNotNone(first)
         self.assertIsNone(services.file_automatic_report('review', review.pk, services.REASON_CROSSED_REVIEWS, 'x'))
@@ -293,3 +287,19 @@ class OfferDecouplingTests(ModerationTestBase):
     def test_dashboard_counts_active_offers(self):
         self.client.force_authenticate(self.admin)
         self.assertEqual(self.client.get('/api/moderation/dashboard/').data['active_posts_count'], 1)
+
+
+def make_review(author, seller, **extra):
+    """Avis créé directement (la preuve de contact est un UUID, sans clé étrangère)."""
+    import uuid
+    from django.utils import timezone
+
+    from apps.reviews.models import Review
+
+    values = dict(
+        user=author, offer_id=uuid.uuid4(), seller_context_type='USER', seller_context_id=seller.id,
+        contact_event_id=uuid.uuid4(), contact_channel='MESSAGE', contact_recorded_at=timezone.now(),
+        content='Avis assez long.', offer_rating=3, seller_rating=3,
+    )
+    values.update(extra)
+    return Review.objects.create(**values)

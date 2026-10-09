@@ -334,7 +334,7 @@ class PublicBusinessListTests(APITestCase):
 
     FORBIDDEN_KEYS = {
         'email', 'phone', 'phone_verified', 'date_joined', 'nif', 'full_name', 'password',
-        'ville', 'commune', 'business_profile', 'user_type', 'photo', 'trust_score',
+        'ville', 'commune', 'business_profile', 'user_type', 'photo',
     }
 
     def make_business(self, n, **extra):

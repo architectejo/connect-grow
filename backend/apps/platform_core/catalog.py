@@ -24,9 +24,11 @@ _TYPES = (
     EventType('marketplace.offer_expiring_soon'),
     EventType('visibility.offer_viewed'),
     EventType('visibility.offer_shared'),
-    EventType('reviews.review_posted'),
+    EventType('visibility.ranking_settings_changed'),
+    # Versions 2 (ADR 0004) : le destinataire de la notification est `recipient_id` ; le nombre d'avis croisés est `reviews_count`.
+    EventType('reviews.review_posted', version=2),
     EventType('reviews.review_replied'),
-    EventType('reviews.crossed_reviews_detected'),
+    EventType('reviews.crossed_reviews_detected', version=2),
 )
 
 EVENT_TYPES = {t.name: t for t in _TYPES}

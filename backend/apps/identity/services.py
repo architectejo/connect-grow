@@ -139,8 +139,6 @@ class SellerSummary:
     user_type: str
     business: Optional[SellerBusiness]
     date_joined: object
-    trust_score: float
-    reviews_count: int
 
 
 def get_seller_summaries(ids: Iterable) -> dict:
@@ -164,7 +162,6 @@ def get_seller_summaries(ids: Iterable) -> dict:
         summaries[user.id] = SellerSummary(
             id=user.id, full_name=user.full_name, photo=user.photo.url if user.photo else None,
             user_type=user.user_type, business=business, date_joined=user.date_joined,
-            trust_score=user.trust_score, reviews_count=user.reviews_count,
         )
     return summaries
 
@@ -179,13 +176,28 @@ def get_full_names(ids: Iterable) -> dict:
     return dict(User.objects.filter(id__in=wanted).values_list('id', 'full_name'))
 
 
-def set_reputation(user_id, trust_score: float, reviews_count: int) -> None:
-    """Met en cache le Trust Score et le nombre d'avis reçus (calculés par `reviews`).
-    Mise à jour par requête : sans effet (et sans erreur) si le compte vient d'être supprimé.
-    Transitoire : supprimé avec le Trust Score par L0-07."""
-    from .models import User
+def acts_for_context(user_id, context_type, context_id) -> bool:
+    """Vrai si ce compte agit pour le contexte désigné (couture L0-09). Aujourd'hui, seul le
+    contexte personnel existe : le compte agit pour lui-même. L0-09 étendra la règle aux membres
+    d'une organisation sans changer les appelants."""
+    from apps.common.contexts import CONTEXT_USER
 
-    User.objects.filter(pk=user_id).update(trust_score=trust_score, reviews_count=reviews_count)
+    return (
+        context_type == CONTEXT_USER and user_id is not None and context_id is not None
+        and str(user_id) == str(context_id)
+    )
+
+
+def public_display_name(full_name) -> str:
+    """Nom affiché publiquement pour un auteur : prénom et initiale du nom (« Marie K. »).
+    Valeur par défaut en attendant la décision du client (D11) ; fonction unique pour que le
+    changement de règle ne touche qu'ici. Un nom d'un seul mot est conservé tel quel."""
+    parts = (full_name or '').split()
+    if not parts:
+        return "Utilisateur"
+    if len(parts) == 1:
+        return parts[0]
+    return f"{parts[0]} {parts[-1][0].upper()}."
 
 
 def get_report_labels(ids: Iterable) -> dict:

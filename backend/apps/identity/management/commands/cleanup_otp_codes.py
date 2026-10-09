@@ -2,7 +2,7 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from apps.accounts.models import OtpCode
+from apps.identity.models import OtpCode
 
 
 class Command(BaseCommand):

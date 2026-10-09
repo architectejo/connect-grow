@@ -2,10 +2,16 @@ from rest_framework import serializers
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+from apps.catalog import services as catalog_services
+from apps.common.serializers import PreloadingListSerializer
+
 from .models import BusinessProfile, KycDocument, OtpCode, User
 
 
 class BusinessProfileSerializer(serializers.ModelSerializer):
+    # Clé JSON `categories` conservée : liste d'UUID de catégories (domaine catalog).
+    categories = serializers.ListField(child=serializers.UUIDField(), source='category_ids', required=False)
+
     class Meta:
         model = BusinessProfile
         fields = ['business_name', 'categories', 'bio', 'logo', 'nif', 'is_verified']
@@ -13,12 +19,25 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
         # (KycDecisionView), jamais par l'utilisateur via son propre profil (CDC 3.1).
         read_only_fields = ['is_verified']
 
+    def validate_categories(self, value):
+        unknown = set(value) - catalog_services.existing_category_ids(value)
+        if unknown:
+            raise serializers.ValidationError("Catégorie introuvable.")
+        return value
+
+
+class UserListSerializer(PreloadingListSerializer):
+    pass
+
 
 class UserSerializer(serializers.ModelSerializer):
     # Inclusion du profil entreprise (imbriqué)
     business_profile = BusinessProfileSerializer(required=False)
-    ville_name = serializers.CharField(source='ville.name', read_only=True)
-    commune_name = serializers.CharField(source='commune.name', read_only=True)
+    # Clés JSON `ville` / `commune` conservées (UUID du domaine catalog).
+    ville = serializers.UUIDField(source='city_id', required=False, allow_null=True)
+    commune = serializers.UUIDField(source='commune_id', required=False, allow_null=True)
+    ville_name = serializers.SerializerMethodField()
+    commune_name = serializers.SerializerMethodField()
     # Fourni uniquement lors d'une inscription/modification par téléphone (CDC 3.1) ;
     # ce n'est pas un champ du modèle, il est retiré dans validate().
     otp_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -46,6 +65,42 @@ class UserSerializer(serializers.ModelSerializer):
             'password': {'write_only': True},  # Sécurité : ne jamais renvoyer le mot de passe
             'phone_verified': {'read_only': True},
         }
+        list_serializer_class = UserListSerializer
+
+    # Noms de ville et de commune : lus par lot dans le catalogue (plus de jointure ORM).
+    CATALOG_CONTEXT_KEY = 'identity_catalog'
+
+    @classmethod
+    def preload(cls, users, context):
+        context[cls.CATALOG_CONTEXT_KEY] = {
+            'cities': catalog_services.get_cities_by_ids(u.city_id for u in users if u.city_id),
+            'communes': catalog_services.get_communes_by_ids(u.commune_id for u in users if u.commune_id),
+        }
+
+    def _catalog(self, obj):
+        cache = self.context.get(self.CATALOG_CONTEXT_KEY)
+        if cache is None:
+            self.preload([obj], self.context)
+            cache = self.context[self.CATALOG_CONTEXT_KEY]
+        return cache
+
+    def get_ville_name(self, obj):
+        city = self._catalog(obj)['cities'].get(obj.city_id)
+        return city.name if city else None
+
+    def get_commune_name(self, obj):
+        commune = self._catalog(obj)['communes'].get(obj.commune_id)
+        return commune.name if commune else None
+
+    def validate_ville(self, value):
+        if value is not None and not catalog_services.city_exists(value):
+            raise serializers.ValidationError("Ville introuvable.")
+        return value
+
+    def validate_commune(self, value):
+        if value is not None and not catalog_services.commune_exists(value):
+            raise serializers.ValidationError("Commune introuvable.")
+        return value
 
     def validate(self, attrs):
         """Si un téléphone est fourni (à la création ou pour le changer), il doit
@@ -84,7 +139,10 @@ class UserSerializer(serializers.ModelSerializer):
             user.save(update_fields=['phone_verified'])
 
         if user.user_type == 'ENTREPRISE' and business_data:
-            BusinessProfile.objects.create(user=user, **business_data)
+            category_ids = business_data.pop('category_ids', None)
+            profile = BusinessProfile.objects.create(user=user, **business_data)
+            if category_ids:
+                profile.set_category_ids(category_ids)
 
         return user
 
@@ -102,12 +160,15 @@ class UserSerializer(serializers.ModelSerializer):
 
         # Mise à jour Profil
         if instance.user_type == 'ENTREPRISE' and business_data:
+            category_ids = business_data.pop('category_ids', None)
             business_profile, _ = BusinessProfile.objects.get_or_create(user=instance)
             for attr, value in business_data.items():
                 # Si value est None ou vide et que c'est une image,
                 # on vérifie si on veut vraiment l'écraser
                 setattr(business_profile, attr, value)
             business_profile.save()
+            if category_ids is not None:
+                business_profile.set_category_ids(category_ids)
 
         return instance
 

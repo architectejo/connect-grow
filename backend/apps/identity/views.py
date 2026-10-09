@@ -52,7 +52,11 @@ class BusinessListView(generics.ListAPIView):
     def get_queryset(self):
         from django.db.models import Q
         # On ne récupère que les utilisateurs de type ENTREPRISE
-        queryset = User.objects.filter(user_type='ENTREPRISE').select_related('business_profile', 'commune', 'ville')
+        queryset = (
+            User.objects.filter(user_type='ENTREPRISE')
+            .select_related('business_profile')
+            .prefetch_related('business_profile__category_links')
+        )
 
         search = self.request.query_params.get('search')
         if search:

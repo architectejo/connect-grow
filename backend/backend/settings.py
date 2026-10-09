@@ -40,8 +40,11 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     
-    # Applications locales
-    'apps.accounts',
+    # Applications locales. `identity` précède `catalog` (ForbiddenItem.added_by -> utilisateur) :
+    # l'ordre garde un seul 0001_initial par app à la génération des migrations.
+    'apps.common',
+    'apps.identity',
+    'apps.catalog',
     'apps.marketplace',
     'apps.payments',
     'apps.interactions',
@@ -181,7 +184,7 @@ if not DEBUG:
     SECURE_SSL_REDIRECT = True
 
 # --- AUTRES CONFIGURATIONS ---
-AUTH_USER_MODEL = 'accounts.User'
+AUTH_USER_MODEL = 'identity.User'
 ASGI_APPLICATION = 'backend.asgi.application'
 
 # CDC 5.5 : une seule instance Daphne avec channel layer en mémoire suffit tant qu'il n'y a
@@ -200,7 +203,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # CDC 4.2 / 5.8 : pièces KYC dans un espace privé, jamais sous MEDIA_ROOT (qui est
 # servi publiquement par Nginx/le helper static() en dev). Accès uniquement via une
-# vue authentifiée réservée aux administrateurs (apps.accounts).
+# vue authentifiée réservée aux administrateurs (apps.identity).
 KYC_PRIVATE_ROOT = BASE_DIR / 'private_media' / 'kyc'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

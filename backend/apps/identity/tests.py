@@ -6,6 +6,10 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+import uuid
+
+from apps.catalog.models import Category, City, Commune
+
 from .models import BusinessProfile, KycDocument, OtpCode, User
 
 
@@ -225,3 +229,77 @@ class OtpCleanupCommandTests(TestCase):
 
         self.assertFalse(OtpCode.objects.filter(pk=expired.pk).exists())
         self.assertTrue(OtpCode.objects.filter(pk=valid.pk).exists())
+
+
+class UuidAndCatalogReferenceTests(APITestCase):
+    """ADR 0002 : clés UUID, localisation et catégories référencées par UUID."""
+
+    def setUp(self):
+        self.city = City.objects.create(name='Kinshasa')
+        self.commune = Commune.objects.create(city=self.city, name='Gombe')
+        self.category = Category.objects.create(name='Mode', slug='mode')
+
+    def register(self, **extra):
+        data = {'email': 'alice@example.com', 'password': 'un-mot-de-passe-solide', 'full_name': 'Alice'}
+        data.update(extra)
+        return self.client.post(reverse('register'), data, format='json')
+
+    def test_user_id_is_uuid_string_in_api(self):
+        response = self.register()
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertIsInstance(uuid.UUID(response.data['id']), uuid.UUID)
+
+    def test_register_with_city_and_commune_returns_names(self):
+        response = self.register(ville=str(self.city.id), commune=str(self.commune.id))
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data['ville'], str(self.city.id))
+        self.assertEqual(response.data['ville_name'], 'Kinshasa')
+        self.assertEqual(response.data['commune_name'], 'Gombe')
+        self.assertEqual(User.objects.get(email='alice@example.com').city_id, self.city.id)
+
+    def test_register_rejects_unknown_or_malformed_city(self):
+        self.assertEqual(self.register(ville=str(uuid.uuid4())).status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.register(ville='12').status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.register(commune=str(uuid.uuid4())).status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_business_categories_stored_as_uuid_and_validated(self):
+        response = self.register(
+            user_type='ENTREPRISE',
+            business_profile={'business_name': 'Chez Alice', 'categories': [str(self.category.id)]},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data['business_profile']['categories'], [str(self.category.id)])
+        profile = BusinessProfile.objects.get(business_name='Chez Alice')
+        self.assertEqual(profile.category_ids, [self.category.id])
+
+        bad = self.register(
+            email='bob@example.com', user_type='ENTREPRISE',
+            business_profile={'business_name': 'Chez Bob', 'categories': [str(uuid.uuid4())]},
+        )
+        self.assertEqual(bad.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_business_list_has_no_query_per_user_for_catalog(self):
+        for i in range(3):
+            user = User.objects.create_user(
+                email=f'b{i}@example.com', password='x', full_name=f'B{i}', user_type='ENTREPRISE',
+                city_id=self.city.id, commune_id=self.commune.id,
+            )
+            profile = BusinessProfile.objects.create(user=user, business_name=f'Boutique {i}')
+            profile.set_category_ids([self.category.id])
+        with self.assertNumQueries(4):  # utilisateurs, catégories, villes, communes : indépendant du nombre de profils
+            response = self.client.get(reverse('business_list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data[0]['ville_name'], 'Kinshasa')
+
+    def test_kyc_urls_use_uuid(self):
+        admin = User.objects.create_user(email='admin@example.com', password='x', full_name='Admin', is_staff=True)
+        self.client.force_authenticate(admin)
+        response = self.client.post(
+            reverse('kyc_decision', args=[uuid.uuid4()]), {'decision': 'VALIDE'}, format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        # Un identifiant entier ne correspond plus à aucune route.
+        self.assertEqual(
+            self.client.post('/api/accounts/kyc/documents/1/decision/', {'decision': 'VALIDE'}).status_code,
+            status.HTTP_404_NOT_FOUND,
+        )

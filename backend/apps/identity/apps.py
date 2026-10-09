@@ -1,6 +1,7 @@
 from django.apps import AppConfig
 
 
-class AccountsConfig(AppConfig):
+class IdentityConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'apps.accounts'
+    name = 'apps.identity'
+    label = 'identity'

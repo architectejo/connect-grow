@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import BusinessProfile, KycDocument, OtpCode, User
+from .models import BusinessProfile, BusinessProfileCategory, KycDocument, OtpCode, User
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
@@ -7,11 +7,16 @@ class UserAdmin(admin.ModelAdmin):
     list_filter = ('user_type', 'is_staff', 'phone_verified')
     search_fields = ('email', 'phone', 'full_name')
 
+class BusinessProfileCategoryInline(admin.TabularInline):
+    model = BusinessProfileCategory
+    extra = 0
+
+
 @admin.register(BusinessProfile)
 class BusinessProfileAdmin(admin.ModelAdmin):
     list_display = ('business_name', 'user', 'is_verified')
     list_filter = ('is_verified',)
-    filter_horizontal = ('categories',) # Interface pratique pour choisir plusieurs catégories
+    inlines = [BusinessProfileCategoryInline]
 
 @admin.register(KycDocument)
 class KycDocumentAdmin(admin.ModelAdmin):

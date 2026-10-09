@@ -9,7 +9,7 @@ import logging
 
 from django.conf import settings
 
-logger = logging.getLogger('apps.accounts.sms')
+logger = logging.getLogger('apps.identity.sms')
 
 
 def send_otp_sms(phone: str, code: str, purpose: str) -> None:

@@ -17,7 +17,7 @@ from django.db.models import Count, F, Q, Sum
 from django.utils import timezone
 
 from apps.common.contexts import CONTEXT_USER
-from apps.common.utils import parse_uuid
+from apps.common.utils import parse_uuid, seconds_until_next_day
 from apps.identity import services as identity_services
 from apps.marketplace import services as marketplace_services
 from apps.moderation import services as moderation_services
@@ -32,11 +32,12 @@ HTTP_FORBIDDEN, HTTP_NOT_FOUND, HTTP_CONFLICT, HTTP_TOO_MANY = 403, 404, 409, 42
 class ReviewError(Exception):
     """Refus métier : message en français, code machine stable et statut HTTP suggéré."""
 
-    def __init__(self, message, code, status_code=HTTP_FORBIDDEN):
+    def __init__(self, message, code, status_code=HTTP_FORBIDDEN, wait=None):
         super().__init__(message)
         self.message = message
         self.code = code
         self.status_code = status_code
+        self.wait = wait  # secondes avant de pouvoir réessayer (en-tête Retry-After des 429)
 
 
 NOT_ELIGIBLE_MESSAGE = "Vous pourrez donner votre avis après avoir contacté le vendeur."
@@ -303,7 +304,8 @@ def reserve_daily_slot(user) -> None:
     ReviewDailyCount.objects.get_or_create(user=user, date=today)
     reserved = ReviewDailyCount.objects.filter(user=user, date=today, count__lt=limit).update(count=F('count') + 1)
     if not reserved:
-        raise ReviewError(f"Vous avez atteint la limite de {limit} avis par jour.", 'daily_limit', HTTP_TOO_MANY)
+        raise ReviewError(f"Vous avez atteint la limite de {limit} avis par jour.", 'daily_limit', HTTP_TOO_MANY,
+                          wait=seconds_until_next_day())
 
 
 def create_review(user, *, offer_id, offer_rating, seller_rating, content) -> Review:

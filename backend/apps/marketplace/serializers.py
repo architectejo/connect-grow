@@ -231,7 +231,7 @@ class FavoriteSerializer(serializers.ModelSerializer):
     # Clés JSON `post` / `post_id` conservées jusqu'à L0-11.
     post = OfferSerializer(source='offer', read_only=True)
     post_id = serializers.PrimaryKeyRelatedField(
-        source='offer', queryset=Offer.objects.filter(is_deleted=False, is_active=True), write_only=True,
+        source='offer', queryset=Offer.objects.filter(is_deleted=False, is_active=True, seller__is_active=True), write_only=True,
     )
 
     class Meta:

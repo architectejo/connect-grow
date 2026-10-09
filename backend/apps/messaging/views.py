@@ -1,3 +1,4 @@
+from django.db import models
 from django.db.models import OuterRef, Subquery
 from rest_framework import permissions, viewsets
 
@@ -24,9 +25,9 @@ class ConversationViewSet(viewsets.ReadOnlyModelViewSet):
             .prefetch_related('participants')
             .annotate(
                 last_message_content=Subquery(last.values('content')[:1]),
-                last_message_at=Subquery(last.values('created_at')[:1]),
+                last_message_at=Subquery(last.values('created_at')[:1], output_field=models.DateTimeField()),
                 last_message_is_read=Subquery(last.values('is_read')[:1]),
-                last_message_sender_id=Subquery(last.values('sender_id')[:1]),
+                last_message_sender_id=Subquery(last.values('sender_id')[:1], output_field=models.UUIDField()),
             )
             .order_by('-updated_at')
         )

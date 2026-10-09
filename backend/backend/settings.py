@@ -277,6 +277,24 @@ LANGUAGE_CODE = 'fr'  # messages de validation Django en français
 TIME_ZONE = 'Africa/Kinshasa'
 USE_TZ = True
 
+# --- Journalisation ---
+# En développement (DEBUG=True), le code OTP « envoyé » est affiché en console (apps/identity/sms.py,
+# aucun fournisseur SMS branché). Hors DEBUG, le niveau reste à WARNING pour ce logger et le code
+# n'est de toute façon jamais journalisé : la passerelle lève une erreur sans l'écrire.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {'simple': {'format': '%(levelname)s %(name)s : %(message)s'}},
+    'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'simple'}},
+    'loggers': {
+        'apps.identity.sms': {
+            'handlers': ['console'],
+            'level': 'INFO' if DEBUG else 'WARNING',
+            'propagate': False,
+        },
+    },
+}
+
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 10}},

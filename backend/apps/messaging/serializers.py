@@ -1,3 +1,5 @@
+import uuid
+
 from rest_framework import serializers
 
 from apps.common.serializers import PreloadingListSerializer
@@ -6,6 +8,18 @@ from apps.marketplace import services as marketplace_services
 from .models import Conversation, Message
 
 MESSAGE_MAX_LENGTH = 2000
+
+_DATETIME_FIELD = serializers.DateTimeField()
+
+
+def _api_datetime(value):
+    """Date au format du reste de l'API (ISO 8601, fuseau local avec décalage, jamais `Z`)."""
+    return _DATETIME_FIELD.to_representation(value) if value is not None else None
+
+
+def _api_uuid(value):
+    """UUID canonique (avec tirets), y compris quand la base renvoie sa forme hexadécimale."""
+    return str(uuid.UUID(str(value))) if value is not None else None
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -87,17 +101,17 @@ class ConversationSerializer(serializers.ModelSerializer):
                 return None
             return {
                 'content': obj.last_message_content,
-                'created_at': obj.last_message_at,
+                'created_at': _api_datetime(obj.last_message_at),
                 'is_read': obj.last_message_is_read,
-                'sender_id': obj.last_message_sender_id,
+                'sender_id': _api_uuid(obj.last_message_sender_id),
             }
         last_msg = obj.messages.order_by('-created_at').first()
         if last_msg:
             return {
                 'content': last_msg.content,
-                'created_at': last_msg.created_at,
+                'created_at': _api_datetime(last_msg.created_at),
                 'is_read': last_msg.is_read,
-                'sender_id': last_msg.sender_id,
+                'sender_id': _api_uuid(last_msg.sender_id),
             }
         return None
 

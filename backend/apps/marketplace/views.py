@@ -14,6 +14,7 @@ from apps.catalog import services as catalog_services
 from apps.common.images import validate_image_pixels, validate_image_upload_size
 from apps.common.pagination import OptionalPagination
 from apps.common.throttles import ActionScopedThrottleMixin, AnonymousOrUserScopedThrottle, AnonymousScopedThrottle
+from apps.moderation.permissions import can_moderate
 from apps.moderation.services import record_audit
 from apps.common.utils import parse_uuid
 from apps.visibility import services as visibility_services
@@ -94,7 +95,8 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
             ordering = '-visibility_score'
 
         # Par défaut (Marketplace), on ne montre que ce qui n'est pas supprimé et actif
-        queryset = Offer.objects.filter(is_active=True, is_deleted=False)
+        # Les offres d'un vendeur suspendu ou banni (compte inactif) ne sont plus publiques.
+        queryset = Offer.objects.filter(is_active=True, is_deleted=False, seller__is_active=True)
 
         # Filtre pour récupérer les offres de l'utilisateur connecté
         my_offers = self.request.query_params.get('my_posts')
@@ -102,9 +104,11 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
             # Le vendeur retrouve toutes ses offres (pause, vendue, expirée, masquée par la
             # modération, corbeille) ; le public et les tiers restent limités aux offres actives.
             # Même requête SQL : seule la clause WHERE change.
-            queryset = Offer.objects.filter(
-                Q(is_active=True, is_deleted=False) | Q(seller=self.request.user)
-            )
+            visible = Q(is_active=True, is_deleted=False, seller__is_active=True) | Q(seller=self.request.user)
+            if can_moderate(self.request.user):
+                # La modération consulte aussi les offres d'un vendeur sanctionné.
+                visible |= Q(is_active=True, is_deleted=False)
+            queryset = Offer.objects.filter(visible)
         elif my_offers == 'true' and self.request.user.is_authenticated:
             queryset = Offer.objects.filter(seller=self.request.user, is_deleted=False)
         elif self.action == 'list':
@@ -341,7 +345,9 @@ class FavoriteViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
         )
         if self.action == 'list':
             # Les offres masquées, en pause, vendues ou en corbeille ne sont plus montrées.
-            queryset = queryset.filter(offer__is_active=True, offer__is_deleted=False)
+            queryset = queryset.filter(
+                offer__is_active=True, offer__is_deleted=False, offer__seller__is_active=True,
+            )
         return queryset
 
     def perform_create(self, serializer):

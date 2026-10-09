@@ -393,7 +393,7 @@ def toggle_favorite(user, offer: Offer) -> bool:
 def ensure_available(offer: Offer) -> None:
     """Une offre masquée, en pause, vendue, expirée ou supprimée n'accepte ni contact, ni
     échange, ni favori."""
-    if not offer.is_active or offer.is_deleted:
+    if not offer.is_active or offer.is_deleted or not offer.seller.is_active:
         raise MarketplaceError("Cette annonce n'est plus disponible.")
 
 

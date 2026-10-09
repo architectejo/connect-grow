@@ -6,14 +6,12 @@ Trois familles :
   12 (journal d'audit) ;
 - outbox (ADR 0003) : diffusion, idempotence, panne d'un abonné, relance, purge.
 
-Les tests marqués `expectedFailure` documentent une anomalie ouverte (identifiant « R0-xx » du rapport
-de recette) : ils passeront en « succès inattendu » une fois l'anomalie corrigée, ce qui signale qu'il
-faut retirer le marqueur.
+Les anomalies « R0-xx » du rapport de recette ont été corrigées en L0-21 : leurs tests sont désormais
+des tests ordinaires, qui verrouillent la correction.
 """
 import io
 import json
 import re
-import unittest
 import uuid
 from datetime import timedelta
 from unittest import mock
@@ -302,7 +300,6 @@ class ContractTests(RecetteBase):
             self.assertEqual(response.json()['code'], 'throttled')
             cache.clear()
 
-    @unittest.expectedFailure
     def test_R0_01_negative_price_is_refused(self):
         """ANOMALIE R0-01 (majeure) : `Offer.price` n'a aucun validateur de minimum ; un prix négatif est
         accepté (201) et publié. Attendu : 400 sur `price`."""
@@ -314,7 +311,6 @@ class ContractTests(RecetteBase):
         }, format='multipart')
         self.assertEqual(response.status_code, 400, response.content[:200])
 
-    @unittest.expectedFailure
     def test_R0_04_negative_stock_is_refused_not_a_server_error(self):
         """ANOMALIE R0-04 (majeure) : `stock` négatif (création ou modification d'offre) déclenche
         `IntegrityError: CHECK constraint failed: stock` donc un HTTP 500. Attendu : 400 sur `stock`."""
@@ -323,7 +319,6 @@ class ContractTests(RecetteBase):
         patched = client.patch(f'{POSTS_URL}{self.offer.id}/', {'stock': '-3'}, format='json')
         self.assertEqual(patched.status_code, 400, patched.status_code)
 
-    @unittest.expectedFailure
     def test_R0_05_login_accepts_the_email_exactly_as_registered(self):
         """ANOMALIE R0-05 (majeure) : l'inscription normalise le domaine de l'e-mail en minuscules
         (`normalize_email`) mais la connexion compare la saisie telle quelle ; le front n'abaisse pas la
@@ -337,14 +332,12 @@ class ContractTests(RecetteBase):
         login = client.post('/api/accounts/login/', {'email': typed, 'password': PASSWORD}, format='json')
         self.assertEqual(login.status_code, 200)
 
-    @unittest.expectedFailure
     def test_R0_05b_same_email_in_another_case_is_a_duplicate(self):
         """ANOMALIE R0-05 (suite) : `BUYER@example.com` est accepté alors que `buyer@example.com` existe."""
         response = APIClient().post('/api/accounts/register/', {
             'full_name': 'Doublon Casse', 'password': PASSWORD, 'email': 'BUYER@example.com'}, format='json')
         self.assertEqual(response.status_code, 400)
 
-    @unittest.expectedFailure
     def test_R0_06_daily_review_limit_429_carries_retry_after(self):
         """ANOMALIE R0-06 (mineure) : le 429 `daily_limit` (et `report_daily_limit`) n'a pas d'en-tête
         Retry-After alors que le front (`review-errors.ts`) prévoit un message avec délai ; la branche
@@ -358,8 +351,8 @@ class ContractTests(RecetteBase):
         limited = client.post(REVIEWS_URL, {'post': str(second.id), **GOOD}, format='json')
         self.assertEqual((limited.status_code, limited.json()['code']), (429, 'daily_limit'))
         self.assertTrue(limited.get('Retry-After', '').isdigit())
+        self.assertTrue(0 < int(limited['Retry-After']) <= 24 * 3600)
 
-    @unittest.expectedFailure
     def test_R0_07_conversation_last_message_uses_canonical_uuid_and_offset_dates(self):
         """ANOMALIE R0-07 (cosmétique) : `last_message.sender_id` est un UUID hexadécimal sans tirets et
         `last_message.created_at` est en UTC (`Z`), alors que partout ailleurs les UUID ont des tirets et les
@@ -741,7 +734,6 @@ class AuditTrailTests(RecetteBase):
         target.refresh_from_db()
         self.assertTrue(target.is_active)
 
-    @unittest.expectedFailure
     def test_R0_03_lifting_one_sanction_keeps_a_user_with_another_active_sanction_blocked(self):
         """ANOMALIE R0-03 (majeure) : `Sanction.lift()` réactive le compte sans regarder les autres sanctions
         actives. Un utilisateur banni puis suspendu, dont on lève la suspension, redevient actif alors que

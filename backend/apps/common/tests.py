@@ -54,6 +54,7 @@ MUST_BE_WALKED = {
     'api/marketplace/stats/dashboard/',
     'api/marketplace/stats/post/<pk>/',
     'api/interactions/reviews/<pk>/reply/',
+    'api/interactions/reviews/eligibility/',
     'api/interactions/contacts/',
     'api/interactions/exchanges/',
     'api/interactions/conversations/',

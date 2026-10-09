@@ -181,14 +181,11 @@ AUTH_USER_MODEL = 'accounts.User'
 ASGI_APPLICATION = 'backend.asgi.application'
 
 # CDC 5.5 : une seule instance Daphne avec channel layer en mémoire suffit tant qu'il n'y a
-# qu'un serveur ; Redis ici sert de base de travail locale, RabbitMQ interviendra seulement
-# au passage à plusieurs instances Daphne (channels_rabbitmq, à valider avant adoption).
+# qu'un serveur ; RabbitMQ interviendra seulement au passage à plusieurs instances Daphne
+# (channels_rabbitmq, à valider avant adoption). Pas de Redis.
 CHANNEL_LAYERS = {
     'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [(os.getenv('REDIS_HOST', '127.0.0.1'), int(os.getenv('REDIS_PORT', 6379)))],
-        },
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
     },
 }
 

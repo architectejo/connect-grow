@@ -9,11 +9,15 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 
 | ID | Tâche | Agents | Statut | Réf. CDC |
 |---|---|---|---|---|
-| L0-01 | Dépôt Git unique à la racine (historique des deux dépôts conservé), puis CI GitHub Actions (tests backend SQLite, lint/test/build front), `.gitignore` vérifié | devops | En cours | §5.11 |
-| L0-02 | SQLite seul : sortir `mysqlclient` de `requirements.txt` vers `requirements-mysql.txt`, retirer les dépendances système MySQL du Dockerfile, archiver `docker-compose.mysql.yml` | devops | À faire | §2.5, ADR 0001 |
-| L0-03 | Supprimer Redis : `CHANNEL_LAYERS` en `InMemoryChannelLayer`, retirer `channels_redis`, le service Redis des compose et les variables `REDIS_*` | dev-temps-reel, devops | À faire | §5.5 |
+| L0-01 | Dépôt Git unique à la racine (historique des deux dépôts conservé), puis CI GitHub Actions (tests backend SQLite, lint/test/build front), `.gitignore` vérifié | devops | Fait sauf `npm run test` du front (aucun test / config Vitest : à corriger par dev-frontend) ; branches `main`, `backend`, `frontend` créées, rien poussé (remote à désigner) | §5.11 |
+| L0-02 | SQLite seul : sortir `mysqlclient` de `requirements.txt` vers `requirements-mysql.txt`, retirer les dépendances système MySQL du Dockerfile, archiver `docker-compose.mysql.yml` | devops | Fait (relu, fusionné dans `backend`, branche `chore/L0-02-sqlite-seul`) | §2.5, ADR 0001 |
+| L0-03 | Supprimer Redis : `CHANNEL_LAYERS` en `InMemoryChannelLayer`, retirer `channels_redis`, le service Redis des compose et les variables `REDIS_*` | dev-temps-reel, devops | Fait (code et compose ; 98 tests verts, relu) | §5.5 |
 | L0-04 | Supprimer le code mort : apps non installées `users`, `offers`, `exchanges`, `chat`, `notifications`, dossier `backend/scratch/`, ancien front `connecte-plus-hub/` (après vérification qu'aucun import n'y renvoie) | architecte-technique (vérif), dev-backend | À faire | — |
-| L0-05 | Décider par ADR de la réinitialisation des migrations (aucune donnée de production) pour passer aux clés UUID et à la structure cible des modules | architecte-technique | En cours (ADR « proposé », décision de l'utilisateur à prendre) | §5.4, §11.1 |
+| L0-05 | Décider par ADR de la réinitialisation des migrations (aucune donnée de production) pour passer aux clés UUID et à la structure cible des modules | architecte-technique | Fait (ADR 0002 accepté ; exécution du reset : voir R1-R3 ci-dessous) | §5.4, §11.1 |
+| L0-05-R1 | Reset R1 : `common`, `identity` (ex-`accounts`), `catalog`, `AUTH_USER_MODEL`, UUID (inclut L0-06). Un seul agent, une seule branche `chore/L0-05-reset-migrations` | dev-backend | À faire (après L0-01) | ADR 0002 |
+| L0-05-R2 | Reset R2 : `marketplace` (`Offer`, `is_deleted`, inclut L0-12 et L0-15), `visibility`, `reviews`, `notifications`, `messaging` | dev-backend | À faire (après R1) | ADR 0002 |
+| L0-05-R3 | Reset R3 : `moderation`, `payments`, cron, `setup_roles`, import-linter, régénération des `0001`, `migrate` sur base vierge | dev-backend | À faire (après R2) | ADR 0002 |
+| L0-05-F1 | Front : ids en `string` (UUID), en parallèle de R1 à R3 | dev-frontend | À faire | ADR 0002 |
 | L0-06 | Créer le module `catalog` (City, Commune, Category, ForbiddenItem) et supprimer les clés étrangères entre domaines (ex. `accounts.User` → `marketplace.City`) | architecte-technique, dev-backend | À faire | §5.3, §5.4 |
 | L0-07 | Retirer le Trust Score : `User.trust_score`, `TrustScoreSettings`, facteur de confiance de `ranking`, `TrustScore.tsx` et `lib/trust.ts` ; remplacer par note d'offre et note vendeur affichées (moyenne, nombre, ancienneté) | analyste-fonctionnel, architecte-technique, dev-backend, dev-frontend | À faire | §3.4, règle 4 |
 | L0-08 | Remplacer le classement par le score organique P × E × R × D, sans note ; pondérations en base | dev-backend | À faire | §3.5 |
@@ -25,7 +29,7 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 | L0-14 | Troc (`is_exchangeable`, `ExchangeProposal`) : masquer derrière un interrupteur en attendant la confirmation du client | dev-backend, dev-frontend | À faire | §8.3 |
 | L0-15 | Fusionner les doublons `Conversation`/`Message` dans un futur module `messaging` (préparation du lot 2) | architecte-technique | À faire | §3.15 |
 | L0-16 | Table outbox et commande de diffusion des événements de domaine | architecte-technique, dev-backend | À faire | §5.4 |
-| L0-17 | Rattrapage du front (phases 0 à 4, livrées hors circuit) : lint à 0 erreur, audit sécurité, relecture | dev-frontend, auditeur-securite, relecteur-code | En cours | §2.4 (DoD) |
+| L0-17 | Rattrapage du front (phases 0 à 4, livrées hors circuit) : lint à 0 erreur, audit sécurité, relecture | dev-frontend, auditeur-securite, relecteur-code | Fait (lint 0 erreur, 15 tests, build vert, audit corrigé, relu ; reste : test du cache PWA en navigateur en recette ; react-router 7 et Tailwind 4 à valider) | §2.4 (DoD) |
 | L0-18 | Passe finale i18n : sortir les textes en dur des pages du front (à faire après L0-07, L0-09 et L0-14, qui réécrivent plusieurs écrans) | dev-frontend | À faire | §4.6 |
 
 ## Lot 1 — Visibilité

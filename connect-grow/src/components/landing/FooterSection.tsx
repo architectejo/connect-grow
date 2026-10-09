@@ -1,58 +1,66 @@
 import { Link } from "react-router-dom";
+import { Logo } from "@/components/layout/Logo";
 
-const FooterSection = () => {
-  return (
-    <footer className="bg-foreground py-16">
-      <div className="container mx-auto px-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-10">
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center">
-                <span className="text-primary-foreground font-bold text-sm">C+</span>
-              </div>
-              <span className="text-xl font-bold text-background">Connecte<span className="text-primary">+</span></span>
-            </div>
-            <p className="text-sm text-background/50">
-              La place de marché locale qui connecte les communautés.
-            </p>
-          </div>
+const columns = [
+  {
+    title: "Marketplace",
+    links: [
+      { label: "Toutes les annonces", to: "/marketplace" },
+      { label: "Annonces échangeables", to: "/marketplace?is_exchangeable=true" },
+      { label: "Entreprises", to: "/businesses" },
+      { label: "Publier une annonce", to: "/create-post" },
+    ],
+  },
+  {
+    title: "Aide",
+    links: [
+      { label: "Comment ça marche", to: "/#comment-ca-marche" },
+      { label: "Pourquoi nous faire confiance", to: "/#confiance" },
+    ],
+  },
+];
 
-          {[
-            {
-              title: "Plateforme",
-              links: ["Vendre", "Acheter", "Échanger", "Événements"],
-            },
-            {
-              title: "Entreprise",
-              links: ["À propos", "Contact", "Carrières", "Presse"],
-            },
-            {
-              title: "Légal",
-              links: ["CGU", "Confidentialité", "Cookies", "Mentions légales"],
-            },
-          ].map((col) => (
-            <div key={col.title}>
-              <h4 className="text-sm font-semibold text-background mb-4">{col.title}</h4>
-              <ul className="space-y-2">
-                {col.links.map((link) => (
-                  <li key={link}>
-                    <a href="#" className="text-sm text-background/50 hover:text-background transition-colors">
-                      {link}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+// Documents légaux en cours de rédaction (CDC 11.3) : affichés sans lien tant qu'ils n'existent pas.
+const legal = ["Conditions d'utilisation", "Confidentialité"];
+
+const FooterSection = () => (
+  <footer className="border-t bg-card">
+    <div className="container py-12 md:py-16">
+      <div className="grid gap-10 md:grid-cols-[1.4fr_1fr_1fr]">
+        <div className="space-y-4">
+          <Logo />
+          <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
+            La marketplace de confiance pour acheter, vendre et échanger près de chez vous, à Kinshasa.
+          </p>
         </div>
 
-        <div className="mt-12 pt-8 border-t border-background/10 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-sm text-background/40">© 2026 Connecte+. Tous droits réservés.</p>
-          <p className="text-sm text-background/40">Paiements sécurisés par Laxpaie</p>
-        </div>
+        {columns.map((column) => (
+          <nav key={column.title} aria-label={column.title}>
+            <h2 className="mb-4 text-xs font-bold uppercase tracking-[0.14em] text-foreground">{column.title}</h2>
+            <ul className="space-y-2.5">
+              {column.links.map((link) => (
+                <li key={link.label}>
+                  <Link to={link.to} className="text-sm text-muted-foreground transition-colors hover:text-primary">
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ))}
       </div>
-    </footer>
-  );
-};
+
+      <div className="mt-12 flex flex-col gap-3 border-t pt-6 text-xs text-muted-foreground md:flex-row md:items-center md:justify-between">
+        <p>© {new Date().getFullYear()} Connecte+. Tous droits réservés.</p>
+        <p className="flex flex-wrap gap-x-4 gap-y-1">
+          {legal.map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+          <span>Réalisé par IMARA TECH Group</span>
+        </p>
+      </div>
+    </div>
+  </footer>
+);
 
 export default FooterSection;

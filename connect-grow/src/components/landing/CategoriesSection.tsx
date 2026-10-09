@@ -1,44 +1,56 @@
-import { Smartphone, Car, Home, Shirt, BookOpen, Wrench, Dumbbell, Utensils } from "lucide-react";
+import { Link } from "react-router-dom";
+import { ArrowRight } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useCategories } from "@/hooks/use-marketplace";
+import { categoryIcon } from "@/lib/category-icons";
 
-const categories = [
-  { icon: Smartphone, label: "Électronique", count: 1240 },
-  { icon: Car, label: "Véhicules", count: 856 },
-  { icon: Home, label: "Immobilier", count: 432 },
-  { icon: Shirt, label: "Mode", count: 2100 },
-  { icon: BookOpen, label: "Éducation", count: 680 },
-  { icon: Wrench, label: "Services", count: 945 },
-  { icon: Dumbbell, label: "Sport", count: 520 },
-  { icon: Utensils, label: "Alimentation", count: 1380 },
-];
-
+/** Accès direct aux catégories gérées dans le back-office. */
 const CategoriesSection = () => {
+  const { data: categories = [], isLoading, isError } = useCategories();
+
+  if (isError || (!isLoading && categories.length === 0)) return null;
+
   return (
-    <section id="categories" className="py-24 bg-background">
-      <div className="container mx-auto px-4">
-        <div className="text-center max-w-xl mx-auto mb-16">
-          <p className="text-sm font-medium text-primary uppercase tracking-wider mb-3">Catégories</p>
-          <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-            Explorez par secteur
-          </h2>
-          <p className="text-muted-foreground">
-            Des milliers d'offres organisées par catégorie pour trouver exactement ce que vous cherchez.
-          </p>
+    <section id="categories" className="py-12 md:py-16">
+      <div className="container">
+        <div className="mb-6 flex items-end justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Catégories</p>
+            <h2 className="mt-1.5 text-2xl font-extrabold md:text-3xl">Que cherchez-vous ?</h2>
+          </div>
+          <Link
+            to="/marketplace"
+            className="hidden items-center gap-1 text-sm font-semibold text-primary hover:underline sm:inline-flex"
+          >
+            Tout voir <ArrowRight className="h-4 w-4" aria-hidden />
+          </Link>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {categories.map((cat) => (
-            <button
-              key={cat.label}
-              className="group flex flex-col items-center gap-3 p-6 rounded-xl bg-card border border-border hover:border-primary/30 transition-all duration-300 shadow-card hover:shadow-lg"
-            >
-              <div className="w-14 h-14 rounded-xl bg-muted group-hover:gradient-primary flex items-center justify-center transition-all">
-                <cat.icon size={24} className="text-muted-foreground group-hover:text-primary-foreground transition-colors" />
-              </div>
-              <span className="text-sm font-medium text-foreground">{cat.label}</span>
-              <span className="text-xs text-muted-foreground">{cat.count.toLocaleString()} annonces</span>
-            </button>
-          ))}
-        </div>
+        {/* Défilement horizontal sur mobile, grille sur grand écran */}
+        <ul className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 scrollbar-none md:mx-0 md:grid md:grid-cols-4 md:overflow-visible md:px-0 lg:grid-cols-8">
+          {isLoading
+            ? Array.from({ length: 8 }, (_, i) => (
+                <li key={i} className="shrink-0">
+                  <Skeleton className="h-28 w-28 rounded-2xl md:w-full" />
+                </li>
+              ))
+            : categories.map((category) => {
+                const Icon = categoryIcon(category);
+                return (
+                  <li key={category.id} className="shrink-0 snap-start">
+                    <Link
+                      to={`/marketplace?category=${category.id}`}
+                      className="group flex h-28 w-28 flex-col items-center justify-center gap-2.5 rounded-2xl border bg-card p-3 text-center shadow-soft transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-card md:w-full"
+                    >
+                      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:gradient-primary group-hover:text-primary-foreground">
+                        <Icon className="h-5 w-5" aria-hidden />
+                      </span>
+                      <span className="line-clamp-2 text-xs font-semibold leading-tight text-foreground">{category.name}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+        </ul>
       </div>
     </section>
   );

@@ -1,113 +1,168 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Controller, useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { Loader2, Mail, Smartphone } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Mail, Lock, Eye, EyeOff } from "lucide-react";
+import { AuthLayout } from "@/components/auth/AuthLayout";
+import { errorProps, Field, fieldInputClass, FormAlert, MethodToggle, PasswordInput, PhoneInput } from "@/components/auth/FormFields";
+import { useAuth } from "@/contexts/AuthContext";
+import { safeNext } from "@/lib/auth-paths";
+import { emailSchema, localPhoneSchema, parseApiErrors, toE164 } from "@/lib/validation";
+
+type Method = "phone" | "email";
+
+const schema = z
+  .object({
+    method: z.enum(["phone", "email"]),
+    phone: z.string(),
+    email: z.string(),
+    password: z.string().min(1, "Saisissez votre mot de passe."),
+  })
+  .superRefine((values, ctx) => {
+    const result = values.method === "phone" ? localPhoneSchema.safeParse(values.phone) : emailSchema.safeParse(values.email);
+    if (!result.success) ctx.addIssue({ code: "custom", path: [values.method], message: result.error.issues[0].message });
+  });
+
+type FormValues = z.infer<typeof schema>;
+
+const methods = [
+  { value: "phone" as const, label: "Téléphone", icon: Smartphone },
+  { value: "email" as const, label: "E-mail", icon: Mail },
+];
 
 const Login = () => {
-  const [showPassword, setShowPassword] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const next = safeNext(searchParams.get("next"));
+  const { login, isAuthenticated } = useAuth();
+  const [generalError, setGeneralError] = useState<string>();
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    // TODO: integrate with Lovable Cloud auth
+  const {
+    register,
+    control,
+    handleSubmit,
+    watch,
+    setValue,
+    formState: { errors, isSubmitting },
+  } = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: { method: "phone", phone: "", email: "", password: "" },
+  });
+  const method = watch("method");
+  const password = watch("password");
+
+  useEffect(() => {
+    if (isAuthenticated) navigate(next, { replace: true });
+  }, [isAuthenticated, navigate, next]);
+
+  const onSubmit = async (values: FormValues) => {
+    setGeneralError(undefined);
+    try {
+      const user = await login(
+        values.method === "phone"
+          ? { phone: toE164(values.phone), password: values.password }
+          : { email: values.email.trim(), password: values.password },
+      );
+      toast.success(`Bon retour, ${user.full_name.split(" ")[0]} !`);
+      navigate(next, { replace: true });
+    } catch (error) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      setGeneralError(
+        status === 401
+          ? "Identifiant ou mot de passe incorrect."
+          : parseApiErrors(error).general ?? "Connexion impossible pour le moment. Réessayez.",
+      );
+    }
   };
 
   return (
-    <div className="min-h-screen flex">
-      <div className="hidden lg:flex flex-1 gradient-hero items-center justify-center p-12">
-        <div className="max-w-md space-y-6">
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-lg gradient-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold">C+</span>
-            </div>
-            <span className="text-2xl font-bold text-primary-foreground">Connecte<span className="text-accent">+</span></span>
-          </div>
-          <h2 className="text-3xl font-bold text-primary-foreground">
-            Bon retour parmi nous
-          </h2>
-          <p className="text-primary-foreground/60">
-            Retrouvez votre communauté locale, gérez vos ventes et suivez vos performances.
-          </p>
-        </div>
-      </div>
+    <AuthLayout
+      title="Bon retour parmi nous"
+      description="Connectez-vous pour contacter les vendeurs, enregistrer vos favoris et publier."
+      footer={
+        <>
+          Pas encore de compte ?{" "}
+          <Link to={`/register${next !== "/dashboard" ? `?next=${encodeURIComponent(next)}` : ""}`} className="font-semibold text-primary hover:underline">
+            Créer un compte
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
+        <MethodToggle<Method>
+          label="Se connecter avec"
+          value={method}
+          onChange={(value) => {
+            setValue("method", value);
+            setGeneralError(undefined);
+          }}
+          options={methods}
+        />
 
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="w-full max-w-md space-y-8">
-          <div className="lg:hidden flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">C+</span>
-            </div>
-            <span className="text-xl font-bold text-foreground">Connecte<span className="text-primary">+</span></span>
-          </div>
-
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Connexion</h1>
-            <p className="text-muted-foreground mt-1">Entrez vos identifiants pour accéder à votre espace</p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <div className="relative">
-                <Mail size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="vous@exemple.com"
-                  className="pl-10"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+        {method === "phone" ? (
+          <Field label="Numéro de téléphone" htmlFor="phone" error={errors.phone?.message}>
+            <Controller
+              control={control}
+              name="phone"
+              render={({ field }) => (
+                <PhoneInput
+                  id="phone"
+                  value={field.value}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  invalid={!!errors.phone}
+                  autoFocus
+                  {...errorProps("phone", errors.phone?.message)}
                 />
-              </div>
-            </div>
+              )}
+            />
+          </Field>
+        ) : (
+          <Field label="Adresse e-mail" htmlFor="email" error={errors.email?.message}>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              placeholder="nom@exemple.com"
+              className={fieldInputClass}
+              autoFocus
+              {...errorProps("email", errors.email?.message)}
+              {...register("email")}
+            />
+          </Field>
+        )}
 
-            <div className="space-y-2">
-              <Label htmlFor="password">Mot de passe</Label>
-              <div className="relative">
-                <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="••••••••"
-                  className="pl-10 pr-10"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between text-sm">
-              <label className="flex items-center gap-2 text-muted-foreground">
-                <input type="checkbox" className="rounded border-border" />
-                Se souvenir de moi
-              </label>
-              <a href="#" className="text-primary hover:underline">Mot de passe oublié ?</a>
-            </div>
-
-            <Button type="submit" className="w-full shadow-primary-glow" size="lg">
-              Se connecter
-            </Button>
-          </form>
-
-          <p className="text-center text-sm text-muted-foreground">
-            Pas encore de compte ?{" "}
-            <Link to="/register" className="text-primary font-medium hover:underline">
-              Créer un compte
+        <Field
+          label="Mot de passe"
+          htmlFor="password"
+          error={errors.password?.message}
+          aside={
+            <Link to="/forgot-password" className="text-sm font-semibold text-primary hover:underline">
+              Mot de passe oublié ?
             </Link>
-          </p>
-        </div>
-      </div>
-    </div>
+          }
+        >
+          <PasswordInput
+            id="password"
+            autoComplete="current-password"
+            value={password}
+            {...errorProps("password", errors.password?.message)}
+            {...register("password")}
+          />
+        </Field>
+
+        <FormAlert message={generalError} />
+
+        <Button type="submit" size="lg" className="w-full shadow-glow" disabled={isSubmitting}>
+          {isSubmitting && <Loader2 className="animate-spin" aria-hidden />}
+          Se connecter
+        </Button>
+      </form>
+    </AuthLayout>
   );
 };
 

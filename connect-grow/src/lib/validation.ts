@@ -1,4 +1,6 @@
 import { z } from "zod";
+import i18n from "@/i18n";
+import { rateLimitMessage } from "@/lib/errors";
 
 // Numéros congolais : +243 suivi de 9 chiffres (CDC 2.3), ex. +243 81 234 5678.
 export const PHONE_PREFIX = "+243";
@@ -51,19 +53,27 @@ export function passwordStrength(password: string): 0 | 1 | 2 | 3 | 4 {
  */
 export function parseApiErrors(error: unknown): { fields: Record<string, string>; general?: string } {
   const response = (error as { response?: { data?: unknown; status?: number } })?.response;
-  if (!response) return { fields: {}, general: "Connexion impossible. Vérifiez votre réseau puis réessayez." };
-  if (response.status === 429) return { fields: {}, general: "Trop de tentatives. Patientez un peu avant de réessayer." };
+  if (!response) return { fields: {}, general: i18n.t("errors.network") };
+  if (response.status === 429) return { fields: {}, general: rateLimitMessage(error) };
 
   const data = response.data;
-  if (!data || typeof data !== "object") return { fields: {}, general: "Une erreur est survenue. Réessayez." };
+  if (!data || typeof data !== "object") return { fields: {}, general: i18n.t("errors.generic") };
 
   const fields: Record<string, string> = {};
   let general: string | undefined;
-  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-    const message = Array.isArray(value) ? String(value[0]) : typeof value === "string" ? value : undefined;
-    if (!message) continue;
-    if (key === "non_field_errors" || key === "detail" || key === "error") general = message;
-    else fields[key] = message;
-  }
+  const collect = (record: Record<string, unknown>) => {
+    for (const [key, value] of Object.entries(record)) {
+      // Profil imbriqué ({ business_profile: { logo: [...] } }) : les erreurs sont ramenées au nom du champ
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        collect(value as Record<string, unknown>);
+        continue;
+      }
+      const message = Array.isArray(value) ? (value.length ? String(value[0]) : undefined) : typeof value === "string" ? value : undefined;
+      if (!message) continue;
+      if (key === "non_field_errors" || key === "detail" || key === "error") general ??= message;
+      else fields[key] ??= message;
+    }
+  };
+  collect(data as Record<string, unknown>);
   return { fields, general };
 }

@@ -1,23 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import apiClient, { unwrapList } from "@/api/client";
-import type { Review } from "@/api/types";
+import type { Review, Uuid } from "@/api/types";
+import { apiErrorMessage } from "@/lib/errors";
 
 export const reviewKeys = {
-  forPost: (postId: string | number) => ["reviews", "post", String(postId)] as const,
+  forPost: (postId: Uuid) => ["reviews", "post", postId] as const,
 };
 
-/** Premier message d'erreur lisible d'une réponse DRF. */
-export function apiErrorMessage(error: unknown, fallback = "Une erreur est survenue."): string {
-  const data = (error as { response?: { data?: unknown } })?.response?.data;
-  if (!data || typeof data !== "object") return fallback;
-  const record = data as Record<string, unknown>;
-  const first = record.non_field_errors ?? record.detail ?? record.error ?? Object.values(record)[0];
-  if (Array.isArray(first)) return String(first[0]);
-  return typeof first === "string" ? first : fallback;
-}
-
-export function useReviews(postId?: string | number) {
+export function useReviews(postId?: Uuid) {
   return useQuery({
     queryKey: reviewKeys.forPost(postId ?? ""),
     queryFn: async () => unwrapList<Review>((await apiClient.get("interactions/reviews/", { params: { post: postId } })).data),
@@ -26,7 +17,7 @@ export function useReviews(postId?: string | number) {
 }
 
 /** Création, modification, suppression et réponse du vendeur, avec rafraîchissement de la liste. */
-export function useReviewMutations(postId: string | number) {
+export function useReviewMutations(postId: Uuid) {
   const queryClient = useQueryClient();
   const key = reviewKeys.forPost(postId);
   const update = (fn: (reviews: Review[]) => Review[]) =>
@@ -44,7 +35,7 @@ export function useReviewMutations(postId: string | number) {
   });
 
   const edit = useMutation({
-    mutationFn: async ({ id, ...input }: { id: number; content: string; rating: number }) =>
+    mutationFn: async ({ id, ...input }: { id: Uuid; content: string; rating: number }) =>
       (await apiClient.patch<Review>(`interactions/reviews/${id}/`, input)).data,
     onSuccess: (review) => {
       update((reviews) => reviews.map((r) => (r.id === review.id ? review : r)));
@@ -54,7 +45,7 @@ export function useReviewMutations(postId: string | number) {
   });
 
   const remove = useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async (id: Uuid) => {
       await apiClient.delete(`interactions/reviews/${id}/`);
       return id;
     },
@@ -66,7 +57,7 @@ export function useReviewMutations(postId: string | number) {
   });
 
   const reply = useMutation({
-    mutationFn: async ({ id, reply_content }: { id: number; reply_content: string }) =>
+    mutationFn: async ({ id, reply_content }: { id: Uuid; reply_content: string }) =>
       (await apiClient.post<Review>(`interactions/reviews/${id}/reply/`, { reply_content })).data,
     onSuccess: (review) => {
       update((reviews) => reviews.map((r) => (r.id === review.id ? review : r)));

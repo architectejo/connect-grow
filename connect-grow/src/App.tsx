@@ -11,6 +11,7 @@ import { OfflineBanner } from "./components/common/OfflineBanner";
 import { PwaUpdater } from "./components/layout/PwaUpdater";
 import { RouteFallback } from "./components/layout/RouteFallback";
 import { ScrollManager } from "./components/layout/ScrollManager";
+import { shouldRetryQuery } from "./lib/errors";
 
 // Chaque page est un fichier JavaScript séparé, téléchargé à la première visite (réseau 3G, CDC 4.1).
 // Seule l'accueil, première page vue, reste dans le paquet initial.
@@ -40,7 +41,8 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       // Réseau 3G instable : peu de nouvelles tentatives, pas de rechargement au retour sur l'onglet
-      retry: 1,
+      // 4xx (dont 429) : jamais relancé automatiquement ; une seule nouvelle tentative sinon
+      retry: shouldRetryQuery,
       staleTime: 30 * 1000,
       refetchOnWindowFocus: false,
     },

@@ -61,6 +61,37 @@ const fr = {
     addFavorite: "Ajouter aux favoris",
     removeFavorite: "Retirer des favoris",
     noImage: "Pas de photo",
+    status: {
+      ACTIVE: "En ligne",
+      PAUSED: "En pause",
+      SOLD: "Vendue",
+      EXPIRED: "Expirée",
+    },
+  },
+  errors: {
+    generic: "Une erreur est survenue. Réessayez.",
+    network: "Connexion impossible. Vérifiez votre réseau puis réessayez.",
+    tooManyAttempts_one: "Trop de tentatives, réessayez dans {{count}} seconde.",
+    tooManyAttempts_other: "Trop de tentatives, réessayez dans {{count}} secondes.",
+    tooManyAttemptsNoDelay: "Trop de tentatives, réessayez dans quelques instants.",
+    notFound: "Cette ressource est introuvable.",
+    forbidden: "Vous n'avez pas le droit d'effectuer cette action.",
+    conflict: "Cette action a déjà été effectuée.",
+  },
+  settings: {
+    samePhone: "Ce numéro est déjà celui de votre compte.",
+    passwordChanged: "Mot de passe modifié. Reconnectez-vous avec le nouveau.",
+    logoutAll: "Se déconnecter de tous les appareils",
+  },
+  otp: {
+    sentBefore: "Si ce numéro peut recevoir un code, un SMS à 6 chiffres lui a été envoyé :",
+  },
+  kyc: {
+    delete: "Supprimer",
+    deleteLabel: "Supprimer le document : {{title}}",
+  },
+  businesses: {
+    loadMore: "Voir plus d'entreprises",
   },
   states: {
     errorTitle: "Une erreur est survenue",

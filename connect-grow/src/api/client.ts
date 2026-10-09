@@ -1,10 +1,13 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { API_URL } from "@/config/env";
+import { httpStatus } from "@/lib/errors";
 import { AUTH_EXPIRED_EVENT, tokenStorage } from "@/lib/tokens";
 
 // Endpoints qui ne doivent jamais recevoir de jeton : un jeton expiré y provoquerait un 401.
 const PUBLIC_AUTH_ENDPOINTS = ["accounts/login/", "accounts/register/", "accounts/token/refresh/"];
 const isPublicAuthEndpoint = (url?: string) => !!url && PUBLIC_AUTH_ENDPOINTS.some((path) => url.includes(path));
+// La déconnexion ne déclenche jamais de rafraîchissement : un 401 y signifie « déjà déconnecté ».
+const isLogoutEndpoint = (url?: string) => !!url && /accounts\/logout(-all)?\//.test(url);
 
 const apiClient = axios.create({
   baseURL: API_URL,
@@ -28,17 +31,25 @@ apiClient.interceptors.request.use((config) => {
 });
 
 // Rafraîchissement du jeton d'accès (15 min) : une seule requête de refresh partagée
-let refreshPromise: Promise<string | null> | null = null;
+type RefreshResult =
+  | { kind: "ok"; access: string }
+  | { kind: "expired" } // refresh refusé ou absent : la session est terminée
+  | { kind: "failed"; error: unknown }; // 429, 5xx, réseau : la session reste ouverte, on ne relance pas
 
-const refreshAccessToken = async (): Promise<string | null> => {
+let refreshPromise: Promise<RefreshResult> | null = null;
+
+const refreshAccessToken = async (): Promise<RefreshResult> => {
   const refresh = tokenStorage.getRefresh();
-  if (!refresh) return null;
+  if (!refresh) return { kind: "expired" };
   try {
     const { data } = await axios.post(`${API_URL}accounts/token/refresh/`, { refresh });
     tokenStorage.set(data.access, data.refresh);
-    return data.access as string;
-  } catch {
-    return null;
+    return { kind: "ok", access: data.access as string };
+  } catch (error) {
+    // Seul un refus d'authentification clôt la session ; un 429 ou une panne ne doit ni
+    // déconnecter l'utilisateur ni relancer le refresh en boucle.
+    const status = httpStatus(error);
+    return status === 400 || status === 401 || status === 403 ? { kind: "expired" } : { kind: "failed", error };
   }
 };
 
@@ -48,7 +59,7 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const original = error.config as RetriableConfig | undefined;
-    if (error.response?.status !== 401 || !original || original._retry || isPublicAuthEndpoint(original.url)) {
+    if (error.response?.status !== 401 || !original || original._retry || isPublicAuthEndpoint(original.url) || isLogoutEndpoint(original.url)) {
       return Promise.reject(error);
     }
     original._retry = true;
@@ -56,10 +67,12 @@ apiClient.interceptors.response.use(
     refreshPromise ??= refreshAccessToken().finally(() => {
       refreshPromise = null;
     });
-    const access = await refreshPromise;
+    const result = await refreshPromise;
 
-    if (access) {
-      original.headers.Authorization = `Bearer ${access}`;
+    if (result.kind === "failed") return Promise.reject(result.error);
+
+    if (result.kind === "ok") {
+      original.headers.Authorization = `Bearer ${result.access}`;
     } else {
       // Session expirée : on la ferme, puis on rejoue la requête en anonyme
       // (les contenus publics restent accessibles, les privés renverront 401).

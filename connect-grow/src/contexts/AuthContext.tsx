@@ -60,15 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data } = await apiClient.post("accounts/login/", credentials);
       tokenStorage.set(data.access, data.refresh);
       setHasToken(true);
-      const user = await queryClient.fetchQuery({ queryKey: ME_QUERY_KEY, queryFn: fetchMe });
-      // Compatibilité avec les pages qui lisent encore ces clés
-      try {
-        localStorage.setItem("user_full_name", user.full_name);
-        localStorage.setItem("user_id", String(user.id));
-      } catch {
-        /* stockage indisponible */
-      }
-      return user;
+      return queryClient.fetchQuery({ queryKey: ME_QUERY_KEY, queryFn: fetchMe });
     },
     [queryClient],
   );

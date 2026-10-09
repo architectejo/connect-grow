@@ -97,7 +97,9 @@ class StaleStateTests(ReviewsTestBase):
 
     def test_delete_with_a_stale_copy_is_refused_after_a_report(self):
         stale = self.make_review()
-        Report.objects.create(target_type='review', target_id=stale.id, reporter=self.other, reason=Report.REASON_AUTRE)
+        Report.objects.create(
+            target_type='review', target_id=stale.id, reporter=self.other, reason=Report.REASON_ARNAQUE,
+        )
         with self.assertRaises(services.ReviewError) as caught:
             services.delete_review(stale, self.buyer)
         self.assertEqual(caught.exception.code, 'review_locked')

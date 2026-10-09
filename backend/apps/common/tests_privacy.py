@@ -206,7 +206,9 @@ class NoPersonalContactLeakTests(APITestCase):
 
     def test_write_responses_do_not_leak_either(self):
         # Le contact de « third » (premier cas) ouvre son droit d'avis (deuxième cas), sans délai ici.
-        ReviewSettings.objects.filter(pk=ReviewSettings.get_solo().pk).update(delay_after_contact_hours=0)
+        ReviewSettings.objects.filter(pk=ReviewSettings.get_solo().pk).update(
+            delay_after_contact_hours=0, min_account_age_hours=0,  # update() contourne le minimum de 1 h (tests seulement)
+        )
         cases = [
             ('third', 'contact-list', {'post': str(self.offer.id), 'message': 'Bonjour, toujours disponible ?'}),
             ('third', 'review-list', {

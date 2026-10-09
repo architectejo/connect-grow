@@ -21,21 +21,29 @@ LOCMEM = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'
 
 
 class ReviewProtectionTests(ReviewsTestBase):
-    def test_reported_review_cannot_be_edited_or_deleted_by_its_author(self):
+    def test_a_grave_open_report_blocks_deletion_but_not_editing(self):
         review = self.make_review()
         detail = f'{REVIEWS_URL}{review.id}/'
         self.client.force_authenticate(self.buyer)
         Report.objects.create(
-            target_type='review', target_id=review.id, reporter=self.other, reason=Report.REASON_AUTRE,
+            target_type='review', target_id=review.id, reporter=self.other, reason=Report.REASON_ARNAQUE,
         )
-        for response in (
-            self.client.patch(detail, {'content': 'Je réécris mon avis signalé.'}), self.client.delete(detail),
-        ):
-            self.assertEqual((response.status_code, response.data['code']), (403, 'review_locked'))
+        gone = self.client.delete(detail)
+        self.assertEqual((gone.status_code, gone.data['code']), (403, 'review_locked'))
+        edited = self.client.patch(detail, {'content': 'Je précise mon avis signalé.'})
+        self.assertEqual(edited.status_code, 200)
         # Un signalement clos libère l'avis.
-        Report.objects.update(status=Report.STATUS_TRAITE)
-        response = self.client.patch(detail, {'content': 'Je précise mon avis après traitement.'})
-        self.assertEqual(response.status_code, 200)
+        Report.objects.update(status=Report.STATUS_REJETE)
+        self.assertEqual(self.client.delete(detail).status_code, 204)
+
+    def test_a_minor_open_report_locks_nothing(self):
+        review = self.make_review()
+        detail = f'{REVIEWS_URL}{review.id}/'
+        self.client.force_authenticate(self.buyer)
+        for reason in (Report.REASON_SPAM, Report.REASON_AUTRE):
+            Report.objects.create(target_type='review', target_id=review.id, reporter=self.other, reason=reason)
+        self.assertEqual(self.client.patch(detail, {'content': 'Je précise mon avis signalé.'}).status_code, 200)
+        self.assertEqual(self.client.delete(detail).status_code, 204)
 
     def test_hidden_review_cannot_be_edited_or_deleted_by_its_author(self):
         review = self.make_review(is_hidden=True)

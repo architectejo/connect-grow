@@ -29,7 +29,9 @@ GOOD = {'offer_rating': 4, 'seller_rating': 5, 'content': 'Très bon vendeur, je
 class ReviewsTestBase(APITestCase):
     def setUp(self):
         # Les tests de création ne portent pas sur le délai contact -> avis (tests_eligibility.py).
-        ReviewSettings.objects.filter(pk=ReviewSettings.get_solo().pk).update(delay_after_contact_hours=0)
+        ReviewSettings.objects.filter(pk=ReviewSettings.get_solo().pk).update(
+            delay_after_contact_hours=0, min_account_age_hours=0,  # update() contourne le minimum de 1 h (tests seulement)
+        )
         city = City.objects.create(name='Kinshasa')
         self.commune = Commune.objects.create(city=city, name='Gombe')
         self.category = Category.objects.create(name='Électronique', slug='electronique')
@@ -407,12 +409,14 @@ class ReviewSettingsTests(ReviewsTestBase):
         for field, bad in (
             ('min_reviews_to_display', 0), ('daily_review_limit', 0), ('edit_window_hours', 0),
             ('crossed_reviews_window_days', 0), ('crossed_reviews_threshold', 1),
+            ('delay_after_contact_hours', 0), ('min_account_age_hours', 721),
         ):
             row = ReviewSettings(**{field: bad})
             with self.assertRaises(ValidationError, msg=field) as caught:
                 row.full_clean()
             self.assertIn(field, caught.exception.message_dict)
-        ReviewSettings(delay_after_contact_hours=0).full_clean()  # 0 : aucun délai
+        ReviewSettings(delay_after_contact_hours=1, min_account_age_hours=0).full_clean()  # bornes incluses
+        ReviewSettings(delay_after_contact_hours=168, min_account_age_hours=720).full_clean()
 
 
 class DecouplingTests(ReviewsTestBase):

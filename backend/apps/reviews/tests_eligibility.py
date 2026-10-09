@@ -268,10 +268,12 @@ class ContactFictitiousReportTests(EligibilityBase):
         self.assertEqual(self.client.get('/api/moderation/dashboard/').data['pending_reports_count'], 1)
         # L'avis est gelé pour son auteur le temps de la décision, mais reste visible et compté.
         self.client.force_authenticate(self.buyer)
+        gone = self.client.delete(f'{REVIEWS_URL}{self.review.id}/')
+        self.assertEqual((gone.status_code, gone.data['code']), (403, 'review_locked'))
         edit = self.client.patch(
             f'{REVIEWS_URL}{self.review.id}/', {'content': 'Un texte modifié assez long.'}, format='json',
         )
-        self.assertEqual((edit.status_code, edit.data['code']), (403, 'review_locked'))
+        self.assertEqual(edit.status_code, 200)
         listed = self.client.get(REVIEWS_URL, {'post': str(self.offer.id)})
         self.assertEqual([r['id'] for r in listed.data], [str(self.review.id)])
 

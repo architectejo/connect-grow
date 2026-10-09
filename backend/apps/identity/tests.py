@@ -647,7 +647,8 @@ class CityCommuneConsistencyAndRegistrationTests(APITestCase):
 
     def test_sms_gateway_failure_keeps_a_uniform_200(self):
         User.objects.create_user(phone='+243811111111', password='x', full_name='E')
-        with mock.patch('apps.identity.views.send_otp_sms', side_effect=NotImplementedError('pas de passerelle')), \n                self.assertLogs('apps.identity.views', level='ERROR'):
+        with mock.patch('apps.identity.views.send_otp_sms', side_effect=NotImplementedError('pas de passerelle')), \
+                self.assertLogs('apps.identity.views', level='ERROR'):
             known = self.client.post(reverse('otp_request'), {'phone': '+243811111111', 'purpose': 'LOGIN'})
             unknown = self.client.post(reverse('otp_request'), {'phone': '+243899999999', 'purpose': 'LOGIN'})
         self.assertEqual((known.status_code, unknown.status_code), (200, 200))

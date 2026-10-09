@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Loader2, MessageSquare, Package, Repeat } from "lucide-react";
 import { toast } from "sonner";
 import apiClient from "@/api/client";
@@ -10,9 +10,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from "@/components/ui/textarea";
 import { ImageWithFallback } from "@/components/common/ImageWithFallback";
 import { formatPrice } from "@/lib/format";
-import { sellerDisplayName } from "@/lib/trust";
+import { sellerDisplayName } from "@/lib/post";
 import { cn } from "@/lib/utils";
 import { useMyPosts } from "@/hooks/use-marketplace";
+import { reviewKeys } from "@/hooks/use-reviews";
 import { apiErrorMessage } from "@/lib/errors";
 
 interface DialogProps {
@@ -23,6 +24,7 @@ interface DialogProps {
 
 /** Message interne au vendeur : ouvre une conversation liée à l'annonce. */
 export function ContactDialog({ post, open, onOpenChange }: DialogProps) {
+  const queryClient = useQueryClient();
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -33,6 +35,8 @@ export function ContactDialog({ post, open, onOpenChange }: DialogProps) {
   const send = useMutation({
     mutationFn: () => apiClient.post("interactions/contacts/", { post: post.id, message: message.trim() }),
     onSuccess: () => {
+      // Le contact ouvre le droit d'avis (après le délai éventuel) : on relit l'éligibilité
+      void queryClient.invalidateQueries({ queryKey: reviewKeys.eligibilityOf(post.id) });
       toast.success("Message envoyé. Retrouvez la conversation dans vos messages.");
       setMessage("");
       onOpenChange(false);

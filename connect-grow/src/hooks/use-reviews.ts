@@ -1,70 +1,122 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import apiClient, { unwrapList } from "@/api/client";
-import type { Review, Uuid } from "@/api/types";
-import { apiErrorMessage } from "@/lib/errors";
+import type { Review, ReviewEligibility, ReviewInput, Uuid } from "@/api/types";
+import i18n from "@/i18n";
+import { apiErrorCode, shouldRetryQuery } from "@/lib/errors";
+import { reviewErrorMessage } from "@/lib/review-errors";
+import { marketplaceKeys } from "./use-marketplace";
 
 export const reviewKeys = {
   forPost: (postId: Uuid) => ["reviews", "post", postId] as const,
+  // La réponse dépend du compte connecté : la clé le porte pour ne jamais mélanger deux sessions
+  eligibility: (postId: Uuid, userId?: Uuid) => ["reviews", "eligibility", postId, userId ?? "anonymous"] as const,
+  eligibilityOf: (postId: Uuid) => ["reviews", "eligibility", postId] as const,
 };
+
+const BASE = "interactions/reviews/";
 
 export function useReviews(postId?: Uuid) {
   return useQuery({
     queryKey: reviewKeys.forPost(postId ?? ""),
-    queryFn: async () => unwrapList<Review>((await apiClient.get("interactions/reviews/", { params: { post: postId } })).data),
+    queryFn: async () => unwrapList<Review>((await apiClient.get(BASE, { params: { post: postId } })).data),
     enabled: !!postId,
+    retry: shouldRetryQuery,
   });
 }
 
-/** Création, modification, suppression et réponse du vendeur, avec rafraîchissement de la liste. */
+/**
+ * Droit d'avis sur une offre. Le serveur seul décide (jamais déduit côté client) :
+ * le bouton « Donner mon avis » n'apparaît que si `can_review` est vrai.
+ */
+export function useReviewEligibility(postId?: Uuid, userId?: Uuid, enabled = true) {
+  return useQuery({
+    queryKey: reviewKeys.eligibility(postId ?? "", userId),
+    queryFn: async () => (await apiClient.get<ReviewEligibility>(`${BASE}eligibility/`, { params: { post: postId } })).data,
+    enabled: !!postId && enabled,
+    retry: shouldRetryQuery,
+  });
+}
+
+/** Codes d'erreur après lesquels l'éligibilité affichée n'est plus à jour. */
+const ELIGIBILITY_CODES = new Set(["own_offer", "not_eligible", "review_too_early", "already_reviewed", "offer_unavailable"]);
+
+/** Création, modification, suppression et réponse du vendeur, avec rafraîchissement des listes et des notes. */
 export function useReviewMutations(postId: Uuid) {
   const queryClient = useQueryClient();
   const key = reviewKeys.forPost(postId);
   const update = (fn: (reviews: Review[]) => Review[]) =>
     queryClient.setQueryData<Review[]>(key, (reviews) => fn(reviews ?? []));
-  const onError = (error: unknown) => toast.error(apiErrorMessage(error));
+  // Les moyennes sont calculées par le serveur à la lecture : on relit l'offre et les listes
+  const refreshRatings = () => {
+    void queryClient.invalidateQueries({ queryKey: marketplaceKeys.post(postId) });
+    void queryClient.invalidateQueries({ queryKey: marketplaceKeys.postLists() });
+  };
+  const refreshEligibility = () => queryClient.invalidateQueries({ queryKey: reviewKeys.eligibilityOf(postId) });
+  const onEligibilityError = (error: unknown) => {
+    const code = apiErrorCode(error);
+    if (code && ELIGIBILITY_CODES.has(code)) void refreshEligibility();
+  };
 
   const create = useMutation({
-    mutationFn: async (input: { content: string; rating: number }) =>
-      (await apiClient.post<Review>("interactions/reviews/", { post: postId, ...input })).data,
+    mutationFn: async (input: ReviewInput) => (await apiClient.post<Review>(BASE, { post: postId, ...input })).data,
     onSuccess: (review) => {
-      update((reviews) => [review, ...reviews]);
-      toast.success("Votre avis a été publié.");
+      update((reviews) => [review, ...reviews.filter((r) => r.id !== review.id)]);
+      refreshRatings();
+      void refreshEligibility();
+      toast.success(i18n.t("reviews.published"));
     },
-    onError,
+    onError: onEligibilityError,
   });
 
   const edit = useMutation({
-    mutationFn: async ({ id, ...input }: { id: Uuid; content: string; rating: number }) =>
-      (await apiClient.patch<Review>(`interactions/reviews/${id}/`, input)).data,
+    mutationFn: async ({ id, ...input }: ReviewInput & { id: Uuid }) =>
+      (await apiClient.patch<Review>(`${BASE}${id}/`, input)).data,
     onSuccess: (review) => {
       update((reviews) => reviews.map((r) => (r.id === review.id ? review : r)));
-      toast.success("Avis mis à jour.");
+      refreshRatings();
+      toast.success(i18n.t("reviews.updated"));
     },
-    onError,
   });
 
   const remove = useMutation({
     mutationFn: async (id: Uuid) => {
-      await apiClient.delete(`interactions/reviews/${id}/`);
+      await apiClient.delete(`${BASE}${id}/`);
       return id;
     },
     onSuccess: (id) => {
       update((reviews) => reviews.filter((r) => r.id !== id));
-      toast.success("Avis supprimé.");
+      refreshRatings();
+      void refreshEligibility();
+      toast.success(i18n.t("reviews.deleted"));
     },
-    onError,
+    onError: (error) => toast.error(reviewErrorMessage(error)),
   });
 
   const reply = useMutation({
     mutationFn: async ({ id, reply_content }: { id: Uuid; reply_content: string }) =>
-      (await apiClient.post<Review>(`interactions/reviews/${id}/reply/`, { reply_content })).data,
+      (await apiClient.post<Review>(`${BASE}${id}/reply/`, { reply_content })).data,
     onSuccess: (review) => {
       update((reviews) => reviews.map((r) => (r.id === review.id ? review : r)));
-      toast.success("Votre réponse a été publiée.");
+      toast.success(i18n.t("reviews.replyPublished"));
     },
-    onError,
   });
 
   return { create, edit, remove, reply };
+}
+
+/** Signalement « contact fictif » d'un avis par le vendeur concerné (le serveur contrôle le rôle : 403 not_seller). */
+export function useReportFakeContact() {
+  return useMutation({
+    mutationFn: async ({ reviewId, description }: { reviewId: Uuid; description: string }) =>
+      (
+        await apiClient.post("moderation/reports/", {
+          target_type: "review",
+          target_id: reviewId,
+          reason: "CONTACT_FICTIF",
+          description,
+        })
+      ).data,
+    onSuccess: () => toast.success(i18n.t("reviews.reportSent")),
+  });
 }

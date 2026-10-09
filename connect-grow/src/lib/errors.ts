@@ -9,6 +9,12 @@ export function httpStatus(error: unknown): number | undefined {
   return responseOf(error)?.status;
 }
 
+/** Code machine du corps d'erreur `{detail, code}` (ADR 0004 §7), ou undefined. */
+export function apiErrorCode(error: unknown): string | undefined {
+  const code = (responseOf(error)?.data as { code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" ? code : undefined;
+}
+
 export const isRateLimited = (error: unknown) => httpStatus(error) === 429;
 
 function readHeader(headers: ErrorResponse["headers"], name: string): string | undefined {

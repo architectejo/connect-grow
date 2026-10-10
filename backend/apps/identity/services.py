@@ -1,10 +1,15 @@
 """Interface publique du domaine `identity` (sessions, jetons, fiches publiques de vendeurs)."""
 import uuid
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Iterable, Optional
 
-from django.db import transaction
+from django.conf import settings
+from django.db import IntegrityError, transaction
+from django.utils import timezone
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+
+from apps.moderation.services import record_audit
 
 
 def revoke_all_sessions(user) -> int:
@@ -72,10 +77,6 @@ def recompute_verification(business_profile):
 def decide_kyc_document(document_id, reviewer, decision, reason=''):
     """Décision (VALIDE ou REFUSE) sur une pièce KYC, atomique avec son journal d'audit."""
     from django.db import transaction
-    from django.utils import timezone
-
-    from apps.moderation.services import record_audit
-
     from .models import KycDocument
 
     if decision not in (KycDocument.STATUS_VALIDE, KycDocument.STATUS_REFUSE):
@@ -310,10 +311,6 @@ def get_contact_settings(user) -> dict:
 
 
 def _revoke_number_channels(user, reason) -> list:
-    from django.utils import timezone
-
-    from apps.moderation.services import record_audit
-
     from .models import ContactConsent
 
     revoked = []
@@ -344,15 +341,39 @@ def _send_contact_code(phone) -> None:
         logging.getLogger(__name__).exception("Échec d'envoi du SMS de vérification du numéro de contact.")
 
 
+def _can_send_contact_sms(user) -> bool:
+    """Un SMS vers un numéro saisi n'est envoyé qu'à un compte assez ancien ou déjà doté d'un
+    identifiant vérifié (anti-SMS arbitraire, audit M2). Ancienneté : `CONTACT_SMS_MIN_ACCOUNT_AGE_HOURS`."""
+    if user.phone_verified:
+        return True
+    min_age = timedelta(hours=settings.CONTACT_SMS_MIN_ACCOUNT_AGE_HOURS)
+    return timezone.now() - user.date_joined >= min_age
+
+
+def _lock_or_create_point(user, number, verified, now):
+    """Renvoie `(point, created)`. Verrouille la ligne existante ; une création concurrente
+    (unicité du compte) est rattrapée par une relecture au lieu d'une erreur 500."""
+    from .models import ContactPoint
+
+    point = ContactPoint.objects.select_for_update().filter(user=user).first()
+    if point is not None:
+        return point, False
+    try:
+        with transaction.atomic():
+            point = ContactPoint.objects.create(
+                user=user, phone=number, is_verified=verified, verified_at=now if verified else None,
+            )
+        return point, True
+    except IntegrityError:
+        return ContactPoint.objects.select_for_update().get(user=user), False
+
+
 def set_contact_phone(user, *, phone=None, use_login_phone=False) -> None:
     """Crée ou remplace le numéro de contact. Seul un geste explicite copie le numéro de connexion.
     Changer de numéro révoque CALL et WHATSAPP ; un numéro non vérifié reçoit un code SMS."""
     from django.core.exceptions import ValidationError as DjangoValidationError
-    from django.utils import timezone
 
-    from apps.moderation.services import record_audit
-
-    from .models import ContactPoint, phone_validator
+    from .models import phone_validator
 
     if bool(use_login_phone) == bool(phone):
         raise ContactSettingsError(
@@ -376,12 +397,17 @@ def set_contact_phone(user, *, phone=None, use_login_phone=False) -> None:
             raise ContactSettingsError(
                 "Numéro invalide. Format attendu : +243XXXXXXXXX.", 'phone_invalid',
             )
+        if not _can_send_contact_sms(user):
+            raise ContactSettingsError(
+                "Votre compte est trop récent pour recevoir un code par SMS. Réessayez plus tard, "
+                "ou vérifiez d'abord votre numéro de connexion.", 'account_too_new', 403,
+            )
 
     send_code = False
     with transaction.atomic():
-        point = ContactPoint.objects.filter(user=user).first()
         now = timezone.now()
-        if point is not None and point.phone == number:
+        point, created = _lock_or_create_point(user, number, verified_at_once, now)
+        if not created and point.phone == number:
             # Même numéro : aucun canal n'est révoqué ; un numéro non vérifié reçoit un nouveau code.
             if not point.is_verified:
                 if verified_at_once:
@@ -391,12 +417,11 @@ def set_contact_phone(user, *, phone=None, use_login_phone=False) -> None:
                 else:
                     send_code = True
         else:
-            if point is None:
-                point = ContactPoint(user=user)
-            point.phone = number
-            point.is_verified = verified_at_once
-            point.verified_at = now if verified_at_once else None
-            point.save()
+            if not created:
+                point.phone = number
+                point.is_verified = verified_at_once
+                point.verified_at = now if verified_at_once else None
+                point.save(update_fields=['phone', 'is_verified', 'verified_at', 'updated_at'])
             _revoke_number_channels(user, 'phone_changed')
             record_audit(
                 user, 'contact.phone_changed', target=user,
@@ -412,10 +437,6 @@ def set_contact_phone(user, *, phone=None, use_login_phone=False) -> None:
 
 def verify_contact_phone(user, code) -> None:
     """Valide le numéro de contact par le code SMS. Ne réactive aucun canal."""
-    from django.utils import timezone
-
-    from apps.moderation.services import record_audit
-
     from .models import ContactPoint, OtpCode
 
     point = ContactPoint.objects.filter(user=user).first()
@@ -438,18 +459,20 @@ def verify_contact_phone(user, code) -> None:
     if not isinstance(code, str) or not otp.verify(code.strip()):
         raise ContactSettingsError("Code invalide.", 'otp_invalid')
     with transaction.atomic():
-        point.is_verified = True
-        point.verified_at = timezone.now()
-        point.save(update_fields=['is_verified', 'verified_at', 'updated_at'])
+        # Mise à jour conditionnelle : le code ne vaut que pour le numéro auquel il a été envoyé.
+        # Si le numéro a changé entre la lecture et l'écriture, rien n'est marqué vérifié.
+        updated = ContactPoint.objects.filter(
+            pk=point.pk, phone=otp.phone, is_verified=False,
+        ).update(is_verified=True, verified_at=timezone.now())
+        if not updated:
+            raise ContactSettingsError("Code invalide. Demandez un nouveau code.", 'otp_invalid')
+        # Le code a servi : on ne garde pas de trace du numéro dans la table des OTP (LEG-PRV-12).
+        OtpCode.objects.filter(phone=otp.phone, purpose=OtpCode.PURPOSE_CONTACT_VERIFY).delete()
         record_audit(user, 'contact.phone_verified', target=user, details="Numéro de contact vérifié par code SMS.")
 
 
 def set_channel_consent(user, channel, *, enabled, text_version=None) -> None:
     """Active ou retire un canal (ADR 0005, C2 et C4). Retirer est toujours permis et idempotent."""
-    from django.utils import timezone
-
-    from apps.moderation.services import record_audit
-
     from .models import CONTACT_CONSENT_TEXT_VERSION, ContactConsent, ContactPoint
 
     if channel not in CHANNEL_ORDER:
@@ -480,19 +503,25 @@ def set_channel_consent(user, channel, *, enabled, text_version=None) -> None:
             raise ContactSettingsError(
                 "Le texte a changé, relisez-le avant d'accepter.", 'consent_version_mismatch',
             )
-        point = ContactPoint.objects.filter(user=user).first()
+        point = ContactPoint.objects.select_for_update().filter(user=user).first()
         if point is None or not point.is_verified:
             raise ContactSettingsError("Vérifiez d'abord votre numéro.", 'contact_phone_unverified', 409)
         last4 = point.phone[-4:]
         if consent.is_granted and consent.text_version == text_version and consent.phone_last4 == last4:
             return
+        # Le numéro doit être resté celui que l'on vient de lire (un changement concurrent
+        # a déjà révoqué les accords : on n'en écrit pas un nouveau pour l'ancien numéro).
+        if not ContactPoint.objects.filter(pk=point.pk, phone=point.phone, is_verified=True).exists():
+            raise ContactSettingsError("Le numéro a changé. Vérifiez-le à nouveau.", 'contact_phone_unverified', 409)
         consent.is_granted = True
         consent.text_version = text_version
         consent.granted_at = now
         consent.revoked_at = None
         consent.revoked_reason = ''
         consent.phone_last4 = last4
-        consent.save()
+        consent.save(update_fields=[
+            'is_granted', 'text_version', 'granted_at', 'revoked_at', 'revoked_reason', 'phone_last4', 'updated_at',
+        ])
         record_audit(
             user, 'contact.consent_granted', target=user,
             details=f"Canal {channel} activé ; texte {text_version} ; numéro se terminant par {last4}.",
@@ -501,28 +530,34 @@ def set_channel_consent(user, channel, *, enabled, text_version=None) -> None:
 
 def get_allowed_channels(seller_ids: Iterable) -> dict:
     """Canaux ouverts par vendeur, en une requête : `{vendeur: ['MESSAGE', 'CALL', ...]}` (ordre fixe).
-    CALL/WHATSAPP exigent un consentement actif ET un numéro de contact vérifié ; MESSAGE est actif
-    sauf refus explicite. Tout vendeur demandé figure dans le résultat. Aucun numéro ici (ADR 0005, C11)."""
+    Un compte inactif n'a aucun canal. CALL/WHATSAPP exigent un consentement actif ET un numéro de
+    contact vérifié ; MESSAGE est actif sauf refus explicite. Tout vendeur demandé figure dans le
+    résultat (un compte inconnu n'a aucun canal). Aucun numéro ici (ADR 0005, C11)."""
     from apps.common.utils import parse_uuid
 
-    from .models import ContactConsent
+    from .models import User
 
     wanted = {parsed for parsed in (parse_uuid(i) for i in seller_ids) if parsed is not None}
     if not wanted:
         return {}
+    active = set()
     message_off = set()
     number_ok = {}
-    rows = ContactConsent.objects.filter(user_id__in=wanted).values_list(
-        'user_id', 'channel', 'is_granted', 'user__contact_point__is_verified', 'user__is_active',
+    rows = User.objects.filter(pk__in=wanted).values_list(
+        'pk', 'is_active', 'contact_point__is_verified', 'contact_consents__channel', 'contact_consents__is_granted',
     )
-    for user_id, channel, granted, verified, active in rows:
-        if channel == 'MESSAGE':
-            if not granted:
-                message_off.add(user_id)
-        elif granted and verified and active:
+    for user_id, is_active, verified, channel, granted in rows:
+        if is_active:
+            active.add(user_id)
+        if channel == 'MESSAGE' and not granted:
+            message_off.add(user_id)
+        elif channel in NUMBER_CHANNELS and granted and verified:
             number_ok.setdefault(user_id, set()).add(channel)
     result = {}
     for user_id in wanted:
+        if user_id not in active:
+            result[user_id] = []
+            continue
         channels = [] if user_id in message_off else ['MESSAGE']
         channels += [ch for ch in NUMBER_CHANNELS if ch in number_ok.get(user_id, ())]
         result[user_id] = channels
@@ -531,8 +566,9 @@ def get_allowed_channels(seller_ids: Iterable) -> dict:
 
 def get_contact_endpoint(seller_id, channel) -> ContactEndpoint:
     """Numéro du vendeur pour un canal consenti (lecture seule, ADR 0005, C5). Lève
-    `ChannelNotConsented` si le canal n'est pas actif, si le numéro n'est pas vérifié ou si le
-    compte est inactif. À appeler uniquement par l'action de révélation de `marketplace`."""
+    `ChannelNotConsented` si le canal n'est pas actif, si le numéro n'est pas vérifié, si le compte
+    est inactif ou si la preuve d'accord (4 derniers chiffres) ne correspond pas au numéro actuel.
+    À appeler uniquement par l'action de révélation de `marketplace`."""
     from apps.common.utils import parse_uuid
 
     from .models import ContactConsent, ContactPoint
@@ -540,10 +576,10 @@ def get_contact_endpoint(seller_id, channel) -> ContactEndpoint:
     seller_uuid = parse_uuid(seller_id)
     if channel not in NUMBER_CHANNELS or seller_uuid is None:
         raise ChannelNotConsented()
-    granted = ContactConsent.objects.filter(
+    consent = ContactConsent.objects.filter(
         user_id=seller_uuid, channel=channel, is_granted=True, user__is_active=True,
-    ).exists()
-    point = ContactPoint.objects.filter(user_id=seller_uuid, is_verified=True).first() if granted else None
-    if point is None:
+    ).first()
+    point = ContactPoint.objects.filter(user_id=seller_uuid, is_verified=True).first() if consent else None
+    if point is None or consent.phone_last4 != point.phone[-4:]:
         raise ChannelNotConsented()
     return ContactEndpoint(phone_e164=point.phone)

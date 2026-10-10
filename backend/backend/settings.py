@@ -281,6 +281,11 @@ LANGUAGE_CODE = 'fr'  # messages de validation Django en français
 TIME_ZONE = 'Africa/Kinshasa'
 USE_TZ = True
 
+# --- Contact vendeur (ADR 0005) ---
+# Ancienneté minimale (heures) d'un compte sans identifiant vérifié pour recevoir un SMS de
+# vérification vers un numéro saisi (anti-SMS arbitraire).
+CONTACT_SMS_MIN_ACCOUNT_AGE_HOURS = int(os.getenv('CONTACT_SMS_MIN_ACCOUNT_AGE_HOURS', '24'))
+
 # --- Journalisation ---
 # En développement (DEBUG=True), le code OTP « envoyé » est affiché en console (apps/identity/sms.py,
 # aucun fournisseur SMS branché). Hors DEBUG, le niveau reste à WARNING pour ce logger et le code

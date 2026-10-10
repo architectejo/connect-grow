@@ -216,8 +216,8 @@ class OfferSerializer(serializers.ModelSerializer):
         return obj.id in self._cache(obj)['trending']
 
     def get_allowed_channels(self, obj):
-        # Par défaut le message interne ; CALL/WHATSAPP seulement si le vendeur les a ouverts.
-        return self._cache(obj)['allowed_channels'].get(obj.seller_id, ['MESSAGE'])
+        # Aucun canal par défaut : seul `identity` dit ce que le vendeur a ouvert.
+        return self._cache(obj)['allowed_channels'].get(obj.seller_id, [])
 
     def get_is_sponsored(self, obj):
         return False

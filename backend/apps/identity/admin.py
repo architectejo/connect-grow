@@ -100,6 +100,10 @@ class OtpCodeAdmin(admin.ModelAdmin):
     search_fields = ('phone',)
     exclude = ('code_hash',)
 
+    def get_queryset(self, request):
+        # Les codes de vérification du numéro de contact portent un numéro à ne pas exposer (LEG-PRV-12).
+        return super().get_queryset(request).exclude(purpose=OtpCode.PURPOSE_CONTACT_VERIFY)
+
     def has_add_permission(self, request):
         return False
 

@@ -20,6 +20,8 @@ import { CommuneSelect } from "@/components/common/CommuneSelect";
 import { ErrorState, PostCard } from "@/components/common";
 import { errorProps, Field, FormAlert } from "@/components/auth/FormFields";
 import { MAX_PHOTOS, PhotoPicker, photoSrc, type EditorPhoto } from "@/components/post-editor/PhotoPicker";
+import { useTranslation } from "react-i18next";
+import { useFeatures } from "@/hooks/use-features";
 import { useAuth } from "@/contexts/AuthContext";
 import { marketplaceKeys, useCategories, useCities, usePost } from "@/hooks/use-marketplace";
 import { accountKeys } from "@/hooks/use-account";
@@ -174,6 +176,8 @@ function PostEditorForm({ post }: { post?: Post }) {
     return [...main, ...gallery];
   }, [post]);
 
+  const { t } = useTranslation();
+  const { exchangeEnabled } = useFeatures();
   const [step, setStep] = useState(0);
   const [maxReached, setMaxReached] = useState(isEdit ? steps.length - 1 : 0);
   const [photos, setPhotos] = useState<EditorPhoto[]>(originalPhotos);
@@ -262,7 +266,8 @@ function PostEditorForm({ post }: { post?: Post }) {
     data.append("price", String(Number(v.price.replace(",", "."))));
     data.append("currency", v.currency);
     data.append("is_price_negotiable", String(v.is_price_negotiable));
-    data.append("is_exchangeable", String(v.is_exchangeable));
+    // Troc éteint : le serveur ignore le champ, on ne l'envoie pas
+    if (exchangeEnabled) data.append("is_exchangeable", String(v.is_exchangeable));
     data.append("commune", v.commune);
     if (v.post_type === "PRODUIT") {
       data.append("condition", v.condition);
@@ -356,7 +361,7 @@ function PostEditorForm({ post }: { post?: Post }) {
     currency: values.currency as Currency,
     condition: values.post_type === "PRODUIT" && values.condition ? values.condition : null,
     is_price_negotiable: values.is_price_negotiable,
-    is_exchangeable: values.is_exchangeable,
+    ...(exchangeEnabled ? { is_exchangeable: values.is_exchangeable } : {}),
     main_image: photos[0] ? photoSrc(photos[0]) : null,
     views_count: post?.views_count ?? 0,
     likes_count: 0,
@@ -575,7 +580,9 @@ function PostEditorForm({ post }: { post?: Post }) {
             <div className="divide-y rounded-xl border">
               {[
                 { name: "is_price_negotiable" as const, label: "Prix discutable", hint: "Les acheteurs peuvent vous faire une offre." },
-                { name: "is_exchangeable" as const, label: "Ouvert au troc", hint: "Vous acceptez d'échanger contre un autre article." },
+                ...(exchangeEnabled
+                  ? [{ name: "is_exchangeable" as const, label: t("exchange.editorLabel"), hint: t("exchange.editorHint") }]
+                  : []),
               ].map(({ name, label, hint }) => (
                 <div key={name} className="flex items-center justify-between gap-4 p-4">
                   <Label htmlFor={name} className="cursor-pointer">
@@ -626,7 +633,7 @@ function PostEditorForm({ post }: { post?: Post }) {
                   ["Type", values.post_type === "SERVICE" ? "Service" : "Produit"],
                   ["Commune", communeName ?? "—"],
                   ["Prix discutable", values.is_price_negotiable ? "Oui" : "Non"],
-                  ["Troc", values.is_exchangeable ? "Accepté" : "Non"],
+                  ...(exchangeEnabled ? [[t("exchange.summaryLabel"), values.is_exchangeable ? t("exchange.accepted") : t("exchange.no")]] : []),
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-xl bg-muted/60 p-3">
                     <dt className="text-xs text-muted-foreground">{label}</dt>

@@ -69,3 +69,14 @@ describe("isContactRevealRequest (révélation du numéro : réseau seul)", () =
     expect(config).toMatch(/runtimeCaching:\s*\[\s*\{[^{}]*?urlPattern:\s*isContactRevealRequest,\s*handler:\s*"NetworkOnly"/);
   });
 });
+
+describe("configuration des fonctionnalités (L0-14)", () => {
+  it("n'est jamais mise en cache hors ligne : seul le Cache-Control de 60 s du serveur s'applique", () => {
+    expect(call("/api/config/features/")).toBe(false);
+    expect(call("/api/v1/config/features/")).toBe(false);
+  });
+  it("aucune règle Workbox de vite.config.ts ne cible config/features", () => {
+    const config = readFileSync(resolve(process.cwd(), "vite.config.ts"), "utf-8");
+    expect(config).not.toMatch(/config\/features/);
+  });
+});

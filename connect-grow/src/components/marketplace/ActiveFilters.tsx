@@ -1,5 +1,7 @@
 import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { PostFilters } from "@/api/types";
+import { useFeatures } from "@/hooks/use-features";
 import { useCategories, useCities } from "@/hooks/use-marketplace";
 import type { FilterKey } from "./use-post-filters";
 
@@ -13,6 +15,8 @@ interface ActiveFiltersProps {
 
 /** Filtres appliqués, retirables un par un. */
 export function ActiveFilters({ filters, onChange, onReset }: ActiveFiltersProps) {
+  const { t } = useTranslation();
+  const { exchangeEnabled } = useFeatures();
   const { data: categories = [] } = useCategories();
   const { data: cities = [] } = useCities();
 
@@ -39,7 +43,8 @@ export function ActiveFilters({ filters, onChange, onReset }: ActiveFiltersProps
   if (filters.currency) chips.push({ key: "currency", label: filters.currency, clear: { currency: undefined } });
   if (filters.condition)
     chips.push({ key: "condition", label: CONDITION_LABELS[filters.condition] ?? filters.condition, clear: { condition: undefined } });
-  if (filters.is_exchangeable === "true") chips.push({ key: "exchange", label: "Échangeable", clear: { is_exchangeable: undefined } });
+  if (exchangeEnabled && filters.is_exchangeable === "true")
+    chips.push({ key: "exchange", label: t("exchange.chip"), clear: { is_exchangeable: undefined } });
 
   if (chips.length === 0) return null;
 

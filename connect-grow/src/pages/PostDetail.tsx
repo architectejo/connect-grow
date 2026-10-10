@@ -7,6 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AppShell } from "@/components/layout/AppShell";
 import { EmptyState, ErrorState, PostCard, PostGrid, PriceTag, RatingBlock, SellerCard, StatusBadge } from "@/components/common";
 import { ContactActions } from "@/components/post/ContactActions";
+import { useTranslation } from "react-i18next";
+import { useFeatures } from "@/hooks/use-features";
 import { ContactDialog, ExchangeDialog } from "@/components/post/ContactDialogs";
 import { PostGallery } from "@/components/post/PostGallery";
 import { ReviewsSection } from "@/components/post/ReviewsSection";
@@ -81,6 +83,9 @@ const PostDetail = () => {
   const toggleFavorite = useToggleFavorite();
   const [contactOpen, setContactOpen] = useState(false);
   const [exchangeOpen, setExchangeOpen] = useState(false);
+  const { t } = useTranslation();
+  const { exchangeEnabled } = useFeatures();
+  const exchangeable = exchangeEnabled && !!post?.is_exchangeable;
 
   const notFound = (error as { response?: { status?: number } } | null)?.response?.status === 404;
 
@@ -184,7 +189,7 @@ const PostDetail = () => {
               <div className="mt-4 flex flex-wrap gap-1.5">
                 {post.post_type === "SERVICE" && <StatusBadge kind="service" size="md" />}
                 {post.condition && <StatusBadge kind={post.condition} size="md" />}
-                {post.is_exchangeable && <StatusBadge kind="exchangeable" size="md" />}
+                {exchangeable && <StatusBadge kind="exchangeable" size="md" />}
               </div>
 
               <ul className="mt-5 space-y-2 border-t pt-4 text-sm text-muted-foreground">
@@ -237,9 +242,9 @@ const PostDetail = () => {
                         allowedChannels={allowedChannelsOf(post)}
                         onMessage={requireAuth(() => setContactOpen(true))}
                       />
-                      {post.is_exchangeable && (
+                      {exchangeable && (
                         <Button variant="soft" size="lg" onClick={requireAuth(() => setExchangeOpen(true))}>
-                          <Repeat aria-hidden /> Proposer un échange
+                          <Repeat aria-hidden /> {t("exchange.propose")}
                         </Button>
                       )}
                     </>
@@ -281,7 +286,7 @@ const PostDetail = () => {
                 post.category_name && { label: "Catégorie", value: post.category_name },
                 post.post_type === "PRODUIT" && post.stock !== undefined && { label: "Quantité", value: String(post.stock) },
                 { label: "Devise", value: post.currency === "CDF" ? "Franc congolais" : "Dollar US" },
-                { label: "Troc", value: post.is_exchangeable ? "Accepté" : "Non" },
+                exchangeEnabled && { label: t("exchange.summaryLabel"), value: post.is_exchangeable ? t("exchange.accepted") : t("exchange.no") },
               ]
                 .filter((item): item is { label: string; value: string } => !!item)
                 .map((item) => (
@@ -330,7 +335,7 @@ const PostDetail = () => {
       </div>
 
       <ContactDialog post={post} open={contactOpen} onOpenChange={setContactOpen} />
-      {post.is_exchangeable && <ExchangeDialog post={post} open={exchangeOpen} onOpenChange={setExchangeOpen} />}
+      {exchangeable && <ExchangeDialog post={post} open={exchangeOpen} onOpenChange={setExchangeOpen} />}
     </AppShell>
   );
 };

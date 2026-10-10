@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { useFeatures } from "@/hooks/use-features";
+import { useTranslation } from "react-i18next";
 import type { FilterKey } from "./use-post-filters";
 
 interface FiltersPanelProps {
@@ -68,6 +70,8 @@ function ChoiceGroup({
 
 /** Filtres de recherche (CDC 3.2). Chaque changement met à jour l'URL, donc les résultats. */
 export function FiltersPanel({ filters, onChange, className }: FiltersPanelProps) {
+  const { t } = useTranslation();
+  const { exchangeEnabled } = useFeatures();
   // Les prix sont appliqués à la validation (Entrée ou sortie du champ), pas à chaque frappe
   const [priceMin, setPriceMin] = useState(filters.price_min ?? "");
   const [priceMax, setPriceMax] = useState(filters.price_max ?? "");
@@ -141,17 +145,19 @@ export function FiltersPanel({ filters, onChange, className }: FiltersPanelProps
         onSelect={(condition) => onChange({ condition })}
       />
 
-      <div className="flex items-center justify-between gap-4 rounded-xl border bg-card p-3.5">
-        <Label htmlFor="filter-exchangeable" className="cursor-pointer">
-          <span className="block text-sm font-semibold">Échangeable uniquement</span>
-          <span className="block text-xs font-normal text-muted-foreground">Annonces ouvertes au troc</span>
-        </Label>
-        <Switch
-          id="filter-exchangeable"
-          checked={filters.is_exchangeable === "true"}
-          onCheckedChange={(checked) => onChange({ is_exchangeable: checked ? "true" : undefined })}
-        />
-      </div>
+      {exchangeEnabled && (
+        <div className="flex items-center justify-between gap-4 rounded-xl border bg-card p-3.5">
+          <Label htmlFor="filter-exchangeable" className="cursor-pointer">
+            <span className="block text-sm font-semibold">{t("exchange.filterLabel")}</span>
+            <span className="block text-xs font-normal text-muted-foreground">{t("exchange.filterHint")}</span>
+          </Label>
+          <Switch
+            id="filter-exchangeable"
+            checked={filters.is_exchangeable === "true"}
+            onCheckedChange={(checked) => onChange({ is_exchangeable: checked ? "true" : undefined })}
+          />
+        </div>
+      )}
     </div>
   );
 }

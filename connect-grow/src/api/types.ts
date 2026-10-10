@@ -95,6 +95,7 @@ export interface Post {
     condition?: PostCondition | null;
     stock?: number;
     is_price_negotiable?: boolean;
+    /** Absent des réponses tant que le troc est éteint côté serveur (L0-14). */
     is_exchangeable?: boolean;
     main_image?: string | null;
     /** Photos supplémentaires de la galerie (main_image non comprise). */
@@ -339,4 +340,9 @@ export interface ReceivedReveal {
     created_at: string;
     requester_display_name: string;
     offer: { id: Uuid; title: string };
+}
+
+/** GET /api/config/features/ (hors /api/v1/) : fonctionnalités activables par le back-office. */
+export interface FeaturesResponse {
+  features: { exchange_enabled: boolean };
 }

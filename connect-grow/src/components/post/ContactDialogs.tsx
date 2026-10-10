@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Loader2, MessageSquare, Package, Repeat } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import apiClient from "@/api/client";
 import type { Post, Uuid } from "@/api/types";
@@ -14,7 +15,8 @@ import { sellerDisplayName } from "@/lib/post";
 import { cn } from "@/lib/utils";
 import { useMyPosts } from "@/hooks/use-marketplace";
 import { reviewKeys } from "@/hooks/use-reviews";
-import { apiErrorMessage } from "@/lib/errors";
+import { apiErrorCode, apiErrorMessage } from "@/lib/errors";
+import { featuresKeys } from "@/hooks/use-features";
 
 interface DialogProps {
   post: Post;
@@ -76,6 +78,8 @@ export function ContactDialog({ post, open, onOpenChange }: DialogProps) {
 
 /** Proposition de troc : l'acheteur choisit une de ses annonces à échanger (CDC 3.3). */
 export function ExchangeDialog({ post, open, onOpenChange }: DialogProps) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const { data: myPosts = [], isLoading } = useMyPosts(open);
   const [selectedId, setSelectedId] = useState<Uuid | null>(null);
   const [message, setMessage] = useState("");
@@ -88,12 +92,21 @@ export function ExchangeDialog({ post, open, onOpenChange }: DialogProps) {
       return apiClient.post("interactions/exchanges/", { post: post.id, message: text });
     },
     onSuccess: () => {
-      toast.success("Proposition d'échange envoyée.");
+      toast.success(t("exchange.proposalSent"));
       setMessage("");
       setSelectedId(null);
       onOpenChange(false);
     },
-    onError: (error) => toast.error(apiErrorMessage(error, "La proposition n'a pas pu être envoyée.")),
+    onError: (error) => {
+      // Troc éteint entre-temps : message dédié (jamais de nouvelle tentative), on referme et on relit la configuration
+      if (apiErrorCode(error) === "feature_disabled") {
+        toast.error(t("exchange.disabled"));
+        onOpenChange(false);
+        void queryClient.invalidateQueries({ queryKey: featuresKeys.all });
+        return;
+      }
+      toast.error(apiErrorMessage(error, t("exchange.proposalFailed")));
+    },
   });
 
   // my_posts renvoie aussi les annonces en pause, vendues ou expirées : seules les annonces en ligne se proposent
@@ -104,26 +117,26 @@ export function ExchangeDialog({ post, open, onOpenChange }: DialogProps) {
       <DialogContent className="flex max-h-[90vh] flex-col rounded-2xl sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Repeat className="h-5 w-5 text-primary" aria-hidden /> Proposer un échange
+            <Repeat className="h-5 w-5 text-primary" aria-hidden /> {t("exchange.propose")}
           </DialogTitle>
-          <DialogDescription>Choisissez l'annonce que vous proposez en échange, puis précisez votre offre.</DialogDescription>
+          <DialogDescription>{t("exchange.proposeDescription")}</DialogDescription>
         </DialogHeader>
 
         <div className="-mx-1 min-h-0 flex-1 space-y-2 overflow-y-auto px-1">
           {isLoading ? (
             <div className="flex justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" aria-label="Chargement de vos annonces" />
+              <Loader2 className="h-6 w-6 animate-spin text-primary" aria-label={t("exchange.loadingMine")} />
             </div>
           ) : offerable.length === 0 ? (
             <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
               <Package className="mx-auto mb-2 h-8 w-8 opacity-40" aria-hidden />
-              Vous n'avez pas encore d'annonce à proposer.
+              {t("exchange.nothingToOffer")}
               <Button asChild variant="link" className="mt-1 h-auto p-0">
-                <Link to="/create-post">Publier une annonce</Link>
+                <Link to="/create-post">{t("exchange.publish")}</Link>
               </Button>
             </div>
           ) : (
-            <div role="radiogroup" aria-label="Annonce proposée" className="grid gap-2">
+            <div role="radiogroup" aria-label={t("exchange.offeredLabel")} className="grid gap-2">
               {offerable.map((own) => {
                 const selected = own.id === selectedId;
                 return (

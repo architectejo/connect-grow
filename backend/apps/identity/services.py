@@ -20,8 +20,14 @@ from .acting import (  # noqa: F401
 # Organisations et équipes (ADR 0006) : façade publique, les autres domaines n'importent jamais le sous-module.
 from .organizations import (  # noqa: F401
     OrganizationError, SUSPENSION_REASONS, add_member, assert_account_removable, archive_organization, change_member_role,
-    count_active_owners, create_organization, get_active_role, get_identity_settings, leave_organization,
-    reactivate_organization, revoke_member, suspend_organization, transfer_ownership,
+    count_active_owners, create_organization, get_active_role, get_identity_settings, get_organization_for_member,
+    leave_organization, reactivate_organization, revoke_member, suspend_organization, transfer_ownership,
+    update_organization,
+)
+
+# Lectures des organisations : état de vérification dérivé, liste publique, limites (ADR 0006, 9.2 et 17.2).
+from .organization_reads import (  # noqa: F401
+    get_category_ids_by_organization, get_organization_limits, get_verification_data, public_organizations_queryset,
 )
 
 # Prestataire individuel (ADR 0006, 9.3) : façade publique.

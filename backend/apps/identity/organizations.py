@@ -31,7 +31,7 @@ from apps.platform_core.services import publish_event
 from . import capabilities
 from .capabilities import ROLE_OWNER, ROLES
 from .models import (
-    IdentitySettings, Membership, Organization, OrganizationCategory, ORG_TYPES, User,
+    IdentitySettings, KycDocument, Membership, Organization, OrganizationCategory, ORG_TYPES, User,
 )
 
 # Motifs de suspension normalisés (jamais de texte libre, ADR 0006 §4.2).
@@ -239,20 +239,7 @@ def validate_category_ids(category_ids):
     return wanted
 
 
-def _validate_creation_input(name, org_type, description, nif, category_ids, city_id, commune_id, logo):
-    from apps.catalog import services as catalog
-
-    errors = {}
-    normalized = normalize_name(name)
-    if normalized is None:
-        errors['name'] = _error("Le nom contient un caractère non autorisé.", 'invalid_name')
-        normalized = ''
-    elif not NAME_MIN_LENGTH <= len(normalized) <= NAME_MAX_LENGTH:
-        errors['name'] = _error(
-            f"Le nom doit contenir de {NAME_MIN_LENGTH} à {NAME_MAX_LENGTH} caractères.", 'invalid_name',
-        )
-    if not isinstance(org_type, str) or org_type not in ORG_TYPES:
-        errors['org_type'] = _error("Type d'organisation inconnu.", 'invalid_org_type')
+def _check_description(description, errors):
     if description is None:
         description = ''
     if not isinstance(description, str):
@@ -261,6 +248,10 @@ def _validate_creation_input(name, org_type, description, nif, category_ids, cit
         errors['description'] = _error(
             f"La description ne doit pas dépasser {DESCRIPTION_MAX_LENGTH} caractères.", 'invalid_description',
         )
+    return description
+
+
+def _check_nif(nif, errors):
     if nif is None:
         nif = ''
     if not isinstance(nif, str):
@@ -269,12 +260,33 @@ def _validate_creation_input(name, org_type, description, nif, category_ids, cit
         nif = nif.strip()
         if len(nif) > NIF_MAX_LENGTH:
             errors['nif'] = _error(f"Le NIF ne doit pas dépasser {NIF_MAX_LENGTH} caractères.", 'invalid_nif')
+    return nif
 
-    wanted = []
+
+def _check_name(name, errors):
+    normalized = normalize_name(name)
+    if normalized is None:
+        errors['name'] = _error("Le nom contient un caractère non autorisé.", 'invalid_name')
+        return ''
+    if not NAME_MIN_LENGTH <= len(normalized) <= NAME_MAX_LENGTH:
+        errors['name'] = _error(
+            f"Le nom doit contenir de {NAME_MIN_LENGTH} à {NAME_MAX_LENGTH} caractères.", 'invalid_name',
+        )
+    return normalized
+
+
+def _check_categories(category_ids, errors):
     try:
-        wanted = validate_category_ids(category_ids)
+        return validate_category_ids(category_ids)
     except serializers.ValidationError as exc:
         errors['category_ids'] = exc.detail['category_ids']
+        return []
+
+
+def _check_location(city_id, commune_id, errors):
+    """Ville et commune (références `catalog`) : existence, et la commune appartient à la ville."""
+    from apps.catalog import services as catalog
+
     if city_id is not None and not catalog.city_exists(city_id):
         errors['city_id'] = _error("Ville inconnue.", 'unknown_city')
     if commune_id is not None:
@@ -282,15 +294,31 @@ def _validate_creation_input(name, org_type, description, nif, category_ids, cit
             errors['commune_id'] = _error("Commune inconnue.", 'unknown_commune')
         elif city_id is not None and not catalog.commune_belongs_to_city(commune_id, city_id):
             errors['commune_id'] = _error("Cette commune n'appartient pas à la ville choisie.", 'unknown_commune')
-    if logo is not None:
-        if not isinstance(logo, File):
-            errors['logo'] = _error("Le logo doit être un fichier image.", 'invalid_logo')
-        else:
-            try:
-                validate_image_upload_size(logo)
-                validate_image_pixels(logo)
-            except DjangoValidationError as exc:
-                errors['logo'] = [ErrorDetail(m, code='invalid_logo') for m in exc.messages]
+
+
+def _check_logo(logo, errors):
+    if logo is None:
+        return
+    if not isinstance(logo, File):
+        errors['logo'] = _error("Le logo doit être un fichier image.", 'invalid_logo')
+        return
+    try:
+        validate_image_upload_size(logo)
+        validate_image_pixels(logo)
+    except DjangoValidationError as exc:
+        errors['logo'] = [ErrorDetail(m, code='invalid_logo') for m in exc.messages]
+
+
+def _validate_creation_input(name, org_type, description, nif, category_ids, city_id, commune_id, logo):
+    errors = {}
+    normalized = _check_name(name, errors)
+    if not isinstance(org_type, str) or org_type not in ORG_TYPES:
+        errors['org_type'] = _error("Type d'organisation inconnu.", 'invalid_org_type')
+    description = _check_description(description, errors)
+    nif = _check_nif(nif, errors)
+    wanted = _check_categories(category_ids, errors)
+    _check_location(city_id, commune_id, errors)
+    _check_logo(logo, errors)
     if errors:
         raise serializers.ValidationError(errors)
     return normalized, description, nif, wanted
@@ -354,6 +382,136 @@ def _discard_logo(organization):
             organization.logo.storage.delete(organization.logo.name)
         except Exception:  # nettoyage au mieux, ne masque jamais l'erreur d'origine
             pass
+
+
+# Champs d'identité modifiables par l'API (`org.edit_profile`). `org_type` est immuable (A13).
+UPDATABLE_FIELDS = ('name', 'description', 'logo', 'category_ids', 'city_id', 'commune_id', 'nif')
+
+
+def _discard_stored_file(name, storage):
+    if name:
+        try:
+            storage.delete(name)
+        except Exception:  # nettoyage au mieux, ne masque jamais l'erreur d'origine
+            pass
+
+
+def _set_categories(organization, wanted):
+    OrganizationCategory.objects.filter(organization=organization).exclude(category_id__in=wanted).delete()
+    existing = set(
+        OrganizationCategory.objects.filter(organization=organization).values_list('category_id', flat=True)
+    )
+    OrganizationCategory.objects.bulk_create([
+        OrganizationCategory(organization=organization, category_id=cid) for cid in wanted if cid not in existing
+    ])
+
+
+def update_organization(actor, organization_id, **changes) -> Organization:
+    """Modifie l'identité de l'organisation (`org.edit_profile` : propriétaire et administrateur seulement,
+    jamais un éditeur ni un analyste, Q-CP3). Seules les clés présentes sont lues ; `logo=None` retire le logo.
+
+    - `org_type` : refusé (400 `org_type_immutable`), le type ne change pas par l'API ;
+    - le nom ne peut plus changer dès qu'une pièce de l'organisation est validée (409
+      `name_locked_by_verification`, ADR 0006 A13) : un compte vérifié ne se renomme pas sans nouvelle
+      vérification (règle 3) ; un nom inchangé après normalisation n'est pas un renommage ;
+    - l'autorisation est (re)faite sous verrou, juste avant l'écriture (révocation ou suspension entre-temps) ;
+    - audit synchrone `ORG_UPDATED` (noms de champs seulement, jamais les valeurs) et événement
+      `identity.organization_updated` dans la même transaction ; rien n'est écrit si rien ne change."""
+    if 'org_type' in changes:
+        raise serializers.ValidationError({'org_type': _error(
+            "Le type d'une organisation ne peut pas être modifié.", 'org_type_immutable',
+        )})
+    unknown = set(changes) - set(UPDATABLE_FIELDS)
+    if unknown:
+        raise serializers.ValidationError({key: _error("Champ non modifiable.", 'read_only') for key in unknown})
+
+    stored_new_logo = None
+    try:
+        with transaction.atomic():
+            organization = _lock_organization(organization_id)
+            _authorize_member(actor, organization, 'org.edit_profile')
+
+            errors = {}
+            values = {}
+            if 'name' in changes:
+                values['name'] = _check_name(changes['name'], errors)
+            if 'description' in changes:
+                values['description'] = _check_description(changes['description'], errors)
+            if 'nif' in changes:
+                values['nif'] = _check_nif(changes['nif'], errors)
+            if 'category_ids' in changes:
+                values['category_ids'] = _check_categories(changes['category_ids'], errors)
+            if 'city_id' in changes or 'commune_id' in changes:
+                city_id = changes['city_id'] if 'city_id' in changes else organization.city_id
+                commune_id = changes['commune_id'] if 'commune_id' in changes else organization.commune_id
+                _check_location(city_id, commune_id, errors)
+                values['city_id'], values['commune_id'] = city_id, commune_id
+            if changes.get('logo') is not None:
+                _check_logo(changes['logo'], errors)
+            if errors:
+                raise serializers.ValidationError(errors)
+
+            if (values.get('name') is not None and values['name'] != organization.name
+                    and KycDocument.objects.filter(
+                        organization=organization, status=KycDocument.STATUS_VALIDE).exists()):
+                raise OrganizationError(
+                    "Le nom ne peut plus être modifié : une pièce de l'organisation est validée. "
+                    "Contactez le support pour un changement de nom.",
+                    'name_locked_by_verification',
+                )
+
+            touched = []
+            for field in ('name', 'description', 'nif', 'city_id', 'commune_id'):
+                if field in values and values[field] != getattr(organization, field):
+                    setattr(organization, field, values[field])
+                    touched.append(field)
+            old_logo_name = organization.logo.name if organization.logo else None
+            if 'logo' in changes and (changes['logo'] is not None or old_logo_name):
+                organization.logo = changes['logo']
+                touched.append('logo')
+            if touched:
+                organization.save(update_fields=touched + ['updated_at'])
+                if 'logo' in touched and organization.logo:
+                    stored_new_logo = organization.logo.name
+            if 'category_ids' in values:
+                current = set(OrganizationCategory.objects.filter(
+                    organization=organization).values_list('category_id', flat=True))
+                if current != set(values['category_ids']):
+                    _set_categories(organization, values['category_ids'])
+                    touched.append('category_ids')
+            if not touched:
+                return organization
+            record_audit(
+                actor, 'ORG_UPDATED', target=organization,
+                details=f"organization={organization.pk}; fields={','.join(touched)}",
+                context=(CONTEXT_ORGANIZATION, organization.pk),
+            )
+            publish_event(
+                'identity.organization_updated', aggregate_type='organization', aggregate_id=organization.pk,
+                payload={
+                    'organization_id': str(organization.pk), 'fields': list(touched), 'actor_id': str(actor.pk),
+                },
+            )
+            if 'logo' in touched and old_logo_name:
+                storage = organization.logo.storage
+                transaction.on_commit(lambda: _discard_stored_file(old_logo_name, storage))
+    except BaseException:
+        if stored_new_logo:
+            _discard_stored_file(stored_new_logo, Organization._meta.get_field('logo').storage)
+        raise
+    return organization
+
+
+def get_organization_for_member(actor, organization_id, capability='org.view_internal'):
+    """Lecture réservée aux membres : `(organisation, rôle)`. Ordre des contrôles : non-membre
+    (`DENY_RELATION`, aussi pour une organisation inexistante : pas d'oracle), état de l'organisation
+    (suspendue `DENY_SECURITY`, archivée `DENY_OBJECT_STATE`), état du compte, puis capacité."""
+    try:
+        organization = Organization.objects.get(pk=organization_id)
+    except (Organization.DoesNotExist, ValueError, TypeError, DjangoValidationError):
+        raise ContextDenied(DENY_RELATION, "Vous n'êtes pas membre de cette organisation.")
+    membership = _authorize_member(actor, organization, capability)
+    return organization, membership.role
 
 
 def archive_organization(actor, organization_id) -> Organization:

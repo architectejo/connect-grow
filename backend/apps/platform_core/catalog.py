@@ -26,6 +26,8 @@ _TYPES = (
     # Abonnés ajoutés par T5 à T7 ; le drapeau no_subscriber est alors retiré.
     EventType('identity.membership_changed', no_subscriber=True),
     EventType('identity.seller_context_status_changed', no_subscriber=True),
+    # Identité d'une organisation modifiée (T8) : noms de champs seulement, aucune valeur.
+    EventType('identity.organization_updated', no_subscriber=True),
     # Émetteur : `decide_kyc_document` (T4).
     EventType('identity.organization_verification_changed', no_subscriber=True, emitter_pending=True),
     EventType('marketplace.contact_recorded'),

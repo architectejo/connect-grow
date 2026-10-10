@@ -140,6 +140,8 @@ REST_FRAMEWORK = {
         'change_password': '10/hour',  # par utilisateur
         'kyc_write': '20/hour',     # dépôt/suppression de pièces KYC, par utilisateur
         'provider_write': '20/hour',  # profil prestataire (activation, modification, archivage), par utilisateur
+        'org_create': '5/day',      # création d'organisation, par utilisateur (ADR 0006, 9.2)
+        'org_write': '30/hour',     # modification, archivage et sortie d'une organisation, par utilisateur
         'contexts': '600/hour',     # liste des contextes disponibles, par utilisateur
         'contact_settings': '20/hour',  # réglages de contact vendeur (numéro, code, canaux), par utilisateur
         # Écritures du marketplace et des interactions (par utilisateur ; par IP pour la vue anonyme).

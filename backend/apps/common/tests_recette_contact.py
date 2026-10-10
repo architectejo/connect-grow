@@ -326,7 +326,7 @@ class Scenario2NoNumberLeakTests(RecetteContactBase):
 
     def test_search_by_any_part_of_the_number_finds_nothing(self):
         for term in (SELLER_CONTACT, SELLER_CONTACT[4:], '7654321', '4321', SELLER_LOGIN, '970000001'):
-            for url in (POSTS, '/api/accounts/businesses/'):
+            for url in (POSTS, '/api/accounts/organizations/'):
                 for viewer in (None, self.buyer):
                     response = self.c(viewer).get(url, {'search': term})
                     self.assertEqual(response.status_code, 200)

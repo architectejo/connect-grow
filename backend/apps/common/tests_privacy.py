@@ -15,7 +15,10 @@ from rest_framework.test import APITestCase
 
 from apps.catalog.models import Category, City, Commune
 from apps.common.factories import make_test_image
-from apps.identity.models import BusinessProfile, ContactConsent, ContactPoint, KycDocument, User, CONTACT_CONSENT_TEXT_VERSION
+from apps.identity.models import (
+    BusinessProfile, ContactConsent, ContactPoint, KycDocument, Membership, Organization, User,
+    CONTACT_CONSENT_TEXT_VERSION,
+)
 from apps.marketplace.models import ContactEvent, ExchangeProposal, Favorite, Offer
 from apps.messaging.models import Conversation, Message
 from apps.moderation.models import Report, Sanction
@@ -104,6 +107,9 @@ class NoPersonalContactLeakTests(APITestCase):
         seller.save()
         profile = BusinessProfile.objects.create(user=seller, business_name='Boutique', bio='Bio', is_verified=True)
         KycDocument.objects.create(business_profile=profile, document_type=KycDocument.DOC_RCCM)
+        # Organisation du vendeur (L0-09g) : alimente la liste publique et le détail interne parcourus par le test.
+        organization = Organization.objects.create(name='Boutique', org_type='ENTREPRISE', description='Bio', nif='NIF-1')
+        Membership.objects.create(organization=organization, user=seller, role='OWNER')
         self.offer = Offer.objects.create(
             seller=seller, category_id=category.id, commune_id=commune.id, title='Un joli canapé à vendre',
             description='Description suffisamment longue pour le CDC.', price=100, main_image=make_test_image(),
@@ -214,7 +220,7 @@ class NoPersonalContactLeakTests(APITestCase):
         witnesses = [
             (None, reverse('offer-detail', args=[self.offer.id]), 'Seller'),
             (None, reverse('offer-list'), 'Seller'),
-            (None, reverse('business_list'), 'Boutique'),
+            (None, reverse('organizations'), 'Boutique'),
             (None, reverse('review-list'), 'Buyer'),
             ('buyer', reverse('conversation-list'), 'Seller'),
             ('buyer', reverse('message-list') + f'?conversation={self.conversation.id}', 'Seller'),
@@ -262,7 +268,7 @@ class NoPersonalContactLeakTests(APITestCase):
     def test_search_by_phone_or_email_finds_nothing(self):
         seller_phone, seller_email = self.PEOPLE['seller']
         for term in (seller_phone, seller_email, '970000001', 'seller-secret'):
-            for name in ('offer-list', 'business_list'):
+            for name in ('offer-list', 'organizations'):
                 for viewer in (None, 'third'):
                     response = self.client_for(viewer).get(reverse(name), {'search': term})
                     self.assertEqual(response.status_code, 200)

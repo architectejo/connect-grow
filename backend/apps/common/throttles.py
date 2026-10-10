@@ -3,6 +3,8 @@
 `ScopedRateThrottle` compte par utilisateur connecté, ou par IP pour un anonyme. Les vues
 déclarent `throttle_scopes = {action: scope}` via `ActionScopedThrottleMixin`. Les dépassements
 renvoient 429 avec l'en-tête `Retry-After`."""
+import ipaddress
+
 from rest_framework.throttling import ScopedRateThrottle, SimpleRateThrottle
 
 
@@ -35,6 +37,18 @@ class AnonymousScopedThrottle(ScopedRateThrottle):
         return super().allow_request(request, view)
 
 
+def normalize_ip(ident):
+    """Clé de limitation d'une adresse : IPv4 telle quelle ; IPv6 réduite à son préfixe /64 (un
+    abonné reçoit au moins un /64 : sans cela, il change d'adresse à volonté pour contourner la limite)."""
+    try:
+        address = ipaddress.ip_address(ident)
+    except ValueError:
+        return ident
+    if address.version == 6:
+        return str(ipaddress.ip_network(f"{address}/64", strict=False))
+    return str(address)
+
+
 class _RevealThrottle(SimpleRateThrottle):
     """Révélation de numéro : ne compte que les POST ; chaque tentative compte (refusée ou non).
     Les compteurs vivent dans le cache et expirent seuls : aucune adresse IP n'est persistée
@@ -55,7 +69,7 @@ class RevealIpThrottle(_RevealThrottle):
     code = 'reveal_quota_ip'
 
     def get_cache_key(self, request, view):
-        return self.cache_format % {'scope': self.scope, 'ident': self.get_ident(request)}
+        return self.cache_format % {'scope': self.scope, 'ident': normalize_ip(self.get_ident(request))}
 
 
 class RevealUserThrottle(_RevealThrottle):

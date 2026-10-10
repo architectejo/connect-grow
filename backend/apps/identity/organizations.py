@@ -9,15 +9,22 @@ des UUID et des codes : jamais de nom, d'e-mail ni de téléphone.
 
 Ce module est exposé par `identity.services` ; les autres domaines n'importent jamais ce sous-module.
 """
+import re
+import unicodedata
+
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.files import File
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers, status
+from rest_framework.exceptions import ErrorDetail
 
 from apps.common.contexts import (
     CONTEXT_ORGANIZATION, DENY_OBJECT_STATE, DENY_PERMISSION, DENY_RELATION, DENY_SECURITY, ContextDenied,
 )
 from apps.common.exception_handler import CodedAPIException
+from apps.common.images import validate_image_pixels, validate_image_upload_size
+from apps.common.utils import parse_uuid
 from apps.moderation.services import is_user_restricted, record_audit
 from apps.platform_core.services import publish_event
 
@@ -33,6 +40,7 @@ SUSPENSION_REASONS = ('moderation', 'verification', 'legal', 'other')
 NAME_MIN_LENGTH = 2
 NAME_MAX_LENGTH = 255
 DESCRIPTION_MAX_LENGTH = 2000
+NIF_MAX_LENGTH = 50
 
 # Types de changement portés par `identity.membership_changed`.
 CHANGE_ADDED = 'added'
@@ -72,7 +80,11 @@ def count_active_owners(organization_id) -> int:
 
 
 def count_active_memberships(user_id) -> int:
-    return Membership.objects.filter(user_id=user_id, status=Membership.STATUS_ACTIVE).count()
+    """Appartenances actives du compte dans des organisations ACTIVE (base du plafond : une organisation
+    archivée ou suspendue ne consomme pas de place)."""
+    return Membership.objects.filter(
+        user_id=user_id, status=Membership.STATUS_ACTIVE, organization__status=Organization.STATUS_ACTIVE,
+    ).count()
 
 
 def get_active_role(user_id, organization_id):
@@ -95,27 +107,47 @@ def _lock_organization(organization_id) -> Organization:
         raise ContextDenied(DENY_RELATION, "Vous n'êtes pas membre de cette organisation.")
 
 
-def _ensure_organization_usable(organization, allow_inactive=False):
+def _ensure_organization_usable(organization, allow_archived=False, allow_inactive=False):
+    """`allow_inactive` : suspendue ou archivée tolérées (sortie volontaire) ; `allow_archived` : seule
+    l'archivée est tolérée (le dernier propriétaire peut transférer depuis une organisation archivée)."""
     if allow_inactive:
         return
     if organization.status == Organization.STATUS_SUSPENDED:
         raise ContextDenied(DENY_SECURITY, "Cette organisation est suspendue.")
-    if organization.status == Organization.STATUS_ARCHIVED:
+    if organization.status == Organization.STATUS_ARCHIVED and not allow_archived:
         raise ContextDenied(DENY_OBJECT_STATE, "Cette organisation est archivée.")
 
 
-def _authorize_member(actor, organization, capability, allow_inactive=False) -> Membership:
-    """Appartenance active de l'acteur, état de l'organisation puis capacité, dans cet ordre.
-    `is_staff` et `is_superuser` n'ouvrent rien (ADR 0006, A5)."""
+def _authorize_member(actor, organization, capability, allow_inactive=False, allow_archived=False) -> Membership:
+    """Appartenance active de l'acteur, état de l'organisation, état du compte puis capacité, dans cet
+    ordre. Un acteur désactivé ou restreint est refusé (`DENY_SECURITY`), sauf pour la sortie volontaire
+    (`org.leave`). `is_staff` et `is_superuser` n'ouvrent rien (ADR 0006, A5)."""
     membership = Membership.objects.filter(
         organization=organization, user_id=actor.pk, status=Membership.STATUS_ACTIVE,
     ).first()
     if membership is None:
         raise ContextDenied(DENY_RELATION, "Vous n'êtes pas membre de cette organisation.")
-    _ensure_organization_usable(organization, allow_inactive=allow_inactive)
+    _ensure_organization_usable(organization, allow_archived=allow_archived, allow_inactive=allow_inactive)
+    if capability != 'org.leave' and (not actor.is_active or is_user_restricted(actor.pk)):
+        raise ContextDenied(DENY_SECURITY, "Votre compte ne permet pas cette action.")
     if not capabilities.role_has_capability(membership.role, capability):
         raise ContextDenied(DENY_PERMISSION, "Votre rôle ne permet pas cette action.")
     return membership
+
+
+def _unavailable_user_error():
+    """Réponse unique et neutre quand un compte ne peut pas être ciblé : inconnu, inactif, restreint ou
+    au plafond. Même code, même statut, même message : elle ne révèle pas l'état du compte."""
+    return OrganizationError(
+        "Ce compte ne peut pas être ajouté ou modifié dans l'organisation.", 'user_unavailable',
+        status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def _ensure_target_available(user_id):
+    """Cible active et non restreinte, sinon réponse neutre."""
+    if not User.objects.filter(pk=user_id, is_active=True).exists() or is_user_restricted(user_id):
+        raise _unavailable_user_error()
 
 
 def _validate_role(role):
@@ -163,32 +195,90 @@ def _ensure_under_limit(user_id):
         raise OrganizationError("Vous avez atteint le nombre maximal d'organisations.", 'organization_limit_reached')
 
 
-def _validate_creation_input(name, org_type, description, category_ids, city_id, commune_id):
+_FORBIDDEN_NAME_CATEGORIES = ('Cc', 'Cf', 'Zl', 'Zp')
+
+
+def normalize_name(name):
+    """Forme canonique d'un nom d'organisation : NFKC, espaces multiples repliés, bords retirés. Retourne
+    None si le nom contient un caractère de contrôle, de direction ou de largeur nulle (catégories
+    Unicode Cc, Cf, Zl, Zp), qui permettraient d'usurper un nom visuellement."""
+    if not isinstance(name, str):
+        return None
+    name = unicodedata.normalize('NFKC', name)
+    if any(unicodedata.category(ch) in _FORBIDDEN_NAME_CATEGORIES for ch in name):
+        return None
+    return re.sub(r'\s+', ' ', name).strip()
+
+
+def _error(message, code):
+    return [ErrorDetail(message, code=code)]
+
+
+def _validate_creation_input(name, org_type, description, nif, category_ids, city_id, commune_id, logo):
     from apps.catalog import services as catalog
 
     errors = {}
-    name = (name or '').strip() if isinstance(name, str) else ''
-    if not NAME_MIN_LENGTH <= len(name) <= NAME_MAX_LENGTH:
-        errors['name'] = [f"Le nom doit contenir de {NAME_MIN_LENGTH} à {NAME_MAX_LENGTH} caractères."]
-    if org_type not in ORG_TYPES:
-        errors['org_type'] = ["Type d'organisation inconnu."]
-    if len(description or '') > DESCRIPTION_MAX_LENGTH:
-        errors['description'] = [f"La description ne doit pas dépasser {DESCRIPTION_MAX_LENGTH} caractères."]
-    wanted = list(dict.fromkeys(str(c) for c in (category_ids or ())))
-    if len(wanted) > get_identity_settings().max_categories_per_context:
-        errors['category_ids'] = ["Trop de catégories."]
-    elif wanted and len(catalog.existing_category_ids(wanted)) != len(wanted):
-        errors['category_ids'] = ["Une catégorie est inconnue."]
+    normalized = normalize_name(name)
+    if normalized is None:
+        errors['name'] = _error("Le nom contient un caractère non autorisé.", 'invalid_name')
+        normalized = ''
+    elif not NAME_MIN_LENGTH <= len(normalized) <= NAME_MAX_LENGTH:
+        errors['name'] = _error(
+            f"Le nom doit contenir de {NAME_MIN_LENGTH} à {NAME_MAX_LENGTH} caractères.", 'invalid_name',
+        )
+    if not isinstance(org_type, str) or org_type not in ORG_TYPES:
+        errors['org_type'] = _error("Type d'organisation inconnu.", 'invalid_org_type')
+    if description is None:
+        description = ''
+    if not isinstance(description, str):
+        errors['description'] = _error("La description doit être un texte.", 'invalid_description')
+    elif len(description) > DESCRIPTION_MAX_LENGTH:
+        errors['description'] = _error(
+            f"La description ne doit pas dépasser {DESCRIPTION_MAX_LENGTH} caractères.", 'invalid_description',
+        )
+    if nif is None:
+        nif = ''
+    if not isinstance(nif, str):
+        errors['nif'] = _error("Le NIF doit être un texte.", 'invalid_nif')
+    else:
+        nif = nif.strip()
+        if len(nif) > NIF_MAX_LENGTH:
+            errors['nif'] = _error(f"Le NIF ne doit pas dépasser {NIF_MAX_LENGTH} caractères.", 'invalid_nif')
+
+    wanted = []
+    if category_ids is None:
+        category_ids = ()
+    if not isinstance(category_ids, (list, tuple, set)):
+        errors['category_ids'] = _error("Les catégories doivent former une liste.", 'unknown_category')
+    else:
+        parsed = [parse_uuid(c) for c in category_ids]
+        if any(p is None for p in parsed):
+            errors['category_ids'] = _error("Une catégorie est inconnue.", 'unknown_category')
+        else:
+            wanted = list(dict.fromkeys(parsed))
+            if len(wanted) > get_identity_settings().max_categories_per_context:
+                errors['category_ids'] = _error("Trop de catégories.", 'too_many_categories')
+            elif wanted and len(catalog.existing_category_ids(wanted)) != len(wanted):
+                errors['category_ids'] = _error("Une catégorie est inconnue.", 'unknown_category')
     if city_id is not None and not catalog.city_exists(city_id):
-        errors['city_id'] = ["Ville inconnue."]
+        errors['city_id'] = _error("Ville inconnue.", 'unknown_city')
     if commune_id is not None:
         if not catalog.commune_exists(commune_id):
-            errors['commune_id'] = ["Commune inconnue."]
+            errors['commune_id'] = _error("Commune inconnue.", 'unknown_commune')
         elif city_id is not None and not catalog.commune_belongs_to_city(commune_id, city_id):
-            errors['commune_id'] = ["Cette commune n'appartient pas à la ville choisie."]
+            errors['commune_id'] = _error("Cette commune n'appartient pas à la ville choisie.", 'unknown_commune')
+    if logo is not None:
+        if not isinstance(logo, File):
+            errors['logo'] = _error("Le logo doit être un fichier image.", 'invalid_logo')
+        else:
+            try:
+                validate_image_upload_size(logo)
+                validate_image_pixels(logo)
+            except DjangoValidationError as exc:
+                errors['logo'] = [ErrorDetail(m, code='invalid_logo') for m in exc.messages]
     if errors:
         raise serializers.ValidationError(errors)
-    return name, wanted
+    return normalized, description, nif, wanted
 
 
 # --- Cycle de vie -------------------------------------------------------------------------
@@ -208,30 +298,47 @@ def create_organization(
         )
     if is_user_restricted(creator.pk):
         raise ContextDenied(DENY_SECURITY, "Votre compte fait l'objet d'une restriction.")
-    name, wanted_categories = _validate_creation_input(name, org_type, description, category_ids, city_id, commune_id)
+    name, description, nif, wanted_categories = _validate_creation_input(
+        name, org_type, description, nif, category_ids, city_id, commune_id, logo,
+    )
 
-    with transaction.atomic():
-        _ensure_under_limit(creator.pk)
-        organization = Organization(
-            name=name, org_type=org_type, description=description or '', nif=(nif or '').strip()[:50],
-            city_id=city_id, commune_id=commune_id, status=Organization.STATUS_ACTIVE, created_by=creator,
-        )
-        if logo:
-            organization.logo = logo
-        organization.save()
-        OrganizationCategory.objects.bulk_create([
-            OrganizationCategory(organization=organization, category_id=cid) for cid in wanted_categories
-        ])
-        membership = Membership.objects.create(
-            organization=organization, user=creator, role=ROLE_OWNER, status=Membership.STATUS_ACTIVE,
-            added_by=creator,
-        )
-        record_audit(
-            creator, 'ORG_CREATED', target=organization, details=f"org_type={org_type}",
-            context=(CONTEXT_ORGANIZATION, organization.pk),
-        )
-        _publish_membership_change(organization, membership, CHANGE_ADDED, None, ROLE_OWNER, creator)
+    organization = None
+    try:
+        with transaction.atomic():
+            _ensure_under_limit(creator.pk)
+            organization = Organization(
+                name=name, org_type=org_type, description=description, nif=nif,
+                city_id=city_id, commune_id=commune_id, status=Organization.STATUS_ACTIVE, created_by=creator,
+            )
+            if logo:
+                organization.logo = logo
+            organization.save()
+            OrganizationCategory.objects.bulk_create([
+                OrganizationCategory(organization=organization, category_id=cid) for cid in wanted_categories
+            ])
+            membership = Membership.objects.create(
+                organization=organization, user=creator, role=ROLE_OWNER, status=Membership.STATUS_ACTIVE,
+                added_by=creator,
+            )
+            record_audit(
+                creator, 'ORG_CREATED', target=organization, details=f"org_type={org_type}",
+                context=(CONTEXT_ORGANIZATION, organization.pk),
+            )
+            _publish_membership_change(organization, membership, CHANGE_ADDED, None, ROLE_OWNER, creator)
+    except BaseException:
+        # Le fichier est écrit par `save()` avant la validation de la transaction : pas d'orphelin si elle
+        # est annulée (limite : une transaction englobante annulée plus tard n'est pas détectable ici).
+        _discard_logo(organization)
+        raise
     return organization
+
+
+def _discard_logo(organization):
+    if organization is not None and organization.logo and organization.logo.name:
+        try:
+            organization.logo.storage.delete(organization.logo.name)
+        except Exception:  # nettoyage au mieux, ne masque jamais l'erreur d'origine
+            pass
 
 
 def archive_organization(actor, organization_id) -> Organization:
@@ -281,11 +388,13 @@ def reactivate_organization(actor, organization_id) -> Organization:
         organization = _lock_organization(organization_id)
         if organization.status == Organization.STATUS_ACTIVE:
             raise OrganizationError("Cette organisation est déjà active.", 'invalid_status')
+        old_status, old_reason = organization.status, organization.suspension_reason
         organization.status = Organization.STATUS_ACTIVE
         organization.suspension_reason = ''
         organization.save(update_fields=['status', 'suspension_reason', 'updated_at'])
         record_audit(
-            actor, 'ORG_REACTIVATED', target=organization, details=f"organization={organization.pk}",
+            actor, 'ORG_REACTIVATED', target=organization,
+            details=f"old_status={old_status}; old_reason={old_reason or '-'}",
             context=(CONTEXT_ORGANIZATION, organization.pk),
         )
         _publish_status_change(organization, STATUS_REASON_REACTIVATED, actor)
@@ -306,22 +415,29 @@ def _publish_status_change(organization, reason, actor):
 
 def add_member(actor, organization_id, user_id, role) -> Membership:
     """Ajoute (ou réactive) un membre actif. `org.manage_members` ; un administrateur n'attribue jamais
-    OWNER (R9) ni un rôle supérieur au sien (R10). Réactive la même ligne pour un ancien membre (R12)."""
+    OWNER (R9) ni un rôle supérieur au sien (R10). Réactive la même ligne pour un ancien membre (R12).
+
+    NON EXPOSABLE TEL QUEL : cet ajout direct se fait sans le consentement de la cible. Aucun endpoint ne doit
+    l'appeler en l'état ; L1-01 doit implémenter invitation + acceptation par la cible (plafond vérifié à
+    l'acceptation), avec revue de `auditeur-securite` (ADR 0006, sections 15 et 17). Les refus portant sur la
+    cible (inconnue, inactive, restreinte, au plafond) partagent une réponse unique et neutre."""
     _validate_role(role)
     with transaction.atomic():
         organization = _lock_organization(organization_id)
         actor_membership = _authorize_member(actor, organization, 'org.manage_members')
         if not capabilities.can_manage_role_of(actor_membership.role, role):
             raise ContextDenied(DENY_PERMISSION, "Vous ne pouvez pas attribuer ce rôle.")
-        target = User.objects.filter(pk=user_id, is_active=True).first()
-        if target is None:
-            raise OrganizationError("Compte introuvable.", 'user_not_found', 404)
-        if is_user_restricted(target.pk):
-            raise OrganizationError("Ce compte ne peut pas rejoindre une organisation.", 'user_restricted', 403)
+        # La cible est verrouillée et son plafond vérifié avant toute lecture de ses appartenances.
+        target = User.objects.select_for_update().filter(pk=user_id, is_active=True).first()
+        if target is None or is_user_restricted(target.pk):
+            raise _unavailable_user_error()
+        try:
+            _ensure_under_limit(target.pk)
+        except OrganizationError:
+            raise _unavailable_user_error()
         membership = Membership.objects.filter(organization=organization, user=target).first()
         if membership is not None and membership.status == Membership.STATUS_ACTIVE:
             raise OrganizationError("Ce compte est déjà membre de l'organisation.", 'already_member')
-        _ensure_under_limit(target.pk)
         now = timezone.now()
         if membership is None:
             membership = Membership.objects.create(
@@ -370,6 +486,7 @@ def change_member_role(actor, organization_id, user_id, new_role) -> Membership:
         if not (capabilities.can_manage_role_of(actor_membership.role, membership.role)
                 and capabilities.can_manage_role_of(actor_membership.role, new_role)):
             raise ContextDenied(DENY_PERMISSION, "Vous ne pouvez pas modifier ce rôle.")
+        _ensure_target_available(membership.user_id)
         return _apply_role_change(actor, organization, membership, new_role)
 
 
@@ -384,12 +501,13 @@ def transfer_ownership(actor, organization_id, new_owner_user_id, actor_new_role
         raise OrganizationError("Vous êtes déjà propriétaire.", 'invalid_transfer', status.HTTP_400_BAD_REQUEST)
     with transaction.atomic():
         organization = _lock_organization(organization_id)
-        actor_membership = _authorize_member(actor, organization, 'org.manage_roles')
+        actor_membership = _authorize_member(actor, organization, 'org.manage_roles', allow_archived=True)
         if actor_membership.role != ROLE_OWNER:
             raise ContextDenied(DENY_PERMISSION, "Seul un propriétaire peut transférer la propriété.")
         target = _get_membership(organization, new_owner_user_id)
         if target.status != Membership.STATUS_ACTIVE:
             raise OrganizationError("Ce compte n'est pas membre de l'organisation.", 'member_not_found', 404)
+        _ensure_target_available(target.user_id)
         _apply_role_change(actor, organization, target, ROLE_OWNER)
         _apply_role_change(actor, organization, actor_membership, actor_new_role)
         record_audit(
@@ -409,7 +527,9 @@ def _end_membership(actor, organization, membership, end_reason, audit_action):
     )
     if not done:
         raise OrganizationError("Ce compte n'est pas membre de l'organisation.", 'member_not_found', 404)
-    if old_role == ROLE_OWNER and count_active_owners(organization.pk) < 1:
+    # Une organisation archivée n'a plus de vie active : son dernier propriétaire peut la quitter (tracé).
+    if (old_role == ROLE_OWNER and organization.status != Organization.STATUS_ARCHIVED
+            and count_active_owners(organization.pk) < 1):
         raise _last_owner_error()
     membership.status, membership.end_reason, membership.ended_at = Membership.STATUS_REVOKED, end_reason, now
     _audit_membership(actor, audit_action, organization, membership, old_role, None)
@@ -440,3 +560,20 @@ def leave_organization(user, organization_id) -> Membership:
         organization = _lock_organization(organization_id)
         membership = _authorize_member(user, organization, 'org.leave', allow_inactive=True)
         return _end_membership(user, organization, membership, Membership.END_LEFT, 'MEMBERSHIP_REVOKED')
+
+
+def assert_account_removable(user):
+    """Refuse (409 `last_owner_account`) la suppression d'un compte seul propriétaire ACTIF d'une organisation
+    active : l'organisation deviendrait orpheline. Ne bloque PAS la désactivation par sanction (`is_active`).
+    Dette (ADR 0006, section 15) : chemin de secours audité du personnel et sort des organisations orphelines,
+    à livrer avec L1-01 / la suppression de compte."""
+    owned = list(Membership.objects.filter(
+        user_id=user.pk, role=ROLE_OWNER, status=Membership.STATUS_ACTIVE,
+        organization__status=Organization.STATUS_ACTIVE,
+    ).values_list('organization_id', flat=True))
+    for organization_id in owned:
+        if count_active_owners(organization_id) <= 1:
+            raise OrganizationError(
+                "Ce compte est le seul propriétaire d'une organisation active : transférez la propriété d'abord.",
+                'last_owner_account',
+            )

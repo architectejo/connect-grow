@@ -3,6 +3,9 @@
 Aucun modèle : de simples constantes partagées par les domaines. Un contexte vendeur est désigné
 par (`type`, `id`) : `USER` (identifiant du compte), `PROVIDER` (identifiant du `ProviderProfile`)
 ou `ORGANIZATION` (identifiant de l'organisation). ADR 0006, section 4.1.
+
+Exceptions : ce module importe `CodedAPIException` (Django REST framework) pour définir `ContextDenied` ;
+il reste sans modèle et ne dépend d'aucun domaine.
 """
 import uuid
 from dataclasses import dataclass

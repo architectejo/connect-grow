@@ -41,7 +41,7 @@ from .verification import (  # noqa: F401
 from .sellers import (  # noqa: F401
     SellerSummary, context_has_capability, get_contact_accounts, get_context_allowed_channels, get_context_recipients,
     get_seller_context_public_flags, get_seller_summaries, get_user_context_roles, is_seller_context_public,
-    set_account_active,
+    set_account_active, announce_account_status,
 )
 
 # Prestataire individuel (ADR 0006, 9.3) : façade publique.

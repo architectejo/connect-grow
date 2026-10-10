@@ -49,7 +49,15 @@ class UserAdmin(admin.ModelAdmin):
         return False
 
     def save_model(self, request, obj, form, change):
-        super().save_model(request, obj, form, change)
+        from django.db import transaction
+
+        from . import services
+
+        with transaction.atomic():
+            super().save_model(request, obj, form, change)
+            if change and 'is_active' in form.changed_data:
+                # Modification directe de `is_active` : la visibilité des offres suit (ADR 0006, A7/A9).
+                services.announce_account_status(obj.pk, obj.is_active, request.user)
         if change and form.changed_data:
             record_audit(
                 request.user, 'USER_ADMIN_CHANGED', target=obj,

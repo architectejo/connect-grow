@@ -625,6 +625,7 @@ def _publish_status_change(organization, reason, actor):
             'context_type': CONTEXT_ORGANIZATION, 'context_id': str(organization.pk), 'reason': reason,
             'actor_id': str(actor.pk) if actor is not None else None,
         },
+        deliver_now=True,  # visibilité des offres du vendeur à jour dès la fin de l'action (ADR 0006, A7)
     )
 
 

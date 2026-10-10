@@ -249,23 +249,31 @@ def set_account_active(user_id, active: bool, actor=None) -> bool:
     parsed = parse_uuid(user_id)
     if parsed is None:
         return False
-    reason = STATUS_REASON_ACCOUNT_REACTIVATED if active else STATUS_REASON_ACCOUNT_DEACTIVATED
     with transaction.atomic():
         user = User.objects.select_for_update().filter(pk=parsed).first()
         if user is None or user.is_active == bool(active):
             return False
         user.is_active = bool(active)
         user.save(update_fields=['is_active'])
-        contexts = [(CONTEXT_USER, 'user', parsed)]
-        provider_id = ProviderProfile.objects.filter(user_id=parsed).values_list('pk', flat=True).first()
-        if provider_id is not None:
-            contexts.append((CONTEXT_PROVIDER, 'provider', provider_id))
-        for context_type, aggregate_type, context_id in contexts:
-            publish_event(
-                'identity.seller_context_status_changed', aggregate_type=aggregate_type, aggregate_id=context_id,
-                payload={
-                    'context_type': context_type, 'context_id': str(context_id), 'reason': reason,
-                    'actor_id': str(actor.pk) if actor is not None else None,
-                },
-            )
+        announce_account_status(parsed, bool(active), actor)
     return True
+
+
+def announce_account_status(user_id, active: bool, actor=None) -> None:
+    """Publie le changement de statut des contextes vendeur d'un compte (personnel et prestataire) et le
+    diffuse immédiatement aux abonnés, dans la transaction. À appeler dans `transaction.atomic()`. Sert aussi
+    à l'administration Django, qui peut modifier `is_active` directement."""
+    reason = STATUS_REASON_ACCOUNT_REACTIVATED if active else STATUS_REASON_ACCOUNT_DEACTIVATED
+    contexts = [(CONTEXT_USER, 'user', user_id)]
+    provider_id = ProviderProfile.objects.filter(user_id=user_id).values_list('pk', flat=True).first()
+    if provider_id is not None:
+        contexts.append((CONTEXT_PROVIDER, 'provider', provider_id))
+    for context_type, aggregate_type, context_id in contexts:
+        publish_event(
+            'identity.seller_context_status_changed', aggregate_type=aggregate_type, aggregate_id=context_id,
+            payload={
+                'context_type': context_type, 'context_id': str(context_id), 'reason': reason,
+                'actor_id': str(actor.pk) if actor is not None else None,
+            },
+            deliver_now=True,
+        )

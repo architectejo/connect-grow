@@ -20,13 +20,15 @@ from typing import Optional
 from django.db.models.functions import Lower
 from rest_framework import permissions
 
+from apps.moderation.services import is_user_restricted
+
 from apps.common.contexts import (
     CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER, DENY_CONTEXT, DENY_OBJECT_STATE, DENY_PERMISSION,
     DENY_RELATION, DENY_SECURITY, ActingContext, ContextDenied,
 )
 
 from . import capabilities
-from .models import Membership, Organization, ProviderProfile
+from .models import Membership, Organization, ProviderProfile, User
 
 CONTEXT_HEADER = 'X-Context'
 CONTEXT_HEADER_META_KEY = 'HTTP_X_CONTEXT'
@@ -41,6 +43,10 @@ MSG_SUSPENDED = "Cette organisation est suspendue."
 MSG_ARCHIVED = "Cette organisation est archivée."
 MSG_PROVIDER_ARCHIVED = "Ce profil de prestataire est archivé."
 MSG_FORBIDDEN = "Votre rôle ne permet pas cette action dans ce contexte."
+MSG_ACCOUNT_UNUSABLE = "Votre compte ne permet pas cette action."
+
+# Seule capacité encore permise à un compte désactivé ou restreint : la sortie volontaire.
+_CAPABILITY_ALLOWED_WHEN_RESTRICTED = 'org.leave'
 
 
 def _parse_header(raw):
@@ -85,9 +91,22 @@ def _check_organization_status(org_status):
         raise ContextDenied(DENY_OBJECT_STATE, MSG_ARCHIVED)
 
 
+def _ensure_actor_usable(user, capability=None):
+    """Garde unique de l'état du COMPTE (même logique que `organizations._authorize_member`) : `is_active`
+    relu en base (jamais l'attribut d'un objet possiblement périmé ou factice) et absence de sanction
+    bloquante, sinon `DENY_SECURITY`. Seule la sortie volontaire (`org.leave`) reste permise. Ne dépend que
+    de l'acteur : n'apprend rien sur l'existence d'un contexte. Deux requêtes SQL."""
+    if capability == _CAPABILITY_ALLOWED_WHEN_RESTRICTED:
+        return
+    if not User.objects.filter(pk=user.pk, is_active=True).exists() or is_user_restricted(user.pk):
+        raise ContextDenied(DENY_SECURITY, MSG_ACCOUNT_UNUSABLE)
+
+
 def resolve_acting_context(user, raw_header=None) -> ActingContext:
     """Contexte sous lequel `user` agit. `raw_header` : valeur brute de `X-Context`, ou None si l'en-tête
-    est absent (contexte personnel). Au plus une requête SQL (ADR 0006, 6.2)."""
+    est absent (contexte personnel). Un compte désactivé ou restreint est refusé (`DENY_SECURITY`) pour tout
+    contexte. Coût : 2 requêtes pour la garde du compte + au plus 1 pour le contexte (ADR 0006, 6.2)."""
+    _ensure_actor_usable(user)
     if raw_header is None:
         return ActingContext(user.pk, CONTEXT_USER, user.pk)
     context_type, context_id = _parse_header(raw_header)
@@ -140,7 +159,11 @@ def authorize(ctx: ActingContext, capability) -> ActingContext:
 def authorize_on(user, context_type, context_id, capability) -> ActingContext:
     """Autorisation PAR OBJET : d'après le contexte propriétaire de l'objet et le rôle réel de `user`,
     jamais d'après l'en-tête (ADR 0006, 6.4). Codes : DENY_RELATION, DENY_SECURITY, DENY_OBJECT_STATE,
-    DENY_PERMISSION."""
+    DENY_PERMISSION.
+
+    ÉCRITURES SENSIBLES : cette vérification se fait AVANT l'écriture, donc avant tout verrou. Un service qui
+    modifie des données sensibles doit la refaire sous `transaction.atomic()`, juste avant d'écrire, pour
+    qu'une révocation ou une suspension survenue entre-temps soit prise en compte (ADR 0006, 6.3)."""
     parsed = context_id if isinstance(context_id, uuid.UUID) else _safe_uuid(context_id)
     if context_type == CONTEXT_USER:
         if parsed is None or parsed != user.pk:
@@ -161,16 +184,15 @@ def authorize_on(user, context_type, context_id, capability) -> ActingContext:
         ctx = ActingContext(user.pk, CONTEXT_ORGANIZATION, parsed, state[0])
     else:
         raise ContextDenied(DENY_CONTEXT, MSG_MALFORMED)
+    _ensure_actor_usable(user, capability)
     return authorize(ctx, capability)
 
 
 def can(user_id, context_type, context_id, capability) -> bool:
     """Variante sans exception d'`authorize_on` pour les autres domaines et les sérialiseurs."""
-    from .models import User
-
     if user_id is None:
         return False
-    # `authorize_on` n'utilise que `user.pk` : un objet léger évite une requête.
+    # `authorize_on` n'utilise que `user.pk` (l'état du compte est relu en base par la garde).
     stub = User(pk=_safe_uuid(user_id))
     if stub.pk is None:
         return False
@@ -194,7 +216,13 @@ def _safe_uuid(value) -> Optional[uuid.UUID]:
 
 class ActingContextMixin:
     """Pour les vues « sensibles au contexte » : `self.acting_context` résout l'en-tête (une fois) et
-    `self.authorize_capability('offer.publish')` contrôle la capacité."""
+    `self.authorize_capability('offer.publish')` contrôle la capacité.
+
+    RÈGLE (ADR 0006, 6.4) : à la CRÉATION et pour les listes « de mon contexte », on utilise l'en-tête
+    (`acting_context`, `authorize_capability`). Sur un OBJET EXISTANT, on autorise d'après le propriétaire
+    réel de l'objet avec `authorize_object`, qui ignore l'en-tête : sinon un membre éditeur de A et analyste
+    de B pourrait agir sur un objet de B en présentant l'en-tête de A (IDOR). Écriture sensible : refaire
+    `authorize_on` sous `transaction.atomic()` dans le service."""
 
     @property
     def acting_context(self) -> ActingContext:
@@ -202,6 +230,10 @@ class ActingContextMixin:
 
     def authorize_capability(self, capability) -> ActingContext:
         return authorize(self.acting_context, capability)
+
+    def authorize_object(self, obj_context_type, obj_context_id, capability) -> ActingContext:
+        """Autorisation d'après le contexte propriétaire de l'objet ; l'en-tête `X-Context` est ignoré."""
+        return authorize_on(self.request.user, obj_context_type, obj_context_id, capability)
 
 
 def capability_permission(capability):
@@ -212,9 +244,10 @@ def capability_permission(capability):
         def has_permission(self, request, view):
             if not (request.user and request.user.is_authenticated):
                 return False
-            authorize(get_acting_context(request), capability)
+            authorize(get_acting_context(request), capability)  # la résolution applique la garde du compte
             return True
 
+    HasContextCapability.acting_context_capability = capability
     HasContextCapability.__name__ = f"HasContextCapability[{capability}]"
     return HasContextCapability
 

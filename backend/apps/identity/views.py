@@ -1,8 +1,8 @@
 import hashlib
 import logging
 
-from django.db import transaction
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from django.db.models import Q
 from django.http import FileResponse
 from rest_framework import generics, permissions, serializers, status
@@ -26,13 +26,14 @@ from .serializers import (
     IdentifierTokenObtainPairSerializer, KycDocumentSerializer, PublicBusinessSerializer, UserSerializer,
 )
 from .services import (
-    ContactSettingsError, get_contexts_for_user, KycError, decide_kyc_document, get_contact_settings, revoke_all_sessions,
-    set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
+    ContactSettingsError, KycError, decide_kyc_document, get_contact_settings, get_contexts_for_user,
+    revoke_all_sessions, set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
 )
 from .sms import send_otp_sms
 from .throttles import (
     ContactSettingsThrottle, ProfileWriteIpThrottle, ProfileWriteThrottle, RegisterIpThrottle,
-    ChangePasswordThrottle, ContextsListThrottle, FailureLimiter, KycWriteThrottle, LoginIpThrottle, OtpConfirmIpThrottle,
+    ChangePasswordThrottle, ContextsListThrottle, FailureLimiter, KycWriteThrottle, LoginIpThrottle,
+    OtpConfirmIpThrottle,
     LogoutIpThrottle, OtpRequestIpThrottle, OtpRequestPhoneDailyThrottle, OtpRequestPhoneThrottle, RefreshIpThrottle,
 )
 
@@ -113,6 +114,7 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         return self.request.user
+
 
 class ContextListView(APIView):
     """GET : contextes que le compte peut activer (ADR 0006, 9.1). Liste bornée, non paginée, servie dans

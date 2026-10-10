@@ -274,6 +274,8 @@ class _OfferMessageSerializer(serializers.ModelSerializer):
 class ContactEventSerializer(_OfferMessageSerializer):
     class Meta(_OfferMessageSerializer.Meta):
         model = ContactEvent
+        fields = [*_OfferMessageSerializer.Meta.fields, 'channel']
+        read_only_fields = [*_OfferMessageSerializer.Meta.read_only_fields, 'channel']
         # Le modèle accepte un message vide (CALL/WHATSAPP) ; ce point d'entrée ne crée que des MESSAGE.
         extra_kwargs = {'message': {'required': True, 'allow_blank': False}}
 
@@ -288,7 +290,7 @@ class RevealRequestSerializer(serializers.Serializer):
     le même 404 uniforme que n'importe quelle offre indisponible (anti-énumération) ; le canal est
     validé par le service (400 `channel_invalid`)."""
 
-    offer = serializers.CharField(max_length=64)
+    offer = serializers.CharField()
     channel = serializers.CharField(max_length=20)
 
 

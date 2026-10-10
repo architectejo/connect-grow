@@ -252,9 +252,15 @@ class RevealRefusalTests(RevealTestBase):
         self.assertEqual(self.code_of(self.reveal(channel='CALL')), (403, 'channel_not_allowed'))
         self.assertEqual(ContactEvent.objects.count(), 0)
         refused = AuditLog.objects.filter(action='contact.reveal_refused')
-        self.assertEqual(refused.count(), 2)
-        for entry in refused:
+        self.assertEqual(refused.count(), 1)  # même visiteur, même offre, même jour : une seule trace
+        for entry in refused.all():
             self.assertNotIn('891111111', entry.details)
+        other = self.more_offers(1)[0]
+        self.assertEqual(self.code_of(self.reveal(other, 'CALL')), (403, 'channel_not_allowed'))
+        self.assertEqual(refused.all().count(), 2)  # autre offre : nouvelle trace
+        AuditLog.objects.update(created_at=timezone.now() - timedelta(days=2))
+        self.reveal()
+        self.assertEqual(refused.all().count(), 3)  # autre jour : nouvelle trace
 
     def test_seller_without_any_consent_row(self):
         ContactConsent.objects.all().delete()
@@ -330,9 +336,11 @@ class RevealQuotaTests(RevealTestBase):
         offers = self.more_offers(1)
         self.reveal()
         self.reveal(offers[0])
-        exceeded = AuditLog.objects.get(action='contact.reveal_quota_exceeded')
+        exceeded = AuditLog.objects.get(action='contact.reveal_quota_exceeded')  # une seule entrée par refus
         self.assertEqual((exceeded.actor, exceeded.target_type, exceeded.target_id), (self.buyer, 'user', self.buyer.pk))
-        self.assertTrue(AuditLog.objects.filter(action='contact.reveal_refused', target_id=offers[0].id).exists())
+        self.assertIn(str(offers[0].id), exceeded.details)
+        self.assertNotIn('891111111', exceeded.details)
+        self.assertFalse(AuditLog.objects.filter(action='contact.reveal_refused').exists())
 
     def test_quota_is_checked_before_consent_so_a_refusal_does_not_leak_who_consented(self):
         self.set_limits(reveal_daily_limit_account=1)
@@ -365,30 +373,145 @@ class RevealQuotaTests(RevealTestBase):
         ContactConsent.objects.filter(user=self.seller).update(is_granted=True)
         self.assertEqual(self.reveal().status_code, 201)
 
-    def test_repeated_overruns_file_an_automatic_report(self):
+    def overrun_on_day(self, offer, days_ago):
+        """Un dépassement de plafond, daté de `days_ago` jours (la dernière entrée d'audit est reculée)."""
+        self.assertEqual(self.reveal(offer).status_code, 429)
+        AuditLog.objects.filter(action='contact.reveal_quota_exceeded').order_by('-created_at').first()
+        entry = AuditLog.objects.filter(action='contact.reveal_quota_exceeded').order_by('-created_at').first()
+        AuditLog.objects.filter(pk=entry.pk).update(created_at=timezone.now() - timedelta(days=days_ago))
+
+    def test_overruns_on_three_distinct_days_file_an_automatic_report(self):
         self.set_limits(reveal_daily_limit_account=1)
         offers = self.more_offers(1)
         self.reveal()
-        self.reveal(offers[0])
-        self.reveal(offers[0])
+        self.overrun_on_day(offers[0], 2)
+        self.overrun_on_day(offers[0], 1)
         self.assertEqual(Report.objects.count(), 0)
-        self.reveal(offers[0])  # troisième dépassement dans les 7 jours
+        self.assertEqual(self.reveal(offers[0]).status_code, 429)  # troisième jour (aujourd'hui)
         report = Report.objects.get()
         self.assertEqual((report.target_type, report.target_id, report.reporter), ('user', self.buyer.pk, None))
         self.assertEqual(report.reason, Report.REASON_SPAM)
         self.assertNotIn('891111111', report.description)
-        self.reveal(offers[0])  # idempotent : pas de second signalement
+        self.reveal(offers[0])  # signalement encore ouvert : pas de doublon
         self.assertEqual(Report.objects.count(), 1)
+
+    def test_a_burst_on_a_single_day_is_not_an_abuse(self):
+        """Faux positif écarté : de nombreux refus le même jour (double-clics) ne font qu'un jour."""
+        self.set_limits(reveal_daily_limit_account=1)
+        offers = self.more_offers(1)
+        self.reveal()
+        for _ in range(6):
+            self.assertEqual(self.reveal(offers[0]).status_code, 429)
+        self.assertEqual(Report.objects.count(), 0)
+        self.assertEqual(AuditLog.objects.filter(action='contact.reveal_quota_exceeded').count(), 6)
+
+    def test_after_the_report_is_closed_new_overruns_file_a_new_one(self):
+        self.set_limits(reveal_daily_limit_account=1, reveal_abuse_threshold=1)
+        offers = self.more_offers(1)
+        self.reveal()
+        self.reveal(offers[0])
+        report = Report.objects.get()
+        report.resolve('Traité')
+        self.reveal(offers[0])
+        self.assertEqual(Report.objects.filter(target_type='user').count(), 2)
+        self.assertEqual(Report.objects.filter(status__in=Report.OPEN_STATUSES).count(), 1)
+
+    def test_automatic_report_only_open_leaves_reviews_behaviour_unchanged(self):
+        target = self.buyer.pk
+        first = moderation_services.file_automatic_report('user', target, Report.REASON_SPAM, 'x', only_open=True)
+        self.assertIsNotNone(first)
+        self.assertIsNone(moderation_services.file_automatic_report('user', target, Report.REASON_SPAM, 'x', only_open=True))
+        first.reject('ok')
+        # Sans only_open (avis croisés) : un signalement clos bloque toujours le suivant.
+        self.assertIsNone(moderation_services.file_automatic_report('user', target, Report.REASON_SPAM, 'x'))
+        self.assertIsNotNone(moderation_services.file_automatic_report('user', target, Report.REASON_SPAM, 'x', only_open=True))
 
     def test_overruns_older_than_the_window_do_not_count_towards_a_report(self):
         self.set_limits(reveal_daily_limit_account=1)
         offers = self.more_offers(1)
         self.reveal()
-        self.reveal(offers[0])
-        self.reveal(offers[0])
-        AuditLog.objects.filter(action='contact.reveal_quota_exceeded').update(created_at=timezone.now() - timedelta(days=8))
-        self.reveal(offers[0])
+        self.overrun_on_day(offers[0], 9)
+        self.overrun_on_day(offers[0], 8)
+        self.assertEqual(self.reveal(offers[0]).status_code, 429)
         self.assertEqual(Report.objects.count(), 0)
+
+    def test_retry_after_after_insertion_ignores_the_contact_being_cancelled(self):
+        self.set_limits(reveal_daily_limit_account=1)
+        offers = self.more_offers(1)
+        self.reveal()
+        ContactEvent.objects.update(created_at=timezone.now() - timedelta(hours=23))
+        with mock.patch.object(services, '_enforce_reveal_quota'):
+            refused = self.reveal(offers[0])
+        self.assertEqual(refused.status_code, 429)
+        self.assertAlmostEqual(int(refused['Retry-After']), 3600, delta=5)  # et non ~86400
+
+
+class RevealConcurrencyTests(RevealTestBase):
+    def test_the_visitor_is_locked_before_the_duplicate_and_quota_are_read(self):
+        calls = []
+        real_find = services._find_recent_reveal
+        with mock.patch.object(services, '_lock_visitor', side_effect=lambda user: calls.append(('lock', user.pk))), \
+                mock.patch.object(services, '_find_recent_reveal', side_effect=lambda *a, **k: (calls.append('find'), real_find(*a, **k))[1]):
+            self.assertEqual(self.reveal().status_code, 201)
+        self.assertEqual(calls, ['find', ('lock', self.buyer.pk), 'find'])  # le dernier `find` suit le verrou
+
+    def test_lock_helper_is_harmless_in_a_transaction(self):
+        from django.db import transaction
+        with transaction.atomic():
+            services._lock_visitor(self.buyer)
+
+    def test_sqlite_locked_error_without_a_duplicate_is_a_clean_409(self):
+        from django.db import OperationalError
+        with mock.patch.object(services, '_lock_visitor', side_effect=OperationalError('database is locked')):
+            response = self.reveal()
+        self.assertEqual((response.status_code, response.json()['code']), (409, 'reveal_in_progress'))
+        self.assertTrue(int(response['Retry-After']) >= 1)
+        self.assertEqual(ContactEvent.objects.count(), 0)
+        self.assertNotIn('891111111', response.content.decode())
+
+    def test_sqlite_locked_error_with_a_duplicate_replays_the_contact(self):
+        from django.db import OperationalError
+        first = self.reveal()
+        with mock.patch.object(services, '_lock_visitor', side_effect=OperationalError('database is locked')):
+            response = self.reveal()
+        self.assertEqual((response.status_code, response.json()['created']), (200, False))
+        self.assertEqual(response.json()['contact_event_id'], first.json()['contact_event_id'])
+        self.assertEqual(ContactEvent.objects.count(), 1)
+
+    def test_other_operational_errors_are_not_swallowed(self):
+        from django.db import OperationalError
+        with mock.patch.object(services, '_lock_visitor', side_effect=OperationalError('disk I/O error')):
+            with self.assertRaises(OperationalError):
+                self.reveal()
+
+    def test_a_duplicate_that_appears_after_insertion_cancels_the_newest(self):
+        earlier = ContactEvent.objects.create(
+            offer=self.offer, sender=self.buyer, channel='CALL', is_counted=True,
+        )
+        # Les deux relectures « avant insertion » ratent le doublon (course) ; le filet le retrouve.
+        with mock.patch.object(services, '_find_recent_reveal', side_effect=[None, None]):
+            response = self.reveal()
+        self.assertEqual((response.status_code, response.json()['created']), (200, False))
+        self.assertEqual(response.json()['contact_event_id'], str(earlier.pk))
+        self.assertEqual(ContactEvent.objects.count(), 1)
+        self.assertEqual(OutboxEvent.objects.filter(event_type='marketplace.contact_revealed').count(), 0)
+
+
+class ReadOnlyChannelAndLooseOfferTests(RevealTestBase):
+    def test_contact_list_exposes_the_channel_read_only(self):
+        self.reveal(channel='WHATSAPP')
+        rows = self.client.get(CONTACTS_URL).json()
+        rows = rows['results'] if isinstance(rows, dict) else rows
+        self.assertEqual([r['channel'] for r in rows], ['WHATSAPP'])
+        self.assertNotIn('891111111', str(rows))
+        created = self.client.post(
+            CONTACTS_URL, {'post': str(self.offer.id), 'message': 'Bonjour', 'channel': 'CALL'}, format='json',
+        )
+        self.assertEqual((created.status_code, created.json()['channel']), (201, 'MESSAGE'))
+
+    def test_a_very_long_offer_identifier_is_still_the_uniform_404(self):
+        response = self.client.post(REVEAL_URL, {'offer': 'x' * 500, 'channel': 'CALL'}, format='json')
+        self.assertEqual((response.status_code, response.json()['code']), (404, 'offer_not_found'))
 
 
 @override_settings(CACHES=LOCMEM_CACHE)
@@ -417,6 +540,21 @@ class RevealIpThrottleTests(RevealTestBase):
             same_ip = self.reveal(HTTP_X_FORWARDED_FOR='203.0.113.7')
             other_ip = self.reveal(HTTP_X_FORWARDED_FOR='203.0.113.8')
         self.assertEqual((first.status_code, same_ip.status_code, other_ip.status_code), (201, 429, 200))
+
+    def test_ipv6_addresses_of_the_same_64_prefix_share_the_limit(self):
+        from apps.common.throttles import normalize_ip
+        self.assertEqual(normalize_ip('2001:db8:1:2:aaaa:bbbb:cccc:dddd'), '2001:db8:1:2::/64')
+        self.assertEqual(normalize_ip('2001:db8:1:2:1::1'), normalize_ip('2001:db8:1:2:ffff::2'))
+        self.assertNotEqual(normalize_ip('2001:db8:1:3::1'), normalize_ip('2001:db8:1:2::1'))
+        self.assertEqual(normalize_ip('203.0.113.7'), '203.0.113.7')
+        self.assertEqual(normalize_ip('pas-une-ip'), 'pas-une-ip')
+        rates = {**SimpleRateThrottle.THROTTLE_RATES, 'contact_reveal_ip': '1/hour'}
+        with mock.patch.object(SimpleRateThrottle, 'THROTTLE_RATES', rates), \
+                mock.patch('rest_framework.settings.api_settings.NUM_PROXIES', 1):
+            first = self.reveal(HTTP_X_FORWARDED_FOR='2001:db8:1:2::1')
+            same_prefix = self.reveal(HTTP_X_FORWARDED_FOR='2001:db8:1:2:dead:beef:0:9')
+            other_prefix = self.reveal(HTTP_X_FORWARDED_FOR='2001:db8:1:3::1')
+        self.assertEqual((first.status_code, same_prefix.status_code, other_prefix.status_code), (201, 429, 200))
 
     def test_no_ip_is_written_to_the_database(self):
         self.reveal(HTTP_X_FORWARDED_FOR='203.0.113.7', REMOTE_ADDR='198.51.100.9')

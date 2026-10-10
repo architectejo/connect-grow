@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Iterable, Optional
 
-from django.db import transaction
+from django.contrib.auth import get_user_model
+from django.db import OperationalError, transaction
 from django.db.models import Case, Count, ExpressionWrapper, F, FloatField, Value, When
 from django.utils import timezone
 
@@ -555,13 +556,15 @@ def _quota_of(sender, row, now) -> tuple:
     return row.reveal_daily_limit_account, 'reveal_quota_account'
 
 
-def _reveal_times(sender, now) -> list:
-    """Dates des numéros obtenus par ce compte sur la fenêtre glissante, de la plus ancienne à la plus récente."""
-    return list(
-        ContactEvent.objects.filter(
-            sender=sender, channel__in=REVEAL_CHANNELS, created_at__gt=now - REVEAL_QUOTA_WINDOW,
-        ).order_by('created_at').values_list('created_at', flat=True)
+def _reveal_times(sender, now, exclude_id=None) -> list:
+    """Dates des numéros obtenus par ce compte sur la fenêtre glissante, de la plus ancienne à la
+    plus récente (`exclude_id` : un contact en cours de validation, à ne pas compter)."""
+    queryset = ContactEvent.objects.filter(
+        sender=sender, channel__in=REVEAL_CHANNELS, created_at__gt=now - REVEAL_QUOTA_WINDOW,
     )
+    if exclude_id is not None:
+        queryset = queryset.exclude(pk=exclude_id)
+    return list(queryset.order_by('created_at').values_list('created_at', flat=True))
 
 
 def _quota_wait(times, limit, now) -> int:
@@ -578,19 +581,30 @@ def _enforce_reveal_quota(sender, row, now) -> None:
 
 
 def _refuse_quota(sender, offer, row, exceeded, now):
-    """Trace le dépassement (hors transaction métier : la trace survit au refus), signale à la
-    modération un abus répété, puis lève le refus 429 avec `Retry-After`."""
-    record_audit(sender, 'contact.reveal_refused', target=offer, details=f"Plafond atteint : {exceeded.code}")
-    record_audit(sender, 'contact.reveal_quota_exceeded', target=sender, details=exceeded.code)
+    """Trace le dépassement (une seule entrée par refus, hors transaction métier : la trace survit
+    au refus), signale à la modération un abus répété, puis lève le refus 429 avec `Retry-After`.
+    Le seuil compte des JOURS distincts avec dépassement : un double-clic ou une rafale le même
+    jour ne fait pas un abus."""
+    record_audit(
+        sender, 'contact.reveal_quota_exceeded', target=sender, details=f"{exceeded.code} ; annonce {offer.id}",
+    )
     since = now - timedelta(days=row.reveal_abuse_window_days)
-    if moderation_services.count_audit_actions(
+    if moderation_services.count_audit_days(
         sender.pk, 'contact.reveal_quota_exceeded', since,
     ) >= row.reveal_abuse_threshold:
         moderation_services.file_automatic_report(
             'user', sender.pk, moderation_services.REASON_SPAM,
             "Plafond de révélation de numéros dépassé à répétition (collecte possible de numéros).",
+            only_open=True,
         )
     raise RevealError(_QUOTA_MESSAGES[exceeded.code] + REVEAL_FALLBACK, exceeded.code, 429, wait=exceeded.wait)
+
+
+def _lock_visitor(user) -> None:
+    """Sérialise les révélations d'un même visiteur : verrou de ligne sur son compte (`SELECT ...
+    FOR UPDATE` sous MySQL ; sans effet sous SQLite, qui sérialise déjà les écritures). Doit
+    précéder la relecture du doublon et du plafond. Ne lit aucun champ du compte."""
+    get_user_model().objects.select_for_update().filter(pk=user.pk).values_list('pk', flat=True).first()
 
 
 def _find_recent_reveal(offer, sender, channel, window_hours, now):
@@ -629,12 +643,20 @@ def reveal_contact(*, offer_id, sender, channel: str) -> RevealResult:
     try:
         endpoint = identity_services.get_contact_endpoint(offer.seller_id, channel)
     except identity_services.ChannelNotConsented:
-        record_audit(sender, 'contact.reveal_refused', target=offer, details=f"Moyen {channel} refusé : channel_not_allowed")
+        # Une trace par visiteur, offre et jour : un visiteur qui insiste ne remplit pas le journal.
+        if not moderation_services.has_audit_since(
+            sender.pk, 'contact.reveal_refused', offer.id, day_bounds(timezone.localdate())[0],
+        ):
+            record_audit(
+                sender, 'contact.reveal_refused', target=offer, details=f"Moyen {channel} refusé : channel_not_allowed",
+            )
         raise RevealError("Ce vendeur n'accepte pas ce moyen de contact.", 'channel_not_allowed', 403)
 
     try:
         with transaction.atomic():
-            # Relecture sous le verrou d'écriture : deux demandes simultanées ne créent qu'un contact.
+            # Verrou par visiteur PUIS relecture du doublon : deux demandes simultanées du même
+            # compte ne créent qu'un contact et ne dépassent pas le plafond.
+            _lock_visitor(sender)
             event = _find_recent_reveal(offer, sender, channel, window_hours, now)
             created = event is None
             if created:
@@ -643,27 +665,49 @@ def reveal_contact(*, offer_id, sender, channel: str) -> RevealResult:
                     is_counted=is_countable_contact(offer, sender, window_hours),
                 )
                 ContactEvent.objects.filter(pk=event.pk).update(delivered_at=event.created_at)
-                # Garde-fou de concurrence : recomptage APRÈS insertion, dans la transaction. Une
-                # rafale qui a passé le contrôle préalable est refusée et annulée ici (SQLite
-                # sérialise les écritures ; sous MySQL, voir ADR 0005, section 8).
-                limit, code = _quota_of(sender, row, now)
-                later = timezone.now()
-                times = _reveal_times(sender, later)
-                if len(times) > limit:
-                    raise _QuotaExceeded(code, _quota_wait(times, limit, later))
-                recount_contacts(offer.id)
-                offer.refresh_from_db(fields=['views_count', 'likes_count', 'shares_count', 'contacts_count'])
-                refresh_visibility_score(offer)
-                publish_event(
-                    'marketplace.contact_revealed', aggregate_type='offer', aggregate_id=offer.id,
-                    payload={**_interaction_payload(offer, sender, contact_event_id=event.pk), 'channel': channel},
-                )
+                # Filet si le verrou ne sérialise pas (autre moteur) : un doublon apparu entre-temps
+                # est annulé (on garde le plus ancien), puis recomptage du plafond APRÈS insertion.
+                earlier = ContactEvent.objects.filter(
+                    offer=offer, sender=sender, channel=channel,
+                    created_at__gte=now - timedelta(hours=window_hours),
+                ).exclude(pk=event.pk).order_by('created_at').first()
+                if earlier is not None:
+                    event.delete()
+                    event, created = earlier, False
+                else:
+                    limit, code = _quota_of(sender, row, now)
+                    later = timezone.now()
+                    # Hors le contact à valider : un `Retry-After` juste, sans surestimation.
+                    times = _reveal_times(sender, later, exclude_id=event.pk)
+                    if len(times) >= limit:
+                        raise _QuotaExceeded(code, _quota_wait(times, limit, later))
+                    recount_contacts(offer.id)
+                    offer.refresh_from_db(fields=['views_count', 'likes_count', 'shares_count', 'contacts_count'])
+                    refresh_visibility_score(offer)
+                    publish_event(
+                        'marketplace.contact_revealed', aggregate_type='offer', aggregate_id=offer.id,
+                        payload={**_interaction_payload(offer, sender, contact_event_id=event.pk), 'channel': channel},
+                    )
             record_audit(
                 sender, 'contact.number_revealed', target=offer,
                 details=f"Moyen {channel} ; vendeur {offer.seller_id} ; {'nouveau' if created else 'renvoi'}",
             )
     except _QuotaExceeded as exceeded:
         _refuse_quota(sender, offer, row, exceeded, now)
+    except OperationalError as exc:
+        # SQLite : écriture concurrente du même compte (double-clic) -> « database is locked ».
+        if 'locked' not in str(exc).lower():
+            raise
+        event = _find_recent_reveal(offer, sender, channel, window_hours, timezone.now())
+        if event is None:
+            raise RevealError(
+                "Une demande est déjà en cours. Réessayez dans un instant.", 'reveal_in_progress', 409, wait=1,
+            )
+        created = False
+        record_audit(
+            sender, 'contact.number_revealed', target=offer,
+            details=f"Moyen {channel} ; vendeur {offer.seller_id} ; renvoi",
+        )
     return RevealResult(
         contact_event_id=event.pk, channel=channel, created=created, offer_title=offer.title,
         phone=endpoint.phone_e164,

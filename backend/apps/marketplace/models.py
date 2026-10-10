@@ -52,7 +52,7 @@ class MarketplaceSettings(SingletonSettingsModel):
     # Abus : un compte qui dépasse son plafond N fois sur D jours est signalé à la modération.
     reveal_abuse_threshold = models.PositiveIntegerField(
         default=3, validators=[MinValueValidator(1), MaxValueValidator(100)],
-        help_text="Nombre de dépassements de plafond (1 à 100) qui déclenche un signalement automatique.",
+        help_text="Nombre de JOURS avec dépassement de plafond (1 à 100) qui déclenche un signalement automatique.",
     )
     reveal_abuse_window_days = models.PositiveIntegerField(
         default=7, validators=[MinValueValidator(1), MaxValueValidator(90)],

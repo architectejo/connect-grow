@@ -113,7 +113,12 @@
   "is_favorited": false,
   "favorites_count": 0,
   "is_trending": false,
-  "is_sponsored": false
+  "is_sponsored": false,
+  "allowed_channels": [
+   "MESSAGE",
+   "CALL",
+   "WHATSAPP"
+  ]
  },
  "post_list": [
   {
@@ -161,7 +166,12 @@
    "is_favorited": false,
    "favorites_count": 0,
    "is_trending": false,
-   "is_sponsored": false
+   "is_sponsored": false,
+   "allowed_channels": [
+    "MESSAGE",
+    "CALL",
+    "WHATSAPP"
+   ]
   }
  ],
  "notifications": [
@@ -370,5 +380,78 @@
  "review_error": {
   "detail": "Vous pourrez donner votre avis après avoir contacté le vendeur.",
   "code": "not_eligible"
+ },
+ "reveal_call": {
+  "status": 201,
+  "body": {
+   "contact_event_id": "cfdfe264-ffc0-48c2-8d90-10e67ee90846",
+   "channel": "CALL",
+   "created": true,
+   "phone": "+243891111111",
+   "tel_url": "tel:+243891111111",
+   "whatsapp_url": null
+  }
+ },
+ "reveal_whatsapp": {
+  "status": 201,
+  "body": {
+   "contact_event_id": "0086b9dd-de34-48b2-a8c2-4a6a8f81ef73",
+   "channel": "WHATSAPP",
+   "created": true,
+   "phone": "+243891111111",
+   "tel_url": null,
+   "whatsapp_url": "https://wa.me/243891111111?text=Chaussures%20%26%20sacs%20%C3%A0%20vendre"
+  }
+ },
+ "reveals_received": {
+  "count": 2,
+  "next": null,
+  "previous": null,
+  "results": [
+   {
+    "id": "0086b9dd-de34-48b2-a8c2-4a6a8f81ef73",
+    "channel": "WHATSAPP",
+    "created_at": "2026-10-10T02:37:13.658037+01:00",
+    "requester_display_name": "Marie K.",
+    "offer": {
+     "id": "756acc18-4d5e-4255-bed9-b05f73626eb6",
+     "title": "Chaussures & sacs à vendre"
+    }
+   },
+   {
+    "id": "cfdfe264-ffc0-48c2-8d90-10e67ee90846",
+    "channel": "CALL",
+    "created_at": "2026-10-10T02:37:13.614508+01:00",
+    "requester_display_name": "Marie K.",
+    "offer": {
+     "id": "e95ea2bc-c7e7-4005-a011-9b06fad067ef",
+     "title": "Un joli canapé à vendre"
+    }
+   }
+  ]
+ },
+ "reveals_received_call": {
+  "count": 1,
+  "next": null,
+  "previous": null,
+  "results": [
+   {
+    "id": "cfdfe264-ffc0-48c2-8d90-10e67ee90846",
+    "channel": "CALL",
+    "created_at": "2026-10-10T02:37:13.614508+01:00",
+    "requester_display_name": "Marie K.",
+    "offer": {
+     "id": "e95ea2bc-c7e7-4005-a011-9b06fad067ef",
+     "title": "Un joli canapé à vendre"
+    }
+   }
+  ]
+ },
+ "reveal_error_channel_invalid": {
+  "status": 400,
+  "body": {
+   "detail": "Moyen de contact invalide.",
+   "code": "channel_invalid"
+  }
  }
 }

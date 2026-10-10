@@ -65,9 +65,7 @@ describe("isContactRevealRequest (révélation du numéro : réseau seul)", () =
   });
   it("la configuration PWA la déclare en premier, en NetworkOnly", () => {
     const config = readFileSync(resolve(process.cwd(), "vite.config.ts"), "utf-8");
-    const rules = config.slice(config.indexOf("runtimeCaching"));
-    const first = rules.slice(0, rules.indexOf("},") + 2);
-    expect(first).toContain("isContactRevealRequest");
-    expect(first).toContain('handler: "NetworkOnly"');
+    // Premier objet du tableau runtimeCaching (sans accolade imbriquée) : urlPattern puis handler NetworkOnly
+    expect(config).toMatch(/runtimeCaching:\s*\[\s*\{[^{}]*?urlPattern:\s*isContactRevealRequest,\s*handler:\s*"NetworkOnly"/);
   });
 });

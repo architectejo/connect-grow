@@ -1,18 +1,19 @@
 import i18n from "@/i18n";
-import type { ContactChannel, Post, RevealChannel } from "@/api/types";
+import type { ContactChannel, RevealChannel } from "@/api/types";
 import { apiErrorCode, httpStatus, retryAfterSeconds } from "@/lib/errors";
 
 /**
  * Moyens de contact affichables pour une offre. Une réponse sans `allowed_channels` (ancienne API)
  * ne propose que le message : on n'affiche jamais un moyen que le vendeur n'a pas accepté.
  */
-export function allowedChannelsOf(post: Pick<Post, "allowed_channels">): ContactChannel[] {
+export function allowedChannelsOf(post: { allowed_channels?: ContactChannel[] }): ContactChannel[] {
   return post.allowed_channels ?? ["MESSAGE"];
 }
 
 // Garde-fou : seuls un lien téléphone ou un lien WhatsApp bien formés sont rendus (jamais javascript: ni autre schéma).
 const TEL_URL = /^tel:\+?\d{6,15}$/;
-const WHATSAPP_URL = /^https:\/\/wa\.me\/\d{6,15}(\?text=[^\s]*)?$/;
+// Le texte prérempli est le titre de l'offre encodé par le serveur (quote(safe='')) : seuls lettres, chiffres, % et . _ ~ - y figurent.
+const WHATSAPP_URL = /^https:\/\/wa\.me\/\d{6,15}(\?text=[A-Za-z0-9%._~-]*)?$/;
 
 /** Lien à rendre pour un canal, ou null si la réponse du serveur est inattendue. */
 export function revealLink(channel: RevealChannel, urls: { tel_url: string | null; whatsapp_url: string | null }): string | null {
@@ -53,6 +54,8 @@ export function revealErrorInfo(error: unknown): RevealErrorInfo {
   if (status >= 500) return { kind: "retry", message: t("errors.server") };
 
   switch (code) {
+    case "channel_invalid": // erreur de programmation, pas une panne : réessayer ne changerait rien
+      return { kind: "blocked", message: t("reveal.errors.generic") };
     case "own_offer":
       return { kind: "blocked", message: t("reveal.errors.own_offer") };
     case "contact_restricted":

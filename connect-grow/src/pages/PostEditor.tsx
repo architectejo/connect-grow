@@ -360,6 +360,7 @@ function PostEditorForm({ post }: { post?: Post }) {
     main_image: photos[0] ? photoSrc(photos[0]) : null,
     views_count: post?.views_count ?? 0,
     likes_count: 0,
+    allowed_channels: post?.allowed_channels ?? ["MESSAGE"],
     created_at: post?.created_at ?? new Date().toISOString(),
   };
 

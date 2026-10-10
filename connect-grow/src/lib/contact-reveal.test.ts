@@ -15,6 +15,16 @@ describe("revealLink", () => {
     expect(revealLink("CALL", { tel_url: "tel:+243812345678", whatsapp_url: null })).toBe("tel:+243812345678");
     expect(revealLink("WHATSAPP", { tel_url: null, whatsapp_url: "https://wa.me/243812345678?text=Chaussures%20Nike" })).toContain("wa.me");
   });
+  it("accepte le lien réel du serveur (titre encodé par quote(safe=''))", () => {
+    const real = "https://wa.me/243891111111?text=Chaussures%20%26%20sacs%20%C3%A0%20vendre";
+    expect(revealLink("WHATSAPP", { tel_url: null, whatsapp_url: real })).toBe(real);
+    expect(revealLink("WHATSAPP", { tel_url: null, whatsapp_url: "https://wa.me/243891111111?text=Un_titre-simple.~" })).not.toBeNull();
+  });
+  it("rejette un texte prérempli contenant des caractères non encodés", () => {
+    for (const text of ["a b", "<script>", "a&b=c", "x#y", "é"]) {
+      expect(revealLink("WHATSAPP", { tel_url: null, whatsapp_url: `https://wa.me/243891111111?text=${text}` })).toBeNull();
+    }
+  });
   it("rejette un autre schéma, un autre hôte ou un lien du mauvais canal", () => {
     expect(revealLink("CALL", { tel_url: "javascript:alert(1)", whatsapp_url: null })).toBeNull();
     expect(revealLink("WHATSAPP", { tel_url: null, whatsapp_url: "https://evil.example/243812345678" })).toBeNull();
@@ -45,7 +55,7 @@ describe("revealErrorInfo", () => {
     expect(revealErrorInfo(err(429, "reveal_quota_ip", { "Retry-After": "10" })).kind).toBe("limit");
     expect(revealErrorInfo(err(409, "reveal_in_progress")).kind).toBe("retry");
     expect(revealErrorInfo(err(401, "not_authenticated")).kind).toBe("login");
-    expect(revealErrorInfo(err(400, "channel_invalid")).kind).toBe("retry");
+    expect(revealErrorInfo(err(400, "channel_invalid")).kind).toBe("blocked");
     expect(revealErrorInfo(new Error("offline")).kind).toBe("retry");
   });
   it("n'affiche jamais le texte du serveur", () => {

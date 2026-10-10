@@ -85,7 +85,8 @@ const fr = {
     callTitle: "Appeler {{seller}}",
     whatsappTitle: "Écrire à {{seller}} sur WhatsApp",
     description: "Le numéro du vendeur n'est jamais public : il s'affiche seulement pour vous, avec son accord.",
-    notice: "Le vendeur sera averti de votre demande avec votre nom d'affichage abrégé (par exemple « Marie K. »).",
+    notice:
+      "Le vendeur sera averti : il verra votre nom d'affichage abrégé (par exemple « Marie K. »), l'annonce concernée, le moyen de contact choisi et la date de votre demande.",
     noticeWhatsapp: "Votre conversation WhatsApp est ensuite traitée par WhatsApp (Meta), selon ses propres conditions.",
     show: "Afficher le numéro",
     loading: "Récupération du numéro…",
@@ -136,8 +137,6 @@ const fr = {
     loadError: "Impossible de charger les demandes de contact.",
     loadMore: "Voir plus de demandes",
     loading: "Chargement des demandes…",
-    count_one: "{{count}} demande",
-    count_other: "{{count}} demandes",
   },
   reviews: {
     title: "Avis après contact",

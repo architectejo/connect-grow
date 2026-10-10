@@ -44,6 +44,7 @@ const sellers: Record<string, Seller> = {
 };
 
 const basePost = {
+  allowed_channels: ["MESSAGE" as const],
   category: "cat-1",
   commune: "com-1",
   description: "",

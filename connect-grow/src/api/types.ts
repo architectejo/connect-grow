@@ -120,8 +120,8 @@ export interface Post {
     shares_count?: number;
     /** Réservé au vendeur : l'offre est masquée par la modération. */
     is_hidden_by_moderation?: boolean;
-    /** Moyens de contact acceptés par le vendeur (ADR 0005 §5.2). Jamais de numéro. Absent des anciennes réponses. */
-    allowed_channels?: ContactChannel[];
+    /** Moyens de contact acceptés par le vendeur (ADR 0005 §5.2). Jamais de numéro. */
+    allowed_channels: ContactChannel[];
 }
 
 export interface Category {

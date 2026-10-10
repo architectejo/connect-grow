@@ -34,7 +34,7 @@ export function useReceivedReveals(channel?: RevealChannel) {
       ).data,
     initialPageParam: 1,
     getNextPageParam: (last, _pages, lastPage) => (last.next ? lastPage + 1 : undefined),
-    select: (data) => ({ reveals: data.pages.flatMap((page) => page.results), count: data.pages[0]?.count ?? 0 }),
+    select: (data) => ({ reveals: data.pages.flatMap((page) => page.results) }),
     enabled: isAuthenticated,
     staleTime: 0,
   });

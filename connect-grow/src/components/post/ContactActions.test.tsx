@@ -89,7 +89,9 @@ describe("ContactActions", () => {
     renderActions(["CALL"]);
     fireEvent.click(screen.getByRole("button", { name: /Appeler/ }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText(/nom d'affichage abrégé/)).toBeInTheDocument();
+    const notice = screen.getByText(/nom d'affichage abrégé/);
+    expect(notice).toHaveTextContent(/« Marie K\. »/);
+    expect(notice).toHaveTextContent(/l'annonce.*moyen de contact.*date/);
     expect(post).not.toHaveBeenCalled();
     expect(document.body.innerHTML).not.toMatch(/tel:|\+243/);
   });
@@ -228,6 +230,14 @@ describe("ContactActions", () => {
       open();
       expect(await screen.findByRole("alert")).toHaveTextContent(/rencontre un problème/);
       expect(screen.getByRole("button", { name: "Réessayer" })).toBeInTheDocument();
+    });
+
+    it("channel_invalid (400) : message générique, sans Réessayer", async () => {
+      vi.spyOn(apiClient, "post").mockRejectedValue(apiError(400, "channel_invalid"));
+      open();
+      expect(await screen.findByRole("alert")).toHaveTextContent(/n'a pas pu être affiché/);
+      expect(screen.queryByRole("button", { name: "Réessayer" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Afficher le numéro" })).not.toBeInTheDocument();
     });
 
     it("sans repli par message quand MESSAGE n'est pas autorisé", async () => {

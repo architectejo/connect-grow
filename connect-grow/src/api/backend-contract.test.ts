@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { apiErrorCode, apiErrorMessage, retryAfterSeconds } from "@/lib/errors";
+import { revealErrorInfo, revealLink } from "@/lib/contact-reveal";
 import { reviewErrorMessage } from "@/lib/review-errors";
 import { unwrapList } from "./client";
 import fixtures from "./__fixtures__/backend-lot0.json";
@@ -50,7 +51,7 @@ const POST = {
   "main_image?": "str|null", "images?": "list", "is_favorited?": "bool", "favorites_count?": "num", views_count: "num",
   likes_count: "num", created_at: "date", "status?": "str", "expires_at?": "date|null", "visibility_score?": "num",
   "visibility_rank?": "str", "is_trending?": "bool", "is_sponsored?": "bool", offer_rating: "obj", seller_rating: "obj",
-  "shares_count?": "num",
+  "shares_count?": "num", allowed_channels: "list",
 };
 const REVIEW = {
   id: "uuid", post: "uuid|null", is_mine: "bool", user_name: "str", offer_rating: "num", seller_rating: "num", content: "str",
@@ -144,6 +145,57 @@ describe("contrat backend -> types.ts (réponses réelles du lot 0)", () => {
     expect(conversation.other_participant).not.toHaveProperty("phone");
     expect(conversation.other_participant).not.toHaveProperty("email");
     expect(typeof (conversation.last_message as Row).content).toBe("string");
+  });
+});
+
+describe("contact vendeur : réponses réelles (ADR 0005 §5.2, 5.4, 5.5)", () => {
+  const FAKE_PHONE = /^\+243\d{9}$/;
+
+  it("allowed_channels : liste de canaux connus sur le détail et la liste, sans numéro", () => {
+    const known = ["MESSAGE", "CALL", "WHATSAPP"];
+    for (const post of [f.post_detail as Row, ...unwrapList<Row>(f.post_list)]) {
+      expect(post.allowed_channels).toBeInstanceOf(Array);
+      for (const channel of post.allowed_channels as string[]) expect(known).toContain(channel);
+      expect(JSON.stringify(post)).not.toMatch(/\+243\d{9}|tel:|wa\.me/);
+    }
+  });
+
+  it("reveal CALL et WHATSAPP : clés exactes, liens cohérents avec le canal, 201", () => {
+    const keys = ["contact_event_id", "channel", "created", "phone", "tel_url", "whatsapp_url"];
+    const call = f.reveal_call as unknown as { status: number; body: Row };
+    const wa = f.reveal_whatsapp as unknown as { status: number; body: Row };
+    expect(call.status).toBe(201);
+    expect(Object.keys(call.body).sort()).toEqual([...keys].sort());
+    expect(mismatches(call.body, { contact_event_id: "uuid", channel: "str", created: "bool", phone: "str", tel_url: "str|null", whatsapp_url: "str|null" })).toEqual([]);
+    expect(call.body.phone).toMatch(FAKE_PHONE);
+    expect(call.body).toMatchObject({ channel: "CALL", whatsapp_url: null });
+    expect(call.body.tel_url).toBe(`tel:${call.body.phone}`);
+    expect(wa.body).toMatchObject({ channel: "WHATSAPP", tel_url: null });
+    expect(revealLink("CALL", call.body as never)).toBe(call.body.tel_url);
+    expect(revealLink("WHATSAPP", wa.body as never)).toBe(wa.body.whatsapp_url);
+  });
+
+  it("reveals/received : page DRF, nom abrégé et offre, ni numéro ni identifiant du visiteur", () => {
+    for (const page of [f.reveals_received, f.reveals_received_call]) {
+      expect(mismatches(page as unknown as Row, PAGE)).toEqual([]);
+      const rows = (page as unknown as { results: Row[] }).results;
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(mismatches(row, { id: "uuid", channel: "str", created_at: "date", requester_display_name: "str", offer: "obj" })).toEqual([]);
+        expect(mismatches(row.offer as Row, { id: "uuid", title: "str" })).toEqual([]);
+        expect(Object.keys(row).sort()).toEqual(["channel", "created_at", "id", "offer", "requester_display_name"]);
+        expect(JSON.stringify(row)).not.toMatch(/\+243\d{9}|tel:|wa\.me/);
+      }
+    }
+    const filtered = (f.reveals_received_call as unknown as { results: Row[] }).results;
+    expect(filtered.every((row) => row.channel === "CALL")).toBe(true);
+  });
+
+  it("channel_invalid : 400 avec code, classé sans nouvelle tentative", () => {
+    const { status, body } = f.reveal_error_channel_invalid as unknown as { status: number; body: unknown };
+    const error = { response: { status, data: body } };
+    expect(apiErrorCode(error)).toBe("channel_invalid");
+    expect(revealErrorInfo(error).kind).toBe("blocked");
   });
 });
 

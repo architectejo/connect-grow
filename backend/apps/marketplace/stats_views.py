@@ -31,7 +31,7 @@ class DashboardStatsView(identity_services.ActingContextMixin, APIView):
         # ADR 0004, 7.3 : moyenne des notes vendeur visibles (sans seuil d'affichage : le vendeur
         # voit ses propres chiffres), calculée à la lecture par `reviews`. Le nom de champ
         # avg_rating est conservé (déjà consommé par le front) ; il vaut null sans avis.
-        rating = reviews_services.get_seller_dashboard_rating(ctx.id, ctx.type)
+        rating = reviews_services.get_seller_dashboard_rating(ctx.type, ctx.id)
         return Response({
             "history": _history(stats.history),
             "summary": {
@@ -53,8 +53,8 @@ class OfferStatsView(identity_services.ActingContextMixin, APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        offer = Offer.objects.filter(pk=pk).only('seller_context_type', 'seller_context_id').first()
+        offer = Offer.objects.filter(pk=pk).first()
         if offer is None:
             return Response({"error": "Annonce introuvable ou accès refusé."}, status=404)
-        self.authorize_object(offer.seller_context_type, offer.seller_context_id, 'stats.view')
+        services.authorize_offer(request.user, offer, 'stats.view')  # 404 uniforme pour un étranger si non publique
         return Response({"history": _history(visibility_services.get_offer_history(pk))})

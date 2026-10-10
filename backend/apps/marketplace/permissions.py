@@ -14,10 +14,11 @@ OBJECT_CAPABILITIES = {
 
 class HasOfferCapability(BasePermission):
     """Autorise une action sur une offre existante d'après le contexte propriétaire de l'offre et le rôle réel
-    de l'utilisateur ; l'en-tête `X-Context` est ignoré (ADR 0006, 6.4). Refus : 403 `DENY_*`."""
+    de l'utilisateur ; l'en-tête `X-Context` est ignoré (ADR 0006, 6.4). Refus : 403 `DENY_*`, ou 404 uniforme pour un
+    étranger au contexte quand l'offre n'est pas publique (`services.authorize_offer`)."""
 
     message = "Action non autorisée"
 
     def has_object_permission(self, request, view, obj):
-        view.authorize_object(obj.seller_context_type, obj.seller_context_id, OBJECT_CAPABILITIES[view.action])
+        services.authorize_offer(request.user, obj, OBJECT_CAPABILITIES[view.action])
         return True

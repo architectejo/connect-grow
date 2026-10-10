@@ -5,7 +5,6 @@ from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.core import signing
-from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -13,7 +12,6 @@ from rest_framework.exceptions import ErrorDetail, ValidationError
 from rest_framework.response import Response
 
 from apps.catalog import services as catalog_services
-from apps.common.images import validate_image_pixels, validate_image_upload_size
 from apps.common.exception_handler import CodedAPIException, throttled_message
 from apps.common.pagination import OptionalPagination, StandardPagination
 from apps.common.throttles import (
@@ -28,7 +26,7 @@ from apps.common.utils import parse_uuid
 from apps.visibility import services as visibility_services
 
 from . import services
-from .models import ContactEvent, ExchangeProposal, Favorite, Offer, OfferImage
+from .models import ContactEvent, ExchangeProposal, Favorite, Offer
 from .permissions import HasOfferCapability
 from .serializers import (
     ContactEventSerializer, ExchangeProposalSerializer, FavoriteSerializer, OfferImageSerializer,
@@ -159,7 +157,7 @@ class OfferViewSet(identity_services.ActingContextMixin, ActionScopedThrottleMix
         """Filtre « offres des contextes dans lesquels l'utilisateur peut agir » (personnel, prestataire actif,
         organisations actives dont il est membre) : deux requêtes, aucun cache."""
         by_type = defaultdict(list)
-        for context_type, context_id in identity_services.get_user_context_roles(self.request.user.pk):
+        for context_type, context_id in services.get_request_user_contexts(self.request):
             by_type[context_type].append(context_id)
         condition = Q()
         for context_type, ids in by_type.items():
@@ -334,36 +332,19 @@ class OfferViewSet(identity_services.ActingContextMixin, ActionScopedThrottleMix
     # 5. Galerie de photos (CDC 3.2 : 1 à 8 photos par annonce, main_image comprise)
     @action(detail=True, methods=['post'])
     def images(self, request, pk=None):
-        offer = self.get_object()
-
-        current_count = offer.images.count() + 1  # + main_image
-        uploaded = request.FILES.getlist('image')
-        if not uploaded:
-            return Response({"error": "Aucune image fournie."}, status=status.HTTP_400_BAD_REQUEST)
-        if current_count + len(uploaded) > OfferImage.MAX_IMAGES_PER_OFFER:
-            return Response(
-                {"error": f"Une annonce ne peut pas dépasser {OfferImage.MAX_IMAGES_PER_OFFER} photos."},
-                status=status.HTTP_400_BAD_REQUEST,
+        try:
+            created = services.add_offer_images(
+                self.get_object(), actor=request.user, files=request.FILES.getlist('image'),
             )
-        # Fichiers contrôlés avant tout enregistrement : un fichier invalide donne un 400, pas un 500.
-        for image in uploaded:
-            try:
-                validate_image_upload_size(image)
-                validate_image_pixels(image)
-            except DjangoValidationError as exc:
-                return Response({"error": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
-
-        created = [OfferImage.objects.create(offer=offer, image=f) for f in uploaded]
+        except services.MarketplaceError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(OfferImageSerializer(created, many=True).data, status=status.HTTP_201_CREATED)
 
     @images.mapping.delete
     def delete_image(self, request, pk=None):
-        offer = self.get_object()
-        image_uuid = parse_uuid(request.query_params.get('image_id'))
-        deleted = 0
-        if image_uuid:
-            deleted, _ = offer.images.filter(pk=image_uuid).delete()
-        if not deleted:
+        if not services.delete_offer_image(
+            self.get_object(), actor=request.user, image_id=request.query_params.get('image_id'),
+        ):
             return Response({"error": "Photo introuvable."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -387,7 +368,7 @@ class OfferViewSet(identity_services.ActingContextMixin, ActionScopedThrottleMix
         # Un membre qui consulte l'offre de son contexte ne gonfle pas les statistiques de ce contexte.
         is_owner = request.user.is_authenticated and (
             (instance.seller_context_type, instance.seller_context_id)
-            in identity_services.get_user_context_roles(request.user.pk)
+            in services.get_request_user_contexts(request)
         )
         if (request.user.is_authenticated or anon_id) and not is_owner:
             services.register_view(instance, visibility_services.build_viewer_key(request.user, anon_id))

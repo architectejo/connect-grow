@@ -5,6 +5,7 @@ modèles de `marketplace` : ils passent par ces fonctions, qui renvoient des str
 immuables et proposent des variantes par lot (`*_by_ids`). La logique métier du cycle de
 vie d'une offre (publication, pause, vente, renouvellement, corbeille, score) est ici.
 """
+import logging
 import math
 import uuid
 from dataclasses import dataclass, field
@@ -12,12 +13,17 @@ from datetime import date, timedelta
 from typing import Iterable, Optional
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import OperationalError, transaction
 from django.db.models import Case, Count, ExpressionWrapper, F, FloatField, Value, When
 from django.utils import timezone
+from rest_framework.exceptions import NotFound
 
 from apps.catalog import services as catalog_services
-from apps.common.contexts import CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER
+from apps.common.contexts import (
+    CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER, DENY_RELATION, ContextDenied,
+)
+from apps.common.images import validate_image_pixels, validate_image_upload_size
 from apps.common.utils import day_bounds, parse_uuid
 from apps.identity import services as identity_services
 from apps.moderation import services as moderation_services
@@ -26,7 +32,10 @@ from apps.platform_core.registry import PermanentEventError
 from apps.platform_core.services import publish_event
 from apps.visibility import services as visibility_services
 
-from .models import ContactEvent, ExchangeProposal, Favorite, MarketplaceSettings, Offer
+from .models import ContactEvent, ExchangeProposal, Favorite, MarketplaceSettings, Offer, OfferImage
+
+
+logger = logging.getLogger(__name__)
 
 
 class MarketplaceError(Exception):
@@ -257,18 +266,54 @@ PROTECTED_FIELDS = frozenset({
 })
 
 
+def _is_public(offer: Offer) -> bool:
+    return offer.is_active and not offer.is_deleted and offer.seller_is_public
+
+
+def get_request_user_contexts(request) -> dict:
+    """Contextes dans lesquels l'utilisateur de la requête peut agir, `{(type, id): rôle}` : lus une seule fois
+    par requête (mémorisés sur `request` seulement, jamais d'un appel à l'autre : ADR 0006, 6.2). Vide si anonyme."""
+    cached = getattr(request, '_marketplace_user_contexts', None)
+    if cached is None:
+        user = request.user
+        cached = identity_services.get_user_context_roles(user.pk) if user.is_authenticated else {}
+        request._marketplace_user_contexts = cached
+    return cached
+
+
 def authorize_offer(actor, offer: Offer, capability: str) -> None:
     """Autorise `actor` d'après le contexte PROPRIÉTAIRE de l'offre et son rôle réel (jamais d'après l'en-tête
     `X-Context`, ADR 0006, 6.4). Lève `ContextDenied` (403 `DENY_*`). À refaire sous `transaction.atomic()`,
-    juste avant l'écriture, pour prendre en compte une révocation ou une suspension survenue entre-temps."""
-    identity_services.authorize_on(actor, offer.seller_context_type, offer.seller_context_id, capability)
+    juste avant l'écriture, pour prendre en compte une révocation ou une suspension survenue entre-temps.
+
+    Pas d'oracle d'existence (ADR 0006, amendement T5a) : un acteur étranger au contexte (`DENY_RELATION`) reçoit
+    un 404 uniforme quand l'offre n'est pas publique (pause, masquée, vendue, expirée, corbeille, vendeur non
+    public) ; `DENY_RELATION` n'est renvoyé que pour une offre publique, que tout le monde peut déjà voir. Un
+    membre au rôle insuffisant reçoit toujours `DENY_PERMISSION`."""
+    try:
+        identity_services.authorize_on(actor, offer.seller_context_type, offer.seller_context_id, capability)
+    except ContextDenied as exc:
+        if exc.get_codes() == DENY_RELATION and not _is_public(offer):
+            raise NotFound("Annonce introuvable.")
+        raise
+
+
+def _audit(actor, action, offer: Offer, details=''):
+    """Trace d'une action sur une offre, sous le contexte propriétaire. `details` : noms de champs ou
+    compteurs seulement, jamais une valeur personnelle (titre, prix, texte)."""
+    record_audit(
+        actor, action, target=offer, details=details, context=(offer.seller_context_type, offer.seller_context_id),
+    )
 
 
 def create_offer(*, actor, context_type, context_id, data: dict) -> Offer:
     """Publie une offre au nom d'un contexte vendeur. `actor` doit avoir `offer.publish` dans ce contexte
     (profil prestataire actif, organisation active, rôle propriétaire/administrateur/éditeur) ; l'autorisation
     est refaite dans la transaction. `created_by` est l'utilisateur ; `seller_is_public` est calculé depuis
-    `identity`. Le corps de la requête ne peut jamais imposer le propriétaire. Journalisé (règle 12)."""
+    `identity`. Le corps de la requête ne peut jamais imposer le propriétaire. Journalisé (règle 12).
+
+    Contexte personnel : l'ancien champ `seller` est aussi écrit (cascade à la suppression du compte conservée
+    tant que T9 n'a pas contracté). Prestataire et organisation : `seller` reste nul."""
     forbidden = PROTECTED_FIELDS & set(data)
     if forbidden:
         raise ValueError(f"Champs réservés au serveur : {sorted(forbidden)}")
@@ -278,10 +323,10 @@ def create_offer(*, actor, context_type, context_id, data: dict) -> Offer:
             **data, seller_context_type=context_type, seller_context_id=context_id, created_by=actor,
             seller_is_public=identity_services.is_seller_context_public(context_type, context_id),
         )
+        if context_type == CONTEXT_USER:
+            offer.seller = actor
         offer.save()
-        record_audit(
-            actor, 'OFFER_CREATED', target=offer, details=offer.title, context=(context_type, context_id),
-        )
+        _audit(actor, 'OFFER_CREATED', offer, 'offer created')
     return offer
 
 
@@ -294,6 +339,7 @@ def update_offer(offer: Offer, *, actor, changes: dict) -> Offer:
         for field, value in changes.items():
             setattr(offer, field, value)
         offer.save()
+        _audit(actor, 'OFFER_UPDATED', offer, 'fields=' + ','.join(sorted(changes)))
     return offer
 
 
@@ -301,10 +347,7 @@ def delete_offer(offer: Offer, *, actor) -> int:
     """Suppression définitive : `offer.delete` dans le contexte propriétaire, journalisée avec ce contexte."""
     with transaction.atomic():
         authorize_offer(actor, offer, CAP_DELETE)
-        record_audit(
-            actor, 'OFFER_DELETED', target=offer, details=offer.title,
-            context=(offer.seller_context_type, offer.seller_context_id),
-        )
+        _audit(actor, 'OFFER_DELETED', offer, 'offer deleted')
         return delete_offers(Offer.objects.filter(pk=offer.pk))
 
 
@@ -317,6 +360,7 @@ def renew_offer(offer: Offer, *, actor) -> None:
         offer.expires_at = timezone.now() + timedelta(days=_expiration_days())
         offer.expiring_soon_notified = False
         offer.save(update_fields=['status', 'is_active', 'expires_at', 'expiring_soon_notified', 'updated_at'])
+        _audit(actor, 'OFFER_RENEWED', offer)
 
 
 def mark_offer_sold(offer: Offer, *, actor) -> None:
@@ -325,6 +369,7 @@ def mark_offer_sold(offer: Offer, *, actor) -> None:
         offer.status = Offer.STATUS_SOLD
         offer.is_active = False
         offer.save(update_fields=['status', 'is_active', 'updated_at'])
+        _audit(actor, 'OFFER_SOLD', offer)
 
 
 def pause_offer(offer: Offer, *, actor) -> None:
@@ -333,6 +378,7 @@ def pause_offer(offer: Offer, *, actor) -> None:
         offer.status = Offer.STATUS_PAUSED
         offer.is_active = False
         offer.save(update_fields=['status', 'is_active', 'updated_at'])
+        _audit(actor, 'OFFER_PAUSED', offer)
 
 
 def unpause_offer(offer: Offer, *, actor) -> bool:
@@ -348,6 +394,7 @@ def unpause_offer(offer: Offer, *, actor) -> bool:
         offer.status = Offer.STATUS_ACTIVE
         offer.is_active = True
         offer.save(update_fields=['status', 'is_active', 'updated_at'])
+        _audit(actor, 'OFFER_RESUMED', offer)
         return True
 
 
@@ -357,6 +404,7 @@ def move_to_trash(offer: Offer, *, actor) -> None:
         offer.is_deleted = True
         offer.deleted_at = timezone.now()
         offer.save(update_fields=['is_deleted', 'deleted_at', 'updated_at'])
+        _audit(actor, 'OFFER_TRASHED', offer)
 
 
 def restore_from_trash(offer: Offer, *, actor) -> None:
@@ -365,6 +413,40 @@ def restore_from_trash(offer: Offer, *, actor) -> None:
         offer.is_deleted = False
         offer.deleted_at = None
         offer.save(update_fields=['is_deleted', 'deleted_at', 'updated_at'])
+        _audit(actor, 'OFFER_RESTORED', offer)
+
+
+def add_offer_images(offer: Offer, *, actor, files: list) -> list:
+    """Ajoute des photos à la galerie (`offer.edit`, ré-autorisé sous transaction, journalisé). 1 à 8 photos au
+    total, `main_image` comprise ; fichiers contrôlés avant tout enregistrement (`MarketplaceError`, 400)."""
+    if not files:
+        raise MarketplaceError("Aucune image fournie.")
+    for image in files:
+        try:
+            validate_image_upload_size(image)
+            validate_image_pixels(image)
+        except DjangoValidationError as exc:
+            raise MarketplaceError(" ".join(exc.messages))
+    with transaction.atomic():
+        authorize_offer(actor, offer, CAP_EDIT)
+        if offer.images.count() + 1 + len(files) > OfferImage.MAX_IMAGES_PER_OFFER:
+            raise MarketplaceError(f"Une annonce ne peut pas dépasser {OfferImage.MAX_IMAGES_PER_OFFER} photos.")
+        created = [OfferImage.objects.create(offer=offer, image=f) for f in files]
+        _audit(actor, 'OFFER_IMAGES_ADDED', offer, f'count={len(created)}')
+    return created
+
+
+def delete_offer_image(offer: Offer, *, actor, image_id) -> bool:
+    """Retire une photo de la galerie (`offer.edit`, ré-autorisé, journalisé). Faux si elle n'existe pas."""
+    parsed = parse_uuid(image_id)
+    with transaction.atomic():
+        authorize_offer(actor, offer, CAP_EDIT)
+        deleted = 0
+        if parsed is not None:
+            deleted, _ = offer.images.filter(pk=parsed).delete()
+        if deleted:
+            _audit(actor, 'OFFER_IMAGE_DELETED', offer)
+    return bool(deleted)
 
 
 # --- Visibilité publique du vendeur (ADR 0006, A7) -----------------------------------------------------
@@ -396,6 +478,8 @@ def sync_all_seller_visibility() -> int:
             changed += Offer.objects.filter(
                 seller_context_type=context_type, seller_context_id=context_id,
             ).exclude(seller_is_public=public).update(seller_is_public=public)
+    if changed:
+        logger.warning("Visibilité des vendeurs : %s offre(s) corrigée(s) par la réconciliation.", changed)
     return changed
 
 
@@ -553,10 +637,21 @@ def ensure_available(offer: Offer) -> None:
         raise MarketplaceError("Cette annonce n'est plus disponible.")
 
 
+SELLER_CONTACT_UNAVAILABLE = "Ce vendeur ne peut pas être contacté par ce moyen pour le moment."
+
+
+def _ensure_seller_reachable(offer: Offer) -> None:
+    """Un vendeur sans compte de contact (organisation, avant le contact d'équipe de T7) n'est joignable par aucun
+    moyen : refus dédié `seller_contact_unavailable` (403), sans repli vers un autre canal."""
+    if _seller_account_id(offer) is None:
+        raise MarketplaceError(SELLER_CONTACT_UNAVAILABLE, 'seller_contact_unavailable', 403)
+
+
 def _check_can_contact(offer: Offer, sender) -> None:
     if identity_services.acts_for_context(sender.pk, offer.seller_context_type, offer.seller_context_id):
         raise MarketplaceError("Vous ne pouvez pas contacter votre propre annonce.")
     ensure_available(offer)
+    _ensure_seller_reachable(offer)
 
 
 EXCHANGE_MESSAGE_PREFIX = "[PROPOSITION D'ÉCHANGE] "
@@ -593,10 +688,13 @@ def _interaction_payload(offer: Offer, sender, **ids) -> dict:
     """Charge utile d'un contact ou d'un échange : identifiants et titre public de l'annonce
     seulement. Ni le texte du message ni le nom de l'expéditeur (données personnelles) ne
     sont copiés dans l'outbox : les abonnés les relisent par `services.py`."""
+    seller_account = _seller_account_id(offer)
+    if seller_account is None:  # garde : aucun événement de contact ne doit partir sans destinataire
+        raise MarketplaceError(SELLER_CONTACT_UNAVAILABLE, 'seller_contact_unavailable', 403)
     return {
         **{key: str(value) for key, value in ids.items()},
         'offer_id': str(offer.id), 'offer_title': offer.title,
-        'seller_id': str(_seller_account_id(offer)), 'sender_id': str(sender.pk),
+        'seller_id': str(seller_account), 'sender_id': str(sender.pk),
     }
 
 
@@ -785,6 +883,8 @@ def reveal_contact(*, offer_id, sender, channel: str) -> RevealResult:
     offer = _revealable_offer(offer_id)
     if identity_services.acts_for_context(sender.pk, offer.seller_context_type, offer.seller_context_id):
         raise RevealError("Vous ne pouvez pas contacter votre propre annonce.", 'own_offer', 403)
+    if _seller_account_id(offer) is None:
+        raise RevealError(SELLER_CONTACT_UNAVAILABLE, 'seller_contact_unavailable', 403)
     if moderation_services.is_user_restricted(sender.pk):
         raise RevealError("Votre compte ne peut pas contacter de vendeur pour le moment.", 'contact_restricted', 403)
 
@@ -922,8 +1022,6 @@ def get_public_features() -> dict:
 
 def create_exchange_proposal(*, offer: Offer, sender, message: str) -> ExchangeProposal:
     _check_can_contact(offer, sender)
-    if _seller_account_id(offer) is None:
-        raise MarketplaceError("Ce vendeur n'accepte pas ce moyen de contact.", 'channel_not_allowed', 403)
     with transaction.atomic():
         proposal = ExchangeProposal.objects.create(offer=offer, sender=sender, message=message)
         publish_event(

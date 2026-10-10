@@ -114,11 +114,8 @@ class OfferSerializer(serializers.ModelSerializer):
         })
         if 'user_contexts' not in context:
             request = context.get('request')
-            # Contextes dans lesquels le demandeur peut agir (2 requêtes pour toute la page) : « mon annonce ».
-            context['user_contexts'] = (
-                identity_services.get_user_context_roles(request.user.pk)
-                if request is not None and request.user.is_authenticated else {}
-            )
+            # Contextes dans lesquels le demandeur peut agir (2 requêtes, une fois par requête) : « mon annonce ».
+            context['user_contexts'] = services.get_request_user_contexts(request) if request is not None else {}
         new = [o for o in offers if o.id not in cache['seen']]
         if not new:
             return

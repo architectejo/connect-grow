@@ -109,7 +109,7 @@ class SellerDashboardRating:
     review_count: int
 
 
-def get_seller_dashboard_rating(seller_id, context_type=CONTEXT_USER) -> SellerDashboardRating:
+def get_seller_dashboard_rating(context_type, seller_id) -> SellerDashboardRating:
     """Pour le tableau de bord d'un contexte vendeur : moyenne de ses notes vendeur visibles, sans
     seuil d'affichage (None s'il n'a aucun avis), et nombre d'avis visibles reçus. `seller_id` est l'identifiant
     du contexte (compte, profil prestataire ou organisation) de type `context_type`."""

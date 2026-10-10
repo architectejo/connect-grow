@@ -508,3 +508,76 @@ Scission décidée de L0-09f : f1 (T6) et f2 (T7), parallélisables après T5 ; 
 - **ADR 0004** : « avis croisés calculés entre `USER` seulement ; à revoir pour les organisations » : voir E9 (section 11.3). `reviews.review_posted` passe en v3.
 - **ADR 0005** : `ContactPoint` et `ContactConsent` deviennent rattachables à une organisation (section 4.4) ; `get_allowed_channels` et `get_contact_endpoint` travaillent par contexte vendeur ; événements de contact en v2.
 - **CDC** (à appliquer sur accord de l'utilisateur, par `analyste-fonctionnel`) : §11.1 ligne `identity` (`User, ProviderProfile, Organization, Membership, VerificationRequest, ContactPoint, ContactConsent, OtpCode` ; contexte calculé, rôles en constantes) ; §11.2 ligne `MembershipChanged` ; §3.1 matrice de rôles (section 5) ; §3.1 vérification (exigences par type, libellé de synthèse accompagné de ses composantes) ; §11.4 tâches L0-09a à L0-09j.
+
+## 17. Amendement 1 (10/10/2026) : réponses aux questions du designer (Q-F1 à Q-F6) et gestion d'équipe cible
+
+- **Statut :** proposé, même validation que l'ADR. Les sections 1 à 16 ne sont pas modifiées ; en cas de divergence, **cette section prévaut** pour les points listés.
+- **Origine :** `docs/specs/L0-09-ecrans-contextes.md` §14 et §15.2. Les décisions de design D1 à D11 de cette spec sont acceptées par le chef de projet. D10 (bouton « Quitter » toujours proposé, refus `last_owner` traité par un message) et D11 (écran Équipe réduit en L0-09) restent valables.
+
+### 17.1 Décisions
+
+| Question | Décision |
+|---|---|
+| **Q-F1** `phone_verified` dans `me/` | Le champ est **déjà** lu et exposé par `GET/PATCH ID me/` (`UserSerializer`, lecture seule). Il est **figé dans le contrat** : `"phone_verified": true|false`, jamais modifiable par `PATCH`. Aucun travail backend, sauf un test de contrat qui le verrouille (T8). Le garde-fou du front reste doublé par le 403 `phone_verification_required` (le serveur décide). |
+| **Q-F2** Organisation issue d'un ancien compte entreprise | Booléen `migrated_from_business` (nom retenu) sur chaque élément de `GET ID contexts/` et dans `OrganizationInternal`. Valeur : `Organization.legacy_business_profile_id` non nul. Toujours `false` pour `USER` et `PROVIDER`. Aucune donnée personnelle. **Sera retiré avec `LegacyAccountMapping` et `legacy_business_profile_id`** (tâche de nettoyage de la section 15) : le front traite l'absence de la clé comme `false`. Sert uniquement à cibler un message d'information ; ne conditionne aucune autorisation. Le test d'exhaustivité des clés de `contexts/` (section 12) est mis à jour. |
+| **Q-F3** Canaux proposables | `available_channels` (tableau parmi `MESSAGE`, `CALL`, `WHATSAPP`) ajouté à **chaque** réponse de `contact-settings/*`, à côté de `context`. Sens : canaux que ce contexte a le droit de configurer, indépendamment de l'état actuel (numéro, consentement) ; ce n'est pas `allowed_channels` d'une offre, qui reste le canal effectivement utilisable. `USER`, `PROVIDER` : les trois. `ORGANIZATION` : `["MESSAGE"]` tant que `IdentitySettings.org_phone_channels_enabled` est faux ; les trois quand il est vrai. Régler un canal absent de `available_channels` : `400 {"channel": [...]}` avec code `channel_not_available`. La valeur vient de la même fonction de service que `get_allowed_channels` (une seule source). |
+| **Q-F4** Organisation archivée | `GET ID organizations/<uuid>/internal/` et les routes `organizations/<id>/…` : ordre de contrôle **non-membre (`DENY_RELATION`) puis état** ; un membre actif d'une organisation archivée reçoit `403 DENY_OBJECT_STATE` (suspendue : `DENY_SECURITY`, inchangé). Exception : `POST …/leave/` reste permis sur une organisation suspendue ou archivée (quitter ne doit jamais être bloqué) et renvoie `204`. Les membres d'une organisation archivée restent `ACTIVE` en base ; seul `leave/` les retire. L'organisation n'est pas listée par `contexts/` (inchangé, 9.1) ; la question client 15.1 n°6 de la spec (afficher les profils suspendus ou archivés en lecture seule) reste ouverte et ne bloque rien. |
+| **Q-F5** `category_ids` | **Facultatif, liste vide permise** à la création et à la modification, pour organisation et prestataire (la publication d'offre ne dépend pas des catégories du vendeur). **Maximum 5**, **réglable** (règle 11) : nouveau champ `IdentitySettings.max_categories_per_context` (PositiveSmallInteger, défaut 5, validateurs 1 à 20). Doublons ignorés. Au-delà : `400 {"category_ids": ["..."]}` code `too_many_categories`. UUID inconnu : `400` code `unknown_category` (inchangé). Le front lit la limite dans `GET ID organizations/limits/` (17.2). |
+| **Q-F6** Membre vu par les autres membres | Champs : `membership_id`, `display_name` (`public_display_name` : prénom + initiale du nom, « Marie K. »), `role`, `joined_at`, `is_self` (booléen). **Jamais** : téléphone, e-mail, nom complet, photo du compte, identifiant du compte, historique, pièces (règle 10). Les anciens membres (`REVOKED`) ne sont pas listés. Visible par tout membre actif (`org.view_internal`), analyste compris. Test d'exhaustivité des clés et de motifs téléphone et e-mail. |
+
+### 17.2 Contrat d'API ajouté
+
+Chemins sous `ID = /api/accounts/` (L0-11 ajoutera `v1`). Format d'erreur identique à la section 9.
+
+**A. Modifications de réponses existantes (livrées en L0-09)**
+
+- `GET ID me/` : confirme `phone_verified` (booléen, lecture seule).
+- `GET ID contexts/` : chaque élément gagne `"migrated_from_business": false` (`true` pour une organisation issue d'un ancien profil entreprise).
+- `OrganizationInternal` (9.2) gagne `"migrated_from_business"`.
+- `contact-settings/*` : chaque réponse gagne `"available_channels": ["MESSAGE"]` (ou les trois canaux).
+- `POST/PATCH organizations/`, `POST/PATCH provider/` : règle `category_ids` ci-dessus.
+
+**B. `GET ID organizations/limits/`** (authentifié ; L0-09 ; le front ne code aucune limite)
+```json
+200 {"max_categories_per_context": 5, "max_organizations_per_account": 10,
+     "name_min_length": 2, "name_max_length": 255, "description_max_length": 2000}
+```
+Valeurs issues de `IdentitySettings` et des validateurs, informatives (le serveur valide toujours). Rien de propre à l'utilisateur.
+
+**C. Gestion d'équipe : contrat CIBLE pour L1-01 (non livré en L0-09, non inscrit au plan T1 à T10)**
+
+Les services existent (T1 : `add_member`, `change_member_role`, `revoke_member`, `leave_organization`). L1-01 ajoute les endpoints, l'invitation et les écrans. Le front de L0-09 ne les appelle pas ; il en connaît les formes pour rester cohérent. Capacités : section 5.
+
+| Appel | Capacité | Corps | Réponse |
+|---|---|---|---|
+| `GET ID organizations/<uuid>/members/` | `org.view_internal` | `page`, `page_size` | `200 {count,next,previous,results:[{"membership_id","display_name","role","joined_at","is_self"}]}` ; ordre : propriétaires, administrateurs, éditeurs, analystes, puis `joined_at` ; seulement `ACTIVE` |
+| `POST ID organizations/<uuid>/members/` | `org.manage_members` | `{"identifier": "<téléphone ou e-mail du compte invité>", "role": "EDITOR"}` | `201` `{membership_id, display_name, role, joined_at, status}` (ajout direct en V1, `status = ACTIVE` ; avec invitation en L1-01 : `INVITED`, même route). Compte introuvable : même réponse que le succès côté contenu (`202 {"detail": "..."}` neutre), pas d'oracle d'existence. Erreurs : `400` rôle inconnu ; `403 DENY_PERMISSION` (administrateur demandant `OWNER`) ; `409 organization_limit_reached` (plafond de l'invité, formulé sans révéler son nombre) |
+| `PATCH ID organizations/<uuid>/members/<membership_id>/` | `org.manage_roles` | `{"role": "ADMIN"}` | `200` membre ; `409 last_owner` ; `403 DENY_PERMISSION` (administrateur sur un propriétaire ou vers `OWNER`) |
+| `DELETE ID organizations/<uuid>/members/<membership_id>/` | `org.manage_members` | — | `204` (`end_reason = removed`) ; `409 last_owner` ; `403 DENY_PERMISSION`. Un membre qui part lui-même passe par `leave/` |
+
+Le `membership_id` (jamais l'identifiant du compte) identifie un membre. Chaque appel : audit synchrone avec contexte, événement `identity.membership_changed`, notification de la personne concernée, révocation immédiate (R11). Revue `auditeur-securite` obligatoire en L1-01 (énumération de comptes par `identifier`, escalade de rôle).
+
+### 17.3 Impact sur le plan T1 à T10 (aucune tâche invalidée ni ajoutée)
+
+| Tâche | Impact |
+|---|---|
+| **T1** | Ajouter `max_categories_per_context` à `IdentitySettings` (même migration `identity 0006`, règle 10.1 respectée) ; `Organization.legacy_business_profile_id` sert de source à `migrated_from_business` (déjà prévu). |
+| **T2** | `contexts/` : clé `migrated_from_business` et test d'exhaustivité mis à jour ; 0 requête de plus (colonne lue avec l'organisation). |
+| **T8** | `OrganizationInternal.migrated_from_business` ; validation `category_ids` (5 réglable, vide permis, codes `too_many_categories`) ; `leave/` permis sur organisation suspendue ou archivée ; `internal/` : `DENY_OBJECT_STATE` pour l'archivée ; endpoint `organizations/limits/` ; test de contrat de `me/.phone_verified`. |
+| **T3** | Mêmes règles `category_ids` pour `provider/`. |
+| **T7** | `available_channels` dans toutes les réponses `contact-settings/*`, refus `channel_not_available` ; tests : interrupteur fermé `["MESSAGE"]`, ouvert trois canaux. |
+| **T9** | `migrated_from_business` vrai pour les organisations converties (T9a remplit `legacy_business_profile_id`), faux sinon : à ajouter au test de migration. |
+| **T4, T5, T6** | Aucun. |
+| **F1 / F2** | Consomment `phone_verified`, `migrated_from_business` (clé absente = faux), `available_channels`, `organizations/limits/`, `DENY_OBJECT_STATE`. L'écran Équipe réduit n'appelle rien de la partie C. |
+| **T10** | Ajouter à la recette : message d'ancienne entreprise, canaux d'organisation, plafond de catégories, quitter une organisation archivée. |
+
+Le chemin critique (T1 → T2 → {T3, T4, T8} → T5 → {T6, T7} → T9 → T10) ne change pas.
+
+### 17.4 Risques et points à valider
+
+1. `migrated_from_business` est une dette volontaire : à retirer avec `LegacyAccountMapping` (section 15) ; le front doit tolérer son absence.
+2. `available_channels` (configurable) et `allowed_channels` (effectif, par offre) sont deux notions : à documenter dans l'OpenAPI.
+3. Plafond de 5 catégories : valeur provisoire sans source client, modifiable en back-office sans migration.
+4. Partie C non validée par le client : seuls les noms de routes, la forme d'un membre et les rôles sont stables ; le mécanisme d'ajout (direct ou invitation) est tranché en L1-01.
+5. `leave/` sur organisation archivée : volontaire (quitter n'est jamais bloqué).
+6. Question client ouverte, inchangée : afficher en lecture seule les profils suspendus ou archivés (spec 15.1 n°6).

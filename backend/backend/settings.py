@@ -138,6 +138,7 @@ REST_FRAMEWORK = {
         'logout': '60/hour',        # déconnexion (publique), par IP
         'change_password': '10/hour',  # par utilisateur
         'kyc_write': '20/hour',     # dépôt/suppression de pièces KYC, par utilisateur
+        'contact_settings': '20/hour',  # réglages de contact vendeur (numéro, code, canaux), par utilisateur
         # Écritures du marketplace et des interactions (par utilisateur ; par IP pour la vue anonyme).
         'contact': '20/hour',
         'exchange': '10/hour',

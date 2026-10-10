@@ -840,7 +840,7 @@ class ContractTests(MarketplaceTestBase):
             'title', 'description', 'price', 'currency', 'condition', 'stock', 'is_price_negotiable',
             'is_exchangeable', 'main_image', 'images', 'views_count', 'likes_count',
             'shares_count', 'created_at', 'status', 'expires_at', 'visibility_score', 'visibility_rank',
-            'offer_rating', 'seller_rating', 'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored',
+            'offer_rating', 'seller_rating', 'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored', 'allowed_channels',
         })
         self.assertEqual(set(data['seller']), {
             'id', 'full_name', 'photo', 'user_type', 'business_profile', 'date_joined',

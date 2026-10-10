@@ -14,6 +14,7 @@ from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+from apps.common.exception_handler import CodedAPIException
 from apps.common.pagination import StandardPagination
 from apps.moderation.services import record_audit
 
@@ -24,10 +25,13 @@ from .permissions import CanReviewKyc
 from .serializers import (
     IdentifierTokenObtainPairSerializer, KycDocumentSerializer, PublicBusinessSerializer, UserSerializer,
 )
-from .services import KycError, decide_kyc_document, revoke_all_sessions, validate_new_password
+from .services import (
+    ContactSettingsError, KycError, decide_kyc_document, get_contact_settings, revoke_all_sessions,
+    set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
+)
 from .sms import send_otp_sms
 from .throttles import (
-    ProfileWriteIpThrottle, ProfileWriteThrottle, RegisterIpThrottle,
+    ContactSettingsThrottle, ProfileWriteIpThrottle, ProfileWriteThrottle, RegisterIpThrottle,
     ChangePasswordThrottle, FailureLimiter, KycWriteThrottle, LoginIpThrottle, OtpConfirmIpThrottle,
     LogoutIpThrottle, OtpRequestIpThrottle, OtpRequestPhoneDailyThrottle, OtpRequestPhoneThrottle, RefreshIpThrottle,
 )
@@ -232,7 +236,8 @@ class OtpRequestView(APIView):
         phone = request.data.get('phone', '')
         purpose = request.data.get('purpose', OtpCode.PURPOSE_REGISTER)
 
-        if purpose not in dict(OtpCode.PURPOSE_CHOICES):
+        # CONTACT_VERIFY n'est émis que par les réglages de contact (utilisateur connecté, ADR 0005).
+        if purpose not in dict(OtpCode.PURPOSE_CHOICES) or purpose == OtpCode.PURPOSE_CONTACT_VERIFY:
             return Response({'error': "purpose invalide."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
@@ -417,3 +422,76 @@ class KycDocumentDownloadView(APIView):
         )
         response['Cache-Control'] = 'private, no-store'  # pièce d'identité : jamais en cache
         return response
+
+
+class _ContactSettingsBase(APIView):
+    """Réglages de contact du vendeur connecté (ADR 0005, 5.1). Le compte ne lit et n'écrit que les
+    siens (aucun identifiant dans l'URL). Numéros masqués ; jamais mis en cache."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        response['Cache-Control'] = 'no-store'
+        response['Pragma'] = 'no-cache'
+        return response
+
+    @staticmethod
+    def current(user):
+        return Response(get_contact_settings(user))
+
+    @staticmethod
+    def body(request):
+        return request.data if hasattr(request.data, 'get') else {}
+
+    def run(self, action, *args, **kwargs):
+        try:
+            return action(*args, **kwargs)
+        except ContactSettingsError as exc:
+            raise CodedAPIException(exc.message, exc.code, status_code=exc.status_code)
+
+
+class ContactSettingsView(_ContactSettingsBase):
+    def get(self, request):
+        return self.current(request.user)
+
+
+class ContactPhoneView(_ContactSettingsBase):
+    """PUT : définit le numéro de contact (saisi, ou numéro de connexion sur geste explicite) et
+    envoie un code SMS s'il n'est pas vérifié d'emblée. Limites des OTP + réglages."""
+
+    throttle_classes = [ContactSettingsThrottle, OtpRequestIpThrottle, OtpRequestPhoneThrottle, OtpRequestPhoneDailyThrottle]
+
+    def put(self, request):
+        data = self.body(request)
+        use_login = data.get('use_login_phone', False)
+        phone = data.get('phone')
+        if not isinstance(use_login, bool) or (phone is not None and not isinstance(phone, str)):
+            raise CodedAPIException("Numéro invalide. Format attendu : +243XXXXXXXXX.", 'phone_invalid')
+        self.run(set_contact_phone, request.user, phone=phone, use_login_phone=use_login)
+        return self.current(request.user)
+
+
+class ContactPhoneVerifyView(_ContactSettingsBase):
+    throttle_classes = [ContactSettingsThrottle, OtpConfirmIpThrottle]
+
+    def post(self, request):
+        self.run(verify_contact_phone, request.user, self.body(request).get('code'))
+        return self.current(request.user)
+
+
+class ContactChannelView(_ContactSettingsBase):
+    throttle_classes = [ContactSettingsThrottle]
+
+    def put(self, request, channel):
+        data = self.body(request)
+        enabled = data.get('enabled')
+        text_version = data.get('text_version')
+        if channel not in ('MESSAGE', 'CALL', 'WHATSAPP'):
+            raise CodedAPIException("Canal inconnu.", 'channel_unknown', status_code=404)
+        if not isinstance(enabled, bool):
+            raise serializers.ValidationError({'enabled': ["Un booléen est attendu."]})
+        if text_version is not None and not isinstance(text_version, str):
+            raise serializers.ValidationError({'text_version': ["Un texte est attendu."]})
+        self.run(set_channel_consent, request.user, channel, enabled=enabled, text_version=text_version)
+        return self.current(request.user)

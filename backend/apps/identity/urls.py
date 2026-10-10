@@ -3,6 +3,10 @@ from django.urls import path
 from .views import (
     BusinessListView,
     ChangePasswordView,
+    ContactChannelView,
+    ContactPhoneVerifyView,
+    ContactPhoneView,
+    ContactSettingsView,
     KycDecisionView,
     KycDocumentDeleteView,
     KycDocumentDownloadView,
@@ -38,6 +42,12 @@ urlpatterns = [
 
     path('change-password/', ChangePasswordView.as_view(), name='change_password'),
     path('businesses/', BusinessListView.as_view(), name='business_list'),
+
+    # Réglages de contact vendeur (ADR 0005)
+    path('contact-settings/', ContactSettingsView.as_view(), name='contact_settings'),
+    path('contact-settings/phone/', ContactPhoneView.as_view(), name='contact_settings_phone'),
+    path('contact-settings/phone/verify/', ContactPhoneVerifyView.as_view(), name='contact_settings_phone_verify'),
+    path('contact-settings/channels/<str:channel>/', ContactChannelView.as_view(), name='contact_settings_channel'),
 
     # KYC Business (CDC 3.1, 3.11)
     path('kyc/documents/', KycDocumentListCreateView.as_view(), name='kyc_documents'),

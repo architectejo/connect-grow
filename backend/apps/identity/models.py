@@ -186,10 +186,12 @@ class OtpCode(BaseModel):
     PURPOSE_REGISTER = 'REGISTER'
     PURPOSE_LOGIN = 'LOGIN'
     PURPOSE_PASSWORD_RESET = 'PASSWORD_RESET'
+    PURPOSE_CONTACT_VERIFY = 'CONTACT_VERIFY'
     PURPOSE_CHOICES = (
         (PURPOSE_REGISTER, "Inscription"),
         (PURPOSE_LOGIN, "Connexion"),
         (PURPOSE_PASSWORD_RESET, "Réinitialisation du mot de passe"),
+        (PURPOSE_CONTACT_VERIFY, "Vérification du numéro de contact"),
     )
 
     VALIDITY_MINUTES = 10

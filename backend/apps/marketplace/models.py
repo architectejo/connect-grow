@@ -49,6 +49,15 @@ class MarketplaceSettings(SingletonSettingsModel):
         default=24, validators=[MaxValueValidator(720)],
         help_text="Ancienneté (en heures, 0 à 720) en dessous de laquelle un compte est considéré comme neuf.",
     )
+    # Abus : un compte qui dépasse son plafond N fois sur D jours est signalé à la modération.
+    reveal_abuse_threshold = models.PositiveIntegerField(
+        default=3, validators=[MinValueValidator(1), MaxValueValidator(100)],
+        help_text="Nombre de JOURS avec dépassement de plafond (1 à 100) qui déclenche un signalement automatique.",
+    )
+    reveal_abuse_window_days = models.PositiveIntegerField(
+        default=7, validators=[MinValueValidator(1), MaxValueValidator(90)],
+        help_text="Période (en jours, 1 à 90) sur laquelle les dépassements de plafond sont comptés.",
+    )
 
     class Meta:
         verbose_name = "Paramètres de la marketplace"

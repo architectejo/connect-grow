@@ -229,6 +229,15 @@ L'adresse IP n'est pas journalisée (LEG-PRV-07 ouverte). La durée de conservat
 | **Codes OTP et administration** (L0-24, audit m3, LEG-PRV-12) | Les codes `CONTACT_VERIFY` sont supprimés dès qu'ils ont servi (le numéro ne reste pas dans `OtpCode`) et l'admin `OtpCode` exclut ce but de sa liste. Un code non utilisé disparaît avec la purge OTP existante. |
 | **Dénombrement à la baisse** (rafales parallèles dépassant le quota) | Comptage en base à chaque appel ; sous SQLite les écritures sont sérialisées ; sous MySQL (fin de projet) ajouter un verrou applicatif court ou un contrôle après insertion. Dette notée, comme celle de `create_contact_event`. |
 
+### 8.1 Exploitation du throttle par IP et verrou par visiteur (T3, après audit)
+
+- **Adresse lue** : `NUM_PROXIES=1` en production et, côté Nginx, `proxy_set_header X-Forwarded-For $remote_addr;` (qui REMPLACE l'en-tête du client au lieu de l'allonger : sans cela, un client choisit son IP et contourne la limite). Aucune IP n'est persistée.
+- **IPv6** : la clé de limitation est le préfixe /64 (`normalize_ip`), car un abonné dispose au moins d'un /64.
+- **Cache** : le compteur vit dans le cache Django. LocMem est PAR PROCESSUS : exécuter Daphne en un seul processus, ou brancher un cache partagé avant la production (sinon la limite est multipliée par le nombre de processus).
+- **CGNAT** : plusieurs abonnés mobiles peuvent partager une IPv4 ; 30/h par IP peut gêner des utilisateurs légitimes. Valeur provisoire, à ajuster d'après les 429 observés.
+- **Concurrence** : `reveal_contact` verrouille la ligne du visiteur (`select_for_update`, sans effet sous SQLite) AVANT de relire le doublon et le plafond ; après insertion, un doublon apparu est annulé (on garde le plus ancien) puis le plafond est recompté sans le contact à valider (`Retry-After` exact). Sous SQLite, un « database is locked » (double-clic) devient un renvoi du contact existant, ou un 409 `reveal_in_progress` avec `Retry-After`.
+- **Journal** : une seule entrée `contact.reveal_quota_exceeded` par refus de plafond ; le refus de consentement (`contact.reveal_refused`) est dédoublonné par visiteur, offre et jour. Le signalement automatique compte des JOURS distincts avec dépassement (réglages `reveal_abuse_threshold` et `reveal_abuse_window_days`) et ne dédoublonne que contre les signalements ouverts.
+
 ## 9. Questions LEG-PRV restantes (à poser au client, ne bloquent pas le développement)
 
 Les numéros renvoient à la section 3 de la spec ; ce document n'en tranche aucune.
@@ -296,6 +305,11 @@ Extension de `apps/common/tests_privacy.py` (classe dédiée, mêmes jeux de don
 - Valeurs par défaut (15, 3, 30, 24 h) et version de texte `2026-10-v1` provisoires, à valider avec le client.
 - Aucun mécanisme de blocage de visiteur (lot 2).
 - Pas de « mes révélations » côté visiteur (LEG-PRV-04, question 6).
+- **Décision T3 : compte neuf** = `phone_verified` faux OU `date_joined` plus récent que `new_account_hours` (écart avec C9, qui disait « phone_verified et e-mail vérifié tous deux faux » : il n'existe pas de vérification d'e-mail). Un compte sans téléphone vérifié reste donc limité au plafond « compte neuf ».
+- **Dette règle 11** : la fenêtre glissante de 24 h des plafonds est une constante (`REVEAL_QUOTA_WINDOW`), non un réglage.
+- **Anti-doublon par canal** : `create_contact_event` juge le doublon par canal (et non plus tous canaux confondus), pour que l'obtention d'un numéro n'empêche pas d'écrire au vendeur ; l'engagement ne compte toujours qu'un contact par fenêtre.
+- **Dette MySQL** : sous REPEATABLE READ, le recomptage après insertion ne voit pas les insertions concurrentes non validées ; le verrou de ligne du visiteur est la parade, à valider à l'introduction de MySQL.
+- `ContactEventSerializer` expose `channel` en lecture seule : `GET /contacts/` renvoie aussi les contacts CALL et WHATSAPP de l'utilisateur (sans numéro).
 
 ### Ajouts L0-24 (audit sécurité et relecture de T1/T2)
 

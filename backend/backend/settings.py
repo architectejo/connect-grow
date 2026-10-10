@@ -141,6 +141,9 @@ REST_FRAMEWORK = {
         'contact_settings': '20/hour',  # réglages de contact vendeur (numéro, code, canaux), par utilisateur
         # Écritures du marketplace et des interactions (par utilisateur ; par IP pour la vue anonyme).
         'contact': '20/hour',
+        'contact_reveal_ip': '30/hour',    # révélation de numéro, par IP (aucune IP persistée)
+        'contact_reveal_user': '60/hour',  # révélation de numéro, filet technique par utilisateur
+        'contact_reveals_list': '120/hour',  # liste « qui a demandé mon numéro », par utilisateur
         'exchange': '10/hour',
         'share': '30/hour',
         'message': '120/hour',

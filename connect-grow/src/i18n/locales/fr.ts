@@ -343,6 +343,8 @@ const fr = {
       otp_expired: "Le code a expiré. Enregistrez de nouveau le numéro pour en recevoir un autre.",
       otp_attempts_exceeded: "Trop d'essais. Enregistrez de nouveau le numéro pour recevoir un autre code.",
       contact_phone_missing: "Enregistrez d'abord un numéro de contact.",
+      account_too_new:
+        "Votre compte est trop récent pour enregistrer un numéro de contact ; réessayez plus tard ou vérifiez votre téléphone de connexion.",
       channel_unknown: "Ce moyen de contact n'existe pas.",
     },
   },

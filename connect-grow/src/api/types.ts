@@ -306,6 +306,10 @@ export interface ContactChannelState {
 export interface ContactSettings {
     /** null tant qu'aucun numéro de contact n'existe. */
     phone: ContactPhoneState | null;
+    /** Masque du numéro de connexion fourni par le serveur à la racine (null sans numéro). Absent des anciennes réponses. */
+    login_phone_masked?: string | null;
+    /** Numéro de connexion présent et vérifié, donc utilisable comme numéro de contact. */
+    can_use_login_phone?: boolean;
     channels: Record<ContactChannel, ContactChannelState>;
     current_text_version: string;
 }

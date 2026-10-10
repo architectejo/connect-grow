@@ -29,7 +29,8 @@ class OrganizationKycDocumentListCreateView(ActingContextMixin, generics.ListCre
     pagination_class = StandardPagination
 
     def get_queryset(self):
-        self.authorize_object(CONTEXT_ORGANIZATION, self.kwargs['org_id'], 'org.view_internal')
+        # Pas d'autorisation par objet ici : elle refuserait une organisation suspendue/archivée, alors que la
+        # lecture reste permise ; le service contrôle l'appartenance, le compte et la capacité.
         return list_kyb_documents(self.request.user, self.kwargs['org_id'])
 
     def list(self, request, *args, **kwargs):
@@ -59,5 +60,4 @@ class OrganizationVerificationView(ActingContextMixin, APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, org_id):
-        self.authorize_object(CONTEXT_ORGANIZATION, org_id, 'org.view_internal')
         return _private(Response(get_organization_verification(request.user, org_id)))

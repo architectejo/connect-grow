@@ -99,17 +99,62 @@ def recompute_verification(business_profile):
     return verified
 
 
+INTEREST_CONFLICT_MESSAGE = (
+    "Vous ne pouvez pas traiter une pièce d'une organisation dont vous êtes ou avez été membre, ni une pièce que "
+    "vous avez déposée."
+)
+
+
+def has_interest_conflict(doc, organization, reviewer) -> bool:
+    """Conflit d'intérêts du personnel sur une pièce d'organisation (ADR 0006, 7.2) : déposant, créateur de
+    l'organisation, ou toute ligne d'appartenance de tout statut (actif ou ancien membre, sans limite de durée)."""
+    from .models import Membership
+
+    return bool(
+        doc.uploaded_by_id == reviewer.pk or organization.created_by_id == reviewer.pk
+        or Membership.objects.filter(organization=organization, user_id=reviewer.pk).exists()
+    )
+
+
+def get_document_for_download(document_id, reviewer):
+    """Pièce que `reviewer` peut télécharger. Même règle de conflit d'intérêts que la décision : le refus est
+    journalisé (`KYC_DOWNLOAD_DENIED`) puis renvoyé en 403. Pièce de l'ancien profil : jamais la sienne."""
+    from apps.common.contexts import CONTEXT_ORGANIZATION
+    from .models import KycDocument
+
+    try:
+        doc = KycDocument.objects.select_related('organization', 'business_profile').get(pk=document_id)
+    except KycDocument.DoesNotExist:
+        raise KycError("Document introuvable.", 404)
+    organization = doc.organization
+    if organization is not None:
+        denied = has_interest_conflict(doc, organization, reviewer)
+    else:
+        denied = doc.business_profile is not None and doc.business_profile.user_id == reviewer.pk
+    if denied:
+        record_audit(
+            reviewer, 'KYC_DOWNLOAD_DENIED', target=doc,
+            details=f"organization={organization.pk}; reason=interest_conflict" if organization else "reason=own_document",
+            context=(CONTEXT_ORGANIZATION, organization.pk) if organization else None,
+        )
+        raise KycError(INTEREST_CONFLICT_MESSAGE, 403)
+    return doc
+
+
 def decide_kyc_document(document_id, reviewer, decision, reason=''):
     """Décision (VALIDE ou REFUSE) sur une pièce KYC ou KYB, atomique avec son journal d'audit.
 
     Pièce d'organisation (ADR 0006, 7.2) : refus (403) si le décideur a une ligne d'appartenance à
     l'organisation (actif ou ancien membre, sans limite de durée), s'il a déposé la pièce ou s'il a créé
     l'organisation. Les claims ne sont jamais écrits : ils sont calculés à la lecture. Un événement
-    `identity.organization_verification_changed` est publié dans la même transaction."""
+    `identity.organization_verification_changed` est publié dans la même transaction.
+
+    `reason` (500 caractères au plus) est visible du déposant : il ne doit contenir AUCUNE donnée personnelle
+    (nom, numéro, adresse). Une liste codée de motifs est une dette suivie pour L1-xx (ADR 0006, amendement T4)."""
     from django.db import transaction
     from apps.common.contexts import CONTEXT_ORGANIZATION
     from apps.platform_core.services import publish_event
-    from .models import KycDocument, Membership, Organization
+    from .models import KycDocument, Organization
 
     if decision not in (KycDocument.STATUS_VALIDE, KycDocument.STATUS_REFUSE):
         raise KycError("decision doit être VALIDE ou REFUSE.")
@@ -126,14 +171,10 @@ def decide_kyc_document(document_id, reviewer, decision, reason=''):
         if doc.organization_id is not None:
             # Verrou de l'organisation : deux décisions sur ses pièces se suivent l'une après l'autre.
             organization = Organization.objects.select_for_update().get(pk=doc.organization_id)
-            if (
-                doc.uploaded_by_id == reviewer.pk or organization.created_by_id == reviewer.pk
-                or Membership.objects.filter(organization=organization, user_id=reviewer.pk).exists()
-            ):
-                raise KycError(
-                    "Vous ne pouvez pas décider sur une pièce d'une organisation dont vous êtes ou avez été "
-                    "membre, ni sur une pièce que vous avez déposée.", 403,
-                )
+            if has_interest_conflict(doc, organization, reviewer):
+                raise KycError(INTEREST_CONFLICT_MESSAGE, 403)
+        elif doc.business_profile_id is None:
+            raise KycError("Cette pièce n'est rattachée à aucun profil ni aucune organisation.", 409)
         elif doc.business_profile.user_id == reviewer.pk:
             raise KycError("Vous ne pouvez pas décider sur votre propre pièce.", 403)
 

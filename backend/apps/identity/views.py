@@ -29,6 +29,7 @@ from .serializers import (
 )
 from .services import (
     ContactSettingsError, KycError, decide_kyc_document, get_contact_settings, get_contexts_for_user,
+    get_document_for_download,
     revoke_all_sessions, set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
 )
 from .sms import send_otp_sms
@@ -434,9 +435,9 @@ class KycDocumentDownloadView(APIView):
 
     def get(self, request, pk):
         try:
-            doc = KycDocument.objects.get(pk=pk)
-        except KycDocument.DoesNotExist:
-            return Response({'error': "Document introuvable."}, status=status.HTTP_404_NOT_FOUND)
+            doc = get_document_for_download(pk, request.user)
+        except KycError as exc:
+            return Response({'error': exc.message}, status=exc.status_code)
         try:
             handle = doc.file.open('rb')
         except (ValueError, OSError):

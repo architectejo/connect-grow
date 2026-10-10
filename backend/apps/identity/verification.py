@@ -11,7 +11,7 @@ Principes :
 
 Ce module est exposé par `identity.services` ; les autres domaines n'importent jamais ce sous-module.
 """
-import uuid
+import logging
 from collections import defaultdict
 from typing import Iterable
 
@@ -24,9 +24,11 @@ from rest_framework.exceptions import ErrorDetail
 from apps.common.contexts import CONTEXT_ORGANIZATION, DENY_RELATION, ContextDenied
 from apps.moderation.services import record_audit
 
-from .kyc_files import validate_kyc_file
+from .kyc_files import detect_kyc_file_type, sanitize_kyc_image, validate_kyc_file
 from .models import KycDocument, Organization, OrganizationDocumentRequirement
 from .organizations import OrganizationError, _authorize_member, _lock_organization
+
+logger = logging.getLogger(__name__)
 
 # Libellés précis (CDC §3.1, doc 07 §3) : chacun dit exactement ce qui a été vérifié, ni « sûre », ni
 # « solvable », ni « recommandée ». Présentation seulement : les pièces EXIGÉES viennent de la base.
@@ -86,7 +88,8 @@ def get_verification_summaries(org_ids: Iterable) -> dict:
             continue
         needed = required.get(org_types[org_id], [])
         proven = validated.get(org_id, {})
-        ordered = [t for t in needed if t in proven] + sorted(t for t in proven if t not in needed)
+        # Seules les pièces actuellement exigées donnent un claim : une pièce hors exigences courantes n'est pas affichée.
+        ordered = [t for t in needed if t in proven]
         complete = bool(needed) and all(t in proven for t in needed)
         result[org_id] = {
             'verified_claims': [_claim(t, proven[t]) for t in ordered],
@@ -109,11 +112,12 @@ def get_verification_state(organization) -> dict:
     requirements = []
     for document_type in _required_types_by_org_type([organization.org_type]).get(organization.org_type, []):
         doc = latest.get(document_type)
+        claim = _claim(document_type, None)
         requirements.append({
             'document_type': document_type,
             'document_type_label': DOC_TYPE_LABELS.get(document_type, document_type),
-            'claim_code': _claim(document_type, None)['code'],
-            'claim_label': _claim(document_type, None)['label'],
+            'claim_code': claim['code'],
+            'claim_label': claim['label'],
             'status': doc.status if doc else STATUS_MISSING,
             'rejection_reason': doc.rejection_reason if doc and doc.status == KycDocument.STATUS_REFUSE else '',
         })
@@ -156,18 +160,9 @@ def _load_for_read(actor, organization_id) -> Organization:
     except (Organization.DoesNotExist, ValueError, TypeError, DjangoValidationError):
         # Même refus qu'un non-membre : aucun oracle d'existence.
         raise ContextDenied(DENY_RELATION, "Vous n'êtes pas membre de cette organisation.")
-    _authorize_member(actor, organization, 'org.view_internal')
+    # Lecture permise aussi pour une organisation suspendue ou archivée (les écritures restent refusées).
+    _authorize_member(actor, organization, 'org.view_internal', allow_inactive=True)
     return organization
-
-
-def _is_uuid(value):
-    if isinstance(value, uuid.UUID):
-        return True
-    try:
-        uuid.UUID(str(value))
-    except (ValueError, TypeError, AttributeError):
-        return False
-    return True
 
 
 def get_organization_verification(actor, organization_id) -> dict:
@@ -175,54 +170,73 @@ def get_organization_verification(actor, organization_id) -> dict:
     return get_verification_state(_load_for_read(actor, organization_id))
 
 
+def _discard_file(stored_file):
+    """Suppression best effort d'un fichier orphelin ; jamais d'exception (la base est déjà dans son état final)."""
+    try:
+        if stored_file and stored_file.name:
+            stored_file.delete(save=False)
+    except OSError:
+        logger.exception("Suppression d'un fichier de pièce orphelin impossible.")
+
+
 def submit_kyb_document(actor, organization_id, document_type, file) -> KycDocument:
     """Dépôt (ou remplacement) d'une pièce par un propriétaire ou un administrateur (`org.verification_submit`).
 
-    Une pièce du même type en attente ou refusée est remplacée (fichier supprimé, trace d'audit) ; une pièce
-    déjà validée ne se remplace pas (409)."""
+    Une pièce du même type en attente ou refusée est remplacée (ligne supprimée, son fichier part avec elle après
+    validation de la transaction, trace d'audit) ; une pièce déjà validée ne se remplace pas (409). Les images
+    JPEG et PNG sont ré-encodées sans métadonnées (EXIF, GPS) avant stockage ; les PDF restent tels quels.
+    Si une erreur survient après l'écriture du fichier, celui-ci est supprimé avant de relancer l'erreur."""
     _validate_input(document_type, file)
-    with transaction.atomic():
-        organization = _lock_organization(organization_id)
-        _authorize_member(actor, organization, 'org.verification_submit')
-        required = OrganizationDocumentRequirement.objects.filter(org_type=organization.org_type)
-        if not required.filter(document_type=document_type).exists():
-            raise _field_error(
-                'document_type', "Cette pièce n'est pas exigée pour ce type d'organisation.",
-                'document_type_not_required',
-            )
-        existing = list(organization.kyc_documents.select_for_update())
-        same_type = [d for d in existing if d.document_type == document_type]
-        if any(d.status == KycDocument.STATUS_VALIDE for d in same_type):
-            raise OrganizationError("Cette pièce est déjà validée.", 'document_already_validated')
-        if len(existing) - len(same_type) >= settings.KYC_MAX_DOCUMENTS_PER_PROFILE:
-            raise OrganizationError("Nombre maximal de pièces atteint.", 'document_limit_reached', status.HTTP_400_BAD_REQUEST)
+    file_type = detect_kyc_file_type(file)
+    stored = sanitize_kyc_image(file, file_type)
+    document = None
+    try:
+        with transaction.atomic():
+            organization = _lock_organization(organization_id)
+            _authorize_member(actor, organization, 'org.verification_submit')
+            required = OrganizationDocumentRequirement.objects.filter(org_type=organization.org_type)
+            if not required.filter(document_type=document_type).exists():
+                raise _field_error(
+                    'document_type', "Cette pièce n'est pas exigée pour ce type d'organisation.",
+                    'document_type_not_required',
+                )
+            existing = list(organization.kyc_documents.select_for_update())
+            same_type = [d for d in existing if d.document_type == document_type]
+            if any(d.status == KycDocument.STATUS_VALIDE for d in same_type):
+                raise OrganizationError("Cette pièce est déjà validée.", 'document_already_validated')
+            if len(existing) - len(same_type) >= settings.KYC_MAX_DOCUMENTS_PER_PROFILE:
+                raise OrganizationError(
+                    "Nombre maximal de pièces atteint.", 'document_limit_reached', status.HTTP_400_BAD_REQUEST,
+                )
 
-        document = KycDocument(organization=organization, uploaded_by=actor, document_type=document_type, file=file)
-        document.save()
-        replaced_files = []
-        for old in same_type:
-            _audit(actor, 'KYC_REPLACED', old, organization, f"document_type={old.document_type}; old_status={old.status}")
-            replaced_files.append(old.file)
-            old.delete()
-        _audit(actor, 'KYC_SUBMITTED', document, organization, f"document_type={document_type}")
-    for stored_file in replaced_files:
-        stored_file.delete(save=False)
+            document = KycDocument(organization=organization, uploaded_by=actor, document_type=document_type, file=stored)
+            document.save()
+            for old in same_type:
+                _audit(actor, 'KYC_REPLACED', old, organization,
+                       f"document_type={old.document_type}; old_status={old.status}")
+                old.delete()
+            _audit(actor, 'KYC_SUBMITTED', document, organization, f"document_type={document_type}")
+    except BaseException:
+        if document is not None and getattr(document.file, '_committed', False):
+            _discard_file(document.file)  # fichier réellement stocké, mais ligne annulée
+        raise
     return document
 
 
 def delete_kyb_document(actor, organization_id, document_id) -> None:
-    """Suppression d'une pièce en attente ou refusée (`org.verification_submit`) ; 409 si validée."""
+    """Suppression d'une pièce en attente ou refusée (`org.verification_submit`) ; 409 si validée.
+    Le fichier est supprimé avec la ligne, après validation de la transaction."""
     with transaction.atomic():
         organization = _lock_organization(organization_id)
         _authorize_member(actor, organization, 'org.verification_submit')
-        document = organization.kyc_documents.select_for_update().filter(pk=document_id).first() \
-            if _is_uuid(document_id) else None
+        try:
+            document = organization.kyc_documents.select_for_update().filter(pk=document_id).first()
+        except (ValueError, TypeError, DjangoValidationError):
+            document = None
         if document is None:
             raise OrganizationError("Pièce introuvable.", 'document_not_found', status.HTTP_404_NOT_FOUND)
         if document.status == KycDocument.STATUS_VALIDE:
             raise OrganizationError("Une pièce validée ne peut pas être supprimée.", 'document_validated')
         _audit(actor, 'KYC_DELETED', document, organization,
                f"document_type={document.document_type}; status={document.status}")
-        stored_file = document.file
         document.delete()
-    stored_file.delete(save=False)

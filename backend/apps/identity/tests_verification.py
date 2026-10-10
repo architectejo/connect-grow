@@ -20,8 +20,10 @@ from . import services
 from .models import BusinessProfile, KycDocument, Membership, Organization, OrganizationDocumentRequirement, User
 from .tests_organizations import ADMIN, ANALYST, TeamTestBase, make_user
 
-PNG = b'\x89PNG\r\n\x1a\n' + b'\x00' * 64
-PDF = b'%PDF-1.4\n' + b'0' * 64
+from .tests import PDF_BYTES, PNG_BYTES
+
+PNG = PNG_BYTES
+PDF = PDF_BYTES
 RCCM, IDN, REP, ARRETE = 'RCCM', 'ID_NATIONALE', 'PIECE_GERANT', 'ARRETE_ONG'
 EVENT = 'identity.organization_verification_changed'
 DOC_KEYS = {'id', 'document_type', 'document_type_label', 'status', 'rejection_reason', 'uploaded_at', 'reviewed_at'}
@@ -164,7 +166,8 @@ class SubmissionTests(VerificationBase):
     def test_pending_or_refused_document_is_replaced_and_its_file_removed(self):
         first = self.post_doc(self.owner)
         old_path = KycDocument.objects.get(pk=first.data['id']).file.path
-        second = self.post_doc(self.admin)
+        with self.captureOnCommitCallbacks(execute=True):
+            second = self.post_doc(self.admin)
         self.assertEqual(second.status_code, 201)
         self.assertFalse(KycDocument.objects.filter(pk=first.data['id']).exists())
         self.assertFalse(os.path.exists(old_path))
@@ -231,7 +234,8 @@ class ListAndDeleteTests(VerificationBase):
         doc = self.make_doc()
         path = doc.file.path
         self.client.force_authenticate(self.admin)
-        response = self.client.delete(reverse('organization_kyc_document_delete', args=[self.org.pk, doc.pk]))
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.delete(reverse('organization_kyc_document_delete', args=[self.org.pk, doc.pk]))
         self.assertEqual(response.status_code, 204)
         self.assertFalse(KycDocument.objects.filter(pk=doc.pk).exists())
         self.assertFalse(os.path.exists(path))
@@ -299,7 +303,7 @@ class ClaimsTests(VerificationBase):
         OrganizationDocumentRequirement.objects.filter(org_type='ENTREPRISE').delete()
         data = self.summary()
         self.assertFalse(data['summary']['complete'])
-        self.assertEqual(len(data['verified_claims']), 1)  # le claim reste vrai, sans synthèse
+        self.assertEqual(data['verified_claims'], [])  # hors exigences courantes : non affiché
 
     def test_ong_needs_its_decree(self):
         ong = services.create_organization(self.outsider, 'Mon ONG', 'ONG')

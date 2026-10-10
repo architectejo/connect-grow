@@ -83,7 +83,7 @@ class RevealUserThrottle(_RevealThrottle):
         return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
 
 
-class AnonymousOrUserIpThrottle(SimpleRateThrottle):
+class PublicIpThrottle(SimpleRateThrottle):
     """Lecture publique : limite PAR ADRESSE IP (lue selon NUM_PROXIES, IPv6 réduite à son /64), que la requête
     soit authentifiée ou non, pour qu'un compte jetable ne contourne pas la limite. Le taux est celui de la
     portée `scope` déclarée par la sous-classe."""

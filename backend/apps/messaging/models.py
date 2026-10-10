@@ -15,7 +15,7 @@ class Conversation(BaseModel):
     offer_id = models.UUIDField(null=True, blank=True, db_index=True)
     participants = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name='conversations')
     # Contexte vendeur de la conversation (ADR 0006, A8 et 4.5). SCHÉMA SEULEMENT en T5b : aucun code ne les lit
-    # ni ne les écrit avant T7. Nul = ancienne conversation, accès par `participants`.
+    # ni ne les écrit avant T7. Nul = ancienne conversation, accès par `participants` (norme unique : aucun remplissage).
     seller_context_type = models.CharField(max_length=20, choices=ALL_CONTEXT_CHOICES, null=True, blank=True)
     seller_context_id = models.UUIDField(null=True, blank=True)
 
@@ -35,7 +35,7 @@ class Message(BaseModel):
     content = models.TextField()
     is_read = models.BooleanField(default=False)
     # Identité affichée de l'expéditeur (personne ou organisation), ADR 0006, 4.5. Schéma seulement (T7 les
-    # utilisera) ; nul = l'expéditeur lui-même.
+    # utilisera) ; nul = l'expéditeur lui-même, à titre personnel (norme unique : aucun remplissage).
     sender_context_type = models.CharField(max_length=20, choices=ALL_CONTEXT_CHOICES, null=True, blank=True)
     sender_context_id = models.UUIDField(null=True, blank=True)
 

@@ -75,10 +75,11 @@ def get_seller_summaries(contexts: Iterable) -> dict:
 
     if grouped[CONTEXT_PROVIDER]:
         for profile in ProviderProfile.objects.filter(pk__in=grouped[CONTEXT_PROVIDER]).select_related('user'):
-            photo = profile.user.photo
+            # Le profil prestataire n'a pas de photo propre : la photo personnelle du compte n'est pas exposée
+            # (règle 10). Dette : photo propre du profil prestataire (ADR 0006, 19.4).
             summaries[(CONTEXT_PROVIDER, profile.pk)] = SellerSummary(
                 context_type=CONTEXT_PROVIDER, context_id=profile.pk, display_name=profile.display_name,
-                photo=photo.url if photo else None, org_type=None, description=profile.bio,
+                photo=None, org_type=None, description=profile.bio,
                 verified_claims=[], verification_summary=dict(NO_CLAIMS_SUMMARY), member_since=profile.created_at,
             )
 

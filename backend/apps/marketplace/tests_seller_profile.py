@@ -1,6 +1,5 @@
 """Profil public d'un vendeur par contexte (ADR 0006, 9.7), statistiques par contexte, colonnes de contexte de la
 messagerie et des notifications (T5b / L0-09e)."""
-import importlib
 import json
 import re
 import uuid
@@ -56,6 +55,9 @@ class ProfileBase(ContextBase):
             nif=SENTINEL_NIF, description='Atelier de menuiserie à Kinshasa.',
         )
         self.join(self.member, role=OWNER)
+        # Règle 10 : une page publique de personne ou de prestataire exige une offre publique active.
+        self.personal_offer = self.make_offer(title='Offre personnelle de Marie')
+        self.provider_public_offer = self.provider_offer(title='Offre de prestataire de Marie')
 
     def provider_offer(self, **kwargs):
         return self.make_offer(
@@ -79,7 +81,6 @@ class ProfileBase(ContextBase):
 
 class PublicProfileTests(ProfileBase):
     def test_personal_profile_is_minimal(self):
-        self.make_offer()
         response = self.get('user', self.seller.pk)
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -95,13 +96,13 @@ class PublicProfileTests(ProfileBase):
         self.assertTrue(data['member_since'])
 
     def test_provider_profile(self):
-        self.provider_offer()
         data = self.get('provider', self.profile.pk).json()
         self.assertEqual(set(data), PROFILE_KEYS)
         self.assertEqual(
             (data['context_type'], data['display_name'], data['description'], data['org_type']),
             ('PROVIDER', 'Marie couture', 'Couture sur mesure', None),
         )
+        self.assertIsNone(data['photo'])
         self.assertEqual(data['active_offers_count'], 1)
 
     def test_organization_profile_with_precise_claims(self):
@@ -154,10 +155,24 @@ class PublicProfileTests(ProfileBase):
         org = self.get('organization', self.org.pk).json()['seller_rating']
         self.assertEqual((user['average'], user['count']), (5.0, 3))
         self.assertEqual((provider['average'], provider['count']), (2.0, 3))
-        # Sous le seuil d'affichage : la moyenne reste masquée, le nombre est exact.
-        self.assertEqual((org['average'], org['count']), (None, 1))
+        # Sous le seuil d'affichage : ni la moyenne ni le nombre d'avis ne sont publics.
+        self.assertEqual((org['average'], org['count']), (None, 0))
         for kind, key in (('user', self.seller.pk), ('provider', self.profile.pk), ('organization', self.org.pk)):
             self.assertNotIn('trust_score', self.get(kind, key).json())
+
+    def test_the_provider_profile_never_exposes_the_personal_photo_of_the_account(self):
+        from apps.common.factories import make_test_image
+
+        self.seller.photo.save('moi.png', make_test_image('moi.png', fmt='PNG'))
+        self.assertIsNone(self.get('provider', self.profile.pk).json()['photo'])
+        offer = self.client.get(reverse('offer-detail', args=[self.provider_public_offer.pk])).json()
+        self.assertIsNone(offer['seller']['photo'])
+        # Le compte personnel garde sa photo (conservé provisoirement, question LEG-PRV).
+        self.assertTrue(self.get('user', self.seller.pk).json()['photo'])
+
+    def test_the_review_count_is_hidden_under_the_display_threshold(self):
+        self.review('USER', self.seller.pk, rating=4)
+        self.assertEqual(self.get('user', self.seller.pk).json()['seller_rating'], {'average': None, 'count': 0})
 
     def test_hidden_reviews_are_not_counted(self):
         for _ in range(3):
@@ -165,14 +180,34 @@ class PublicProfileTests(ProfileBase):
         Review.objects.filter(seller_context_type='USER').update(is_hidden=True)
         self.assertEqual(self.get('user', self.seller.pk).json()['seller_rating'], {'average': None, 'count': 0})
 
-    def test_reading_a_profile_never_touches_the_organic_ranking(self):
-        offer = self.make_offer()
-        before = offer.visibility_score
-        for _ in range(5):
-            self.review('USER', self.seller.pk, rating=5)
+    def test_ratings_never_enter_the_organic_ranking(self):
+        # Règle 4 : recalcul réel du classement avant et après des avis (offre, vendeur) très bons ou très mauvais.
+        from . import services
+
+        frozen = timezone.now()
+
+        def score():
+            with mock.patch('django.utils.timezone.now', return_value=frozen):  # la récence ne doit pas bouger
+                services.refresh_all_scores()
+            return Offer.objects.get(pk=self.personal_offer.pk).visibility_score
+
+        before = score()
+        for rating in (5, 5, 5, 1, 1):
+            review = self.review('USER', self.seller.pk, rating=rating)
+            Review.objects.filter(pk=review.pk).update(offer_id=self.personal_offer.pk)
         self.get('user', self.seller.pk)
-        offer.refresh_from_db()
-        self.assertEqual(offer.visibility_score, before)
+        self.assertEqual(score(), before)
+
+    def test_ranking_and_visibility_do_not_reference_reviews(self):
+        import pathlib
+
+        import apps.visibility
+
+        root = pathlib.Path(apps.visibility.__file__).parent
+        for path in root.rglob('*.py'):
+            if path.name.startswith('tests') or 'migrations' in path.parts:
+                continue
+            self.assertNotIn('apps.reviews', path.read_text(encoding='utf-8'), path.name)
 
 
 class UniformNotFoundTests(ProfileBase):
@@ -215,6 +250,25 @@ class UniformNotFoundTests(ProfileBase):
         Organization.objects.filter(pk=self.org.pk).update(status=Organization.STATUS_SUSPENDED)
         self.assertEqual(self.get('organization', self.org.pk).status_code, 404)
         Organization.objects.filter(pk=self.org.pk).update(status=Organization.STATUS_ACTIVE)
+        self.assertEqual(self.get('organization', self.org.pk).status_code, 200)
+
+    def test_a_person_or_provider_without_a_public_offer_has_no_public_page(self):
+        # Règle 10 : acheteur sans offre -> même 404 que l'inconnu ; avec offre -> 200 ; offre en pause -> 404.
+        buyer = self.buyer
+        unknown = self.client.get(profile_url('user', uuid.uuid4())).content
+        response = self.get('user', buyer.pk)
+        self.assertEqual((response.status_code, response.content), (404, unknown))
+        offer = self.make_offer(seller=buyer, title='Offre de l acheteur devenu vendeur')
+        self.assertEqual(self.get('user', buyer.pk).status_code, 200)
+        Offer.objects.filter(pk=offer.pk).update(is_active=False)
+        response = self.get('user', buyer.pk)
+        self.assertEqual((response.status_code, response.content), (404, unknown))
+        Offer.objects.filter(pk=offer.pk).update(is_active=True, is_deleted=True)
+        self.assertEqual(self.get('user', buyer.pk).status_code, 404)
+
+    def test_provider_without_a_public_offer_has_no_page_but_an_organization_keeps_its_page(self):
+        Offer.objects.filter(pk=self.provider_public_offer.pk).update(is_active=False)
+        self.assertEqual(self.get('provider', self.profile.pk).status_code, 404)
         self.assertEqual(self.get('organization', self.org.pk).status_code, 200)
 
     def test_only_get_is_allowed(self):
@@ -401,7 +455,7 @@ class DashboardByContextTests(ProfileBase):
 
 
 class ContextColumnsMigrationTests(TransactionTestCase):
-    """Colonnes de contexte de `messaging` (0002) et `notifications` (0002), puis remplissage séparé (0003)."""
+    """Colonnes de contexte de `messaging` (0002) et `notifications` (0002) : schéma additif, nul = personnel."""
 
     def tearDown(self):
         call_command('migrate', verbosity=0)
@@ -432,71 +486,42 @@ class ContextColumnsMigrationTests(TransactionTestCase):
         indexes = {index.name for model in (conversation, notification) for index in model._meta.indexes}
         self.assertTrue({'conv_seller_ctx', 'notif_user_ctx'} <= indexes)
 
-    def test_backfill_is_correct_idempotent_and_reversible(self):
+    def test_existing_rows_stay_null_and_the_migration_is_reversible(self):
+        # Norme unique : nul = personnel. Aucun remplissage : les lignes existantes gardent des colonnes nulles.
         before = MigrationExecutor(connection)
         old = self.targets(before, ('messaging', '0001_initial'), ('notifications', '0001_initial'))
         before.migrate(old)
         old_apps = before.loader.project_state(old).apps
         HUser = old_apps.get_model('identity', 'User')
-        HConversation = old_apps.get_model('messaging', 'Conversation')
-        HMessage = old_apps.get_model('messaging', 'Message')
-        HNotification = old_apps.get_model('notifications', 'Notification')
         alice = HUser.objects.create(email='alice@example.com')
-        bob = HUser.objects.create(email='bob@example.com')
-        conversation = HConversation.objects.create()
-        conversation.participants.add(alice, bob)
-        for sender in (alice, bob, alice):
-            HMessage.objects.create(conversation=conversation, sender=sender, content='Bonjour')
-        for owner in (alice, bob):
-            HNotification.objects.create(user=owner, notification_type='SYSTEM', title='t', content='c')
+        conversation = old_apps.get_model('messaging', 'Conversation').objects.create()
+        conversation.participants.add(alice)
+        old_apps.get_model('messaging', 'Message').objects.create(
+            conversation=conversation, sender=alice, content='Bonjour',
+        )
+        old_apps.get_model('notifications', 'Notification').objects.create(
+            user=alice, notification_type='SYSTEM', title='t', content='c',
+        )
 
         after = MigrationExecutor(connection)
         new = self.targets(
-            after, ('messaging', '0003_fill_message_sender_context'),
-            ('notifications', '0003_fill_notification_context'),
+            after, ('messaging', '0002_conversation_message_contexts'), ('notifications', '0002_notification_context'),
         )
         after.migrate(new)
         new_apps = after.loader.project_state(new).apps
-        NMessage = new_apps.get_model('messaging', 'Message')
-        NNotification = new_apps.get_model('notifications', 'Notification')
-        NConversation = new_apps.get_model('messaging', 'Conversation')
-
-        expected_messages = sorted((s.pk, 'USER', s.pk) for s in (alice, alice, bob))
-        expected_notifications = sorted((s.pk, 'USER', s.pk) for s in (alice, bob))
-        self.assertEqual(
-            sorted((m.sender_id, m.sender_context_type, m.sender_context_id) for m in NMessage.objects.all()),
-            expected_messages,
-        )
-        self.assertEqual(
-            sorted((n.user_id, n.context_type, n.context_id) for n in NNotification.objects.all()),
-            expected_notifications,
-        )
-        # Les conversations existantes restent sans contexte vendeur (ADR 0006, 10.3).
-        conv = NConversation.objects.get()
+        message = new_apps.get_model('messaging', 'Message').objects.get()
+        notification = new_apps.get_model('notifications', 'Notification').objects.get()
+        conv = new_apps.get_model('messaging', 'Conversation').objects.get()
+        self.assertEqual((message.sender_context_type, message.sender_context_id), (None, None))
+        self.assertEqual((notification.context_type, notification.context_id), (None, None))
         self.assertEqual((conv.seller_context_type, conv.seller_context_id), (None, None))
-        self.assertEqual(conv.participants.count(), 2)
+        self.assertEqual(conv.participants.count(), 1)
 
-        # Idempotence : rejouer ne réécrase pas un contexte déjà posé et ne crée rien.
-        marker = uuid.uuid4()
-        NMessage.objects.filter(sender_id=bob.pk).update(sender_context_type='ORGANIZATION', sender_context_id=marker)
-        NNotification.objects.filter(user_id=bob.pk).update(context_type='ORGANIZATION', context_id=marker)
-        importlib.import_module(
-            'apps.messaging.migrations.0003_fill_message_sender_context',
-        ).fill_sender_contexts(new_apps, None)
-        importlib.import_module(
-            'apps.notifications.migrations.0003_fill_notification_context',
-        ).fill_contexts(new_apps, None)
-        self.assertEqual((NMessage.objects.count(), NNotification.objects.count()), (3, 2))
-        self.assertEqual(NMessage.objects.filter(sender_context_id=marker).count(), 1)
-        self.assertEqual(NNotification.objects.filter(context_id=marker).count(), 1)
-        self.assertEqual(NMessage.objects.filter(sender_context_type='USER').count(), 2)
-
-        # Retour arrière : colonnes retirées, données conservées.
         back = MigrationExecutor(connection)
         back.migrate(old)
         back_apps = back.loader.project_state(old).apps
-        self.assertEqual(back_apps.get_model('messaging', 'Message').objects.count(), 3)
-        self.assertEqual(back_apps.get_model('notifications', 'Notification').objects.count(), 2)
+        self.assertEqual(back_apps.get_model('messaging', 'Message').objects.count(), 1)
+        self.assertEqual(back_apps.get_model('notifications', 'Notification').objects.count(), 1)
         self.assertNotIn(
             'context_id', {f.name for f in back_apps.get_model('notifications', 'Notification')._meta.get_fields()},
         )

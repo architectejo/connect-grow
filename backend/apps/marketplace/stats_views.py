@@ -3,11 +3,10 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.throttles import PublicIpThrottle
 from apps.identity import services as identity_services
 from apps.reviews import services as reviews_services
 from apps.visibility import services as visibility_services
-
-from apps.common.throttles import AnonymousOrUserIpThrottle
 
 from . import services
 from .models import Offer
@@ -64,7 +63,7 @@ class OfferStatsView(identity_services.ActingContextMixin, APIView):
         return Response({"history": _history(visibility_services.get_offer_history(pk))})
 
 
-class SellerProfileThrottle(AnonymousOrUserIpThrottle):
+class SellerProfileThrottle(PublicIpThrottle):
     """Lecture publique du profil d'un vendeur : par adresse IP, anonymes compris."""
 
     scope = 'seller_profile'
@@ -90,9 +89,13 @@ class PublicSellerProfileView(APIView):
         if profile is None:
             raise NotFound("Vendeur introuvable.")
         summary = profile.summary
-        rating = reviews_services.get_seller_ratings(
-            summary.context_type, [summary.context_id],
-        ).get(summary.context_id) or reviews_services.RatingSummary(None, 0)
+        # Assemblage dans la vue : la fiche et le nombre d'offres viennent de `marketplace`/`identity`, la note de
+        # `reviews` (qui importe déjà `marketplace.services` : l'import inverse ferait un cycle). Pour chaque
+        # identifiant demandé, `get_seller_ratings` renvoie toujours une entrée (zéro avis compris).
+        rating = reviews_services.get_seller_ratings(summary.context_type, [summary.context_id])[summary.context_id]
+        if rating.average is None:
+            # Sous le seuil d'affichage, le nombre d'avis n'est pas public non plus (il révélerait « 1 avis »).
+            rating = reviews_services.RatingSummary(None, 0)
         data = PublicSellerProfileSerializer(
             {'summary': summary, 'rating': rating, 'active_offers_count': profile.active_offers_count},
             context={'request': request},

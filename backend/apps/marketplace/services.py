@@ -136,10 +136,14 @@ def get_public_seller_profile(context_type, context_id) -> Optional[PublicSeller
         return None
     if not identity_services.is_seller_context_public(context_type, parsed):
         return None
+    active = public_offers().filter(seller_context_type=context_type, seller_context_id=parsed).count()
+    if active == 0 and context_type != CONTEXT_ORGANIZATION:
+        # Règle 10 : une personne ou un prestataire sans offre publique n'a pas de page publique (même 404 que
+        # l'inconnu). Une organisation active reste publique (annuaire).
+        return None
     summary = identity_services.get_seller_summaries([(context_type, parsed)]).get((context_type, parsed))
     if summary is None:
         return None
-    active = public_offers().filter(seller_context_type=context_type, seller_context_id=parsed).count()
     return PublicSellerProfile(summary=summary, active_offers_count=active)
 
 

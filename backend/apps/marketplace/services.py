@@ -17,11 +17,12 @@ from django.db.models import Case, Count, ExpressionWrapper, F, FloatField, Valu
 from django.utils import timezone
 
 from apps.catalog import services as catalog_services
-from apps.common.contexts import CONTEXT_USER
+from apps.common.contexts import CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER
 from apps.common.utils import day_bounds, parse_uuid
 from apps.identity import services as identity_services
 from apps.moderation import services as moderation_services
 from apps.moderation.services import record_audit
+from apps.platform_core.registry import PermanentEventError
 from apps.platform_core.services import publish_event
 from apps.visibility import services as visibility_services
 
@@ -47,22 +48,18 @@ class OfferHiddenError(MarketplaceError):
 
 @dataclass(frozen=True)
 class OfferInfo:
+    """Offre vue par les autres domaines (ADR 0006, A3) : le propriétaire est un CONTEXT vendeur
+    (`seller_context_type`, `seller_context_id`), jamais un compte."""
+
     id: uuid.UUID
-    seller_id: uuid.UUID
+    seller_context_type: str
+    seller_context_id: uuid.UUID
     title: str
     main_image_url: Optional[str]
     is_active: bool
     is_deleted: bool
     is_hidden_by_moderation: bool = False
-
-    @property
-    def seller_context_type(self) -> str:
-        # Couture L0-09 : le contexte vendeur deviendra l'organisation sans changer les appelants.
-        return CONTEXT_USER
-
-    @property
-    def seller_context_id(self) -> uuid.UUID:
-        return self.seller_id
+    seller_is_public: bool = True
 
     @property
     def is_available(self) -> bool:
@@ -72,10 +69,10 @@ class OfferInfo:
 
 def _info(offer: Offer) -> OfferInfo:
     return OfferInfo(
-        id=offer.id, seller_id=offer.seller_id, title=offer.title,
-        main_image_url=offer.main_image.url if offer.main_image else None,
+        id=offer.id, seller_context_type=offer.seller_context_type, seller_context_id=offer.seller_context_id,
+        title=offer.title, main_image_url=offer.main_image.url if offer.main_image else None,
         is_active=offer.is_active, is_deleted=offer.is_deleted,
-        is_hidden_by_moderation=offer.is_hidden_by_moderation,
+        is_hidden_by_moderation=offer.is_hidden_by_moderation, seller_is_public=offer.seller_is_public,
     )
 
 
@@ -101,12 +98,18 @@ def offer_exists(offer_id) -> bool:
     return parsed is not None and Offer.objects.filter(id=parsed).exists()
 
 
-def count_active_offers(seller_id=None) -> int:
-    """Offres visibles sur la marketplace (actives, hors corbeille), d'un vendeur ou de tous."""
+def count_active_offers(context_type=None, context_id=None) -> int:
+    """Offres visibles sur la marketplace (actives, hors corbeille), d'un contexte vendeur ou de tous. Aucun
+    plafond ici : les quotas relèvent de L1-11."""
     queryset = Offer.objects.filter(is_active=True, is_deleted=False)
-    if seller_id is not None:
-        queryset = queryset.filter(seller_id=seller_id)
+    if context_type is not None:
+        queryset = queryset.filter(seller_context_type=context_type, seller_context_id=context_id)
     return queryset.count()
+
+
+def public_offers():
+    """Offres publiques : actives, hors corbeille, vendeur public (`seller_is_public`, ADR 0006, A7)."""
+    return Offer.objects.filter(is_active=True, is_deleted=False, seller_is_public=True)
 
 
 @dataclass(frozen=True)
@@ -152,15 +155,19 @@ def lift_moderation_hiding(offer_id) -> None:
 
 
 def count_contacts_by_offer(day: date) -> list:
-    """(offer_id, seller_id, total) des contacts comptés un jour donné (agrégat du tableau de bord).
-    Même définition du « contact » que l'engagement E du classement : `is_counted` (ADR 0004)."""
+    """(offer_id, type du contexte vendeur, id du contexte vendeur, total) des contacts comptés un jour
+    donné (agrégat du tableau de bord). Même définition du « contact » que l'engagement E du classement :
+    `is_counted` (ADR 0004)."""
     start, end = day_bounds(day)
     rows = (
         ContactEvent.objects.filter(created_at__gte=start, created_at__lt=end, is_counted=True)
-        .values('offer_id', 'offer__seller_id')
+        .values('offer_id', 'offer__seller_context_type', 'offer__seller_context_id')
         .annotate(total=Count('id'))
     )
-    return [(row['offer_id'], row['offer__seller_id'], row['total']) for row in rows]
+    return [
+        (row['offer_id'], row['offer__seller_context_type'], row['offer__seller_context_id'], row['total'])
+        for row in rows
+    ]
 
 
 # --- Score de visibilité -----------------------------------------------------
@@ -238,51 +245,167 @@ def _refuse_if_hidden(offer: Offer) -> None:
         raise OfferHiddenError("Cette annonce a été masquée par la modération : vous ne pouvez pas la remettre en ligne.")
 
 
-def renew_offer(offer: Offer) -> None:
-    _refuse_if_hidden(offer)
-    offer.status = Offer.STATUS_ACTIVE
-    offer.is_active = True
-    offer.expires_at = timezone.now() + timedelta(days=_expiration_days())
-    offer.expiring_soon_notified = False
-    offer.save(update_fields=['status', 'is_active', 'expires_at', 'expiring_soon_notified', 'updated_at'])
+CAP_PUBLISH = 'offer.publish'
+CAP_EDIT = 'offer.edit'
+CAP_DELETE = 'offer.delete'
+CAP_VIEW_INTERNAL = 'offer.view_internal'
+
+# Champs que l'API ne modifie jamais : le propriétaire est posé par le serveur (ADR 0006, 9.6).
+PROTECTED_FIELDS = frozenset({
+    'seller', 'seller_id', 'seller_context_type', 'seller_context_id', 'created_by', 'created_by_id',
+    'seller_is_public',
+})
 
 
-def mark_offer_sold(offer: Offer) -> None:
-    offer.status = Offer.STATUS_SOLD
-    offer.is_active = False
-    offer.save(update_fields=['status', 'is_active', 'updated_at'])
+def authorize_offer(actor, offer: Offer, capability: str) -> None:
+    """Autorise `actor` d'après le contexte PROPRIÉTAIRE de l'offre et son rôle réel (jamais d'après l'en-tête
+    `X-Context`, ADR 0006, 6.4). Lève `ContextDenied` (403 `DENY_*`). À refaire sous `transaction.atomic()`,
+    juste avant l'écriture, pour prendre en compte une révocation ou une suspension survenue entre-temps."""
+    identity_services.authorize_on(actor, offer.seller_context_type, offer.seller_context_id, capability)
 
 
-def pause_offer(offer: Offer) -> None:
-    offer.status = Offer.STATUS_PAUSED
-    offer.is_active = False
-    offer.save(update_fields=['status', 'is_active', 'updated_at'])
+def create_offer(*, actor, context_type, context_id, data: dict) -> Offer:
+    """Publie une offre au nom d'un contexte vendeur. `actor` doit avoir `offer.publish` dans ce contexte
+    (profil prestataire actif, organisation active, rôle propriétaire/administrateur/éditeur) ; l'autorisation
+    est refaite dans la transaction. `created_by` est l'utilisateur ; `seller_is_public` est calculé depuis
+    `identity`. Le corps de la requête ne peut jamais imposer le propriétaire. Journalisé (règle 12)."""
+    forbidden = PROTECTED_FIELDS & set(data)
+    if forbidden:
+        raise ValueError(f"Champs réservés au serveur : {sorted(forbidden)}")
+    with transaction.atomic():
+        identity_services.authorize_on(actor, context_type, context_id, CAP_PUBLISH)
+        offer = Offer(
+            **data, seller_context_type=context_type, seller_context_id=context_id, created_by=actor,
+            seller_is_public=identity_services.is_seller_context_public(context_type, context_id),
+        )
+        offer.save()
+        record_audit(
+            actor, 'OFFER_CREATED', target=offer, details=offer.title, context=(context_type, context_id),
+        )
+    return offer
 
 
-def unpause_offer(offer: Offer) -> bool:
+def update_offer(offer: Offer, *, actor, changes: dict) -> Offer:
+    """Modifie une offre existante : `offer.edit` dans le contexte propriétaire de l'offre. Le propriétaire,
+    l'auteur et la visibilité du vendeur ne changent jamais par ce service."""
+    changes = {key: value for key, value in changes.items() if key not in PROTECTED_FIELDS}
+    with transaction.atomic():
+        authorize_offer(actor, offer, CAP_EDIT)
+        for field, value in changes.items():
+            setattr(offer, field, value)
+        offer.save()
+    return offer
+
+
+def delete_offer(offer: Offer, *, actor) -> int:
+    """Suppression définitive : `offer.delete` dans le contexte propriétaire, journalisée avec ce contexte."""
+    with transaction.atomic():
+        authorize_offer(actor, offer, CAP_DELETE)
+        record_audit(
+            actor, 'OFFER_DELETED', target=offer, details=offer.title,
+            context=(offer.seller_context_type, offer.seller_context_id),
+        )
+        return delete_offers(Offer.objects.filter(pk=offer.pk))
+
+
+def renew_offer(offer: Offer, *, actor) -> None:
+    with transaction.atomic():
+        authorize_offer(actor, offer, CAP_EDIT)
+        _refuse_if_hidden(offer)
+        offer.status = Offer.STATUS_ACTIVE
+        offer.is_active = True
+        offer.expires_at = timezone.now() + timedelta(days=_expiration_days())
+        offer.expiring_soon_notified = False
+        offer.save(update_fields=['status', 'is_active', 'expires_at', 'expiring_soon_notified', 'updated_at'])
+
+
+def mark_offer_sold(offer: Offer, *, actor) -> None:
+    with transaction.atomic():
+        authorize_offer(actor, offer, CAP_EDIT)
+        offer.status = Offer.STATUS_SOLD
+        offer.is_active = False
+        offer.save(update_fields=['status', 'is_active', 'updated_at'])
+
+
+def pause_offer(offer: Offer, *, actor) -> None:
+    with transaction.atomic():
+        authorize_offer(actor, offer, CAP_EDIT)
+        offer.status = Offer.STATUS_PAUSED
+        offer.is_active = False
+        offer.save(update_fields=['status', 'is_active', 'updated_at'])
+
+
+def unpause_offer(offer: Offer, *, actor) -> bool:
     """Remet l'offre en ligne ; renvoie False (et la marque expirée) si son échéance est passée.
     Refusé (OfferHiddenError) tant que la modération la masque."""
-    _refuse_if_hidden(offer)
-    if offer.expires_at and offer.expires_at < timezone.now():
-        offer.status = Offer.STATUS_EXPIRED
-        offer.save(update_fields=['status', 'updated_at'])
-        return False
-    offer.status = Offer.STATUS_ACTIVE
-    offer.is_active = True
-    offer.save(update_fields=['status', 'is_active', 'updated_at'])
-    return True
+    with transaction.atomic():
+        authorize_offer(actor, offer, CAP_EDIT)
+        _refuse_if_hidden(offer)
+        if offer.expires_at and offer.expires_at < timezone.now():
+            offer.status = Offer.STATUS_EXPIRED
+            offer.save(update_fields=['status', 'updated_at'])
+            return False
+        offer.status = Offer.STATUS_ACTIVE
+        offer.is_active = True
+        offer.save(update_fields=['status', 'is_active', 'updated_at'])
+        return True
 
 
-def move_to_trash(offer: Offer) -> None:
-    offer.is_deleted = True
-    offer.deleted_at = timezone.now()
-    offer.save(update_fields=['is_deleted', 'deleted_at', 'updated_at'])
+def move_to_trash(offer: Offer, *, actor) -> None:
+    with transaction.atomic():
+        authorize_offer(actor, offer, CAP_DELETE)
+        offer.is_deleted = True
+        offer.deleted_at = timezone.now()
+        offer.save(update_fields=['is_deleted', 'deleted_at', 'updated_at'])
 
 
-def restore_from_trash(offer: Offer) -> None:
-    offer.is_deleted = False
-    offer.deleted_at = None
-    offer.save(update_fields=['is_deleted', 'deleted_at', 'updated_at'])
+def restore_from_trash(offer: Offer, *, actor) -> None:
+    with transaction.atomic():
+        authorize_offer(actor, offer, CAP_DELETE)
+        offer.is_deleted = False
+        offer.deleted_at = None
+        offer.save(update_fields=['is_deleted', 'deleted_at', 'updated_at'])
+
+
+# --- Visibilité publique du vendeur (ADR 0006, A7) -----------------------------------------------------
+
+SYNC_BATCH_SIZE = 200
+
+
+def sync_seller_visibility(context_type, context_id) -> int:
+    """Recalcule `seller_is_public` des offres d'un contexte vendeur depuis `identity` (la source). Idempotent :
+    rejouable sans risque (abonné d'événement). Renvoie le nombre d'offres modifiées."""
+    public = identity_services.is_seller_context_public(context_type, context_id)
+    return Offer.objects.filter(
+        seller_context_type=context_type, seller_context_id=context_id,
+    ).exclude(seller_is_public=public).update(seller_is_public=public)
+
+
+def sync_all_seller_visibility() -> int:
+    """Réconciliation complète (commande horaire `sync_seller_visibility`) : recalcule chaque contexte vendeur
+    ayant des offres, par lots, pour rattraper un événement perdu ou en échec. Idempotent. Renvoie le nombre
+    d'offres modifiées."""
+    contexts = list(
+        Offer.objects.filter(seller_context_type__isnull=False, seller_context_id__isnull=False)
+        .order_by().values_list('seller_context_type', 'seller_context_id').distinct()
+    )
+    changed = 0
+    for start in range(0, len(contexts), SYNC_BATCH_SIZE):
+        flags = identity_services.get_seller_context_public_flags(contexts[start:start + SYNC_BATCH_SIZE])
+        for (context_type, context_id), public in flags.items():
+            changed += Offer.objects.filter(
+                seller_context_type=context_type, seller_context_id=context_id,
+            ).exclude(seller_is_public=public).update(seller_is_public=public)
+    return changed
+
+
+def apply_seller_status_event(payload: dict) -> int:
+    """Traite `identity.seller_context_status_changed` : recalcule les offres du contexte désigné."""
+    context_type = payload.get('context_type')
+    context_id = parse_uuid(payload.get('context_id'))
+    if context_type not in (CONTEXT_USER, CONTEXT_PROVIDER, CONTEXT_ORGANIZATION) or context_id is None:
+        raise PermanentEventError("charge utile invalide")
+    return sync_seller_visibility(context_type, context_id)
 
 
 def delete_offers(queryset) -> int:
@@ -329,13 +452,18 @@ def expire_offers() -> tuple:
             )
             if not marked:
                 continue
-            publish_event(
-                'marketplace.offer_expiring_soon', aggregate_type='offer', aggregate_id=offer.id,
-                payload={
-                    'offer_id': str(offer.id), 'offer_title': offer.title, 'seller_id': str(offer.seller_id),
-                    'expires_at': offer.expires_at.isoformat(),
-                },
-            )
+            # Un événement par destinataire (capacité `offer.edit` du contexte) : l'abonné de `notifications`
+            # reste inchangé jusqu'à son passage au contexte (v2, T6).
+            for recipient_id in identity_services.get_context_recipients(
+                offer.seller_context_type, offer.seller_context_id, CAP_EDIT,
+            ):
+                publish_event(
+                    'marketplace.offer_expiring_soon', aggregate_type='offer', aggregate_id=offer.id,
+                    payload={
+                        'offer_id': str(offer.id), 'offer_title': offer.title, 'seller_id': str(recipient_id),
+                        'expires_at': offer.expires_at.isoformat(),
+                    },
+                )
         notified += 1
     return expired_count, notified
 
@@ -361,7 +489,10 @@ def register_view(offer: Offer, viewer_key: str) -> bool:
     l'événement ; le total et le score de l'offre suivent à la diffusion (immédiate après la
     validation, sinon reprise par le cron). Renvoie True si la vue est nouvelle ; l'instance
     reçoit alors les compteurs lus en base, « au mieux »."""
-    if not visibility_services.record_view(offer_id=offer.id, seller_id=offer.seller_id, viewer_key=viewer_key):
+    if not visibility_services.record_view(
+        offer_id=offer.id, seller_context_type=offer.seller_context_type,
+        seller_context_id=offer.seller_context_id, viewer_key=viewer_key,
+    ):
         return False
     offer.refresh_from_db(fields=['views_count'])
     return True
@@ -372,7 +503,10 @@ def register_share(offer: Offer, user) -> int:
     qu'une fois par offre et par jour. Renvoie `shares_count` « au mieux » : valeur lue après la
     diffusion immédiate de l'événement ; si elle n'a pas encore eu lieu, le total précédent
     (la source de vérité reste le compteur de `visibility`, recalculé ensuite)."""
-    visibility_services.record_share(offer_id=offer.id, seller_id=offer.seller_id, actor_key=f"user:{user.pk}")
+    visibility_services.record_share(
+        offer_id=offer.id, seller_context_type=offer.seller_context_type,
+        seller_context_id=offer.seller_context_id, actor_key=f"user:{user.pk}",
+    )
     offer.refresh_from_db(fields=['shares_count'])
     return offer.shares_count
 
@@ -415,12 +549,12 @@ def toggle_favorite(user, offer: Offer) -> bool:
 def ensure_available(offer: Offer) -> None:
     """Une offre masquée, en pause, vendue, expirée ou supprimée n'accepte ni contact, ni
     échange, ni favori."""
-    if not offer.is_active or offer.is_deleted or not offer.seller.is_active:
+    if not offer.is_active or offer.is_deleted or not offer.seller_is_public:
         raise MarketplaceError("Cette annonce n'est plus disponible.")
 
 
 def _check_can_contact(offer: Offer, sender) -> None:
-    if offer.seller_id == sender.pk:
+    if identity_services.acts_for_context(sender.pk, offer.seller_context_type, offer.seller_context_id):
         raise MarketplaceError("Vous ne pouvez pas contacter votre propre annonce.")
     ensure_available(offer)
 
@@ -446,6 +580,15 @@ def get_exchange_message(proposal_id) -> Optional[str]:
     return None if text is None else f"{EXCHANGE_MESSAGE_PREFIX}{text}"
 
 
+def _seller_account_id(offer: Offer):
+    """Compte qui reçoit les contacts de cette offre : le compte lui-même (`USER`) ou le titulaire du profil
+    prestataire (`PROVIDER`). Une organisation n'a pas de compte de contact avant T7 : None."""
+    if offer.seller_context_type == CONTEXT_USER:
+        return offer.seller_context_id
+    key = (offer.seller_context_type, offer.seller_context_id)
+    return identity_services.get_contact_accounts([key]).get(key)
+
+
 def _interaction_payload(offer: Offer, sender, **ids) -> dict:
     """Charge utile d'un contact ou d'un échange : identifiants et titre public de l'annonce
     seulement. Ni le texte du message ni le nom de l'expéditeur (données personnelles) ne
@@ -453,7 +596,7 @@ def _interaction_payload(offer: Offer, sender, **ids) -> dict:
     return {
         **{key: str(value) for key, value in ids.items()},
         'offer_id': str(offer.id), 'offer_title': offer.title,
-        'seller_id': str(offer.seller_id), 'sender_id': str(sender.pk),
+        'seller_id': str(_seller_account_id(offer)), 'sender_id': str(sender.pk),
     }
 
 
@@ -476,8 +619,9 @@ def create_contact_event(*, offer: Offer, sender, message: str, channel: str = C
     MySQL, deux contacts pourraient être comptés). L'effet est borné : `contacts_count` est
     recompté à la source et corrigé à chaque rafraîchissement horaire (`refresh_all_scores`)."""
     _check_can_contact(offer, sender)
+    key = (offer.seller_context_type, offer.seller_context_id)
     if channel == ContactEvent.CHANNEL_MESSAGE and ContactEvent.CHANNEL_MESSAGE not in (
-        identity_services.get_allowed_channels([offer.seller_id]).get(offer.seller_id, [])
+        identity_services.get_context_allowed_channels([key]).get(key, [])
     ):
         raise MarketplaceError("Ce vendeur n'accepte pas ce moyen de contact.", 'channel_not_allowed', 403)
     window_hours = MarketplaceSettings.get_solo().duplicate_contact_window_hours
@@ -551,9 +695,7 @@ def _revealable_offer(offer_id) -> Offer:
     parsed = parse_uuid(offer_id)
     offer = None
     if parsed is not None:
-        offer = Offer.objects.select_related('seller').filter(
-            pk=parsed, is_active=True, is_deleted=False, seller__is_active=True,
-        ).first()
+        offer = public_offers().filter(pk=parsed).first()
     if offer is None:
         raise RevealError("Cette annonce n'est pas disponible.", 'offer_not_found', 404)
     return offer
@@ -641,7 +783,7 @@ def reveal_contact(*, offer_id, sender, channel: str) -> RevealResult:
     if channel not in REVEAL_CHANNELS:
         raise RevealError("Moyen de contact invalide.", 'channel_invalid', 400)
     offer = _revealable_offer(offer_id)
-    if offer.seller_id == sender.pk:
+    if identity_services.acts_for_context(sender.pk, offer.seller_context_type, offer.seller_context_id):
         raise RevealError("Vous ne pouvez pas contacter votre propre annonce.", 'own_offer', 403)
     if moderation_services.is_user_restricted(sender.pk):
         raise RevealError("Votre compte ne peut pas contacter de vendeur pour le moment.", 'contact_restricted', 403)
@@ -656,7 +798,7 @@ def reveal_contact(*, offer_id, sender, channel: str) -> RevealResult:
         _refuse_quota(sender, offer, row, exceeded, now)
 
     try:
-        endpoint = identity_services.get_contact_endpoint(offer.seller_id, channel)
+        endpoint = identity_services.get_contact_endpoint(_seller_account_id(offer), channel)
     except identity_services.ChannelNotConsented:
         # Une trace par visiteur, offre et jour : un visiteur qui insiste ne remplit pas le journal.
         if not moderation_services.has_audit_since(
@@ -705,7 +847,7 @@ def reveal_contact(*, offer_id, sender, channel: str) -> RevealResult:
                     )
             record_audit(
                 sender, 'contact.number_revealed', target=offer,
-                details=f"Moyen {channel} ; vendeur {offer.seller_id} ; {'nouveau' if created else 'renvoi'}",
+                details=f"Moyen {channel} ; vendeur {offer.seller_context_type}:{offer.seller_context_id} ; {'nouveau' if created else 'renvoi'}",
             )
     except _QuotaExceeded as exceeded:
         _refuse_quota(sender, offer, row, exceeded, now)
@@ -721,7 +863,7 @@ def reveal_contact(*, offer_id, sender, channel: str) -> RevealResult:
         created = False
         record_audit(
             sender, 'contact.number_revealed', target=offer,
-            details=f"Moyen {channel} ; vendeur {offer.seller_id} ; renvoi",
+            details=f"Moyen {channel} ; vendeur {offer.seller_context_type}:{offer.seller_context_id} ; renvoi",
         )
     return RevealResult(
         contact_event_id=event.pk, channel=channel, created=created, offer_title=offer.title,
@@ -741,10 +883,12 @@ class ReceivedReveal:
     offer_title: str
 
 
-def list_reveals_for_seller(seller, channel=None):
-    """Révélations de numéro sur les offres du vendeur, les plus récentes d'abord (queryset paginable) ;
-    `to_received_reveals` convertit une page."""
-    queryset = ContactEvent.objects.filter(offer__seller=seller, channel__in=REVEAL_CHANNELS)
+def list_reveals_for_seller(context_type, context_id, channel=None):
+    """Révélations de numéro sur les offres d'un contexte vendeur, les plus récentes d'abord (queryset
+    paginable) ; `to_received_reveals` convertit une page. L'appelant a contrôlé `contact.view_requesters`."""
+    queryset = ContactEvent.objects.filter(
+        offer__seller_context_type=context_type, offer__seller_context_id=context_id, channel__in=REVEAL_CHANNELS,
+    )
     if channel:
         queryset = queryset.filter(channel=channel)
     return queryset.select_related('offer').order_by('-created_at', '-id')
@@ -778,6 +922,8 @@ def get_public_features() -> dict:
 
 def create_exchange_proposal(*, offer: Offer, sender, message: str) -> ExchangeProposal:
     _check_can_contact(offer, sender)
+    if _seller_account_id(offer) is None:
+        raise MarketplaceError("Ce vendeur n'accepte pas ce moyen de contact.", 'channel_not_allowed', 403)
     with transaction.atomic():
         proposal = ExchangeProposal.objects.create(offer=offer, sender=sender, message=message)
         publish_event(
@@ -799,14 +945,30 @@ def _parsed(ids: Iterable) -> set:
 
 
 def get_report_authors(ids: Iterable) -> dict:
-    """Vendeur de chaque offre, `{offre: vendeur}` (une requête) : refuse l'auto-signalement."""
-    return dict(Offer.objects.filter(id__in=_parsed(ids)).values_list('id', 'seller_id'))
+    """Compte auteur de chaque offre, `{offre: compte}` : refuse l'auto-signalement. Contexte personnel : le
+    compte ; prestataire : son titulaire (une requête de plus pour tout le lot) ; organisation : aucun compte
+    n'est « l'auteur » (dette : l'appartenance à l'organisation n'empêche pas encore le signalement)."""
+    rows = list(Offer.objects.filter(id__in=_parsed(ids)).values_list('id', 'seller_context_type', 'seller_context_id'))
+    accounts = identity_services.get_contact_accounts([(kind, ctx) for _, kind, ctx in rows if kind != CONTEXT_USER])
+    result = {}
+    for offer_id, kind, ctx in rows:
+        account = ctx if kind == CONTEXT_USER else accounts.get((kind, ctx))
+        if account is not None:
+            result[offer_id] = account
+    return result
 
 
 def seller_owns_offer(offer_id, user_id) -> bool:
-    """Vrai si l'offre existe et appartient à cet utilisateur (rattachement d'une sanction)."""
+    """Vrai si l'offre existe et appartient à cet utilisateur personnellement (contexte personnel ou profil
+    prestataire : rattachement d'une sanction de compte). Une offre d'organisation n'appartient jamais à un
+    membre : la suspension d'une organisation est une action du personnel sur l'organisation (ADR 0006, 11.1)."""
     parsed = parse_uuid(offer_id)
-    return parsed is not None and Offer.objects.filter(id=parsed, seller_id=user_id).exists()
+    if parsed is None:
+        return False
+    row = Offer.objects.filter(id=parsed).values_list('seller_context_type', 'seller_context_id').first()
+    if row is None or row[0] == CONTEXT_ORGANIZATION:
+        return False
+    return identity_services.acts_for_context(user_id, row[0], row[1])
 
 
 # --- Proximité D à la lecture (CDC 3.5, ADR 0004 6.2) -------------------------

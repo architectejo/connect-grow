@@ -95,9 +95,13 @@ class DailyVisibilityCounter(BaseModel):
     des totaux `views_count` / `shares_count` de l'offre (recalculés par événement, ADR 0003)."""
 
     offer_id = models.UUIDField()
-    # Le vendeur facilite les requêtes du tableau de bord (clé étrangère vers l'utilisateur : autorisée).
+    # Contexte vendeur de l'offre (ADR 0006, A3) : facilite les requêtes du tableau de bord d'un contexte.
+    # Nuls seulement le temps de l'étape « étendre » (migration de données ; NOT NULL à la contraction T9).
+    seller_context_type = models.CharField(max_length=20, null=True, blank=True)
+    seller_context_id = models.UUIDField(null=True, blank=True)
+    # Ancien rattachement au compte, conservé jusqu'à la contraction (T9) et jamais lu par le code métier.
     seller = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='visibility_counters',
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name='visibility_counters',
     )
     date = models.DateField()
     views = models.PositiveIntegerField(default=0)
@@ -111,7 +115,18 @@ class DailyVisibilityCounter(BaseModel):
         constraints = [
             models.UniqueConstraint(fields=['offer_id', 'date'], name='uniq_visibility_counter_offer_date'),
         ]
-        indexes = [models.Index(fields=['seller', 'date'], name='visib_counter_seller_date')]
+        indexes = [
+            models.Index(fields=['seller', 'date'], name='visib_counter_seller_date'),
+            models.Index(fields=['seller_context_type', 'seller_context_id', 'date'], name='visib_counter_ctx_date'),
+        ]
+
+    def save(self, *args, **kwargs):
+        # Passerelle de l'étape « étendre » (ADR 0006, 10) : un appelant qui ne connaît que l'ancien
+        # rattachement au compte obtient un contexte personnel. Retirée avec `seller` à la contraction (T9).
+        if self.seller_context_type is None and self.seller_id is not None:
+            self.seller_context_type = 'USER'
+            self.seller_context_id = self.seller_id
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.offer_id} - {self.date} ({self.views} vues, {self.contacts} contacts)"

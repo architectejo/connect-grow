@@ -14,10 +14,16 @@ class OfferImageInline(admin.TabularInline):
 
 @admin.register(Offer)
 class OfferAdmin(admin.ModelAdmin):
-    list_display = ('title', 'offer_type', 'status', 'price', 'currency', 'seller', 'is_deleted', 'expires_at')
-    list_filter = ('offer_type', 'status', 'currency', 'is_deleted')
+    list_display = (
+        'title', 'offer_type', 'status', 'price', 'currency', 'seller_context_type', 'seller_context_id',
+        'seller_is_public', 'is_deleted', 'expires_at',
+    )
+    list_filter = ('offer_type', 'status', 'currency', 'is_deleted', 'seller_context_type', 'seller_is_public')
     search_fields = ('title', 'description')
-    raw_id_fields = ('seller',)
+    raw_id_fields = ('seller', 'created_by')
+    # Le propriétaire d'une offre ne se change pas depuis l'administration (ADR 0006) ; la visibilité du vendeur
+    # est recalculée depuis `identity`.
+    readonly_fields = ('seller_context_type', 'seller_context_id', 'created_by', 'seller_is_public')
     inlines = [OfferImageInline]
 
     def save_model(self, request, obj, form, change):

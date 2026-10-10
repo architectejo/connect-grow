@@ -109,11 +109,12 @@ class SellerDashboardRating:
     review_count: int
 
 
-def get_seller_dashboard_rating(seller_id) -> SellerDashboardRating:
-    """Pour le tableau de bord du vendeur lui-même : moyenne de ses notes vendeur visibles, sans
-    seuil d'affichage (None s'il n'a aucun avis), et nombre d'avis visibles reçus."""
+def get_seller_dashboard_rating(seller_id, context_type=CONTEXT_USER) -> SellerDashboardRating:
+    """Pour le tableau de bord d'un contexte vendeur : moyenne de ses notes vendeur visibles, sans
+    seuil d'affichage (None s'il n'a aucun avis), et nombre d'avis visibles reçus. `seller_id` est l'identifiant
+    du contexte (compte, profil prestataire ou organisation) de type `context_type`."""
     visible = Review.objects.filter(
-        seller_context_type=CONTEXT_USER, seller_context_id=seller_id, is_hidden=False,
+        seller_context_type=context_type, seller_context_id=seller_id, is_hidden=False,
     )
     counted = visible.filter(counts_for_seller=True).aggregate(total=Sum('seller_rating'), n=Count('id'))
     return SellerDashboardRating(

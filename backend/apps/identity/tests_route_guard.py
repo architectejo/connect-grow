@@ -34,34 +34,14 @@ LEGACY_WRITE_ROUTES = {
     'api/accounts/password-reset/confirm/': 'compte : authentification et réglages toujours personnels',  # POST
     'api/accounts/register/': 'compte : authentification et réglages toujours personnels',  # POST
     'api/accounts/token/refresh/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/interactions/^contacts/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T5',  # POST
-    'api/interactions/^contacts/(?P<pk>[^/.]+)/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T5',  # DELETE/PATCH/PUT
-    'api/interactions/^contacts/reveal/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T5',  # POST
-    'api/interactions/^exchanges/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T5',  # POST
-    'api/interactions/^exchanges/(?P<pk>[^/.]+)/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T5',  # DELETE/PATCH/PUT
-    'api/interactions/^messages/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T5',  # POST
-    'api/interactions/^messages/(?P<pk>[^/.]+)/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T5',  # DELETE/PATCH/PUT
-    'api/interactions/^notifications/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T5',  # POST
-    'api/interactions/^notifications/(?P<pk>[^/.]+)/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T5',  # DELETE/PATCH/PUT
-    'api/interactions/^notifications/mark_all_as_read/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T5',  # POST
-    'api/interactions/^reviews/$': 'avis : acheteur toujours personnel, réponse vendeur à migrer en T5',  # POST
-    'api/interactions/^reviews/(?P<pk>[^/.]+)/$': 'avis : acheteur toujours personnel, réponse vendeur à migrer en T5',  # DELETE/PATCH/PUT
-    'api/interactions/^reviews/(?P<pk>[^/.]+)/reply/$': 'avis : acheteur toujours personnel, réponse vendeur à migrer en T5',  # POST
-    'api/marketplace/^favorites/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # POST
-    'api/marketplace/^favorites/(?P<pk>[^/.]+)/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # DELETE/PATCH/PUT
-    'api/marketplace/^posts/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # POST
-    'api/marketplace/^posts/(?P<pk>[^/.]+)/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # DELETE/PATCH/PUT
-    'api/marketplace/^posts/(?P<pk>[^/.]+)/favorite/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # POST
-    'api/marketplace/^posts/(?P<pk>[^/.]+)/hard_delete/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # DELETE
-    'api/marketplace/^posts/(?P<pk>[^/.]+)/images/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # DELETE/POST
-    'api/marketplace/^posts/(?P<pk>[^/.]+)/mark_sold/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # POST
-    'api/marketplace/^posts/(?P<pk>[^/.]+)/pause/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # POST
-    'api/marketplace/^posts/(?P<pk>[^/.]+)/renew/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # POST
-    'api/marketplace/^posts/(?P<pk>[^/.]+)/restore/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # POST
-    'api/marketplace/^posts/(?P<pk>[^/.]+)/share/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # POST
-    'api/marketplace/^posts/(?P<pk>[^/.]+)/soft_delete/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # POST
-    'api/marketplace/^posts/(?P<pk>[^/.]+)/unpause/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # POST
-    'api/marketplace/^posts/recalculate_all_scores/$': 'marketplace : offres par contexte vendeur, à migrer en T5',  # POST
+    'api/interactions/^messages/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # POST
+    'api/interactions/^messages/(?P<pk>[^/.]+)/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # DELETE/PATCH/PUT
+    'api/interactions/^notifications/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # POST
+    'api/interactions/^notifications/(?P<pk>[^/.]+)/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # DELETE/PATCH/PUT
+    'api/interactions/^notifications/mark_all_as_read/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # POST
+    'api/interactions/^reviews/$': 'avis : acheteur toujours personnel, réponse vendeur à migrer en T6',  # POST
+    'api/interactions/^reviews/(?P<pk>[^/.]+)/$': 'avis : acheteur toujours personnel, réponse vendeur à migrer en T6',  # DELETE/PATCH/PUT
+    'api/interactions/^reviews/(?P<pk>[^/.]+)/reply/$': 'avis : acheteur toujours personnel, réponse vendeur à migrer en T6',  # POST
     'api/moderation/^reports/$': 'modération : hors contexte vendeur',  # POST
     'api/moderation/^reports/(?P<pk>[^/.]+)/$': 'modération : hors contexte vendeur',  # DELETE/PATCH/PUT
     'api/moderation/^reports/(?P<pk>[^/.]+)/author-response/$': 'modération : hors contexte vendeur',  # POST

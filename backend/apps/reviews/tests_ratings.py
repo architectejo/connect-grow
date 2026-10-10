@@ -95,7 +95,10 @@ class RatingAveragesTests(ReviewsTestBase):
         data = self.detail()
         self.assertFalse(FORBIDDEN_KEYS & set(data))
         self.assertFalse(FORBIDDEN_KEYS & set(data['seller']))
-        self.assertEqual(set(data['seller']), {'id', 'full_name', 'user_type', 'date_joined', 'photo', 'business_profile'})
+        self.assertEqual(set(data['seller']), {
+            'context_type', 'context_id', 'display_name', 'photo', 'org_type', 'verified_claims',
+            'verification_summary', 'member_since',
+        })
         self.assertIn('is_sponsored', data)
 
     def test_ratings_do_not_change_the_organic_score(self):

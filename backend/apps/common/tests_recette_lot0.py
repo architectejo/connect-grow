@@ -46,8 +46,8 @@ LOCMEM = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'
 # --- Miroir de connect-grow/src/api/types.ts : {clé: types acceptés} ; `?` = optionnelle côté TS ---
 SPEC_RATING = {'average': 'num|null', 'count': 'num'}
 SPEC_SELLER = {
-    'id': 'uuid', 'full_name': 'str', 'photo?': 'str|null', 'user_type': 'str', 'business_profile?': 'obj|null',
-    'date_joined?': 'date',
+    'context_type': 'str', 'context_id': 'uuid', 'display_name': 'str', 'photo?': 'str|null', 'org_type?': 'str|null',
+    'verified_claims': 'list', 'verification_summary': 'obj', 'member_since': 'date',
 }
 SPEC_POST = {
     'id': 'uuid', 'seller': 'obj', 'seller_name?': 'str', 'category': 'uuid', 'category_name?': 'str|null',
@@ -232,7 +232,7 @@ class ContractTests(RecetteBase):
         body = APIClient().get(f'{POSTS_URL}{self.offer.id}/').json()
         self.assertTrue(DATE_RE.match(body['created_at']), body['created_at'])
         self.assertTrue(body['created_at'].endswith('+01:00'), body['created_at'])
-        self.assertTrue(body['seller']['date_joined'].endswith('+01:00'), body['seller']['date_joined'])
+        self.assertTrue(body['seller']['member_since'].endswith('+01:00'), body['seller']['member_since'])
 
     def test_organizations_are_paginated_by_20_and_filter_on_fully_verified(self):
         for i in range(24):
@@ -476,9 +476,9 @@ class JourneyTests(RecetteBase):
         gallery = client.post(f'{POSTS_URL}{offer_id}/images/', {'image': make_test_image()}, format='multipart')
         self.assertEqual(gallery.status_code, 201)
         self.assertShape(gallery.json()[0], {'id': 'uuid', 'image': 'str', 'order?': 'num'}, 'PostImage')
-        # Un tiers ne peut pas ajouter de photo : 404, comme une offre inconnue.
+        # Un tiers ne peut pas ajouter de photo : 403 DENY_RELATION (autorisation par objet, ADR 0006).
         intruder = self.as_user(self.buyer).post(f'{POSTS_URL}{offer_id}/images/', {'image': make_test_image()}, format='multipart')
-        self.assertEqual(intruder.status_code, 404)
+        self.assertEqual(intruder.status_code, 403)
         self.assertEqual(client.delete(f'{POSTS_URL}{offer_id}/images/', {}, QUERY_STRING=f"image_id={gallery.json()[0]['id']}").status_code, 204)
 
     def test_contact_review_reply_report_recourse_and_decision(self):
@@ -815,7 +815,7 @@ class AuditTrailTests(RecetteBase):
         self.assertFalse(Offer.objects.filter(pk__in=[first.id, second.id]).exists())
         # Un tiers ne supprime pas l'offre d'autrui et rien n'est journalisé.
         before = AuditLog.objects.count()
-        self.assertEqual(self.as_user(self.buyer).delete(f'{POSTS_URL}{self.offer.id}/').status_code, 404)
+        self.assertEqual(self.as_user(self.buyer).delete(f'{POSTS_URL}{self.offer.id}/').status_code, 403)
         self.assertEqual(AuditLog.objects.count(), before)
 
     def test_rule12_settings_change_through_the_admin_form(self):

@@ -633,6 +633,7 @@ class Scenario6UnavailableTests(RecetteContactBase):
             'user': str(user.pk), 'sanction_type': kind, 'reason': 'Recette', **extra,
         }, format='json')
         self.assertEqual(response.status_code, 201, response.content)
+        dispatch_outbox_now()  # la visibilité des offres du vendeur suit l'événement (ADR 0006, A7)
         return response.json()
 
     def test_suspended_seller_gives_the_uniform_404_then_recovers(self):
@@ -643,6 +644,7 @@ class Scenario6UnavailableTests(RecetteContactBase):
         self.assertEqual(ContactEvent.objects.count(), 0)
         lifted = self.c(self.admin).post(f"/api/moderation/sanctions/{sanction['id']}/lift/")
         self.assertEqual(lifted.status_code, 200)
+        dispatch_outbox_now()
         self.assertEqual(self.reveal().status_code, 201)
 
     def test_suspended_visitor_token_is_rejected(self):

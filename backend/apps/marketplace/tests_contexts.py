@@ -700,6 +700,7 @@ class SellerObjectTests(ContextBase):
         CaptureQueries = _Capture  # noqa: F811
         self.join(self.member, role=OWNER)
         build(1)
+        count_queries()  # échauffement : réglages mis en cache en base à la première lecture
         small = count_queries()
         build(6)
         large = count_queries()

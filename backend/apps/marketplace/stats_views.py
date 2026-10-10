@@ -1,4 +1,5 @@
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import NotFound
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -6,8 +7,11 @@ from apps.identity import services as identity_services
 from apps.reviews import services as reviews_services
 from apps.visibility import services as visibility_services
 
+from apps.common.throttles import AnonymousOrUserIpThrottle
+
 from . import services
 from .models import Offer
+from .serializers import PublicSellerProfileSerializer
 
 
 def _history(points):
@@ -58,3 +62,42 @@ class OfferStatsView(identity_services.ActingContextMixin, APIView):
             return Response({"error": "Annonce introuvable ou accès refusé."}, status=404)
         services.authorize_offer(request.user, offer, 'stats.view')  # 404 uniforme pour un étranger si non publique
         return Response({"history": _history(visibility_services.get_offer_history(pk))})
+
+
+class SellerProfileThrottle(AnonymousOrUserIpThrottle):
+    """Lecture publique du profil d'un vendeur : par adresse IP, anonymes compris."""
+
+    scope = 'seller_profile'
+
+
+class PublicSellerProfileView(APIView):
+    """Profil public minimal d'un contexte vendeur (ADR 0006, 9.7) : `GET sellers/<user|provider|organization>/<id>/`.
+
+    Public, lecture seule, indépendant du demandeur : aucune authentification n'est lue (un jeton périmé ne casse
+    pas la page) et l'en-tête `X-Context` est ignoré. Un contexte inexistant, mal formé, non public (compte
+    désactivé ou sanctionné, profil archivé, organisation suspendue ou archivée) répond le MÊME 404 : aucun oracle
+    d'existence. La réponse est mise en cache publiquement quelques secondes, sauf si la requête porte un jeton ou
+    `X-Context` (le middleware d'API la rend alors privée)."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [SellerProfileThrottle]
+    CACHE_SECONDS = 60
+    PATH_TYPES = {'user': 'USER', 'provider': 'PROVIDER', 'organization': 'ORGANIZATION'}
+
+    def get(self, request, context_type, context_id):
+        profile = services.get_public_seller_profile(self.PATH_TYPES.get(context_type), context_id)
+        if profile is None:
+            raise NotFound("Vendeur introuvable.")
+        summary = profile.summary
+        rating = reviews_services.get_seller_ratings(
+            summary.context_type, [summary.context_id],
+        ).get(summary.context_id) or reviews_services.RatingSummary(None, 0)
+        data = PublicSellerProfileSerializer(
+            {'summary': summary, 'rating': rating, 'active_offers_count': profile.active_offers_count},
+            context={'request': request},
+        ).data
+        response = Response(data)
+        if not request.META.get('HTTP_X_CONTEXT') and not request.META.get('HTTP_AUTHORIZATION'):
+            response['Cache-Control'] = f'public, max-age={self.CACHE_SECONDS}'
+        return response

@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 
+from apps.common.contexts import ALL_CONTEXT_CHOICES
 from apps.common.models import BaseModel
 
 
@@ -13,9 +14,16 @@ class Conversation(BaseModel):
 
     offer_id = models.UUIDField(null=True, blank=True, db_index=True)
     participants = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name='conversations')
+    # Contexte vendeur de la conversation (ADR 0006, A8 et 4.5). SCHÉMA SEULEMENT en T5b : aucun code ne les lit
+    # ni ne les écrit avant T7. Nul = ancienne conversation, accès par `participants`.
+    seller_context_type = models.CharField(max_length=20, choices=ALL_CONTEXT_CHOICES, null=True, blank=True)
+    seller_context_id = models.UUIDField(null=True, blank=True)
 
     class Meta:
         ordering = ['-updated_at']
+        indexes = [
+            models.Index(fields=['seller_context_type', 'seller_context_id'], name='conv_seller_ctx'),
+        ]
 
     def __str__(self):
         return f"Conversation {self.pk}"
@@ -26,6 +34,10 @@ class Message(BaseModel):
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sent_messages')
     content = models.TextField()
     is_read = models.BooleanField(default=False)
+    # Identité affichée de l'expéditeur (personne ou organisation), ADR 0006, 4.5. Schéma seulement (T7 les
+    # utilisera) ; nul = l'expéditeur lui-même.
+    sender_context_type = models.CharField(max_length=20, choices=ALL_CONTEXT_CHOICES, null=True, blank=True)
+    sender_context_id = models.UUIDField(null=True, blank=True)
 
     class Meta:
         ordering = ['created_at']

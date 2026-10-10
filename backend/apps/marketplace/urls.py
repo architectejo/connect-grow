@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .stats_views import DashboardStatsView, OfferStatsView
+from .stats_views import DashboardStatsView, OfferStatsView, PublicSellerProfileView
 from .views import FavoriteViewSet, OfferViewSet
 
 router = DefaultRouter()
@@ -11,5 +11,6 @@ router.register(r'favorites', FavoriteViewSet, basename='favorite')
 urlpatterns = [
     path('stats/dashboard/', DashboardStatsView.as_view(), name='dashboard_stats'),
     path('stats/post/<uuid:pk>/', OfferStatsView.as_view(), name='offer_stats'),
+    path('sellers/<str:context_type>/<str:context_id>/', PublicSellerProfileView.as_view(), name='seller_profile'),
     path('', include(router.urls)),
 ]

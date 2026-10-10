@@ -142,6 +142,7 @@ REST_FRAMEWORK = {
         'provider_write': '20/hour',  # profil prestataire (activation, modification, archivage), par utilisateur
         'org_create': '5/day',      # création d'organisation, par utilisateur (ADR 0006, 9.2)
         'org_list': '600/hour',     # liste publique des organisations, par IP
+        'seller_profile': '600/hour',  # profil public d'un vendeur (marketplace), par IP
         'org_write': '30/hour',     # modification, archivage et sortie d'une organisation, par utilisateur
         'contexts': '600/hour',     # liste des contextes disponibles, par utilisateur
         'contact_settings': '20/hour',  # réglages de contact vendeur (numéro, code, canaux), par utilisateur

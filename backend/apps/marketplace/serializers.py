@@ -36,6 +36,30 @@ class SellerSerializer(serializers.Serializer):
         return _media_url(self.context.get('request'), obj.photo)
 
 
+class PublicSellerProfileSerializer(serializers.Serializer):
+    """Profil public minimal d'un vendeur (ADR 0006, 9.7), construit explicitement : les clés sont exactement
+    celles du contrat, aucune autre ne peut fuir (téléphone, e-mail, NIF, membres, adresse exacte, nom complet).
+    `seller_rating` est la note du CONTEXTE seul (règle 4) ; `description` est nulle pour un compte personnel."""
+
+    def to_representation(self, obj):
+        summary, rating = obj['summary'], obj['rating']
+        photo = summary.photo
+        request = self.context.get('request')
+        return {
+            'context_type': summary.context_type,
+            'context_id': str(summary.context_id),
+            'display_name': summary.display_name,
+            'photo': _media_url(request, photo),
+            'description': summary.description,
+            'org_type': summary.org_type,
+            'verified_claims': summary.verified_claims,
+            'verification_summary': summary.verification_summary,
+            'member_since': serializers.DateTimeField().to_representation(summary.member_since),
+            'seller_rating': {'average': rating.average, 'count': rating.count},
+            'active_offers_count': obj['active_offers_count'],
+        }
+
+
 class OfferImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = OfferImage

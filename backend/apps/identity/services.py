@@ -11,6 +11,13 @@ from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, Ou
 
 from apps.moderation.services import record_audit
 
+# Organisations et équipes (ADR 0006) : façade publique, les autres domaines n'importent jamais le sous-module.
+from .organizations import (  # noqa: F401
+    OrganizationError, SUSPENSION_REASONS, add_member, archive_organization, change_member_role,
+    count_active_owners, create_organization, get_active_role, get_identity_settings, leave_organization,
+    reactivate_organization, revoke_member, suspend_organization, transfer_ownership,
+)
+
 
 def revoke_all_sessions(user) -> int:
     """Révoque tous les refresh tokens en cours de `user` (déconnexion de tous les

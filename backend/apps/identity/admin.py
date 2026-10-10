@@ -8,11 +8,17 @@ Principes (règles 2, 3, 10, 12) :
   elles ne naissent que de `decide_kyc_document` (journalisée) ;
 - les pièces d'identité ne sont ni affichées ni téléchargeables depuis l'admin.
 """
-from django.contrib import admin
+from django.contrib import admin, messages
 
+from apps.common.admin_mixins import SingletonSettingsAdminMixin
+from apps.common.contexts import ContextDenied
 from apps.moderation.services import record_audit
 
-from .models import BusinessProfile, BusinessProfileCategory, ContactConsent, KycDocument, OtpCode, User
+from . import services
+from .models import (
+    BusinessProfile, BusinessProfileCategory, ContactConsent, IdentitySettings, KycDocument, Membership, OtpCode,
+    Organization, OrganizationDocumentRequirement, ProviderProfile, User,
+)
 
 
 @admin.register(User)
@@ -131,3 +137,93 @@ class ContactConsentAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+class ReadOnlyAdmin(admin.ModelAdmin):
+    """Consultation seule : ni ajout, ni modification, ni suppression."""
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Organization)
+class OrganizationAdmin(ReadOnlyAdmin):
+    """Lecture seule (ADR 0006, 11.4). Le personnel suspend et réactive par les actions ci-dessous, qui
+    passent par les services (journal d'audit et événement de statut), réservées à la permission
+    `identity.suspend_organization`. Le nom et les coordonnées des membres ne sont pas affichés."""
+
+    list_display = ('name', 'org_type', 'status', 'created_at')
+    list_filter = ('status', 'org_type')
+    search_fields = ('name',)
+    exclude = ('logo', 'nif', 'created_by', 'legacy_business_profile_id')
+    actions = ['suspend_selected', 'reactivate_selected']
+
+    def has_suspend_permission(self, request):
+        return request.user.has_perm('identity.suspend_organization')
+
+    @admin.action(description="Suspendre les organisations sélectionnées", permissions=['suspend'])
+    def suspend_selected(self, request, queryset):
+        self._run(request, queryset, lambda org: services.suspend_organization(request.user, org.pk, 'moderation'))
+
+    @admin.action(description="Réactiver les organisations sélectionnées", permissions=['suspend'])
+    def reactivate_selected(self, request, queryset):
+        self._run(request, queryset, lambda org: services.reactivate_organization(request.user, org.pk))
+
+    def _run(self, request, queryset, func):
+        done = 0
+        for organization in queryset:
+            try:
+                func(organization)
+                done += 1
+            except (ContextDenied, services.OrganizationError):
+                continue
+        self.message_user(request, f"{done} organisation(s) modifiée(s).", messages.SUCCESS)
+
+
+@admin.register(Membership)
+class MembershipAdmin(ReadOnlyAdmin):
+    """Lecture seule : le personnel n'attribue aucun rôle et ne voit ni téléphone ni e-mail de membre."""
+
+    list_display = ('organization', 'role', 'status', 'end_reason', 'joined_at', 'ended_at')
+    list_filter = ('role', 'status')
+    exclude = ('user', 'added_by', 'ended_by')
+
+
+@admin.register(ProviderProfile)
+class ProviderProfileAdmin(ReadOnlyAdmin):
+    list_display = ('display_name', 'status', 'created_at')
+    list_filter = ('status',)
+    exclude = ('user',)
+
+
+@admin.register(OrganizationDocumentRequirement)
+class OrganizationDocumentRequirementAdmin(admin.ModelAdmin):
+    """Pièces exigées par type d'organisation (règle 11) ; chaque modification est journalisée (règle 12)."""
+
+    list_display = ('org_type', 'document_type', 'position')
+    list_filter = ('org_type',)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        record_audit(
+            request.user, 'DOC_REQUIREMENT_CHANGED', target=obj,
+            details=f"org_type={obj.org_type}; document_type={obj.document_type}; position={obj.position}",
+        )
+
+    def delete_model(self, request, obj):
+        record_audit(
+            request.user, 'DOC_REQUIREMENT_DELETED', target=obj,
+            details=f"org_type={obj.org_type}; document_type={obj.document_type}",
+        )
+        super().delete_model(request, obj)
+
+
+@admin.register(IdentitySettings)
+class IdentitySettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
+    list_display = ('max_organizations_per_account', 'max_categories_per_context', 'org_phone_channels_enabled')

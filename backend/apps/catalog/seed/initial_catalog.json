@@ -1,0 +1,28 @@
+{
+  "cities": [
+    {
+      "name": "Kinshasa",
+      "communes": [
+        "Bandalungwa", "Barumbu", "Bumbu", "Gombe", "Kalamu", "Kasa-Vubu",
+        "Kimbanseke", "Kinshasa", "Kintambo", "Kisenso", "Lemba", "Limete",
+        "Lingwala", "Makala", "Maluku", "Masina", "Matete", "Mont-Ngafula",
+        "N'djili", "Ngaba", "Ngaliema", "Ngiri-Ngiri", "N'sele", "Selembao"
+      ]
+    }
+  ],
+  "categories": [
+    {"name": "Électronique", "slug": "electronique", "icon": "smartphone"},
+    {"name": "Véhicules", "slug": "vehicules", "icon": "car"},
+    {"name": "Immobilier", "slug": "immobilier", "icon": "home"},
+    {"name": "Mode", "slug": "mode", "icon": "shirt"},
+    {"name": "Éducation", "slug": "education", "icon": "book-open"},
+    {"name": "Services", "slug": "services", "icon": "wrench"},
+    {"name": "Sport", "slug": "sport", "icon": "dumbbell"},
+    {"name": "Alimentation", "slug": "alimentation", "icon": "utensils"}
+  ],
+  "forbidden_items": [
+    {"keyword": "médicament"},
+    {"keyword": "arme à feu"},
+    {"keyword": "contrefaçon"}
+  ]
+}

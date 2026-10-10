@@ -1,11 +1,9 @@
 FROM python:3.12-slim
 
-# Dépendances système : compilation de mysqlclient (CDC 5.1) + Pillow (libjpeg/zlib)
+# Dépendances système : Pillow (libjpeg/zlib)
 # + cron pour les tâches planifiées (CDC 5.6, 5.2 : « Tâches cron »).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
-        default-libmysqlclient-dev \
-        pkg-config \
         libjpeg62-turbo-dev \
         zlib1g-dev \
         cron \

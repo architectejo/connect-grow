@@ -3,8 +3,12 @@
 # chaque ligne recharge avant d'invoquer manage.py.
 SHELL=/bin/sh
 
-0 2 * * * . /etc/environment; cd /app && python manage.py purge_trash >> /proc/1/fd/1 2>> /proc/1/fd/2
-5 2 * * * . /etc/environment; cd /app && python manage.py expire_posts >> /proc/1/fd/1 2>> /proc/1/fd/2
+0 2 * * * . /etc/environment; cd /app && python manage.py purge_offer_trash >> /proc/1/fd/1 2>> /proc/1/fd/2
+5 2 * * * . /etc/environment; cd /app && python manage.py expire_offers >> /proc/1/fd/1 2>> /proc/1/fd/2
 10 2 * * * . /etc/environment; cd /app && python manage.py lift_expired_sanctions >> /proc/1/fd/1 2>> /proc/1/fd/2
-0 * * * * . /etc/environment; cd /app && python manage.py cleanup_otp_codes >> /proc/1/fd/1 2>> /proc/1/fd/2
-5 * * * * . /etc/environment; cd /app && python manage.py refresh_dashboard_aggregates >> /proc/1/fd/1 2>> /proc/1/fd/2
+0 * * * * . /etc/environment; cd /app && python manage.py purge_otp_codes >> /proc/1/fd/1 2>> /proc/1/fd/2
+5 * * * * . /etc/environment; cd /app && python manage.py refresh_daily_contacts >> /proc/1/fd/1 2>> /proc/1/fd/2
+15 * * * * . /etc/environment; cd /app && python manage.py refresh_visibility_scores >> /proc/1/fd/1 2>> /proc/1/fd/2
+20 2 * * * . /etc/environment; cd /app && python manage.py purge_offer_views >> /proc/1/fd/1 2>> /proc/1/fd/2
+* * * * * . /etc/environment; cd /app && python manage.py dispatch_outbox >> /proc/1/fd/1 2>> /proc/1/fd/2
+30 2 * * * . /etc/environment; cd /app && python manage.py purge_outbox >> /proc/1/fd/1 2>> /proc/1/fd/2

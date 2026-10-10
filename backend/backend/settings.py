@@ -6,6 +6,8 @@ Version sécurisée pour la production et le développement.
 from pathlib import Path
 import os
 from datetime import timedelta
+
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # Charger les variables d'environnement depuis le fichier .env
@@ -14,11 +16,23 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # --- SÉCURITÉ CRITIQUE ---
-# Ne jamais stocker la clé secrète directement dans le code
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-fallback-key-change-me')
-
 # DEBUG doit être à False en production pour ne pas exposer la structure de la DB en cas d'erreur
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
+
+# Vrai seulement sous backend.settings_test (lancé par `manage.py test`).
+TESTING = False
+
+# Ne jamais stocker la clé secrète dans le code. Valeur de repli réservée au développement
+# (DEBUG=True) : hors DEBUG, une clé absente ou factice interrompt le démarrage.
+_DEV_SECRET_KEY = 'django-insecure-dev-only-key'
+SECRET_KEY = os.getenv('SECRET_KEY', '')
+if not SECRET_KEY or SECRET_KEY == 'change-me':
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "SECRET_KEY est absente ou factice : définissez une clé secrète unique dans l'environnement "
+            "(.env), ou activez DEBUG=True en développement uniquement."
+        )
+    SECRET_KEY = _DEV_SECRET_KEY
 
 # Restreindre les hôtes autorisés pour éviter les attaques par empoisonnement d'hôte HTTP
 # ALLOWED_HOSTS='localhost,127.0.0.1,api.connecteplus.cd' dans .env pour la recette/prod
@@ -38,15 +52,21 @@ INSTALLED_APPS = [
     # Bibliothèques tierces
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',  # déconnexion et révocation des refresh tokens
     'corsheaders',
     
-    # Applications locales
-    'apps.accounts',
+    # Applications locales. `identity` précède `catalog` (ForbiddenItem.added_by -> utilisateur) :
+    # l'ordre garde un seul 0001_initial par app à la génération des migrations.
+    'apps.common',
+    'apps.platform_core',
+    'apps.identity',
+    'apps.catalog',
+    'apps.visibility',
+    'apps.notifications',
+    'apps.messaging',
     'apps.marketplace',
+    'apps.reviews',
     'apps.payments',
-    'apps.interactions',
-    'apps.reputation',
-    'apps.ranking',
     'apps.moderation',
 ]
 
@@ -59,6 +79,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware', # Protection contre le Clickjacking
+    'apps.common.middleware.ApiCacheHeadersMiddleware',  # Vary/Cache-Control de l'API (vie privée)
 ]
 
 ROOT_URLCONF = 'backend.urls'
@@ -84,24 +105,61 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    # Erreurs hors champ : {"detail", "code"} (ADR 0004, section 7).
+    'EXCEPTION_HANDLER': 'apps.common.exception_handler.exception_handler',
+    # Refus par défaut : toute vue publique déclare explicitement AllowAny.
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
+        'rest_framework.permissions.IsAuthenticated',
     ],
     # Protection contre le brute-force : limitation du nombre de requêtes
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle',
     ],
+    # Nombre de proxies de confiance devant l'application (0 = adresse de connexion directe ;
+    # 1 derrière Nginx). Détermine l'IP lue par tous les throttles (voir .env.example).
+    'NUM_PROXIES': int(os.getenv('NUM_PROXIES', '0')),
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/day',
-        'user': '1000/day',
-        # CDC 4.2 : limitation du débit sur l'OTP (coût SMS, anti-brute-force).
-        'otp': '5/hour',
+        # Navigation générale (larges : plusieurs utilisateurs derrière une même IP mobile).
+        'anon': '5000/day',
+        'user': '10000/day',
+        # CDC 4.2 : OTP (coût SMS, anti-brute-force).
+        'otp': '5/hour',            # demandes de code, par IP
+        'otp_phone': '3/hour',      # demandes de code, par couple numéro+IP
+        'otp_phone_day': '10/day',  # demandes de code, par numéro seul (coût SMS)
+        'otp_confirm': '20/hour',   # confirmations de reset, par IP
+        # Connexion : toutes requêtes par IP ; les échecs par identifiant sont comptés à part
+        # (voir apps/identity/throttles.py : FailureLimiter).
+        'login': '60/hour',
+        'refresh': '60/hour',       # renouvellement de jeton, par IP
+        'register': '20/hour',      # inscription, par IP (anti-énumération des e-mails)
+        'profile_write': '30/hour',     # écritures du profil, par utilisateur
+        'profile_write_ip': '60/hour',  # écritures du profil, par IP
+        'logout': '60/hour',        # déconnexion (publique), par IP
+        'change_password': '10/hour',  # par utilisateur
+        'kyc_write': '20/hour',     # dépôt/suppression de pièces KYC, par utilisateur
+        'contact_settings': '20/hour',  # réglages de contact vendeur (numéro, code, canaux), par utilisateur
+        # Écritures du marketplace et des interactions (par utilisateur ; par IP pour la vue anonyme).
+        'contact': '20/hour',
+        'contact_reveal_ip': '30/hour',    # révélation de numéro, par IP (aucune IP persistée)
+        'contact_reveal_user': '60/hour',  # révélation de numéro, filet technique par utilisateur
+        'contact_reveals_list': '120/hour',  # liste « qui a demandé mon numéro », par utilisateur
+        'exchange': '10/hour',
+        'share': '30/hour',
+        'message': '120/hour',
+        'review': '10/hour',
+        'offer_list': '600/hour',  # liste des annonces (tri par pertinence non indexé), par IP ou par utilisateur
+        'review_eligibility': '120/hour',  # lecture du droit d'avis, par utilisateur
+        'report': '10/hour',        # signalements, par utilisateur
+        'report_response': '30/hour',  # recours de l'auteur d'un avis signalé, par utilisateur
+        'offer_upload': '30/hour',  # création / modification d'offre et envoi de photos
+        'favorite': '60/hour',
+        'offer_view_anon': '300/hour',  # consultation anonyme d'une offre, par IP
     }
 }
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1), # Réduit pour plus de sécurité
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),  # CLAUDE.md §5
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True, # Sécurité accrue : change le refresh token à chaque usage
     'BLACKLIST_AFTER_ROTATION': True,
@@ -125,6 +183,9 @@ CORS_ALLOWED_ORIGINS = [
 # 2. Obligatoire pour withCredentials: true (cookies)
 CORS_ALLOW_CREDENTIALS = True
 
+# Le front doit pouvoir lire Retry-After sur les réponses 429 (appels inter-origines).
+CORS_EXPOSE_HEADERS = ['Retry-After']
+
 # 3. Assure-toi que ces méthodes sont autorisées
 CORS_ALLOW_METHODS = [
     "DELETE",
@@ -138,9 +199,10 @@ CORS_ALLOW_METHODS = [
 # --- BASE DE DONNÉES & SÉCURITÉ ---
 # L'utilisation de l'ORM Django protège déjà nativement contre les Injections SQL
 #
-# CDC 2.5 : SQLite en développement, MySQL 8+ (InnoDB, utf8mb4, mode SQL strict)
-# en recette/CI et en production. Le moteur est choisi par DB_ENGINE dans .env
-# ('sqlite' par défaut, 'mysql' en recette/CI/prod) — jamais codé en dur (2.5, 4.7).
+# CDC 2.5 et ADR 0001 : SQLite seul dans tous les environnements jusqu'à la fin du
+# projet. Le moteur est choisi par DB_ENGINE dans .env ('sqlite' par défaut).
+# La branche 'mysql' ci-dessous est réservée à la tâche F-01 (requirements-mysql.txt) :
+# code non testé, ne pas l'activer avant F-01.
 if os.getenv('DB_ENGINE', 'sqlite') == 'mysql':
     DATABASES = {
         'default': {
@@ -162,8 +224,19 @@ else:
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / os.getenv('DB_NAME', 'db.sqlite3'),
+            # Le serveur et le cron écrivent dans le même fichier : on attend jusqu'à
+            # 20 s un verrou d'écriture avant « database is locked » (défaut : 5 s).
+            'OPTIONS': {'timeout': 20},
         }
     }
+
+# Derrière Nginx (TLS terminé par le proxy) : faire confiance à X-Forwarded-Proto pour que
+# Django sache que la requête est en HTTPS (sinon SECURE_SSL_REDIRECT boucle). À n'activer
+# (BEHIND_PROXY=True) que si le proxy écrase cet en-tête et que Daphne n'est pas joignable
+# directement : sinon un client pourrait le falsifier. Nginx doit envoyer
+# `proxy_set_header X-Forwarded-Proto $scheme;`.
+if os.getenv('BEHIND_PROXY', 'False') == 'True':
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Paramètres de sécurité avancés (pour HTTPS en production)
 if not DEBUG:
@@ -177,18 +250,15 @@ if not DEBUG:
     SECURE_SSL_REDIRECT = True
 
 # --- AUTRES CONFIGURATIONS ---
-AUTH_USER_MODEL = 'accounts.User'
+AUTH_USER_MODEL = 'identity.User'
 ASGI_APPLICATION = 'backend.asgi.application'
 
 # CDC 5.5 : une seule instance Daphne avec channel layer en mémoire suffit tant qu'il n'y a
-# qu'un serveur ; Redis ici sert de base de travail locale, RabbitMQ interviendra seulement
-# au passage à plusieurs instances Daphne (channels_rabbitmq, à valider avant adoption).
+# qu'un serveur ; RabbitMQ interviendra seulement au passage à plusieurs instances Daphne
+# (channels_rabbitmq, à valider avant adoption). Pas de Redis.
 CHANNEL_LAYERS = {
     'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [(os.getenv('REDIS_HOST', '127.0.0.1'), int(os.getenv('REDIS_PORT', 6379)))],
-        },
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
     },
 }
 
@@ -199,7 +269,80 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # CDC 4.2 / 5.8 : pièces KYC dans un espace privé, jamais sous MEDIA_ROOT (qui est
 # servi publiquement par Nginx/le helper static() en dev). Accès uniquement via une
-# vue authentifiée réservée aux administrateurs (apps.accounts).
+# vue authentifiée réservée aux administrateurs (apps.identity).
 KYC_PRIVATE_ROOT = BASE_DIR / 'private_media' / 'kyc'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# --- Mots de passe et langue ---
+LANGUAGE_CODE = 'fr'  # messages de validation Django en français
+# Les dates sont stockées en UTC et exposées avec leur décalage (Kinshasa : UTC+1). Les « jours »
+# des compteurs et des limites quotidiennes suivent ce fuseau (timezone.localdate()).
+TIME_ZONE = 'Africa/Kinshasa'
+USE_TZ = True
+
+# --- Contact vendeur (ADR 0005) ---
+# Ancienneté minimale (heures) d'un compte sans identifiant vérifié pour recevoir un SMS de
+# vérification vers un numéro saisi (anti-SMS arbitraire).
+CONTACT_SMS_MIN_ACCOUNT_AGE_HOURS = int(os.getenv('CONTACT_SMS_MIN_ACCOUNT_AGE_HOURS', '24'))
+
+# --- Journalisation ---
+# En développement (DEBUG=True), le code OTP « envoyé » est affiché en console (apps/identity/sms.py,
+# aucun fournisseur SMS branché). Hors DEBUG, le niveau reste à WARNING pour ce logger et le code
+# n'est de toute façon jamais journalisé : la passerelle lève une erreur sans l'écrire.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {'simple': {'format': '%(levelname)s %(name)s : %(message)s'}},
+    'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'simple'}},
+    'loggers': {
+        'apps.identity.sms': {
+            'handlers': ['console'],
+            'level': 'INFO' if DEBUG else 'WARNING',
+            'propagate': False,
+        },
+    },
+}
+
+AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 10}},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+]
+
+
+# --- Pièces KYC (règle 10 : données d'identité) ---
+# Valeurs de départ, ajustables par variable d'environnement.
+KYC_MAX_FILE_BYTES = int(os.getenv('KYC_MAX_FILE_MB', '5')) * 1024 * 1024
+KYC_MAX_DOCUMENTS_PER_PROFILE = int(os.getenv('KYC_MAX_DOCUMENTS_PER_PROFILE', '6'))
+
+
+# --- Photos de profil et logos (ré-encodés sans métadonnées : apps/common/images.py) ---
+PROFILE_IMAGE_MAX_SIDE = int(os.getenv('PROFILE_IMAGE_MAX_SIDE', '1024'))      # pixels, côté le plus long
+PROFILE_IMAGE_QUALITY = int(os.getenv('PROFILE_IMAGE_QUALITY', '85'))
+PROFILE_IMAGE_MAX_BYTES = int(os.getenv('PROFILE_IMAGE_MAX_MB', '5')) * 1024 * 1024
+PROFILE_IMAGE_MAX_PIXELS = int(os.getenv('PROFILE_IMAGE_MAX_PIXELS', str(16_000_000)))  # anti « bombe » d'image
+
+# Plafonds de requête : corps hors fichiers (JSON, champs de formulaire) et nombre de fichiers par
+# requête. La taille des fichiers est contrôlée par PROFILE_IMAGE_MAX_BYTES ; la taille totale du
+# corps doit aussi être bornée par Nginx (client_max_body_size, voir README).
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv('DATA_UPLOAD_MAX_MEMORY_KB', '1024')) * 1024
+DATA_UPLOAD_MAX_NUMBER_FILES = 10
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 200
+
+# Cookie signé qui identifie un visiteur anonyme pour le comptage des vues (apps.marketplace).
+ANON_VIEW_COOKIE_MAX_AGE = 365 * 86400
+
+# --- Outbox des événements de domaine (ADR 0003) ---
+# Diffusion immédiate après validation de la transaction émettrice ; le cron `dispatch_outbox`
+# (chaque minute) reste le filet de sécurité. Désactivée sous settings_test.
+OUTBOX_INLINE_DISPATCH = os.getenv('OUTBOX_INLINE_DISPATCH', 'True') == 'True'
+OUTBOX_MAX_ATTEMPTS = int(os.getenv('OUTBOX_MAX_ATTEMPTS', '8'))
+OUTBOX_LOCK_TIMEOUT_SECONDS = int(os.getenv('OUTBOX_LOCK_TIMEOUT_SECONDS', '300'))
+OUTBOX_BACKOFF_BASE_SECONDS = int(os.getenv('OUTBOX_BACKOFF_BASE_SECONDS', '30'))
+OUTBOX_BACKOFF_MAX_SECONDS = int(os.getenv('OUTBOX_BACKOFF_MAX_SECONDS', '3600'))
+OUTBOX_MAX_PAYLOAD_BYTES = 16 * 1024
+# Rétention courte : certaines charges utiles contiennent des données personnelles (message de contact).
+OUTBOX_RETENTION_DAYS = int(os.getenv('OUTBOX_RETENTION_DAYS', '7'))
+OUTBOX_DEAD_RETENTION_DAYS = int(os.getenv('OUTBOX_DEAD_RETENTION_DAYS', '30'))

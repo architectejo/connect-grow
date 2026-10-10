@@ -1,26 +1,20 @@
-# Environnement de développement conteneurisé (CDC 4.7, 2.5) : base SQLite,
-# comme sur le poste de chaque développeur. Pour la parité MySQL de recette/CI,
-# voir docker-compose.mysql.yml.
+# Environnement de développement conteneurisé (CDC 4.7, 2.5) : SQLite seul (ADR 0001),
+# base stockée sur un volume Docker partagé entre backend et cron.
 services:
-  redis:
-    image: redis:7-alpine
-    # Pas de port publié sur l'hôte : seul le service backend a besoin de le joindre,
-    # via le réseau Docker interne (nom de service "redis"). Évite les conflits avec
-    # un Redis déjà lancé sur la machine de dev.
-
   backend:
     build: .
     env_file:
       - ./.env
     environment:
-      REDIS_HOST: redis
+      DB_ENGINE: sqlite
+      DB_NAME: data/db.sqlite3
     volumes:
       - .:/app
       - backend_media:/app/media
+      - backend_data:/app/data
+      - backend_private:/app/private_media
     ports:
       - "8000:8000"
-    depends_on:
-      - redis
 
   # CDC 5.2, 5.6 : « Tâches cron » — mêmes image et code que backend, même base
   # de données, mais un processus cron dédié plutôt qu'une tâche de fond dans
@@ -28,15 +22,19 @@ services:
   cron:
     build: .
     entrypoint: ["/app/docker-entrypoint-cron.sh"]
+    depends_on:
+      - backend
     env_file:
       - ./.env
     environment:
-      REDIS_HOST: redis
+      DB_ENGINE: sqlite
+      DB_NAME: data/db.sqlite3
     volumes:
       - .:/app
       - backend_media:/app/media
-    depends_on:
-      - redis
+      - backend_data:/app/data
 
 volumes:
   backend_media:
+  backend_data:
+  backend_private:

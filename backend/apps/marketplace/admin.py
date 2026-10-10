@@ -1,44 +1,51 @@
 from django.contrib import admin
-from .models import City, Commune, Category, Favorite, MarketplaceSettings, Post, PostImage
 
-@admin.register(City)
-class CityAdmin(admin.ModelAdmin):
-    list_display = ('name',)
-    search_fields = ('name',)
+from apps.common.admin_mixins import SingletonSettingsAdminMixin
+from apps.moderation.services import record_audit
 
-@admin.register(Commune)
-class CommuneAdmin(admin.ModelAdmin):
-    list_display = ('name', 'city')
-    list_filter = ('city',)
-    search_fields = ('name',)
+from . import services
+from .models import ContactEvent, ExchangeProposal, Favorite, MarketplaceSettings, Offer, OfferImage
 
-@admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
-    list_display = ('name', 'icon')
-    prepopulated_fields = {'slug': ('name',)} # Génère le slug automatiquement
 
-class PostImageInline(admin.TabularInline):
-    model = PostImage
+class OfferImageInline(admin.TabularInline):
+    model = OfferImage
     extra = 0
 
-@admin.register(Post)
-class PostAdmin(admin.ModelAdmin):
-    list_display = ('title', 'post_type', 'status', 'price', 'currency', 'seller', 'is_delete', 'expires_at')
-    list_filter = ('post_type', 'status', 'category', 'commune', 'currency', 'is_delete')
+
+@admin.register(Offer)
+class OfferAdmin(admin.ModelAdmin):
+    list_display = ('title', 'offer_type', 'status', 'price', 'currency', 'seller', 'is_deleted', 'expires_at')
+    list_filter = ('offer_type', 'status', 'currency', 'is_deleted')
     search_fields = ('title', 'description')
-    inlines = [PostImageInline]
+    raw_id_fields = ('seller',)
+    inlines = [OfferImageInline]
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        record_audit(request.user, 'OFFER_ADMIN_UPDATED' if change else 'OFFER_ADMIN_CREATED', target=obj,
+                     details=f"Champs : {', '.join(form.changed_data)}")
+
+    def delete_model(self, request, obj):
+        record_audit(request.user, 'OFFER_DELETED', target=obj, details=obj.title)
+        services.delete_offers(Offer.objects.filter(pk=obj.pk))
+
+    def delete_queryset(self, request, queryset):
+        for offer in queryset:
+            record_audit(request.user, 'OFFER_DELETED', target=offer, details=offer.title)
+        services.delete_offers(queryset)
+
 
 @admin.register(Favorite)
 class FavoriteAdmin(admin.ModelAdmin):
-    list_display = ('user', 'post', 'created_at')
-    search_fields = ('user__email', 'user__phone', 'post__title')
+    list_display = ('user', 'offer', 'created_at')
+    search_fields = ('user__email', 'user__phone', 'offer__title')
+    raw_id_fields = ('user', 'offer')
+
 
 @admin.register(MarketplaceSettings)
-class MarketplaceSettingsAdmin(admin.ModelAdmin):
-    list_display = ('expiration_days', 'trash_retention_days', 'expiring_soon_warning_days')
-
-    def has_add_permission(self, request):
-        return not MarketplaceSettings.objects.exists()
-
-    def has_delete_permission(self, request, obj=None):
-        return False
+class MarketplaceSettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
+    list_display = (
+        'expiration_days', 'trash_retention_days', 'expiring_soon_warning_days', 'duplicate_contact_window_hours',
+        'reveal_daily_limit_account', 'reveal_daily_limit_new_account', 'new_account_hours',
+        'reveal_abuse_threshold', 'reveal_abuse_window_days',
+    )

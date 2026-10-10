@@ -5,7 +5,6 @@ __pycache__/
 db.sqlite3
 media/
 staticfiles/
-scratch/
 
 # --- Divers ---
 .DS_Store
@@ -13,3 +12,6 @@ Thumbs.db
 
 # KYC (fichiers privés, jamais commit)
 private_media/
+
+# Base SQLite des conteneurs (volume)
+data/

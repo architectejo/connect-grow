@@ -1,313 +1,466 @@
 import uuid
+from urllib.parse import quote
+from decimal import Decimal, InvalidOperation
 
-from django.db.models import Exists, F, OuterRef, Q
-from django.shortcuts import get_object_or_404
-from django.utils.timezone import now
+from django.conf import settings
+from django.core import signing
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Q
+from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
-from rest_framework import status, viewsets, permissions
-from .models import City, Category, Favorite, Post, PostImage, PostUniqueView, Commune, PostViewStat
+
+from apps.catalog import services as catalog_services
+from apps.common.images import validate_image_pixels, validate_image_upload_size
+from apps.common.exception_handler import CodedAPIException, throttled_message
+from apps.common.pagination import OptionalPagination, StandardPagination
+from apps.common.throttles import (
+    ActionScopedThrottleMixin, AnonymousOrUserScopedThrottle, AnonymousScopedThrottle, RevealIpThrottle,
+    RevealUserThrottle,
+)
+from apps.moderation.permissions import can_moderate
+from apps.moderation.services import record_audit
+from apps.common.utils import parse_uuid
+from apps.visibility import services as visibility_services
+
+from . import services
+from .models import ContactEvent, ExchangeProposal, Favorite, Offer, OfferImage
+from .permissions import IsOfferOwner
 from .serializers import (
-    CategorySerializer,
-    CitySerializer,
-    CommuneSerializer,
-    FavoriteSerializer,
-    PostImageSerializer,
-    PostSerializer,
+    ContactEventSerializer, ExchangeProposalSerializer, FavoriteSerializer, OfferImageSerializer,
+    OfferSerializer, ReceivedRevealSerializer, RevealRequestSerializer, RevealResponseSerializer,
 )
 
-class CityViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = City.objects.all().prefetch_related('communes')
-    serializer_class = CitySerializer
-    permission_classes = [permissions.AllowAny] # Tout le monde peut voir les villes
+PRICE_LIMIT = Decimal('99999999.99')  # borne de Offer.price (10 chiffres dont 2 décimales)
 
-class CommuneViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Commune.objects.all()
-    serializer_class = CommuneSerializer
-    permission_classes = [permissions.AllowAny] # Tout le monde peut voir les communes
 
-class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Category.objects.all()
-    serializer_class = CategorySerializer
-    permission_classes = [permissions.AllowAny] # Tout le monde peut voir les catégories
+def parse_price(value):
+    """Prix de filtre borné à la plage du champ ; None si la valeur n'est pas un nombre."""
+    try:
+        price = Decimal(value.strip())
+    except (InvalidOperation, AttributeError):
+        return None
+    if not price.is_finite():
+        return None
+    return max(-PRICE_LIMIT, min(PRICE_LIMIT, price)).quantize(Decimal('0.01'))
 
-class PostViewSet(viewsets.ModelViewSet):
-    serializer_class = PostSerializer
 
-    def get_queryset(self):
-        # On trie par le score de visibilité "Trust & Engage" par défaut
-        ordering = self.request.query_params.get('ordering', '-visibility_score')
-        if ordering not in ('-visibility_score', 'visibility_score', '-created_at', 'created_at', 'price', '-price'):
-            ordering = '-visibility_score'
+ANON_COOKIE = 'anon_id'
+ANON_COOKIE_SALT = 'marketplace.anon_view'
 
-        # Par défaut (Marketplace), on ne montre que ce qui n'est pas supprimé et actif
-        queryset = Post.objects.filter(is_active=True, is_delete=False)
 
-        # Filtre pour récupérer les annonces de l'utilisateur connecté
-        my_posts = self.request.query_params.get('my_posts')
-        if my_posts == 'true' and self.request.user.is_authenticated:
-            queryset = Post.objects.filter(seller=self.request.user, is_delete=False)
-        else:
-            # --- FILTRES DYNAMIQUES (CDC 3.2) ---
-            search = self.request.query_params.get('search')
-            category = self.request.query_params.get('category')
-            location = self.request.query_params.get('location')
-            city = self.request.query_params.get('city')
-            commune = self.request.query_params.get('commune')
-            currency = self.request.query_params.get('currency')
-            condition = self.request.query_params.get('condition')
-            is_exchangeable = self.request.query_params.get('is_exchangeable')
-            price_min = self.request.query_params.get('price_min')
-            price_max = self.request.query_params.get('price_max')
+def read_anon_id(request):
+    """Identifiant de visiteur anonyme lu dans le cookie SIGNÉ par le serveur ; None si absent,
+    falsifié ou expiré (la vue n'est alors pas comptée, un nouveau cookie est émis)."""
+    value = request.COOKIES.get(ANON_COOKIE)
+    if not value:
+        return None
+    try:
+        return signing.loads(value, salt=ANON_COOKIE_SALT, max_age=settings.ANON_VIEW_COOKIE_MAX_AGE)
+    except signing.BadSignature:
+        return None
 
-            if search:
-                queryset = queryset.filter(Q(title__icontains=search) | Q(description__icontains=search))
 
-            if category:
-                queryset = queryset.filter(category_id=category)
+class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
+    serializer_class = OfferSerializer
+    pagination_class = OptionalPagination
 
-            if location:
-                queryset = queryset.filter(
-                    Q(commune__name__icontains=location) |
-                    Q(commune__city__name__icontains=location)
-                )
-
-            if city:
-                queryset = queryset.filter(commune__city_id=city)
-
-            if commune:
-                queryset = queryset.filter(commune_id=commune)
-
-            if currency in ('USD', 'CDF'):
-                queryset = queryset.filter(currency=currency)
-
-            if condition:
-                queryset = queryset.filter(condition=condition)
-
-            if is_exchangeable is not None:
-                queryset = queryset.filter(is_exchangeable=is_exchangeable.lower() == 'true')
-
-            if price_min:
-                queryset = queryset.filter(price__gte=price_min)
-
-            if price_max:
-                queryset = queryset.filter(price__lte=price_max)
-
-            seller = self.request.query_params.get('seller')
-            if seller:
-                queryset = queryset.filter(seller_id=seller)
-
-        if self.request.user.is_authenticated:
-            # Évite le N+1 de is_favorited sur les listes.
-            queryset = queryset.annotate(
-                is_favorited_by_user=Exists(
-                    Favorite.objects.filter(user=self.request.user, post=OuterRef('pk'))
-                )
-            )
-
-        return queryset.order_by(ordering)
-
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context['request'] = self.request
-        return context
-
-    @action(detail=False, methods=['post'], permission_classes=[permissions.IsAdminUser])
-    def recalculate_all_scores(self, request):
-        """Force le recalcul des scores pour toutes les annonces actives."""
-        posts = Post.objects.filter(is_active=True, is_delete=False)
-        for post in posts:
-            post.update_visibility_score()
-        return Response({"message": f"Scores recalculés pour {posts.count()} annonces."})
+    # Actions réservées au vendeur : elles portent aussi sur des offres inactives (pause,
+    # expirée, corbeille), donc hors du queryset public.
+    OWNER_ACTIONS = {
+        'update', 'partial_update', 'destroy', 'soft_delete', 'restore', 'hard_delete',
+        'pause', 'unpause', 'mark_sold', 'renew', 'images', 'delete_image',
+    }
+    throttle_scopes = {
+        'list': ('offer_list', AnonymousOrUserScopedThrottle),
+        'create': 'offer_upload', 'update': 'offer_upload', 'partial_update': 'offer_upload',
+        'images': 'offer_upload', 'share': 'share', 'favorite': 'favorite',
+        'retrieve': ('offer_view_anon', AnonymousScopedThrottle),
+    }
+    ORDERINGS = ('-visibility_score', 'visibility_score', '-created_at', 'created_at', 'price', '-price')
 
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
             return [permissions.AllowAny()]
+        if self.action in self.OWNER_ACTIONS:
+            return [permissions.IsAuthenticated(), IsOfferOwner()]
+        if self.action == 'recalculate_all_scores':
+            return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        if self.action in self.OWNER_ACTIONS:
+            # Filtré sur le vendeur : l'offre d'un autre répond 404, comme une offre inconnue.
+            return Offer.objects.filter(seller=self.request.user).select_related('seller').prefetch_related('images')
+
+        # On trie par le score de visibilité organique (E x R, ADR 0004) par défaut
+        ordering = self.request.query_params.get('ordering', '-visibility_score')
+        if ordering not in self.ORDERINGS:
+            ordering = '-visibility_score'
+
+        # Par défaut (Marketplace), on ne montre que ce qui n'est pas supprimé et actif
+        # Les offres d'un vendeur suspendu ou banni (compte inactif) ne sont plus publiques.
+        queryset = Offer.objects.filter(is_active=True, is_deleted=False, seller__is_active=True)
+
+        # Filtre pour récupérer les offres de l'utilisateur connecté
+        my_offers = self.request.query_params.get('my_posts')
+        if self.action == 'retrieve' and self.request.user.is_authenticated:
+            # Le vendeur retrouve toutes ses offres (pause, vendue, expirée, masquée par la
+            # modération, corbeille) ; le public et les tiers restent limités aux offres actives.
+            # Même requête SQL : seule la clause WHERE change.
+            visible = Q(is_active=True, is_deleted=False, seller__is_active=True) | Q(seller=self.request.user)
+            if can_moderate(self.request.user):
+                # La modération consulte aussi les offres d'un vendeur sanctionné.
+                visible |= Q(is_active=True, is_deleted=False)
+            queryset = Offer.objects.filter(visible)
+        elif my_offers == 'true' and self.request.user.is_authenticated:
+            queryset = Offer.objects.filter(seller=self.request.user, is_deleted=False)
+        elif self.action == 'list':
+            queryset = self.apply_filters(queryset)
+
+        queryset = queryset.select_related('seller').prefetch_related('images')
+        if ordering == '-visibility_score':
+            # Pertinence : score stocké (E x R) x proximité D, appliquée dans le tri SQL.
+            return services.order_by_relevance(queryset, self.get_near_commune())
+        return queryset.order_by(ordering, '-created_at', 'id')
+
+    def get_near_commune(self):
+        """Commune de référence de la proximité D : paramètre `near` (un identifiant invalide est
+        ignoré), sinon commune du profil de l'utilisateur connecté, sinon aucune."""
+        near = parse_uuid(self.request.query_params.get('near'))
+        if near is None and self.request.user.is_authenticated:
+            near = self.request.user.commune_id
+        return near
+
+    def apply_filters(self, queryset):
+        """Filtres dynamiques (CDC 3.2). Les référentiels vivent dans `catalog` : pas de
+        jointure, on résout en UUID via son service. Un identifiant invalide ne renvoie aucune offre."""
+        params = self.request.query_params
+
+        search = params.get('search')
+        if search:
+            queryset = queryset.filter(Q(title__icontains=search) | Q(description__icontains=search))
+
+        category = params.get('category')
+        if category:
+            category_uuid = parse_uuid(category)
+            queryset = queryset.filter(category_id=category_uuid) if category_uuid else queryset.none()
+
+        # Les filtres ville/lieu deviennent `commune_id IN (...)` : la liste est plafonnée
+        # par catalog.services (MAX_COMMUNE_IDS) pour rester sous la limite de variables SQLite.
+        location = params.get('location')
+        if location:
+            queryset = queryset.filter(commune_id__in=catalog_services.search_commune_ids(location))
+
+        city = params.get('city')
+        if city:
+            queryset = queryset.filter(commune_id__in=catalog_services.get_commune_ids_for_city(city))
+
+        commune = params.get('commune')
+        if commune:
+            commune_uuid = parse_uuid(commune)
+            queryset = queryset.filter(commune_id=commune_uuid) if commune_uuid else queryset.none()
+
+        if params.get('currency') in ('USD', 'CDF'):
+            queryset = queryset.filter(currency=params['currency'])
+
+        condition = params.get('condition')
+        if condition:
+            queryset = queryset.filter(condition=condition)
+
+        is_exchangeable = params.get('is_exchangeable')
+        if is_exchangeable is not None:
+            queryset = queryset.filter(is_exchangeable=is_exchangeable.lower() == 'true')
+
+        for param, lookup in (('price_min', 'price__gte'), ('price_max', 'price__lte')):
+            if params.get(param):
+                price = parse_price(params[param])
+                queryset = queryset.filter(**{lookup: price}) if price is not None else queryset.none()
+
+        seller = params.get('seller')
+        if seller:
+            seller_uuid = parse_uuid(seller)
+            queryset = queryset.filter(seller_id=seller_uuid) if seller_uuid else queryset.none()
+        return queryset
 
     def perform_create(self, serializer):
         # L'utilisateur connecté est automatiquement le vendeur
         serializer.save(seller=self.request.user)
 
-    # 1. Action pour récupérer uniquement la corbeille de l'utilisateur
-    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def perform_destroy(self, instance):
+        record_audit(self.request.user, 'OFFER_DELETED', target=instance, details=instance.title)
+        services.delete_offers(Offer.objects.filter(pk=instance.pk))
+
+    @action(detail=False, methods=['post'])
+    def recalculate_all_scores(self, request):
+        """Force le recalcul des scores pour toutes les annonces actives."""
+        count = services.refresh_all_scores()
+        return Response({"message": f"Scores recalculés pour {count} annonces."})
+
+    # 1. Corbeille de l'utilisateur connecté
+    @action(detail=False, methods=['get'])
     def trash(self, request):
-        # On récupère uniquement les annonces supprimées de l'utilisateur connecté
-        trash_posts = Post.objects.filter(seller=request.user, is_delete=True).order_by('-created_at')
-        serializer = self.get_serializer(trash_posts, many=True)
-        return Response(serializer.data)
+        trashed = (
+            Offer.objects.filter(seller=request.user, is_deleted=True)
+            .select_related('seller').prefetch_related('images').order_by('-created_at')
+        )
+        page = self.paginate_queryset(trashed)
+        serializer = self.get_serializer(page if page is not None else trashed, many=True)
+        return self.get_paginated_response(serializer.data) if page is not None else Response(serializer.data)
 
-    # 2. Action pour "supprimer" (envoyer à la corbeille) sans supprimer de la BDD
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    # 2. « Supprimer » (envoyer à la corbeille) sans supprimer de la base
+    @action(detail=True, methods=['post'])
     def soft_delete(self, request, pk=None):
-        post = self.get_object()
-        if post.seller != request.user:
-            return Response({"error": "Action non autorisée"}, status=403)
-
-        post.is_delete = True
-        post.deleted_at = now()
-        post.save()
+        services.move_to_trash(self.get_object())
         return Response({"message": "Annonce déplacée dans la corbeille"})
 
-    # 3. Action pour restaurer une annonce
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    # 3. Restaurer une annonce
+    @action(detail=True, methods=['post'])
     def restore(self, request, pk=None):
-        # On cherche dans tous les objets (même supprimés) pour pouvoir restaurer
-        post = Post.objects.get(pk=pk, seller=request.user)
-        post.is_delete = False
-        post.deleted_at = None
-        post.save()
+        services.restore_from_trash(self.get_object())
         return Response({"message": "Annonce restaurée"})
 
-    # 4. Action pour supprimer définitivement une annonce
-    @action(detail=True, methods=['delete'], permission_classes=[permissions.IsAuthenticated])
+    # 4. Supprimer définitivement une annonce
+    @action(detail=True, methods=['delete'])
     def hard_delete(self, request, pk=None):
-        post = Post.objects.get(pk=pk, seller=request.user)
-        post.delete()
+        offer = self.get_object()
+        record_audit(request.user, 'OFFER_DELETED', target=offer, details=offer.title)
+        services.delete_offers(Offer.objects.filter(pk=offer.pk))
         return Response({"message": "Annonce supprimée définitivement"})
 
     # Cycle de vie (CDC 3.2, 3.9) : pause, reprise, vente, renouvellement.
-    # Ces actions portent aussi sur des annonces inactives (en pause, expirées),
-    # donc hors du queryset public par défaut : lookup direct, comme restore/hard_delete.
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post'])
     def pause(self, request, pk=None):
-        post = get_object_or_404(Post, pk=pk)
-        if post.seller != request.user:
-            return Response({"error": "Action non autorisée"}, status=status.HTTP_403_FORBIDDEN)
-        post.pause()
-        return Response(self.get_serializer(post).data)
+        offer = self.get_object()
+        services.pause_offer(offer)
+        return Response(self.get_serializer(offer).data)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post'])
     def unpause(self, request, pk=None):
-        post = get_object_or_404(Post, pk=pk)
-        if post.seller != request.user:
-            return Response({"error": "Action non autorisée"}, status=status.HTTP_403_FORBIDDEN)
-        resumed = post.unpause()
+        offer = self.get_object()
+        try:
+            resumed = services.unpause_offer(offer)
+        except services.OfferHiddenError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         if not resumed:
             return Response(
-                {"error": "Cette annonce a expiré. Renouvelez-la plutôt.", "status": post.status},
+                {"error": "Cette annonce a expiré. Renouvelez-la plutôt.", "status": offer.status},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return Response(self.get_serializer(post).data)
+        return Response(self.get_serializer(offer).data)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post'])
     def mark_sold(self, request, pk=None):
-        post = get_object_or_404(Post, pk=pk)
-        if post.seller != request.user:
-            return Response({"error": "Action non autorisée"}, status=status.HTTP_403_FORBIDDEN)
-        post.mark_sold()
-        return Response(self.get_serializer(post).data)
+        offer = self.get_object()
+        services.mark_offer_sold(offer)
+        return Response(self.get_serializer(offer).data)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post'])
     def renew(self, request, pk=None):
-        post = get_object_or_404(Post, pk=pk)
-        if post.seller != request.user:
-            return Response({"error": "Action non autorisée"}, status=status.HTTP_403_FORBIDDEN)
-        post.renew()
-        return Response(self.get_serializer(post).data)
+        offer = self.get_object()
+        try:
+            services.renew_offer(offer)
+        except services.OfferHiddenError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        return Response(self.get_serializer(offer).data)
 
     # 5. Galerie de photos (CDC 3.2 : 1 à 8 photos par annonce, main_image comprise)
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post'])
     def images(self, request, pk=None):
-        post = self.get_object()
-        if post.seller != request.user:
-            return Response({"error": "Action non autorisée"}, status=status.HTTP_403_FORBIDDEN)
+        offer = self.get_object()
 
-        current_count = post.images.count() + 1  # + main_image
+        current_count = offer.images.count() + 1  # + main_image
         uploaded = request.FILES.getlist('image')
         if not uploaded:
             return Response({"error": "Aucune image fournie."}, status=status.HTTP_400_BAD_REQUEST)
-        if current_count + len(uploaded) > PostImage.MAX_IMAGES_PER_POST:
+        if current_count + len(uploaded) > OfferImage.MAX_IMAGES_PER_OFFER:
             return Response(
-                {"error": f"Une annonce ne peut pas dépasser {PostImage.MAX_IMAGES_PER_POST} photos."},
+                {"error": f"Une annonce ne peut pas dépasser {OfferImage.MAX_IMAGES_PER_OFFER} photos."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # Fichiers contrôlés avant tout enregistrement : un fichier invalide donne un 400, pas un 500.
+        for image in uploaded:
+            try:
+                validate_image_upload_size(image)
+                validate_image_pixels(image)
+            except DjangoValidationError as exc:
+                return Response({"error": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
 
-        created = [PostImage.objects.create(post=post, image=f) for f in uploaded]
-        return Response(PostImageSerializer(created, many=True).data, status=status.HTTP_201_CREATED)
+        created = [OfferImage.objects.create(offer=offer, image=f) for f in uploaded]
+        return Response(OfferImageSerializer(created, many=True).data, status=status.HTTP_201_CREATED)
 
     @images.mapping.delete
     def delete_image(self, request, pk=None):
-        post = self.get_object()
-        if post.seller != request.user:
-            return Response({"error": "Action non autorisée"}, status=status.HTTP_403_FORBIDDEN)
-
-        image_id = request.query_params.get('image_id')
-        deleted, _ = post.images.filter(pk=image_id).delete()
+        offer = self.get_object()
+        image_uuid = parse_uuid(request.query_params.get('image_id'))
+        deleted = 0
+        if image_uuid:
+            deleted, _ = offer.images.filter(pk=image_uuid).delete()
         if not deleted:
             return Response({"error": "Photo introuvable."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     # 6. Partage externe (CDC 3.4) : simple compteur, alimente l'engagement (CDC 3.8).
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post'])
     def share(self, request, pk=None):
-        post = self.get_object()
-        post.shares_count = F('shares_count') + 1
-        post.save(update_fields=['shares_count'])
-        post.refresh_from_db(fields=['shares_count'])
-        post.update_visibility_score()
-        return Response({"shares_count": post.shares_count})
+        return Response({"shares_count": services.register_share(self.get_object(), request.user)})
 
     # 7. Favoris (CDC 3.2)
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post'])
     def favorite(self, request, pk=None):
-        post = self.get_object()
-        favorite, created = Favorite.objects.get_or_create(user=request.user, post=post)
-        if not created:
-            favorite.delete()
-            return Response({"favorited": False})
-        return Response({"favorited": True})
+        return Response({"favorited": services.toggle_favorite(request.user, self.get_object())})
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
 
-        # CDC 3.8 : une vue unique par jour et par utilisateur (ou empreinte anonyme),
-        # garantie par une contrainte d'unicité en base plutôt qu'un simple cookie.
-        anon_id = request.COOKIES.get('anon_id') or uuid.uuid4().hex
-        viewer_key = PostUniqueView.build_viewer_key(request.user, anon_id)
+        # CDC 3.8 : une vue unique par jour et par visiteur. Un visiteur anonyme n'est compté que
+        # si son cookie a été émis ET signé par le serveur (pas de fabrication d'empreintes).
+        # Le vendeur qui consulte sa propre offre ne gonfle pas ses statistiques.
+        anon_id = None if request.user.is_authenticated else read_anon_id(request)
+        is_owner = request.user.is_authenticated and instance.seller_id == request.user.id
+        if (request.user.is_authenticated or anon_id) and not is_owner:
+            services.register_view(instance, visibility_services.build_viewer_key(request.user, anon_id))
 
-        _, is_new_view = PostUniqueView.objects.get_or_create(
-            post=instance, date=now().date(), viewer_key=viewer_key,
-        )
-
-        if is_new_view:
-            instance.views_count += 1
-            instance.update_visibility_score()
-            instance.save(update_fields=['views_count', 'visibility_score', 'last_score_update'])
-
-            stat, created = PostViewStat.objects.get_or_create(
-                post=instance,
-                seller=instance.seller,
-                date=now().date()
-            )
-            # Ici on peut garder F() car on ne renvoie pas 'stat' dans la réponse
-            stat.views = F('views') + 1
-            stat.save()
-
-        serializer = self.get_serializer(instance)
-        response = Response(serializer.data)
-
-        if not request.COOKIES.get('anon_id'):
+        response = Response(self.get_serializer(instance).data)
+        if not request.user.is_authenticated and anon_id is None:
             response.set_cookie(
-                'anon_id', anon_id,
-                max_age=365 * 86400,
+                ANON_COOKIE, signing.dumps(uuid.uuid4().hex, salt=ANON_COOKIE_SALT),
+                max_age=settings.ANON_VIEW_COOKIE_MAX_AGE,
                 httponly=True,
                 samesite='Lax',
-                secure=False,
+                secure=not settings.DEBUG,
             )
-
         return response
 
 
-class FavoriteViewSet(viewsets.ModelViewSet):
+class FavoriteViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     """Liste personnelle des favoris de l'utilisateur connecté (CDC 3.2)."""
 
     serializer_class = FavoriteSerializer
     permission_classes = [permissions.IsAuthenticated]
-    http_method_names = ['get', 'post', 'delete']
+    pagination_class = OptionalPagination
+    http_method_names = ['get', 'post', 'delete', 'head', 'options']
+    throttle_scopes = {'create': 'favorite'}
 
     def get_queryset(self):
-        return Favorite.objects.filter(user=self.request.user).select_related('post')
+        queryset = (
+            Favorite.objects.filter(user=self.request.user)
+            .select_related('offer', 'offer__seller').prefetch_related('offer__images')
+        )
+        if self.action == 'list':
+            # Les offres masquées, en pause, vendues ou en corbeille ne sont plus montrées.
+            queryset = queryset.filter(
+                offer__is_active=True, offer__is_deleted=False, offer__seller__is_active=True,
+            )
+        return queryset
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        try:
+            serializer.instance, _ = services.add_favorite(self.request.user, serializer.validated_data['offer'])
+        except services.MarketplaceError as exc:
+            raise ValidationError({'post_id': str(exc)})
+
+    def perform_destroy(self, instance):
+        services.remove_favorite(instance)
+
+
+class _OfferMessageViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
+    """Base des contacts et propositions d'échange : l'utilisateur ne voit que les siens ;
+    ni modification ni suppression (traçabilité)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = OptionalPagination
+    http_method_names = ['get', 'post', 'head', 'options']
+    model = None
+
+    def get_queryset(self):
+        return self.model.objects.filter(sender=self.request.user).select_related('sender').order_by('-created_at')
+
+    def perform_create(self, serializer):
+        offer = serializer.validated_data['offer']
+        try:
+            serializer.instance = self.create_with_service(offer, serializer.validated_data['message'])
+        except services.MarketplaceError as exc:
+            if exc.code:
+                raise CodedAPIException(exc.message, exc.code, exc.status_code, wait=exc.wait)
+            raise ValidationError({'post': str(exc)})
+
+
+class ContactEventViewSet(_OfferMessageViewSet):
+    throttle_scopes = {'create': 'contact', 'reveals_received': 'contact_reveals_list'}
+    serializer_class = ContactEventSerializer
+    model = ContactEvent
+
+    def create_with_service(self, offer, message):
+        return services.create_contact_event(offer=offer, sender=self.request.user, message=message)
+
+    # --- Révélation du numéro de contact (ADR 0005, 5.4 et 5.5) ---
+
+    def get_throttles(self):
+        throttles = super().get_throttles()
+        if self.action == 'reveal':
+            throttles += [RevealIpThrottle(), RevealUserThrottle()]
+        return throttles
+
+    def check_throttles(self, request):
+        """Pour la révélation, un dépassement répond 429 avec le code de la limite atteinte
+        (`reveal_quota_ip`) et `Retry-After`."""
+        if self.action != 'reveal':
+            return super().check_throttles(request)
+        for throttle in self.get_throttles():
+            if not throttle.allow_request(request, self):
+                wait = throttle.wait()
+                raise CodedAPIException(
+                    throttled_message(wait) + " " + services.REVEAL_FALLBACK,
+                    getattr(throttle, 'code', 'throttled'), status.HTTP_429_TOO_MANY_REQUESTS,
+                    wait=None if wait is None else max(1, int(wait)),
+                )
+
+    @staticmethod
+    def _no_store(response):
+        response['Cache-Control'] = 'no-store'
+        response['Pragma'] = 'no-cache'
+        return response
+
+    @action(detail=False, methods=['post'], url_path='reveal')
+    def reveal(self, request):
+        body = RevealRequestSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        try:
+            result = services.reveal_contact(
+                offer_id=body.validated_data['offer'], sender=request.user, channel=body.validated_data['channel'],
+            )
+        except services.RevealError as exc:
+            raise CodedAPIException(exc.message, exc.code, exc.status_code, wait=exc.wait)
+        digits = result.phone.lstrip('+')
+        is_call = result.channel == ContactEvent.CHANNEL_CALL
+        data = {
+            'contact_event_id': result.contact_event_id, 'channel': result.channel, 'created': result.created,
+            'phone': result.phone,
+            'tel_url': f"tel:{result.phone}" if is_call else None,
+            # Le texte prérempli ne contient que le titre public de l'offre.
+            'whatsapp_url': None if is_call else f"https://wa.me/{digits}?text={quote(result.offer_title, safe='')}",
+        }
+        response = Response(RevealResponseSerializer(data).data, status=201 if result.created else 200)
+        return self._no_store(response)
+
+    @action(detail=False, methods=['get'], url_path='reveals/received')
+    def reveals_received(self, request):
+        channel = request.query_params.get('channel')
+        if channel and channel not in services.REVEAL_CHANNELS:
+            raise CodedAPIException("Moyen de contact invalide.", 'channel_invalid', status.HTTP_400_BAD_REQUEST)
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(services.list_reveals_for_seller(request.user, channel), request, view=self)
+        rows = services.to_received_reveals(page)
+        response = paginator.get_paginated_response(ReceivedRevealSerializer(rows, many=True).data)
+        return self._no_store(response)
+
+
+class ExchangeProposalViewSet(_OfferMessageViewSet):
+    throttle_scopes = {'create': 'exchange'}
+    serializer_class = ExchangeProposalSerializer
+    model = ExchangeProposal
+
+    def create_with_service(self, offer, message):
+        return services.create_exchange_proposal(offer=offer, sender=self.request.user, message=message)

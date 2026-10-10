@@ -1,85 +1,51 @@
-from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Sum
-from datetime import timedelta
-from django.utils.timezone import now
-from .models import PostViewStat, Post
-from apps.interactions.models import ContactStat
 from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from apps.reviews import services as reviews_services
+from apps.visibility import services as visibility_services
+
+from . import services
+from .models import Offer
+
+
+def _history(points):
+    return [{"day": p.date.strftime('%d/%m'), "views": p.views} for p in points]
+
 
 class DashboardStatsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        today = now().date()
-        last_30_days = today - timedelta(days=30)
-
-        # 1. Graphique des 30 derniers jours (Historique)
-        history_stats = PostViewStat.objects.filter(
-            seller=request.user,
-            date__gte=last_30_days
-        ).values('date').annotate(views=Sum('views')).order_by('date')
-
-        history_data = [
-            {
-                "day": s['date'].strftime('%d/%m'),
-                "views": s['views']
-            } for s in history_stats
-        ]
-
-        # 2. Stats rapides (Résumé)
-        total_views = PostViewStat.objects.filter(seller=request.user).aggregate(total=Sum('views'))['total'] or 0
-        today_views = PostViewStat.objects.filter(seller=request.user, date=today).aggregate(today=Sum('views'))['today'] or 0
-        active_posts = Post.objects.filter(seller=request.user, is_active=True, is_delete=False).count()
+        stats = visibility_services.get_seller_stats(request.user.id)
+        active_offers = services.count_active_offers(request.user.id)
 
         # CDC 3.9 : contacts reçus et taux de contact par annonce (agrégat CDC 5.6,
-        # apps.interactions.management.commands.refresh_dashboard_aggregates).
-        contacts_count = ContactStat.objects.filter(seller=request.user).aggregate(
-            total=Sum('count')
-        )['total'] or 0
-        contact_rate = round(contacts_count / active_posts, 2) if active_posts else 0.0
+        # commande refresh_daily_contacts).
+        contact_rate = round(stats.contacts_count / active_offers, 2) if active_offers else 0.0
 
-        # CDC 3.7 : Trust Score bayésien (déjà mis en cache par apps.reputation),
-        # jamais recalculé ici pour rester cohérent avec le profil public du vendeur.
-        # Le nom de champ avg_rating est conservé (déjà consommé par le frontend),
-        # mais la valeur vient désormais du Trust Score, plus de la moyenne brute.
+        # ADR 0004, 7.3 : moyenne des notes vendeur visibles (sans seuil d'affichage : le vendeur
+        # voit ses propres chiffres), calculée à la lecture par `reviews`. Le nom de champ
+        # avg_rating est conservé (déjà consommé par le front) ; il vaut null sans avis.
+        rating = reviews_services.get_seller_dashboard_rating(request.user.id)
         return Response({
-            "history": history_data,
+            "history": _history(stats.history),
             "summary": {
-                "total_views": total_views,
-                "today_views": today_views,
-                "active_posts": active_posts,
-                "contacts_count": contacts_count,
+                "total_views": stats.total_views,
+                "today_views": stats.today_views,
+                "active_posts": active_offers,
+                "contacts_count": stats.contacts_count,
                 "contact_rate": contact_rate,
-                "avg_rating": request.user.trust_score,
-                "review_count": request.user.reviews_count,
-            }
+                "avg_rating": rating.average,
+                "review_count": rating.review_count,
+            },
         })
 
-class PostStatsView(APIView):
+
+class OfferStatsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        try:
-            post = Post.objects.get(pk=pk, seller=request.user)
-        except Post.DoesNotExist:
-            return Response({"error": "Post not found or access denied"}, status=404)
-
-        today = now().date()
-        last_30_days = today - timedelta(days=30)
-
-        history_stats = PostViewStat.objects.filter(
-            post=post,
-            date__gte=last_30_days
-        ).order_by('date')
-
-        history_data = [
-            {
-                "day": s.date.strftime('%d/%m'),
-                "views": s.views
-            } for s in history_stats
-        ]
-
-        return Response({
-            "history": history_data
-        })
+        if not Offer.objects.filter(pk=pk, seller=request.user).exists():
+            return Response({"error": "Annonce introuvable ou accès refusé."}, status=404)
+        return Response({"history": _history(visibility_services.get_offer_history(pk))})

@@ -1,26 +1,55 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- TODO: Set the document title to the name of your application -->
-    <title>Lovable App</title>
-    <meta name="description" content="Lovable Generated Project" />
-    <meta name="author" content="Lovable" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#184dbf" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f1420" media="(prefers-color-scheme: dark)" />
+    <title>Connecte+ | Marketplace de confiance à Kinshasa</title>
+    <meta name="description" content="Achetez, vendez et échangez près de chez vous à Kinshasa, auprès de vendeurs dont la réputation se vérifie." />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Connecte+" />
+    <meta name="author" content="Connecte+ Team" />
 
-    <!-- TODO: Update og:title to match your application name -->
-    <meta property="og:title" content="Lovable App" />
-    <meta property="og:description" content="Lovable Generated Project" />
+    <!-- Open Graph -->
+    <meta property="og:title" content="Connecte+ | Marketplace de confiance à Kinshasa" />
+    <meta property="og:description" content="Annonces par commune, vendeurs notés, boutiques vérifiées. Publication gratuite." />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    <meta property="og:image" content="/logo.png" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@Lovable" />
-    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    <meta name="twitter:title" content="Connecte+" />
+    <meta name="twitter:image" content="/logo.png" />
+    <script>
+      // Applique le thème enregistré avant le premier affichage (évite un éclair clair en mode sombre)
+      try {
+        var t = localStorage.getItem("vite-ui-theme") || "light";
+        if (t === "system") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.classList.add(t);
+      } catch (e) {}
+    </script>
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!--
+        Coquille statique affichée dès la réception du HTML, avant le JavaScript (3G, CDC 4.1).
+        React la remplace au démarrage. Styles en ligne uniquement : aucune dépendance au reste du site.
+      -->
+      <div aria-hidden="true" style="min-height:100vh;background:hsl(var(--background,36 33% 98%))">
+        <div style="height:64px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid hsl(var(--border,30 15% 88%))">
+          <img src="/logo-mark.png" alt="" width="36" height="36" style="border-radius:12px;background:#fff;padding:4px;border:1px solid hsl(var(--border,30 15% 88%))" />
+          <span style="font:800 18px/1 system-ui,sans-serif;letter-spacing:-.02em;color:hsl(var(--foreground,222 35% 12%))">Connecte<span style="color:hsl(var(--primary,221 78% 42%))">+</span></span>
+        </div>
+        <div style="max-width:1320px;margin:0 auto;padding:24px 16px;display:grid;gap:12px">
+          <div style="height:28px;width:60%;max-width:420px;border-radius:8px;background:hsl(var(--muted,36 20% 95%))"></div>
+          <div style="height:16px;width:80%;max-width:560px;border-radius:8px;background:hsl(var(--muted,36 20% 95%))"></div>
+          <div style="height:180px;border-radius:16px;background:hsl(var(--muted,36 20% 95%))"></div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

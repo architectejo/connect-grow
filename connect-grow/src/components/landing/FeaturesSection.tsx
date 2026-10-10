@@ -1,80 +1,60 @@
-import { ShoppingBag, Repeat, Heart, BarChart3, MapPin, Star, Calendar, Megaphone } from "lucide-react";
+import { BadgeCheck, ListFilter, ShieldCheck, TrendingUp } from "lucide-react";
 
-const features = [
+// Les trois réponses de Connecte+ aux problèmes des groupes WhatsApp et Facebook (CDC 1.1),
+// plus la vitrine vérifiée des entreprises.
+const pillars = [
   {
-    icon: ShoppingBag,
-    title: "Vente directe",
-    description: "Vendez vos produits et services avec paiement sécurisé via Laxpaie.",
+    icon: ListFilter,
+    title: "Des annonces qui ne se perdent plus",
+    description: "Chaque annonce a sa catégorie, son prix en USD ou en CDF et sa commune. Filtrez en quelques secondes.",
+    tone: "bg-primary/10 text-primary",
   },
   {
-    icon: Repeat,
-    title: "Échange & Troc",
-    description: "Proposez des échanges de biens entre particuliers de votre ville.",
+    icon: ShieldCheck,
+    title: "Des avis après contact",
+    description:
+      "Seules les personnes qui ont contacté le vendeur peuvent noter l'offre et le vendeur, séparément. Il n'y a pas de score unique.",
+    tone: "bg-success/10 text-success",
   },
   {
-    icon: Heart,
-    title: "Collecte de fonds",
-    description: "Les ONG lancent des campagnes de financement participatif transparentes.",
+    icon: TrendingUp,
+    title: "Un classement transparent",
+    description: "Le classement dépend de l'engagement, de la récence et de la proximité, pas des notes. Une annonce sponsorisée est toujours signalée.",
+    tone: "bg-sun/15 text-sun",
   },
   {
-    icon: BarChart3,
-    title: "Analytics avancés",
-    description: "Suivez vos vues, conversions et l'impact de vos promotions en temps réel.",
-  },
-  {
-    icon: MapPin,
-    title: "Géo-recommandation",
-    description: "Découvrez les offres proches de vous grâce à l'algorithme de proximité.",
-  },
-  {
-    icon: Star,
-    title: "Système de notation",
-    description: "Évaluez et consultez la réputation des vendeurs avant d'acheter.",
-  },
-  {
-    icon: Calendar,
-    title: "Événements locaux",
-    description: "Découvrez et publiez des événements avec billetterie intégrée.",
-  },
-  {
-    icon: Megaphone,
-    title: "Boost de visibilité",
-    description: "Mettez en avant vos publications pour toucher plus de clients.",
+    icon: BadgeCheck,
+    title: "Des boutiques vérifiées",
+    description: "Les entreprises présentent leurs documents (RCCM, identité du gérant) pour obtenir le badge Vérifié.",
+    tone: "bg-info/10 text-info",
   },
 ];
 
-const FeaturesSection = () => {
-  return (
-    <section id="features" className="py-24 bg-background">
-      <div className="container mx-auto px-4">
-        <div className="text-center max-w-xl mx-auto mb-16">
-          <p className="text-sm font-medium text-primary uppercase tracking-wider mb-3">Fonctionnalités</p>
-          <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-            Tout ce dont vous avez besoin
-          </h2>
-          <p className="text-muted-foreground">
-            Une plateforme complète qui connecte vendeurs, acheteurs et associations dans votre communauté.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {features.map((feature, index) => (
-            <div
-              key={feature.title}
-              className="group p-6 rounded-xl bg-card border border-border hover:border-primary/30 transition-all duration-300 shadow-card hover:shadow-lg"
-              style={{ animationDelay: `${index * 80}ms` }}
-            >
-              <div className="w-12 h-12 rounded-xl gradient-primary flex items-center justify-center mb-4 group-hover:shadow-primary-glow transition-shadow">
-                <feature.icon size={22} className="text-primary-foreground" />
-              </div>
-              <h3 className="text-base font-semibold text-foreground mb-2">{feature.title}</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">{feature.description}</p>
-            </div>
-          ))}
-        </div>
+const FeaturesSection = () => (
+  <section id="confiance" className="py-16 md:py-24">
+    <div className="container">
+      <div className="mx-auto mb-10 max-w-2xl text-center md:mb-14">
+        <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Pourquoi Connecte+</p>
+        <h2 className="mt-2 text-balance text-3xl font-extrabold md:text-4xl">Fini les arnaques et les annonces noyées</h2>
+        <p className="mt-3 text-muted-foreground">
+          Acheter entre particuliers à Kinshasa ne devrait pas être un pari. Connecte+ rend chaque vendeur identifiable et
+          chaque annonce facile à trouver.
+        </p>
       </div>
-    </section>
-  );
-};
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {pillars.map(({ icon: Icon, title, description, tone }) => (
+          <article key={title} className="rounded-2xl border bg-card p-6 shadow-soft transition-shadow hover:shadow-card">
+            <span className={`flex h-12 w-12 items-center justify-center rounded-xl ${tone}`}>
+              <Icon className="h-6 w-6" aria-hidden />
+            </span>
+            <h3 className="mt-5 text-lg font-bold">{title}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{description}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+);
 
 export default FeaturesSection;

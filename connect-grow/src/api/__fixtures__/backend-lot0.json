@@ -1,0 +1,457 @@
+{
+ "eligibility_ok": {
+  "can_review": true,
+  "reason": null,
+  "available_at": null,
+  "review_id": null
+ },
+ "eligibility_too_early": {
+  "can_review": false,
+  "reason": "too_early",
+  "available_at": "2026-10-10T21:28:14.520613Z",
+  "review_id": null
+ },
+ "review_mine": {
+  "id": "afcf976c-c9cb-4455-be77-2166b61e1f83",
+  "post": "11db0d43-6d60-47f8-b31c-f95472b6f28f",
+  "user_name": "Acheteur",
+  "offer_rating": 4,
+  "seller_rating": 5,
+  "content": "Très bon vendeur, je recommande.",
+  "source": "CONTACT",
+  "reply_content": null,
+  "reply_at": null,
+  "created_at": "2026-10-09T22:28:14.721974+01:00",
+  "edited_at": null,
+  "is_post_owner": false,
+  "is_mine": true,
+  "can_edit": true,
+  "can_delete": true,
+  "contest_report_id": null,
+  "contest_responded": false
+ },
+ "review_replied_public": {
+  "id": "0c6e1082-52a5-42c5-868b-bcbb73b828f8",
+  "post": "11db0d43-6d60-47f8-b31c-f95472b6f28f",
+  "user_name": "Acheteuse D.",
+  "offer_rating": 4,
+  "seller_rating": 5,
+  "content": "Très bon vendeur, je recommande.",
+  "source": "CONTACT",
+  "reply_content": "Merci pour votre retour.",
+  "reply_at": "2026-10-09T22:28:14.843019+01:00",
+  "created_at": "2026-10-09T22:28:14.792439+01:00",
+  "edited_at": null,
+  "is_post_owner": false,
+  "is_mine": false,
+  "can_edit": false,
+  "can_delete": false,
+  "contest_report_id": null,
+  "contest_responded": false
+ },
+ "review_contested_author": {
+  "id": "e0bf1bd7-8bde-44a0-a47e-b91ac3da25b4",
+  "post": "11db0d43-6d60-47f8-b31c-f95472b6f28f",
+  "user_name": "Troisieme A.",
+  "offer_rating": 4,
+  "seller_rating": 5,
+  "content": "Très bon vendeur, je recommande.",
+  "source": "CONTACT",
+  "reply_content": null,
+  "reply_at": null,
+  "created_at": "2026-10-09T22:28:14.915662+01:00",
+  "edited_at": null,
+  "is_post_owner": false,
+  "is_mine": true,
+  "can_edit": true,
+  "can_delete": false,
+  "contest_report_id": "791c1a42-61a2-40a6-b203-1d3fdb513c2a",
+  "contest_responded": false
+ },
+ "post_detail": {
+  "id": "11db0d43-6d60-47f8-b31c-f95472b6f28f",
+  "seller": {
+   "id": "9d909537-020c-4f99-8301-baeaa227fb55",
+   "full_name": "Vendeur",
+   "user_type": "PARTICULIER",
+   "date_joined": "2026-10-09T22:28:14.427613+01:00",
+   "photo": null,
+   "business_profile": null
+  },
+  "seller_name": "Vendeur",
+  "category": "0305bb8e-20b2-4b00-b669-d491f66adcce",
+  "category_name": "Électronique",
+  "commune": "6fe5a305-2f32-496c-8caa-d8bc361a568c",
+  "commune_name": "Gombe",
+  "post_type": "PRODUIT",
+  "title": "Un joli canapé à vendre",
+  "description": "Description suffisamment longue pour le CDC.",
+  "price": "100.00",
+  "currency": "USD",
+  "condition": null,
+  "stock": 1,
+  "is_price_negotiable": true,
+  "is_exchangeable": true,
+  "main_image": "http://testserver/media/offers/a6805a30f2384b0bbf443ad8f9415000.webp",
+  "images": [],
+  "views_count": 0,
+  "likes_count": 0,
+  "shares_count": 0,
+  "created_at": "2026-10-09T22:28:14.433615+01:00",
+  "status": "ACTIVE",
+  "expires_at": "2026-12-08T22:28:14.433615+01:00",
+  "visibility_score": 3.3978942460331623,
+  "visibility_rank": "Faible",
+  "offer_rating": {
+   "average": 4.0,
+   "count": 3
+  },
+  "seller_rating": {
+   "average": 5.0,
+   "count": 3
+  },
+  "is_favorited": false,
+  "favorites_count": 0,
+  "is_trending": false,
+  "is_sponsored": false,
+  "allowed_channels": [
+   "MESSAGE",
+   "CALL",
+   "WHATSAPP"
+  ]
+ },
+ "post_list": [
+  {
+   "id": "11db0d43-6d60-47f8-b31c-f95472b6f28f",
+   "seller": {
+    "id": "9d909537-020c-4f99-8301-baeaa227fb55",
+    "full_name": "Vendeur",
+    "user_type": "PARTICULIER",
+    "date_joined": "2026-10-09T22:28:14.427613+01:00",
+    "photo": null,
+    "business_profile": null
+   },
+   "seller_name": "Vendeur",
+   "category": "0305bb8e-20b2-4b00-b669-d491f66adcce",
+   "category_name": "Électronique",
+   "commune": "6fe5a305-2f32-496c-8caa-d8bc361a568c",
+   "commune_name": "Gombe",
+   "post_type": "PRODUIT",
+   "title": "Un joli canapé à vendre",
+   "description": "Description suffisamment longue pour le CDC.",
+   "price": "100.00",
+   "currency": "USD",
+   "condition": null,
+   "stock": 1,
+   "is_price_negotiable": true,
+   "is_exchangeable": true,
+   "main_image": "http://testserver/media/offers/a6805a30f2384b0bbf443ad8f9415000.webp",
+   "images": [],
+   "views_count": 0,
+   "likes_count": 0,
+   "shares_count": 0,
+   "created_at": "2026-10-09T22:28:14.433615+01:00",
+   "status": "ACTIVE",
+   "expires_at": "2026-12-08T22:28:14.433615+01:00",
+   "visibility_score": 3.3978942460331623,
+   "visibility_rank": "Faible",
+   "offer_rating": {
+    "average": 4.0,
+    "count": 3
+   },
+   "seller_rating": {
+    "average": 5.0,
+    "count": 3
+   },
+   "is_favorited": false,
+   "favorites_count": 0,
+   "is_trending": false,
+   "is_sponsored": false,
+   "allowed_channels": [
+    "MESSAGE",
+    "CALL",
+    "WHATSAPP"
+   ]
+  }
+ ],
+ "notifications": [
+  {
+   "id": "86758731-e736-4aa7-a94d-5426d73e2121",
+   "user": "9d909537-020c-4f99-8301-baeaa227fb55",
+   "notification_type": "CONTACT",
+   "title": "Nouvelle demande de contact",
+   "content": "Acheteuse Deux vous a contacté pour Un joli canapé à vendre",
+   "link": "/messages",
+   "is_read": false,
+   "created_at": "2026-10-09T22:28:14.640618+01:00"
+  },
+  {
+   "id": "90e3a95e-cf97-464c-8351-e7d037422ed3",
+   "user": "9d909537-020c-4f99-8301-baeaa227fb55",
+   "notification_type": "CONTACT",
+   "title": "Nouvelle demande de contact",
+   "content": "Acheteur vous a contacté pour Un joli canapé à vendre",
+   "link": "/messages",
+   "is_read": false,
+   "created_at": "2026-10-09T22:28:14.588621+01:00"
+  }
+ ],
+ "conversations": [
+  {
+   "id": "fa7fcf6e-522e-477f-a4f0-8c51a203b0d2",
+   "post": "11db0d43-6d60-47f8-b31c-f95472b6f28f",
+   "post_title": "Un joli canapé à vendre",
+   "post_image": "/media/offers/a6805a30f2384b0bbf443ad8f9415000.webp",
+   "other_participant": {
+    "id": "dd6d1445-1688-431f-a6ff-302ec65f07cc",
+    "full_name": "Acheteuse Deux",
+    "photo": null
+   },
+   "last_message": {
+    "content": "Bonjour, est-ce toujours disponible ?",
+    "created_at": "2026-10-09T21:28:14.610614Z",
+    "is_read": false,
+    "sender_id": "dd6d14451688431fa6ff302ec65f07cc"
+   },
+   "updated_at": "2026-10-09T22:28:14.611618+01:00"
+  },
+  {
+   "id": "bab76647-b0c6-4282-aa9e-e158fd6ee41d",
+   "post": "11db0d43-6d60-47f8-b31c-f95472b6f28f",
+   "post_title": "Un joli canapé à vendre",
+   "post_image": "/media/offers/a6805a30f2384b0bbf443ad8f9415000.webp",
+   "other_participant": {
+    "id": "5ff69233-5540-4aa2-8846-d28ec89c96fe",
+    "full_name": "Acheteur",
+    "photo": null
+   },
+   "last_message": {
+    "content": "Bonjour, est-ce toujours disponible ?",
+    "created_at": "2026-10-09T21:28:14.566615Z",
+    "is_read": false,
+    "sender_id": "5ff6923355404aa28846d28ec89c96fe"
+   },
+   "updated_at": "2026-10-09T22:28:14.567616+01:00"
+  }
+ ],
+ "me_phone_only": {
+  "id": "295964d2-3202-4052-b190-a806446503b1",
+  "email": null,
+  "photo": null,
+  "full_name": "Par Telephone",
+  "user_type": "PARTICULIER",
+  "ville": null,
+  "ville_name": null,
+  "commune": null,
+  "commune_name": null,
+  "phone": "+243812345678",
+  "phone_verified": false,
+  "business_profile": null,
+  "date_joined": "2026-10-09T22:28:15.167736+01:00"
+ },
+ "businesses": {
+  "count": 1,
+  "next": null,
+  "previous": null,
+  "results": [
+   {
+    "id": "7135ec45-6fac-42bd-92df-f6412a69a90f",
+    "business_name": "Atelier Fixture",
+    "logo": null,
+    "bio": "",
+    "categories": [],
+    "ville_name": null,
+    "commune_name": null,
+    "is_verified": true
+   }
+  ]
+ },
+ "me_business": {
+  "id": "7135ec45-6fac-42bd-92df-f6412a69a90f",
+  "email": "biz@example.com",
+  "photo": null,
+  "full_name": "Gerant",
+  "user_type": "ENTREPRISE",
+  "ville": null,
+  "ville_name": null,
+  "commune": null,
+  "commune_name": null,
+  "phone": null,
+  "phone_verified": false,
+  "business_profile": {
+   "business_name": "Atelier Fixture",
+   "categories": [],
+   "bio": "",
+   "logo": null,
+   "nif": "",
+   "is_verified": true
+  },
+  "date_joined": "2026-10-09T22:28:15.179060+01:00"
+ },
+ "kyc": {
+  "id": "d1588569-3d29-4828-b346-a6d77aefb135",
+  "document_type": "RCCM",
+  "download_url": null,
+  "status": "EN_ATTENTE",
+  "rejection_reason": "",
+  "created_at": "2026-10-09T22:28:15.217498+01:00",
+  "reviewed_at": null
+ },
+ "dashboard": {
+  "history": [],
+  "summary": {
+   "total_views": 0,
+   "today_views": 0,
+   "active_posts": 1,
+   "contacts_count": 0,
+   "contact_rate": 0.0,
+   "avg_rating": 5.0,
+   "review_count": 3
+  }
+ },
+ "favorite": {
+  "favorited": true
+ },
+ "favorites": [
+  {
+   "id": "147029b1-56a1-4a58-af00-4b86067edf04",
+   "post": {
+    "id": "11db0d43-6d60-47f8-b31c-f95472b6f28f",
+    "seller": {
+     "id": "9d909537-020c-4f99-8301-baeaa227fb55",
+     "full_name": "Vendeur",
+     "user_type": "PARTICULIER",
+     "date_joined": "2026-10-09T22:28:14.427613+01:00",
+     "photo": null,
+     "business_profile": null
+    },
+    "seller_name": "Vendeur",
+    "category": "0305bb8e-20b2-4b00-b669-d491f66adcce",
+    "category_name": "Électronique",
+    "commune": "6fe5a305-2f32-496c-8caa-d8bc361a568c",
+    "commune_name": "Gombe",
+    "post_type": "PRODUIT",
+    "title": "Un joli canapé à vendre",
+    "description": "Description suffisamment longue pour le CDC.",
+    "price": "100.00",
+    "currency": "USD",
+    "condition": null,
+    "stock": 1,
+    "is_price_negotiable": true,
+    "is_exchangeable": true,
+    "main_image": "http://testserver/media/offers/a6805a30f2384b0bbf443ad8f9415000.webp",
+    "images": [],
+    "views_count": 0,
+    "likes_count": 1,
+    "shares_count": 0,
+    "created_at": "2026-10-09T22:28:14.433615+01:00",
+    "status": "ACTIVE",
+    "expires_at": "2026-12-08T22:28:14.433615+01:00",
+    "visibility_score": 3.639049098554767,
+    "visibility_rank": "Faible",
+    "offer_rating": {
+     "average": 4.0,
+     "count": 3
+    },
+    "seller_rating": {
+     "average": 5.0,
+     "count": 3
+    },
+    "is_favorited": true,
+    "favorites_count": 1,
+    "is_trending": false,
+    "is_sponsored": false
+   },
+   "created_at": "2026-10-09T22:28:15.274430+01:00"
+  }
+ ],
+ "throttled": {
+  "status": 429,
+  "retry_after": "3600",
+  "body": {
+   "detail": "Requête ralentie. Expected available in 3600 seconds.",
+   "code": "throttled"
+  }
+ },
+ "login_401": {
+  "detail": "Aucun compte actif trouvé avec les identifiants fournis.",
+  "code": "no_active_account"
+ },
+ "review_error": {
+  "detail": "Vous pourrez donner votre avis après avoir contacté le vendeur.",
+  "code": "not_eligible"
+ },
+ "reveal_call": {
+  "status": 201,
+  "body": {
+   "contact_event_id": "cfdfe264-ffc0-48c2-8d90-10e67ee90846",
+   "channel": "CALL",
+   "created": true,
+   "phone": "+243891111111",
+   "tel_url": "tel:+243891111111",
+   "whatsapp_url": null
+  }
+ },
+ "reveal_whatsapp": {
+  "status": 201,
+  "body": {
+   "contact_event_id": "0086b9dd-de34-48b2-a8c2-4a6a8f81ef73",
+   "channel": "WHATSAPP",
+   "created": true,
+   "phone": "+243891111111",
+   "tel_url": null,
+   "whatsapp_url": "https://wa.me/243891111111?text=Chaussures%20%26%20sacs%20%C3%A0%20vendre"
+  }
+ },
+ "reveals_received": {
+  "count": 2,
+  "next": null,
+  "previous": null,
+  "results": [
+   {
+    "id": "0086b9dd-de34-48b2-a8c2-4a6a8f81ef73",
+    "channel": "WHATSAPP",
+    "created_at": "2026-10-10T02:37:13.658037+01:00",
+    "requester_display_name": "Marie K.",
+    "offer": {
+     "id": "756acc18-4d5e-4255-bed9-b05f73626eb6",
+     "title": "Chaussures & sacs à vendre"
+    }
+   },
+   {
+    "id": "cfdfe264-ffc0-48c2-8d90-10e67ee90846",
+    "channel": "CALL",
+    "created_at": "2026-10-10T02:37:13.614508+01:00",
+    "requester_display_name": "Marie K.",
+    "offer": {
+     "id": "e95ea2bc-c7e7-4005-a011-9b06fad067ef",
+     "title": "Un joli canapé à vendre"
+    }
+   }
+  ]
+ },
+ "reveals_received_call": {
+  "count": 1,
+  "next": null,
+  "previous": null,
+  "results": [
+   {
+    "id": "cfdfe264-ffc0-48c2-8d90-10e67ee90846",
+    "channel": "CALL",
+    "created_at": "2026-10-10T02:37:13.614508+01:00",
+    "requester_display_name": "Marie K.",
+    "offer": {
+     "id": "e95ea2bc-c7e7-4005-a011-9b06fad067ef",
+     "title": "Un joli canapé à vendre"
+    }
+   }
+  ]
+ },
+ "reveal_error_channel_invalid": {
+  "status": 400,
+  "body": {
+   "detail": "Moyen de contact invalide.",
+   "code": "channel_invalid"
+  }
+ }
+}

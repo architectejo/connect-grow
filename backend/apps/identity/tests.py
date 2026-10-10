@@ -819,3 +819,24 @@ class PhoneExistenceOracleTests(APITestCase):
         self.assertEqual(taken.data, free.data)
         me.refresh_from_db()
         self.assertIsNone(me.phone)
+
+
+class RequesterDisplayNameTests(TestCase):
+    def test_normal_names(self):
+        from . import services
+        self.assertEqual(services.requester_display_name('Marie Kabila'), 'Marie K.')
+        self.assertEqual(services.requester_display_name("Jean-Luc N'Dour"), "Jean-Luc N.")
+        self.assertEqual(services.requester_display_name('Marie'), 'Marie')
+
+    def test_digits_urls_and_symbols_are_removed(self):
+        from . import services
+        self.assertEqual(services.requester_display_name('Appelez 0812345678 Marie'), 'Appelez M.')
+        self.assertEqual(services.requester_display_name('http://x.cd/a Paul'), 'httpxcda P.')
+        self.assertEqual(services.requester_display_name('0812345678'), 'Un visiteur')
+        self.assertEqual(services.requester_display_name('+243 81 23 45'), 'Un visiteur')
+
+    def test_first_word_is_capped_and_empty_falls_back(self):
+        from . import services
+        self.assertEqual(services.requester_display_name('A' * 50 + ' Zola'), 'A' * 20 + ' Z.')
+        for empty in (None, '', '   ', '123 456', '--'):
+            self.assertEqual(services.requester_display_name(empty), 'Un visiteur')

@@ -201,6 +201,27 @@ def public_display_name(full_name) -> str:
     return f"{parts[0]} {parts[-1][0].upper()}."
 
 
+REQUESTER_NAME_MAX_LENGTH = 20
+REQUESTER_NAME_FALLBACK = "Un visiteur"
+
+
+def requester_display_name(full_name) -> str:
+    """Nom du demandeur montré au vendeur dans « mes révélations » (ADR 0005). Le nom est saisi
+    librement : on borne le premier mot et on ne garde que lettres, tiret et apostrophe, pour
+    qu'il ne serve pas à glisser un numéro, une URL ou un message. Repli : « Un visiteur »."""
+    def clean(word):
+        return ''.join(c for c in word if c.isalpha() or c in "-'’").strip("-'’")
+
+    parts = [clean(word) for word in (full_name or '').split()]
+    parts = [word for word in parts if word]
+    if not parts:
+        return REQUESTER_NAME_FALLBACK
+    first = parts[0][:REQUESTER_NAME_MAX_LENGTH]
+    if len(parts) == 1:
+        return first
+    return f"{first} {parts[-1][0].upper()}."
+
+
 def get_report_labels(ids: Iterable) -> dict:
     """Libellés de comptes signalables, indexés par UUID (une requête) : sert à la modération.
     Un compte absent n'apparaît pas dans le résultat."""

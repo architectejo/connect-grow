@@ -334,6 +334,16 @@ class ContactPoint(BaseModel):
     is_verified = models.BooleanField(default=False)
     verified_at = models.DateTimeField(null=True, blank=True)
 
+    class Meta:
+        constraints = [
+            # Exactement un propriétaire : un compte ou une organisation (ADR 0006 §4.4).
+            models.CheckConstraint(
+                check=(models.Q(user__isnull=False, organization__isnull=True)
+                       | models.Q(user__isnull=True, organization__isnull=False)),
+                name='contact_point_exactly_one_owner',
+            ),
+        ]
+
     def __str__(self):
         # Jamais le numéro dans les représentations (logs, admin).
         return f"Numéro de contact de {self.user_id or self.organization_id}"
@@ -385,6 +395,11 @@ class ContactConsent(BaseModel):
             models.UniqueConstraint(fields=['user', 'channel'], name='contact_consent_user_channel_uniq'),
             # Les valeurs nulles ne se comparent pas : portable SQLite et MySQL, inconditionnelle.
             models.UniqueConstraint(fields=['organization', 'channel'], name='contact_consent_org_channel_uniq'),
+            models.CheckConstraint(
+                check=(models.Q(user__isnull=False, organization__isnull=True)
+                       | models.Q(user__isnull=True, organization__isnull=False)),
+                name='contact_consent_exactly_one_owner',
+            ),
         ]
 
     def __str__(self):

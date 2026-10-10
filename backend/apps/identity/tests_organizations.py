@@ -149,7 +149,9 @@ class TeamTestBase(TestCase):
 
     def staff_user(self):
         staff = make_user('staffer', is_staff=True)
-        staff.user_permissions.add(Permission.objects.get(codename='suspend_organization'))
+        staff.user_permissions.add(
+            *Permission.objects.filter(codename__in=['suspend_organization', 'view_organization']),
+        )
         return User.objects.get(pk=staff.pk)  # recharge le cache de permissions
 
     def role_of(self, user):
@@ -336,17 +338,24 @@ class MembershipRulesTests(TeamTestBase):
 
     def test_adding_an_active_member_twice_or_an_unknown_or_restricted_account_is_refused(self):
         self.assertBusiness('already_member', services.add_member, self.owner, self.org.pk, self.editor.pk, EDITOR)
-        self.assertBusiness('user_not_found', services.add_member, self.owner, self.org.pk, uuid.uuid4(), EDITOR)
         restricted = make_user('restricted')
         Sanction.objects.create(user=restricted, sanction_type='BANNISSEMENT', reason='x')
-        self.assertBusiness('user_restricted', services.add_member, self.owner, self.org.pk, restricted.pk, EDITOR)
+        inactive = make_user('inactive2', is_active=False)
+        responses = set()
+        for target in (uuid.uuid4(), restricted.pk, inactive.pk):
+            with self.assertRaises(services.OrganizationError) as caught:
+                services.add_member(self.owner, self.org.pk, target, EDITOR)
+            responses.add((caught.exception.get_codes(), caught.exception.status_code, str(caught.exception.detail)))
+        # Une seule réponse neutre : l'existence et l'état du compte ne sont pas révélés.
+        self.assertEqual(len(responses), 1)
+        self.assertEqual(responses.pop()[0], 'user_unavailable')
 
     def test_added_member_is_subject_to_the_organization_limit(self):
         services.create_organization(self.outsider, 'Sienne', 'ONG')
         row = IdentitySettings.get_solo()
         row.max_organizations_per_account = 1
         row.save()
-        self.assertBusiness('organization_limit_reached', services.add_member, self.owner, self.org.pk, self.outsider.pk, EDITOR)
+        self.assertBusiness('user_unavailable', services.add_member, self.owner, self.org.pk, self.outsider.pk, EDITOR)
         # Le propriétaire déjà au plafond (1) ne peut plus rien créer.
         self.assertBusiness('organization_limit_reached', services.create_organization, self.owner, 'Autre', 'ONG')
 
@@ -624,7 +633,7 @@ class AdminTests(TestCase):
 
     def test_suspend_action_goes_through_the_service(self):
         response = self.client.post('/admin/identity/organization/', {
-            'action': 'suspend_selected', '_selected_action': [str(self.org.pk)],
+            'action': 'suspend_selected', '_selected_action': [str(self.org.pk)], 'apply': '1', 'reason': 'moderation',
         })
         self.assertEqual(response.status_code, 302)
         self.org.refresh_from_db()

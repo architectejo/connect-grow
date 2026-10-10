@@ -34,7 +34,9 @@ class EligibilityBase(ReviewsTestBase):
         ReviewSettings.objects.filter(pk=ReviewSettings.get_solo().pk).update(**values)
 
     def age_contact(self, contact, **delta):
-        ContactEvent.objects.filter(pk=contact.pk).update(created_at=timezone.now() - timedelta(**delta))
+        aged = timezone.now() - timedelta(**delta)
+        ContactEvent.objects.filter(pk=contact.pk).update(created_at=aged)
+        ContactEvent.objects.filter(pk=contact.pk, delivered_at__isnull=False).update(delivered_at=aged)  # délai compté depuis la remise
         contact.refresh_from_db()
 
     def eligibility(self, offer=None):

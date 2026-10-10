@@ -123,7 +123,9 @@ class ReviewCreationTests(ReviewsTestBase):
     def test_any_contact_channel_opens_the_right_and_the_oldest_contact_is_the_proof(self):
         newer = self.make_contact(channel=ContactEvent.CHANNEL_CALL)
         older = self.make_contact(channel=ContactEvent.CHANNEL_WHATSAPP)
-        ContactEvent.objects.filter(pk=older.pk).update(created_at=timezone.now() - timedelta(days=2))
+        ContactEvent.objects.filter(pk=older.pk).update(
+            created_at=timezone.now() - timedelta(days=2), delivered_at=timezone.now() - timedelta(days=2),
+        )
         self.client.force_authenticate(self.buyer)
         self.assertEqual(self.post_review().status_code, status.HTTP_201_CREATED)
         review = Review.objects.get()

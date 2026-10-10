@@ -71,7 +71,9 @@ class SettingsBoundsTests(ReviewsTestBase):
         ))
         contact = marketplace_services.create_contact_event(offer=self.offer, sender=self.buyer, message='Bonjour')
         marketplace_services.mark_contact_delivered(contact.pk)  # message remis : preuve de contact
-        type(contact).objects.filter(pk=contact.pk).update(created_at=timezone.now() - timedelta(hours=200))
+        type(contact).objects.filter(pk=contact.pk).update(
+            created_at=timezone.now() - timedelta(hours=200), delivered_at=timezone.now() - timedelta(hours=200),
+        )
         self.assertEqual(marketplace_services.refresh_all_scores(), 1)
         self.client.force_authenticate(self.buyer)
         response = self.client.post(REVIEWS_URL, {'post': str(self.offer.id), **GOOD})

@@ -1,4 +1,7 @@
 """Preuve de remise du contact pour l'avis (ADR 0005, C10) : `delivered_at` non nul exigé."""
+from datetime import timedelta
+
+from django.utils import timezone
 from rest_framework import status
 
 from apps.marketplace.models import ContactEvent
@@ -66,11 +69,20 @@ class DeliveredContactProofTests(EligibilityBase):
         self.age_contact(contact, hours=25)
         self.assertTrue(self.eligibility().data['can_review'])
 
-    def test_exchange_proposal_does_not_publish_a_delivery_event(self):
+    def test_late_delivery_delays_the_review_from_the_delivery(self):
+        contact = self.make_contact(delivered=False)
+        self.age_contact(contact, hours=30)  # contact vieux de 30 h, délai de 24 h
+        delivered_at = timezone.now() - timedelta(hours=2)
+        ContactEvent.objects.filter(pk=contact.pk).update(delivered_at=delivered_at)
+        result = self.eligibility().data
+        self.assertEqual(result['reason'], 'too_early')  # compté depuis la remise, pas la création
+        self.assertEqual(result['available_at'], delivered_at + timedelta(hours=24))
+
+    def test_exchange_proposal_publishes_its_own_event_but_no_delivery_event(self):
         from apps.marketplace import services as marketplace_services
 
-        marketplace_services.create_exchange_proposal(offer=self.offer, sender=self.buyer, message='Échange ?') \
-            if hasattr(marketplace_services, 'create_exchange_proposal') else None
+        marketplace_services.create_exchange_proposal(offer=self.offer, sender=self.buyer, message='Échange ?')
+        self.assertTrue(OutboxEvent.objects.filter(event_type='marketplace.exchange_proposed').exists())
         dispatch_outbox_now()
         dispatch_outbox_now()
         self.assertTrue(Message.objects.exists())

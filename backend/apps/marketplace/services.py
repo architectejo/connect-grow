@@ -112,7 +112,8 @@ def count_active_offers(seller_id=None) -> int:
 @dataclass(frozen=True)
 class ReviewContact:
     """Preuve de contact qui ouvre le droit d'avis (CDC 3.4) : le plus ancien contact de l'auteur
-    sur l'offre, tous canaux confondus (message, appel, WhatsApp)."""
+    sur l'offre, tous canaux confondus (message, appel, WhatsApp). `recorded_at` est la date de
+    preuve : la plus tardive de la création et de la remise du contact."""
 
     contact_event_id: uuid.UUID
     channel: str
@@ -123,13 +124,19 @@ def get_review_contact(offer_id, user_id) -> Optional[ReviewContact]:
     """Plus ancien contact de `user_id` sur l'offre, ou None s'il n'a jamais contacté le vendeur.
     Valent preuve les contacts comptés (`is_counted`) ET remis (`delivered_at` non nul : numéro
     révélé, ou message déposé chez le vendeur ; ADR 0005, C10). La réponse du vendeur n'est pas exigée."""
-    row = (
-        ContactEvent.objects.filter(
-            offer_id=offer_id, sender_id=user_id, is_counted=True, delivered_at__isnull=False,
-        )
-        .order_by('created_at', 'id').values_list('id', 'channel', 'created_at').first()
+    rows = ContactEvent.objects.filter(
+        offer_id=offer_id, sender_id=user_id, is_counted=True, delivered_at__isnull=False,
+    ).values_list('id', 'channel', 'created_at', 'delivered_at')
+    # Le délai avant avis court depuis la remise (jamais avant) : on retient le contact dont
+    # la date de preuve, `max(created_at, delivered_at)`, est la plus ancienne.
+    proofs = sorted(
+        ((max(created, delivered), created, pk, channel) for pk, channel, created, delivered in rows),
+        key=lambda item: (item[0], item[1], str(item[2])),
     )
-    return None if row is None else ReviewContact(contact_event_id=row[0], channel=row[1], recorded_at=row[2])
+    if not proofs:
+        return None
+    proof_at, _, pk, channel = proofs[0]
+    return ReviewContact(contact_event_id=pk, channel=channel, recorded_at=proof_at)
 
 
 def hide_by_moderation(offer_id) -> None:
@@ -749,7 +756,7 @@ def to_received_reveals(events) -> list:
     return [
         ReceivedReveal(
             id=event.id, channel=event.channel, created_at=event.created_at,
-            requester_display_name=identity_services.public_display_name(names.get(event.sender_id)),
+            requester_display_name=identity_services.requester_display_name(names.get(event.sender_id)),
             offer_id=event.offer_id, offer_title=event.offer.title,
         )
         for event in events

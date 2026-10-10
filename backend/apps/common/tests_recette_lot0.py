@@ -203,7 +203,9 @@ class ContractTests(RecetteBase):
         self.assertShape(too_early, SPEC_ELIGIBILITY, 'éligibilité')
         self.assertEqual(too_early['reason'], 'too_early')
         self.assertIsNotNone(too_early['available_at'])
-        ContactEvent.objects.filter(pk=contact.pk).update(created_at=timezone.now() - timedelta(hours=48))
+        ContactEvent.objects.filter(pk=contact.pk).update(
+            created_at=timezone.now() - timedelta(hours=48), delivered_at=timezone.now() - timedelta(hours=48),
+        )
         ReviewSettings.objects.filter(pk=ReviewSettings.get_solo().pk).update(min_account_age_hours=72)
         too_new = client.get(url, {'post': str(self.offer.id)}).json()
         self.assertEqual(too_new['reason'], 'account_too_new')
@@ -884,18 +886,23 @@ class OutboxScenarioTests(RecetteBase):
     def test_purge_removes_old_done_and_dead_events_only(self):
         self.make_contacts(3)
         call_command('dispatch_outbox', verbosity=0)
+        call_command('dispatch_outbox', verbosity=0)  # 2e passe : remise des messages de contact
+        # Après deux passes, tous les contacts sont remis.
+        self.assertFalse(ContactEvent.objects.filter(delivered_at__isnull=True).exists())
+        delivered = list(OutboxEvent.objects.filter(event_type='messaging.contact_message_delivered'))
+        self.assertEqual(len(delivered), 3)
         events = list(OutboxEvent.objects.filter(event_type='marketplace.contact_recorded').order_by('created_at'))
-        OutboxEvent.objects.exclude(pk__in=[e.pk for e in events]).delete()  # événements de remise : hors sujet ici
         old, recent, dead = events
+        old_delivered, kept_delivered = delivered[0], delivered[1]
         OutboxEvent.objects.filter(pk=old.pk).update(completed_at=timezone.now() - timedelta(days=8))
+        OutboxEvent.objects.filter(pk=old_delivered.pk).update(completed_at=timezone.now() - timedelta(days=8))
         OutboxEvent.objects.filter(pk=dead.pk).update(status='dead', completed_at=timezone.now() - timedelta(days=10))
+        OutboxEvent.objects.exclude(pk__in=[old.pk, recent.pk, dead.pk, old_delivered.pk, kept_delivered.pk]).delete()
         call_command('purge_outbox', verbosity=0)
         remaining = set(OutboxEvent.objects.values_list('pk', flat=True))
-        self.assertEqual(remaining, {recent.pk, dead.pk})  # le mort attend 30 jours, le récent 7
+        self.assertEqual(remaining, {recent.pk, dead.pk, kept_delivered.pk})  # le mort attend 30 jours, le récent 7
+        self.assertFalse(OutboxEvent.objects.filter(pk=old_delivered.pk).exists())
         self.assertFalse(OutboxDelivery.objects.filter(event_id=old.pk).exists())  # cascade
-        OutboxEvent.objects.filter(pk=dead.pk).update(completed_at=timezone.now() - timedelta(days=31))
-        call_command('purge_outbox', verbosity=0)
-        self.assertEqual(set(OutboxEvent.objects.values_list('pk', flat=True)), {recent.pk})
 
     def test_review_events_reach_the_right_people(self):
         self.contact_via_api(self.buyer)

@@ -22,6 +22,9 @@ from .views import (
     RegisterView,
     UserDetailView,
 )
+from .views_verification import (
+    OrganizationKycDocumentDeleteView, OrganizationKycDocumentListCreateView, OrganizationVerificationView,
+)
 from .views_provider import ProviderActivateView, ProviderArchiveView, ProviderDetailView
 
 
@@ -65,4 +68,12 @@ urlpatterns = [
     path('kyc/documents/<uuid:pk>/', KycDocumentDeleteView.as_view(), name='kyc_document_delete'),
     path('kyc/documents/<uuid:pk>/decision/', KycDecisionView.as_view(), name='kyc_decision'),
     path('kyc/documents/<uuid:pk>/download/', KycDocumentDownloadView.as_view(), name='kyc_download'),
+
+    # Vérification des organisations (ADR 0006, 9.4)
+    path('organizations/<uuid:org_id>/kyc/documents/', OrganizationKycDocumentListCreateView.as_view(),
+         name='organization_kyc_documents'),
+    path('organizations/<uuid:org_id>/kyc/documents/<uuid:pk>/', OrganizationKycDocumentDeleteView.as_view(),
+         name='organization_kyc_document_delete'),
+    path('organizations/<uuid:org_id>/verification/', OrganizationVerificationView.as_view(),
+         name='organization_verification'),
 ]

@@ -24,6 +24,12 @@ from .organizations import (  # noqa: F401
     reactivate_organization, revoke_member, suspend_organization, transfer_ownership,
 )
 
+# Vérification des organisations (ADR 0006, A6, 9.4) : façade publique.
+from .verification import (  # noqa: F401
+    delete_kyb_document, get_organization_verification, get_verification_summaries, get_verified_claims,
+    list_kyb_documents, submit_kyb_document,
+)
+
 # Prestataire individuel (ADR 0006, 9.3) : façade publique.
 from .providers import (  # noqa: F401
     ProviderError, activate_provider, archive_provider, get_provider_category_ids, get_provider_profile,
@@ -94,9 +100,16 @@ def recompute_verification(business_profile):
 
 
 def decide_kyc_document(document_id, reviewer, decision, reason=''):
-    """Décision (VALIDE ou REFUSE) sur une pièce KYC, atomique avec son journal d'audit."""
+    """Décision (VALIDE ou REFUSE) sur une pièce KYC ou KYB, atomique avec son journal d'audit.
+
+    Pièce d'organisation (ADR 0006, 7.2) : refus (403) si le décideur a une ligne d'appartenance à
+    l'organisation (actif ou ancien membre, sans limite de durée), s'il a déposé la pièce ou s'il a créé
+    l'organisation. Les claims ne sont jamais écrits : ils sont calculés à la lecture. Un événement
+    `identity.organization_verification_changed` est publié dans la même transaction."""
     from django.db import transaction
-    from .models import KycDocument
+    from apps.common.contexts import CONTEXT_ORGANIZATION
+    from apps.platform_core.services import publish_event
+    from .models import KycDocument, Membership, Organization
 
     if decision not in (KycDocument.STATUS_VALIDE, KycDocument.STATUS_REFUSE):
         raise KycError("decision doit être VALIDE ou REFUSE.")
@@ -109,7 +122,19 @@ def decide_kyc_document(document_id, reviewer, decision, reason=''):
         except KycDocument.DoesNotExist:
             raise KycError("Document introuvable.", 404)
 
-        if doc.business_profile.user_id == reviewer.pk:
+        organization = None
+        if doc.organization_id is not None:
+            # Verrou de l'organisation : deux décisions sur ses pièces se suivent l'une après l'autre.
+            organization = Organization.objects.select_for_update().get(pk=doc.organization_id)
+            if (
+                doc.uploaded_by_id == reviewer.pk or organization.created_by_id == reviewer.pk
+                or Membership.objects.filter(organization=organization, user_id=reviewer.pk).exists()
+            ):
+                raise KycError(
+                    "Vous ne pouvez pas décider sur une pièce d'une organisation dont vous êtes ou avez été "
+                    "membre, ni sur une pièce que vous avez déposée.", 403,
+                )
+        elif doc.business_profile.user_id == reviewer.pk:
             raise KycError("Vous ne pouvez pas décider sur votre propre pièce.", 403)
 
         previous = doc.status
@@ -130,13 +155,27 @@ def decide_kyc_document(document_id, reviewer, decision, reason=''):
             raise KycError("Cette pièce a déjà fait l'objet d'une décision.", 409)
         doc.refresh_from_db()
 
-        recompute_verification(doc.business_profile)
-
         action = 'KYC_REVOKED' if revoking else f'KYC_{decision}'
-        record_audit(
-            reviewer, action, target=doc,
-            details=doc.rejection_reason or f"Document {doc.get_document_type_display()} validé.",
-        )
+        if organization is not None:
+            record_audit(
+                reviewer, action, target=doc,
+                details=f"organization={organization.pk}; document_type={doc.document_type}; decision={decision}",
+                context=(CONTEXT_ORGANIZATION, organization.pk),
+            )
+            publish_event(
+                'identity.organization_verification_changed', aggregate_type='organization',
+                aggregate_id=organization.pk,
+                payload={
+                    'organization_id': str(organization.pk), 'document_type': doc.document_type,
+                    'decision': 'REVOKED' if revoking else decision,
+                },
+            )
+        else:
+            recompute_verification(doc.business_profile)
+            record_audit(
+                reviewer, action, target=doc,
+                details=doc.rejection_reason or f"Document {doc.get_document_type_display()} validé.",
+            )
     return doc
 
 

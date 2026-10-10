@@ -283,7 +283,7 @@ class KycDocument(BaseModel):
     )
 
     business_profile = models.ForeignKey(
-        BusinessProfile, on_delete=models.CASCADE, related_name='kyc_documents',
+        BusinessProfile, on_delete=models.CASCADE, related_name='kyc_documents', null=True, blank=True,
     )
     # ADR 0006, section 4.4 : pièce rattachée à une organisation (nul pendant l'étape « étendre » ;
     # NOT NULL à la contraction, T9). `uploaded_by` : trace de l'auteur du dépôt.
@@ -308,7 +308,8 @@ class KycDocument(BaseModel):
         permissions = [('review_kycdocument', "Peut examiner, décider et télécharger les pièces KYC")]
 
     def __str__(self):
-        return f"{self.get_document_type_display()} — {self.business_profile.business_name} ({self.status})"
+        owner = self.business_profile.business_name if self.business_profile_id else f"organisation {self.organization_id}"
+        return f"{self.get_document_type_display()} — {owner} ({self.status})"
 
 
 # Version courante du texte de consentement au contact (ADR 0005, C4). Provisoire (LEG-PRV-03).

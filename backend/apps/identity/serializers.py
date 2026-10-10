@@ -342,14 +342,22 @@ class KycDocumentSerializer(serializers.ModelSerializer):
     # Le fichier n'est qu'en écriture : aucun chemin de stockage n'est jamais renvoyé.
     file = serializers.FileField(write_only=True, validators=[validate_kyc_file])
     download_url = serializers.SerializerMethodField()
+    organization = serializers.SerializerMethodField()
 
     class Meta:
         model = KycDocument
         fields = [
             'id', 'document_type', 'file', 'download_url', 'status', 'rejection_reason',
-            'created_at', 'reviewed_at',
+            'created_at', 'reviewed_at', 'organization',
         ]
         read_only_fields = ['id', 'status', 'rejection_reason', 'created_at', 'reviewed_at']
+
+    def get_organization(self, obj):
+        """Organisation concernée (file de vérification) : identifiant, nom, type. Aucune coordonnée de membre."""
+        if obj.organization_id is None:
+            return None
+        organization = obj.organization
+        return {'id': str(organization.pk), 'name': organization.name, 'org_type': organization.org_type}
 
     def get_download_url(self, obj):
         """URL de l'endpoint authentifié, pour les seuls examinateurs habilités."""
@@ -379,3 +387,15 @@ class KycDocumentSerializer(serializers.ModelSerializer):
                 {'document_type': "Une pièce de ce type est déjà en attente ou validée."}
             )
         return attrs
+
+
+class OrganizationKycDocumentSerializer(serializers.ModelSerializer):
+    """Pièce d'une organisation vue par ses membres (ADR 0006, 9.4) : jamais d'URL ni de contenu de fichier."""
+
+    document_type_label = serializers.CharField(source='get_document_type_display', read_only=True)
+    uploaded_at = serializers.DateTimeField(source='created_at', read_only=True)
+
+    class Meta:
+        model = KycDocument
+        fields = ['id', 'document_type', 'document_type_label', 'status', 'rejection_reason', 'uploaded_at', 'reviewed_at']
+        read_only_fields = fields

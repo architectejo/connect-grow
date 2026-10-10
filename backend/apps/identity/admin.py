@@ -8,7 +8,11 @@ Principes (règles 2, 3, 10, 12) :
   elles ne naissent que de `decide_kyc_document` (journalisée) ;
 - les pièces d'identité ne sont ni affichées ni téléchargeables depuis l'admin.
 """
+from django import forms
 from django.contrib import admin, messages
+from django.contrib.admin.utils import unquote
+from django.shortcuts import redirect
+from django.template.response import TemplateResponse
 
 from apps.common.admin_mixins import SingletonSettingsAdminMixin
 from apps.common.contexts import ContextDenied
@@ -51,15 +55,41 @@ class UserAdmin(admin.ModelAdmin):
                 details="Champs modifiés : " + ', '.join(sorted(form.changed_data)),
             )
 
+    def delete_view(self, request, object_id, extra_context=None):
+        # Un compte seul propriétaire d'une organisation active n'est pas supprimable (dette ADR 0006 §15).
+        if request.method == 'POST':
+            obj = self.get_object(request, unquote(object_id))
+            if obj is not None:
+                try:
+                    services.assert_account_removable(obj)
+                except services.OrganizationError as exc:
+                    self.message_user(request, exc.detail, messages.ERROR)
+                    return redirect('admin:identity_user_change', obj.pk)
+        return super().delete_view(request, object_id, extra_context)
+
     def delete_model(self, request, obj):
+        services.assert_account_removable(obj)
         record_audit(request.user, 'USER_ADMIN_DELETED', target=obj, details=f"Compte supprimé ({obj.pk}).")
         super().delete_model(request, obj)
 
     def delete_queryset(self, request, queryset):
-        # Suppression en masse (action « supprimer la sélection ») : une trace par compte.
+        # Suppression en masse (action « supprimer la sélection ») : une trace par compte ; les comptes
+        # seuls propriétaires d'une organisation active sont ignorés et signalés.
+        removable, blocked = [], 0
         for obj in queryset:
+            try:
+                services.assert_account_removable(obj)
+            except services.OrganizationError:
+                blocked += 1
+                continue
+            removable.append(obj.pk)
             record_audit(request.user, 'USER_ADMIN_DELETED', target=obj, details=f"Compte supprimé ({obj.pk}).")
-        super().delete_queryset(request, queryset)
+        if blocked:
+            self.message_user(
+                request, f"{blocked} compte(s) non supprimé(s) : seul propriétaire d'une organisation active.",
+                messages.WARNING,
+            )
+        super().delete_queryset(request, queryset.filter(pk__in=removable))
 
 
 class BusinessProfileCategoryInline(admin.TabularInline):
@@ -122,10 +152,11 @@ class ContactConsentAdmin(admin.ModelAdmin):
     """Consultation seule (ADR 0005, C12) : jamais le numéro, seulement les 4 derniers chiffres de preuve.
     `ContactPoint` n'est volontairement pas enregistré dans l'admin (LEG-PRV-12)."""
 
-    list_display = ('user', 'channel', 'is_granted', 'text_version', 'granted_at', 'revoked_at', 'revoked_reason')
+    list_display = ('user', 'organization', 'channel', 'is_granted', 'text_version', 'granted_at', 'revoked_at', 'revoked_reason')
     list_filter = ('channel', 'is_granted', 'revoked_reason')
     readonly_fields = (
-        'user', 'channel', 'is_granted', 'text_version', 'granted_at', 'revoked_at', 'phone_last4',
+        'user', 'organization', 'granted_by', 'channel', 'is_granted', 'text_version', 'granted_at', 'revoked_at',
+        'phone_last4',
         'revoked_reason', 'created_at', 'updated_at',
     )
 
@@ -152,6 +183,15 @@ class ReadOnlyAdmin(admin.ModelAdmin):
         return False
 
 
+class SuspensionReasonForm(forms.Form):
+    reason = forms.ChoiceField(
+        label="Motif", choices=[
+            ('moderation', "Modération"), ('verification', "Vérification"), ('legal', "Obligation légale"),
+            ('other', "Autre"),
+        ],
+    )
+
+
 @admin.register(Organization)
 class OrganizationAdmin(ReadOnlyAdmin):
     """Lecture seule (ADR 0006, 11.4). Le personnel suspend et réactive par les actions ci-dessous, qui
@@ -169,21 +209,34 @@ class OrganizationAdmin(ReadOnlyAdmin):
 
     @admin.action(description="Suspendre les organisations sélectionnées", permissions=['suspend'])
     def suspend_selected(self, request, queryset):
-        self._run(request, queryset, lambda org: services.suspend_organization(request.user, org.pk, 'moderation'))
+        """Étape 1 : formulaire du motif normalisé ; étape 2 (`apply`) : suspension par le service."""
+        form = SuspensionReasonForm(request.POST if 'apply' in request.POST else None)
+        if 'apply' in request.POST and form.is_valid():
+            reason = form.cleaned_data['reason']
+            self._run(request, queryset, lambda org: services.suspend_organization(request.user, org.pk, reason))
+            return None
+        return TemplateResponse(request, 'admin/identity/suspend_reason.html', {
+            **self.admin_site.each_context(request), 'title': "Suspendre des organisations", 'form': form,
+            'organizations': queryset, 'opts': self.model._meta,
+            'selected': request.POST.getlist('_selected_action'),
+        })
 
     @admin.action(description="Réactiver les organisations sélectionnées", permissions=['suspend'])
     def reactivate_selected(self, request, queryset):
         self._run(request, queryset, lambda org: services.reactivate_organization(request.user, org.pk))
 
     def _run(self, request, queryset, func):
-        done = 0
+        done = failed = 0
         for organization in queryset:
             try:
                 func(organization)
                 done += 1
             except (ContextDenied, services.OrganizationError):
-                continue
-        self.message_user(request, f"{done} organisation(s) modifiée(s).", messages.SUCCESS)
+                failed += 1
+        if done:
+            self.message_user(request, f"{done} organisation(s) modifiée(s).", messages.SUCCESS)
+        if failed:
+            self.message_user(request, f"{failed} organisation(s) non modifiée(s) (état incompatible ou droit manquant).", messages.WARNING)
 
 
 @admin.register(Membership)
@@ -222,6 +275,15 @@ class OrganizationDocumentRequirementAdmin(admin.ModelAdmin):
             details=f"org_type={obj.org_type}; document_type={obj.document_type}",
         )
         super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        # Suppression en masse : une trace par ligne (règle 12).
+        for obj in queryset:
+            record_audit(
+                request.user, 'DOC_REQUIREMENT_DELETED', target=obj,
+                details=f"org_type={obj.org_type}; document_type={obj.document_type}",
+            )
+        super().delete_queryset(request, queryset)
 
 
 @admin.register(IdentitySettings)

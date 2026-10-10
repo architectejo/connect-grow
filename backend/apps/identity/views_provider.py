@@ -10,6 +10,7 @@ from .services import (
 )
 from .throttles import ProviderWriteThrottle
 
+EXEMPT_REASON = "profil prestataire du compte : ignore X-Context (ADR 0006 §6.4)"
 WRITABLE_FIELDS = ('display_name', 'bio', 'category_ids')
 
 
@@ -34,7 +35,7 @@ def _body(request):
 
 
 class ProviderDetailView(APIView):
-    acting_context_exempt = "profil prestataire du compte : ignore X-Context (ADR 0006 §6.4)"
+    acting_context_exempt = EXEMPT_REASON
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ProviderWriteThrottle]
 
@@ -47,7 +48,7 @@ class ProviderDetailView(APIView):
 
 
 class ProviderActivateView(APIView):
-    acting_context_exempt = "profil prestataire du compte : ignore X-Context (ADR 0006 §6.4)"
+    acting_context_exempt = EXEMPT_REASON
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ProviderWriteThrottle]
 
@@ -62,7 +63,7 @@ class ProviderActivateView(APIView):
 
 
 class ProviderArchiveView(APIView):
-    acting_context_exempt = "profil prestataire du compte : ignore X-Context (ADR 0006 §6.4)"
+    acting_context_exempt = EXEMPT_REASON
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ProviderWriteThrottle]
 

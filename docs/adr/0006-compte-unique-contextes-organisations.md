@@ -181,7 +181,7 @@ Budget (amendé par l'audit L0-30) : **garde du compte** (2 requêtes : `User.is
 |---|---|---|
 | **Sensibles au contexte (en-tête lu)** | `POST posts/` ; `GET posts/?mine=true` ; `GET posts/trash/` ; `GET stats/dashboard/` ; `contact-settings/*` ; `GET contacts/reveals/received/` (« qui a demandé ») ; `GET conversations/` (boîte) | contexte résolu, puis `authorize(ctx, capacité)` |
 | **Par objet (en-tête ignoré)** | `PATCH/DELETE/actions posts/<id>/` ; `GET stats/post/<id>/` ; réponse à un avis ; lecture et envoi dans une conversation ; routes `organizations/<id>/…` (identifiant dans le chemin) | `authorize_on(user, contexte de l'objet, capacité)` |
-| **Toujours personnels (en-tête ignoré, non validé)** | contact, révélation de numéro, avis, favoris, signalement, `me/`, notifications | Q-CP8 |
+| **Toujours personnels (en-tête ignoré, non validé)** | `provider/` (activation, lecture, modification, archivage : profil du compte, sans identifiant dans le chemin), contact, révélation de numéro, avis, favoris, signalement, `me/`, notifications | Q-CP8 |
 
 Un en-tête ignoré n'est pas un repli : ces endpoints n'ont qu'une identité possible. Le front le sait et l'indique dans l'interface (T10).
 
@@ -299,7 +299,7 @@ Codes de claim (libellés en base de code, traduits par le front via la clé `co
 | `PATCH ID provider/` | `display_name, bio, category_ids` | `200` profil ; `403 DENY_OBJECT_STATE` si archivé |
 | `POST ID provider/archive/` | — | `200` profil `ARCHIVED` ; offres retirées du public ; avis conservés |
 
-Aucun plan requis (règle 2). Un compte restreint : `403 DENY_SECURITY`. Audit `PROVIDER_ACTIVATED`, `PROVIDER_ARCHIVED`.
+Sur un profil déjà actif, le corps d'`activate/` est ignoré sans validation (200 idempotent, rien n'est modifié ni journalisé). Aucun plan requis (règle 2). Un compte restreint : `403 DENY_SECURITY`. Audit `PROVIDER_ACTIVATED`, `PROVIDER_ARCHIVED`.
 
 ### 9.4 Vérification d'une organisation (remplace `kyc/documents/`)
 
@@ -450,7 +450,7 @@ Légende : **I** = branche d'intégration `integ/L0-09` (changements de contrat 
 | **T3** | L0-09c | dev-backend | `ProviderProfile` : services et endpoints 9.3, intégration à `contexts/` et `acts_for_context`, événement de statut | T2 | T4, T8 | D |
 | **T4** | L0-09d | dev-backend, auditeur-securite | Pièces d'organisation (9.4), claims dérivés, exigences, règle de l'ancien membre, file de vérification, suppression de `recompute_verification` | T2 | T3, T8 | I |
 | **T8** | L0-09g (identité) | dev-backend | `register/` et `me/` sans `user_type`/`business_profile`, `organizations/` (création, `internal`, `PATCH`, `archive`, `leave`, liste publique), throttles, remplace `businesses/` | T2 | T3, T4 | I |
-| **T5** | L0-09e (+ profil vendeur) | dev-backend | Migrations d'extension de marketplace, visibility, messaging, notifications, reviews ; `Offer`/compteurs par contexte ; `seller_is_public` + abonné + `sync_seller_visibility` + cron ; `set_account_active` et branchement de `moderation` ; `get_seller_summaries` nouvelle forme ; objet `seller` ; `sellers/…` (9.7) ; statistiques par contexte ; `?seller=` | T2, T3, T4 (claims), T8 | — | I |
+| **T5** | L0-09e (+ profil vendeur) | dev-backend | Migrations d'extension de marketplace, visibility, messaging, notifications, reviews ; `Offer`/compteurs par contexte ; `seller_is_public` + abonné + `sync_seller_visibility` + cron (retirer alors `no_subscriber` de `identity.seller_context_status_changed` dans `platform_core/catalog.py` et le test `test_event_type_has_no_subscriber_yet` de `tests_provider.py`) ; `set_account_active` et branchement de `moderation` ; `get_seller_summaries` nouvelle forme ; objet `seller` ; `sellers/…` (9.7) ; statistiques par contexte ; `?seller=` | T2, T3, T4 (claims), T8 | — | I |
 | **T6** | L0-09f1 | dev-backend | Avis (réponse, `acts_for_context`, destinataires), `review_posted` v3, notifications (`context`, abonnés d'équipe, de statut, de décision KYB, purge à la révocation), expiration v2 | T5 | T7 | I |
 | **T7** | L0-09f2 | dev-backend, auditeur-securite | Contact par contexte vendeur, `ContactPoint/ContactConsent` d'organisation et interrupteur, `get_allowed_channels` par contexte, événements v2, messagerie par contexte (accès par capacité, `sender_context`) | T5 | T6 | I |
 | **T9** | L0-09h | dev-backend, auditeur-securite | Migrations de conversion (T9a) puis de contraction (T9b), retrait du code et des tests obsolètes, admin, `setup_roles`, script de recette | T3, T4, T6, T7, T8 | F2 | I |

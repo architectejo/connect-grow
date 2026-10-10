@@ -73,6 +73,26 @@ class ActivationTests(ProviderBase):
         self.assertEqual(body['display_name'], 'Marie M.')
         self.assertNotIn('Kabongo', json.dumps(body))
 
+    def test_too_short_default_name_falls_back(self):
+        for label, full_name in (('court', 'X'), ('vide', '')):
+            with self.subTest(full_name=full_name):
+                user = make_user(label, full_name=full_name)
+                client = APIClient()
+                client.force_authenticate(user)
+                self.assertEqual(client.post(ACTIVATE, {}, format='json').json()['display_name'], 'Utilisateur')
+
+    def test_account_state_rechecked_after_lock(self):
+        calls = []
+        from . import providers
+
+        original = providers._ensure_account_allowed
+        with mock.patch.object(providers, '_ensure_account_allowed', side_effect=lambda u: (calls.append(1), original(u))[1]):
+            self.activate(display_name='Nom valide')
+            before = len(calls)
+            self.client.patch(URL, {'bio': 'x'}, format='json')
+        self.assertGreaterEqual(before, 2)
+        self.assertGreaterEqual(len(calls) - before, 2)
+
     def test_name_is_nfkc_normalized(self):
         body = self.activate(display_name='ＡＢＣ Service').json()
         self.assertEqual(body['display_name'], 'ABC Service')
@@ -342,6 +362,8 @@ class ArchiveTests(ProviderBase):
         self.assertEqual(client.post(ARCHIVE).status_code, 404)
 
     def test_event_type_has_no_subscriber_yet(self):
+        # À RETIRER quand l'abonné marketplace de T5 (`sync_seller_visibility`) arrive : le drapeau
+        # `no_subscriber` sera alors supprimé du catalogue.
         from apps.platform_core.catalog import EVENT_TYPES
 
         self.assertTrue(EVENT_TYPES['identity.seller_context_status_changed'].no_subscriber)

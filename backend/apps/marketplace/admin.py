@@ -47,4 +47,5 @@ class MarketplaceSettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
     list_display = (
         'expiration_days', 'trash_retention_days', 'expiring_soon_warning_days', 'duplicate_contact_window_hours',
         'reveal_daily_limit_account', 'reveal_daily_limit_new_account', 'new_account_hours',
+        'reveal_abuse_threshold', 'reveal_abuse_window_days',
     )

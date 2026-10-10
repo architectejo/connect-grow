@@ -180,6 +180,12 @@ class OrganizationCreateThrottle(UserWriteThrottle):
     scope = 'org_create'
 
 
+class OrganizationListThrottle(IpThrottle):
+    """Liste publique des organisations (recherche, filtres) : par adresse IP, anonymes compris."""
+
+    scope = 'org_list'
+
+
 class OrganizationWriteThrottle(UserWriteThrottle):
     """Modification, archivage et sortie d'une organisation : 30/h par compte (ADR 0006, 9.2)."""
 

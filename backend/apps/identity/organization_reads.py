@@ -17,6 +17,7 @@ from rest_framework.exceptions import ErrorDetail
 from . import organizations, verification
 from .models import KycDocument, Organization, OrganizationCategory, OrganizationDocumentRequirement
 
+SEARCH_MAX_LENGTH = 100
 STATE_NONE = 'NONE'
 STATE_MISSING_T4 = verification.STATUS_MISSING
 
@@ -89,6 +90,10 @@ def public_organizations_queryset(params):
     queryset = Organization.objects.filter(status=Organization.STATUS_ACTIVE)
 
     search = params.get('search')
+    if search and len(search.strip()) > SEARCH_MAX_LENGTH:
+        raise serializers.ValidationError({'search': [ErrorDetail(
+            f"La recherche ne doit pas dépasser {SEARCH_MAX_LENGTH} caractères.", 'search_too_long',
+        )]})
     if search and search.strip():
         queryset = queryset.filter(Q(name__icontains=search.strip()) | Q(description__icontains=search.strip()))
 

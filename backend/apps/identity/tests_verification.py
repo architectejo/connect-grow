@@ -312,7 +312,7 @@ class ClaimsTests(VerificationBase):
         self.decide(self.make_doc(ARRETE, org=ong, uploader=self.outsider), reviewer('rev2'))
         data = self.summary(ong)
         self.assertTrue(data['summary']['complete'])
-        self.assertEqual(data['verified_claims'][0]['code'], 'ONG_DECREE_VERIFIED')
+        self.assertEqual(data['verified_claims'][0]['code'], 'NGO_DECREE_VERIFIED')
 
     def test_revocation_withdraws_the_claim_and_the_global_label(self):
         self.validate_all()

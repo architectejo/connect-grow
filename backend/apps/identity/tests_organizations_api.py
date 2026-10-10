@@ -58,6 +58,25 @@ def join(org, user, role=OWNER, status=Membership.STATUS_ACTIVE):
     return Membership.objects.create(organization=org, user=user, role=role, status=status)
 
 
+def truncated_images():
+    """PNG et JPEG valides coupés en deux : l'en-tête est lisible, le décodage échoue."""
+    import io
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from PIL import Image
+
+    def encoded(fmt):
+        buffer = io.BytesIO()
+        Image.new('RGB', (300, 300), (10, 200, 30)).save(buffer, format=fmt)
+        return buffer.getvalue()
+
+    png, jpeg = encoded('PNG'), encoded('JPEG')
+    return {
+        'png': SimpleUploadedFile('l.png', png[:len(png) // 2], content_type='image/png'),
+        'jpeg': SimpleUploadedFile('l.jpg', jpeg[:len(jpeg) // 2], content_type='image/jpeg'),
+    }
+
+
 def add_document(org, document_type, status=KycDocument.STATUS_VALIDE, reviewed_at=None):
     """Pièce de l'organisation. `business_profile` est encore obligatoire en base (contraction en T9) : un
     profil support est créé pour chaque pièce."""
@@ -202,6 +221,27 @@ class CreateTests(ApiBase):
         self.assertEqual(set(empty.json()), {'name', 'org_type'})
         self.assertEqual(Organization.objects.count(), 0)
 
+    def test_truncated_logo_is_a_400_on_creation_and_creates_nothing(self):
+        client = APIClient(raise_request_exception=False)
+        client.force_authenticate(self.user)
+        for label, upload in truncated_images().items():
+            with self.subTest(label):
+                response = client.post(
+                    ORGS, {'name': 'Logo cassé', 'org_type': 'ENTREPRISE', 'logo': upload}, format='multipart',
+                )
+                self.assertEqual(response.status_code, 400, response.content)
+                self.assertIn('logo', response.json())
+        self.assertEqual(Organization.objects.count(), 0)
+
+    def test_names_mixing_scripts_are_refused(self):
+        for name in ('Rawb\u0430nk', '\u03a1aypal Shop', '\u0410lfa'):  # a cyrillique ; rho grec ; A cyrillique
+            with self.subTest(name=name):
+                self.assertEqual(self.create_via_api(name=name).status_code, 400)
+        cyrillic = '\u0411\u0430\u043d\u043a \u0421\u0442\u043e\u043b\u0438\u0446\u0430'
+        self.assertEqual(self.create_via_api(name=cyrillic).status_code, 201)
+        self.assertEqual(self.create_via_api(name='Café Élégance 24').status_code, 201)
+        self.assertEqual(Organization.objects.count(), 2)
+
     def test_name_is_not_unique_but_normalized(self):
         self.assertEqual(self.create_via_api(name='Homonyme').status_code, 201)
         self.assertEqual(self.create_via_api(name='Homonyme').status_code, 201)
@@ -255,6 +295,13 @@ class InternalTests(ApiBase):
                 self.assertEqual((body['my_role'], body['id']), (role, str(self.org.pk)))
                 self.assertEqual(body['capabilities'], capabilities.capabilities_for_role(role))
                 self.assertEqual(response['Cache-Control'], 'private, no-store')
+
+    def test_nif_is_only_shown_to_roles_that_can_edit_the_identity(self):
+        for role, member in self.members.items():
+            with self.subTest(role=role):
+                body = self.login(member).get(self.url).json()
+                self.assertIn('nif', body)
+                self.assertEqual(body['nif'], NIF if role in (OWNER, ADMIN) else None)
 
     def test_a_non_member_and_an_unknown_organization_get_the_same_refusal(self):
         stranger = self.login(make_user('etranger'))
@@ -335,7 +382,7 @@ class InternalTests(ApiBase):
         full = owner.get(self.url).json()['verification']
         self.assertEqual(full['summary'], {'complete': True, 'label': 'Organisation vérifiée'})
         self.assertEqual(
-            [c['code'] for c in full['verified_claims']], ['RCCM_VERIFIED', 'ID_NATIONALE_VERIFIED', 'REPRESENTATIVE_VERIFIED'],
+            [c['code'] for c in full['verified_claims']], ['RCCM_VERIFIED', 'NATIONAL_ID_VERIFIED', 'REPRESENTATIVE_VERIFIED'],
         )
 
     def test_summary_is_never_complete_when_the_requirement_list_is_empty(self):
@@ -420,13 +467,53 @@ class PatchTests(ApiBase):
         self.assertEqual(self.org.name, 'Atelier')
         # le même nom (même après normalisation) n'est pas un renommage ; le reste reste modifiable
         self.assertEqual(self.patch(name='  Atelier ', description='Nouvelle').status_code, 200)
-        self.assertEqual(self.patch(nif=NIF).status_code, 200)
         self.assertFalse(AuditLog.objects.filter(action='ORG_UPDATED', details__contains='fields=name').exists())
 
-    def test_name_stays_editable_with_pending_or_refused_pieces_only(self):
-        add_document(self.org, 'RCCM', KycDocument.STATUS_EN_ATTENTE)
+    def test_name_stays_editable_with_refused_pieces_only(self):
         add_document(self.org, 'ID_NATIONALE', KycDocument.STATUS_REFUSE)
-        self.assertEqual(self.patch(name='Atelier 2').status_code, 200)
+        self.assertEqual(self.patch(name='Atelier 2', nif=NIF).status_code, 200)
+
+    def test_name_is_also_locked_while_a_piece_is_pending(self):
+        add_document(self.org, 'RCCM', KycDocument.STATUS_EN_ATTENTE)
+        refused = self.patch(name='Autre marque')
+        self.assertEqual((refused.status_code, refused.json()['code']), (409, 'name_locked_by_verification'))
+        self.assertEqual(self.patch(nif=NIF, description='Ok').status_code, 200)  # le NIF reste libre sans pièce validée
+
+    def test_nif_is_locked_once_a_piece_is_validated(self):
+        self.assertEqual(self.patch(nif='AVANT-1').status_code, 200)
+        add_document(self.org, 'RCCM', KycDocument.STATUS_VALIDE)
+        refused = self.patch(nif=NIF)
+        self.assertEqual((refused.status_code, refused.json()['code']), (409, 'nif_locked_by_verification'))
+        self.assertEqual(self.patch(nif=' AVANT-1 ', description='Autre').status_code, 200)  # inchangé
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.nif, 'AVANT-1')
+
+    def test_removing_the_city_removes_the_commune(self):
+        kin = City.objects.create(name='Kinshasa')
+        gombe = Commune.objects.create(city=kin, name='Gombe')
+        self.assertEqual(self.patch(city_id=str(kin.id), commune_id=str(gombe.id)).status_code, 200)
+        cleared = self.patch(city_id=None).json()
+        self.assertEqual((cleared['city_id'], cleared['commune_id']), (None, None))
+        self.org.refresh_from_db()
+        self.assertIsNone(self.org.commune_id)
+
+    def test_truncated_logo_is_a_400_on_patch_and_leaves_no_file(self):
+        import os
+
+        from django.conf import settings as django_settings
+
+        folder = os.path.join(django_settings.MEDIA_ROOT, 'organization_logos')
+        before = set(os.listdir(folder)) if os.path.isdir(folder) else set()
+        client = APIClient(raise_request_exception=False)
+        client.force_authenticate(self.members[OWNER])
+        for label, upload in truncated_images().items():
+            with self.subTest(label):
+                response = client.patch(self.url, {'logo': upload}, format='multipart')
+                self.assertEqual(response.status_code, 400, response.content)
+                self.assertIn('logo', response.json())
+        self.org.refresh_from_db()
+        self.assertFalse(self.org.logo)
+        self.assertEqual(set(os.listdir(folder)) if os.path.isdir(folder) else set(), before)
 
     def test_name_lock_covers_the_admin_too(self):
         add_document(self.org, 'RCCM', KycDocument.STATUS_VALIDE)
@@ -668,6 +755,12 @@ class PublicListTests(TestCase):
         self.assertEqual(self.names(search='Privée'), [])
         self.assertEqual(self.names(search=member.email), [])
 
+    def test_search_is_bounded(self):
+        self.assertEqual(self.client.get(ORGS, {'search': 'a' * 100}).status_code, 200)
+        response = self.client.get(ORGS, {'search': 'a' * 101})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('search', response.json())
+
     def test_org_type_filter(self):
         make_org('E1')
         make_org('O1', org_type='ONG')
@@ -682,8 +775,8 @@ class PublicListTests(TestCase):
         add_document(partial, 'ID_NATIONALE', KycDocument.STATUS_EN_ATTENTE)
         add_document(none, 'ARRETE_ONG')  # validée mais non exigée pour ENTREPRISE : ne compte pas
         self.assertEqual(self.names(claim='RCCM_VERIFIED'), ['Complete', 'Partielle'])
-        self.assertEqual(self.names(claim='ID_NATIONALE_VERIFIED'), ['Complete'])
-        self.assertEqual(self.names(claim='ONG_DECREE_VERIFIED'), [])
+        self.assertEqual(self.names(claim='NATIONAL_ID_VERIFIED'), ['Complete'])
+        self.assertEqual(self.names(claim='NGO_DECREE_VERIFIED'), [])
         self.assertEqual(self.names(fully_verified='true'), ['Complete'])
         self.assertEqual(self.names(fully_verified='FALSE'), ['Aucune', 'Partielle'])
         self.assertEqual(self.names(claim='RCCM_VERIFIED', fully_verified='false'), ['Partielle'])
@@ -869,3 +962,21 @@ class FiltersMatchSharedDerivationTests(TestCase):
             names = {o['name'] for o in client.get(ORGS, {'claim': code}).json()['results']}
             expected = {o.name for o in orgs if code in {c['code'] for c in summaries[o.pk]['verified_claims']}}
             self.assertEqual(names, expected, code)
+
+
+@override_settings(CACHES=LOCMEM_CACHE)
+class ListThrottleTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_public_list_is_throttled_per_ip_and_defaults_apply(self):
+        self.assertEqual(settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']['org_list'], '600/hour')
+        client = APIClient()
+        with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'org_list': '2/hour'}):
+            codes = [client.get(ORGS, REMOTE_ADDR='10.7.7.7').status_code for _ in range(3)]
+            other = client.get(ORGS, REMOTE_ADDR='10.7.7.8').status_code
+        self.assertEqual((codes, other), ([200, 200, 429], 200))
+        with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'anon': '1/hour'}):
+            cache.clear()
+            codes = [client.get(ORGS, REMOTE_ADDR='10.7.7.9').status_code for _ in range(2)]
+        self.assertEqual(codes, [200, 429])

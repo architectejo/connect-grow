@@ -14,6 +14,7 @@ aucune réponse publique (seulement dans le détail interne, réservé aux membr
 from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.fields import DateTimeField
 from rest_framework.response import Response
+from rest_framework.settings import api_settings
 from rest_framework.views import APIView
 
 from apps.common.pagination import StandardPagination
@@ -25,7 +26,7 @@ from .services import (
     get_internal_verification, get_organization_for_member, get_organization_limits, get_verification_data, leave_organization, public_organizations_queryset,
     update_organization,
 )
-from .throttles import OrganizationCreateThrottle, OrganizationWriteThrottle
+from .throttles import OrganizationCreateThrottle, OrganizationListThrottle, OrganizationWriteThrottle
 
 EXEMPT_REASON = (
     "organisation : création par le compte et autorisation par objet dans le service ; "
@@ -87,7 +88,9 @@ def serialize_internal(request, organization, role):
     category_ids = get_category_ids_by_organization([organization]).get(organization.pk, [])
     return {
         'id': str(organization.pk), 'name': organization.name, 'org_type': organization.org_type,
-        'description': organization.description, 'logo': _logo_url(request, organization), 'nif': organization.nif,
+        'description': organization.description, 'logo': _logo_url(request, organization),
+        # Minimisation (règle 10) : le NIF n'est lu que par les rôles qui peuvent le modifier.
+        'nif': organization.nif if 'org.edit_profile' in capabilities.capabilities_for_role(role) else None,
         'city_id': str(organization.city_id) if organization.city_id else None,
         'commune_id': str(organization.commune_id) if organization.commune_id else None,
         'category_ids': [str(c) for c in category_ids],
@@ -125,7 +128,12 @@ class OrganizationViewSet(viewsets.ViewSet):
     """`GET organizations/` (public, paginé) et `POST organizations/` (création, authentifié)."""
 
     acting_context_exempt = EXEMPT_REASON
-    throttle_classes = [OrganizationCreateThrottle]  # ne compte que les écritures (POST)
+
+    def get_throttles(self):
+        """Défauts du projet (anonyme/utilisateur) + un throttle propre à l'action : lecture publique par IP
+        pour `list`, plafond de création par compte pour `create`."""
+        specific = OrganizationListThrottle if self.action == 'list' else OrganizationCreateThrottle
+        return [throttle() for throttle in api_settings.DEFAULT_THROTTLE_CLASSES] + [specific()]
 
     def get_permissions(self):
         if self.action == 'list':

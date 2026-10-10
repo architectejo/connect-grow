@@ -23,7 +23,7 @@ from apps.common.contexts import (
     CONTEXT_ORGANIZATION, DENY_OBJECT_STATE, DENY_PERMISSION, DENY_RELATION, DENY_SECURITY, ContextDenied,
 )
 from apps.common.exception_handler import CodedAPIException
-from apps.common.images import validate_image_pixels, validate_image_upload_size
+from apps.common.images import reencode_image, validate_image_pixels, validate_image_upload_size
 from apps.common.utils import parse_uuid
 from apps.moderation.services import is_user_restricted, record_audit
 from apps.platform_core.services import publish_event
@@ -198,14 +198,33 @@ def _ensure_under_limit(user_id):
 _FORBIDDEN_NAME_CATEGORIES = ('Cc', 'Cf', 'Zl', 'Zp')
 
 
+_CONFUSABLE_SCRIPTS = ('LATIN', 'CYRILLIC', 'GREEK')
+
+
+def _mixes_scripts(name):
+    """Vrai si le nom mêle plusieurs écritures aisément confondables (latin, cyrillique, grec) : « Rawbаnk »
+    avec un « а » cyrillique imite « Rawbank » (homoglyphes). Ne détecte pas les collisions entre noms
+    d'écritures homogènes (dette : modération, L1-01)."""
+    scripts = set()
+    for ch in name:
+        if ch.isalpha():
+            word = unicodedata.name(ch, '').split(' ', 1)[0]
+            if word in _CONFUSABLE_SCRIPTS:
+                scripts.add(word)
+    return len(scripts) > 1
+
+
 def normalize_name(name):
     """Forme canonique d'un nom d'organisation : NFKC, espaces multiples repliés, bords retirés. Retourne
     None si le nom contient un caractère de contrôle, de direction ou de largeur nulle (catégories
-    Unicode Cc, Cf, Zl, Zp), qui permettraient d'usurper un nom visuellement."""
+    Unicode Cc, Cf, Zl, Zp), ou qui mêle latin, cyrillique et grec (homoglyphes), qui permettraient d'usurper
+    un nom visuellement."""
     if not isinstance(name, str):
         return None
     name = unicodedata.normalize('NFKC', name)
     if any(unicodedata.category(ch) in _FORBIDDEN_NAME_CATEGORIES for ch in name):
+        return None
+    if _mixes_scripts(name):
         return None
     return re.sub(r'\s+', ' ', name).strip()
 
@@ -305,8 +324,14 @@ def _check_logo(logo, errors):
     try:
         validate_image_upload_size(logo)
         validate_image_pixels(logo)
+        # Décodage réel (une image tronquée ou corrompue passe les contrôles d'en-tête) : refus ici en 400,
+        # jamais une erreur au moment de l'écriture.
+        reencode_image(logo)
     except DjangoValidationError as exc:
         errors['logo'] = [ErrorDetail(m, code='invalid_logo') for m in exc.messages]
+    finally:
+        if hasattr(logo, 'seek'):
+            logo.seek(0)
 
 
 def _validate_creation_input(name, org_type, description, nif, category_ids, city_id, commune_id, logo):
@@ -355,7 +380,7 @@ def create_organization(
             )
             if logo:
                 organization.logo = logo
-            organization.save()
+            _save_with_logo_check(organization)
             OrganizationCategory.objects.bulk_create([
                 OrganizationCategory(organization=organization, category_id=cid) for cid in wanted_categories
             ])
@@ -374,6 +399,15 @@ def create_organization(
         _discard_logo(organization)
         raise
     return organization
+
+
+def _save_with_logo_check(organization, **kwargs):
+    """`save()` ré-encode le logo ; une image illisible qui aurait échappé à la validation devient un 400
+    `invalid_logo` et non une erreur serveur. Le ré-encodage précède l'écriture : aucun fichier orphelin."""
+    try:
+        organization.save(**kwargs)
+    except DjangoValidationError:
+        raise serializers.ValidationError({'logo': _error("Fichier image invalide.", 'invalid_logo')})
 
 
 def _discard_logo(organization):
@@ -411,8 +445,9 @@ def update_organization(actor, organization_id, **changes) -> Organization:
     jamais un éditeur ni un analyste, Q-CP3). Seules les clés présentes sont lues ; `logo=None` retire le logo.
 
     - `org_type` : refusé (400 `org_type_immutable`), le type ne change pas par l'API ;
-    - le nom ne peut plus changer dès qu'une pièce de l'organisation est validée (409
-      `name_locked_by_verification`, ADR 0006 A13) : un compte vérifié ne se renomme pas sans nouvelle
+    - le nom ne peut plus changer dès qu'une pièce de l'organisation est validée ou en attente d'examen (409
+      `name_locked_by_verification`, ADR 0006 A13 et §18) et le NIF dès qu'une pièce est validée (409
+      `nif_locked_by_verification`) : un compte vérifié ne se renomme pas sans nouvelle
       vérification (règle 3) ; un nom inchangé après normalisation n'est pas un renommage ;
     - l'autorisation est (re)faite sous verrou, juste avant l'écriture (révocation ou suspension entre-temps) ;
     - audit synchrone `ORG_UPDATED` (noms de champs seulement, jamais les valeurs) et événement
@@ -444,6 +479,8 @@ def update_organization(actor, organization_id, **changes) -> Organization:
             if 'city_id' in changes or 'commune_id' in changes:
                 city_id = changes['city_id'] if 'city_id' in changes else organization.city_id
                 commune_id = changes['commune_id'] if 'commune_id' in changes else organization.commune_id
+                if city_id is None and 'commune_id' not in changes:
+                    commune_id = None  # retirer la ville retire aussi la commune (cohérence)
                 _check_location(city_id, commune_id, errors)
                 values['city_id'], values['commune_id'] = city_id, commune_id
             if changes.get('logo') is not None:
@@ -451,13 +488,20 @@ def update_organization(actor, organization_id, **changes) -> Organization:
             if errors:
                 raise serializers.ValidationError(errors)
 
-            if (values.get('name') is not None and values['name'] != organization.name
-                    and KycDocument.objects.filter(
-                        organization=organization, status=KycDocument.STATUS_VALIDE).exists()):
+            pieces = KycDocument.objects.filter(organization=organization)
+            if values.get('name') is not None and values['name'] != organization.name and pieces.filter(
+                    status__in=(KycDocument.STATUS_VALIDE, KycDocument.STATUS_EN_ATTENTE)).exists():
                 raise OrganizationError(
-                    "Le nom ne peut plus être modifié : une pièce de l'organisation est validée. "
-                    "Contactez le support pour un changement de nom.",
+                    "Le nom ne peut plus être modifié : une pièce de l'organisation est validée ou en cours "
+                    "d'examen. Contactez le support pour un changement de nom.",
                     'name_locked_by_verification',
+                )
+            if values.get('nif') is not None and values['nif'] != organization.nif and pieces.filter(
+                    status=KycDocument.STATUS_VALIDE).exists():
+                raise OrganizationError(
+                    "Le NIF ne peut plus être modifié : une pièce de l'organisation est validée. "
+                    "Contactez le support pour un changement.",
+                    'nif_locked_by_verification',
                 )
 
             touched = []
@@ -470,7 +514,7 @@ def update_organization(actor, organization_id, **changes) -> Organization:
                 organization.logo = changes['logo']
                 touched.append('logo')
             if touched:
-                organization.save(update_fields=touched + ['updated_at'])
+                _save_with_logo_check(organization, update_fields=touched + ['updated_at'])
                 if 'logo' in touched and organization.logo:
                     stored_new_logo = organization.logo.name
             if 'category_ids' in values:

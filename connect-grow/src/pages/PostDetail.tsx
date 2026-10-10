@@ -14,6 +14,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePost, usePosts, useToggleFavorite } from "@/hooks/use-marketplace";
 import { loginPath } from "@/lib/auth-paths";
 import { shareLink } from "@/lib/contact";
+import { allowedChannelsOf } from "@/lib/contact-reveal";
 import { formatCount, formatRelativeDate } from "@/lib/format";
 import { getPostBadges, sellerDisplayName } from "@/lib/post";
 import { cn } from "@/lib/utils";
@@ -230,7 +231,12 @@ const PostDetail = () => {
                 actions={
                   isOwner ? undefined : (
                     <>
-                      <ContactActions onMessage={requireAuth(() => setContactOpen(true))} />
+                      <ContactActions
+                        offerId={post.id}
+                        sellerName={sellerName}
+                        allowedChannels={allowedChannelsOf(post)}
+                        onMessage={requireAuth(() => setContactOpen(true))}
+                      />
                       {post.is_exchangeable && (
                         <Button variant="soft" size="lg" onClick={requireAuth(() => setExchangeOpen(true))}>
                           <Repeat aria-hidden /> Proposer un échange
@@ -313,7 +319,13 @@ const PostDetail = () => {
             </Link>
           </Button>
         ) : (
-          <ContactActions layout="bar" onMessage={requireAuth(() => setContactOpen(true))} />
+          <ContactActions
+            layout="bar"
+            offerId={post.id}
+            sellerName={sellerName}
+            allowedChannels={allowedChannelsOf(post)}
+            onMessage={requireAuth(() => setContactOpen(true))}
+          />
         )}
       </div>
 

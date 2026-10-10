@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AccountShell } from "@/components/layout/AccountShell";
 import { MyPostsList } from "@/components/dashboard/MyPostsList";
+import { ReceivedRevealsSection } from "@/components/dashboard/ReceivedRevealsSection";
 import { ViewsChart } from "@/components/dashboard/ViewsChart";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDashboardStats, useKycDocuments } from "@/hooks/use-account";
@@ -115,6 +116,8 @@ const Dashboard = () => {
         isError={myPosts.isError}
         onRetry={() => myPosts.refetch()}
       />
+
+      <ReceivedRevealsSection />
     </AccountShell>
   );
 };

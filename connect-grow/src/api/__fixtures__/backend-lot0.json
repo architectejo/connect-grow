@@ -453,5 +453,118 @@
    "detail": "Moyen de contact invalide.",
    "code": "channel_invalid"
   }
+ },
+ "features_exchange_off": {
+  "features": {
+   "exchange_enabled": false
+  }
+ },
+ "features_exchange_on": {
+  "features": {
+   "exchange_enabled": true
+  }
+ },
+ "exchange_feature_disabled_error": {
+  "detail": "Cette fonctionnalité n'est pas disponible.",
+  "code": "feature_disabled"
+ },
+ "post_detail_exchange_off": {
+  "id": "9b3e1203-9979-4865-ab7d-e0672a179cda",
+  "seller": {
+   "id": "c9b4e476-312b-467f-8b4e-70e776a0d261",
+   "full_name": "Vendeur",
+   "user_type": "PARTICULIER",
+   "date_joined": "2026-10-10T04:08:26.281137+01:00",
+   "photo": null,
+   "business_profile": null
+  },
+  "seller_name": "Vendeur",
+  "category": "2c0d1f16-7b38-4346-abe5-c41f38dab0aa",
+  "category_name": "Électronique",
+  "commune": "fad6191e-fb10-45ef-aa58-962567258b35",
+  "commune_name": "Gombe",
+  "post_type": "PRODUIT",
+  "title": "Un joli canapé à vendre",
+  "description": "Description suffisamment longue pour passer la validation du CDC.",
+  "price": "100.00",
+  "currency": "USD",
+  "condition": null,
+  "stock": 1,
+  "is_price_negotiable": true,
+  "main_image": "http://testserver/media/offers/971a532c8ace447a8012c2ad61d23c75.webp",
+  "images": [],
+  "views_count": 0,
+  "likes_count": 0,
+  "shares_count": 0,
+  "created_at": "2026-10-10T04:08:27.055199+01:00",
+  "status": "ACTIVE",
+  "expires_at": "2026-12-09T04:08:27.055199+01:00",
+  "visibility_score": 0.0,
+  "visibility_rank": "Faible",
+  "offer_rating": {
+   "average": null,
+   "count": 0
+  },
+  "seller_rating": {
+   "average": null,
+   "count": 0
+  },
+  "is_favorited": false,
+  "favorites_count": 0,
+  "is_trending": false,
+  "is_sponsored": false,
+  "allowed_channels": [
+   "MESSAGE"
+  ]
+ },
+ "post_detail_exchange_on": {
+  "id": "9b3e1203-9979-4865-ab7d-e0672a179cda",
+  "seller": {
+   "id": "c9b4e476-312b-467f-8b4e-70e776a0d261",
+   "full_name": "Vendeur",
+   "user_type": "PARTICULIER",
+   "date_joined": "2026-10-10T04:08:26.281137+01:00",
+   "photo": null,
+   "business_profile": null
+  },
+  "seller_name": "Vendeur",
+  "category": "2c0d1f16-7b38-4346-abe5-c41f38dab0aa",
+  "category_name": "Électronique",
+  "commune": "fad6191e-fb10-45ef-aa58-962567258b35",
+  "commune_name": "Gombe",
+  "post_type": "PRODUIT",
+  "title": "Un joli canapé à vendre",
+  "description": "Description suffisamment longue pour passer la validation du CDC.",
+  "price": "100.00",
+  "currency": "USD",
+  "condition": null,
+  "stock": 1,
+  "is_price_negotiable": true,
+  "is_exchangeable": true,
+  "main_image": "http://testserver/media/offers/971a532c8ace447a8012c2ad61d23c75.webp",
+  "images": [],
+  "views_count": 0,
+  "likes_count": 0,
+  "shares_count": 0,
+  "created_at": "2026-10-10T04:08:27.055199+01:00",
+  "status": "ACTIVE",
+  "expires_at": "2026-12-09T04:08:27.055199+01:00",
+  "visibility_score": 0.0,
+  "visibility_rank": "Faible",
+  "offer_rating": {
+   "average": null,
+   "count": 0
+  },
+  "seller_rating": {
+   "average": null,
+   "count": 0
+  },
+  "is_favorited": false,
+  "favorites_count": 0,
+  "is_trending": false,
+  "is_sponsored": false,
+  "allowed_channels": [
+   "MESSAGE"
+  ]
  }
 }

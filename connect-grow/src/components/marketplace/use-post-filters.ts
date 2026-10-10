@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { PostFilters } from "@/api/types";
+import { useFeatures } from "@/hooks/use-features";
 
 export const FILTER_KEYS = [
   "search",
@@ -26,15 +27,18 @@ export const DEFAULT_ORDERING = "-visibility_score";
 /** Filtres de la marketplace lus et écrits dans l'URL (partageables, conservés au retour arrière). */
 export function usePostFilters() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { exchangeEnabled } = useFeatures();
 
   const filters = useMemo(() => {
     const result: PostFilters = {};
     for (const key of FILTER_KEYS) {
       const value = searchParams.get(key);
+      // Troc éteint : le paramètre de l'URL est ignoré (jamais envoyé au serveur, jamais compté).
+      if (key === "is_exchangeable" && !exchangeEnabled) continue;
       if (value) (result as Record<string, string>)[key] = value;
     }
     return result;
-  }, [searchParams]);
+  }, [searchParams, exchangeEnabled]);
 
   const setFilters = useCallback(
     (patch: Partial<Record<FilterKey, string | undefined>>) => {

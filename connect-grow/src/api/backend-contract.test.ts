@@ -225,4 +225,18 @@ describe("erreurs réelles du backend vs helpers du front", () => {
     expect(apiErrorCode(error)).toBe("not_eligible");
     expect(reviewErrorMessage(error)).toBe("Vous pourrez donner votre avis après avoir contacté le vendeur.");
   });
+
+  it("Troc masqué (L0-14) : configuration publique, annonce sans is_exchangeable, erreur feature_disabled", () => {
+    expect(mismatches(f.features_exchange_off as Row, { features: "obj" })).toEqual([]);
+    expect(mismatches((f.features_exchange_off as Row).features as Row, { exchange_enabled: "bool" })).toEqual([]);
+    expect(f.features_exchange_off).toEqual({ features: { exchange_enabled: false } });
+    expect(f.features_exchange_on).toEqual({ features: { exchange_enabled: true } });
+    expect(f.post_detail_exchange_off).not.toHaveProperty("is_exchangeable");
+    expect(mismatches(f.post_detail_exchange_off as Row, POST)).toEqual([]);
+    expect(mismatches(f.post_detail_exchange_on as Row, POST)).toEqual([]);
+    expect(f.post_detail_exchange_on).toHaveProperty("is_exchangeable", true);
+    expect(apiErrorCode({ response: { status: 403, data: f.exchange_feature_disabled_error } })).toBe("feature_disabled");
+    const serialized = JSON.stringify([f.features_exchange_off, f.features_exchange_on, f.exchange_feature_disabled_error]);
+    expect(serialized).not.toMatch(/phone|email|nif/i);
+  });
 });

@@ -2,6 +2,7 @@ import { Heart, MapPin, Package } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { Post } from "@/api/types";
+import { useFeatures } from "@/hooks/use-features";
 import { formatRelativeDate, formatShortAge } from "@/lib/format";
 import { getPostBadges, isSellerVerified, sellerDisplayName } from "@/lib/post";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,9 @@ interface PostCardProps {
  */
 export function PostCard({ post, isFavorite, onToggleFavorite, hideSeller, className }: PostCardProps) {
   const { t } = useTranslation();
+  const { exchangeEnabled } = useFeatures();
+  // Une réponse gardée hors ligne peut encore porter le champ : le badge dépend de la configuration, pas seulement de l'annonce
+  const exchangeable = exchangeEnabled && !!post.is_exchangeable;
   const badges = getPostBadges(post);
   const sellerName = sellerDisplayName(post.seller);
   const sellerAvatar = post.seller?.business_profile?.logo || post.seller?.photo;
@@ -70,10 +74,10 @@ export function PostCard({ post, isFavorite, onToggleFavorite, hideSeller, class
           </button>
         )}
 
-        {(post.is_exchangeable || post.post_type === "SERVICE") && (
+        {(exchangeable || post.post_type === "SERVICE") && (
           <div className="absolute inset-x-2.5 bottom-2.5 flex flex-wrap gap-1.5">
             {post.post_type === "SERVICE" && <StatusBadge kind="service" className="bg-background/95 backdrop-blur-sm" />}
-            {post.is_exchangeable && <StatusBadge kind="exchangeable" className="bg-background/95 backdrop-blur-sm" />}
+            {exchangeable && <StatusBadge kind="exchangeable" className="bg-background/95 backdrop-blur-sm" />}
           </div>
         )}
       </div>

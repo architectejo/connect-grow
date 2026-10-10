@@ -11,7 +11,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.catalog.models import Category, City, Commune
-from apps.identity.models import User
+from apps.identity.models import Membership, Organization, User
 from apps.marketplace.models import ContactEvent, Offer
 from apps.marketplace.tests import make_test_image
 from apps.moderation.models import Report
@@ -310,6 +310,20 @@ class ReviewReplyTests(ReviewsTestBase):
         self.assertTrue(response.data['is_post_owner'])
         dispatch_outbox_now()
         self.assertEqual(Notification.objects.get(user=self.buyer).notification_type, 'SYSTEM')
+
+    def test_organization_reply_follows_the_review_reply_capability(self):
+        review = self.make_review()
+        org = Organization.objects.create(name='Atelier', org_type='ENTREPRISE')
+        Review.objects.filter(pk=review.pk).update(seller_context_type='ORGANIZATION', seller_context_id=org.id)
+        review.refresh_from_db()
+        expected = {'OWNER': True, 'ADMIN': True, 'EDITOR': True, 'ANALYST': False}
+        for role, allowed in expected.items():
+            member = User.objects.create_user(email=f'{role}@example.com', password='x', full_name=role)
+            Membership.objects.create(organization=org, user=member, role=role)
+            with self.subTest(role=role):
+                self.assertEqual(services.can_reply(review, member), allowed)
+        self.assertFalse(services.can_reply(review, self.other))
+        self.assertFalse(services.can_reply(review, self.seller))
 
     def test_author_and_strangers_cannot_reply(self):
         review = self.make_review()

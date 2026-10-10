@@ -16,7 +16,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.catalog.models import Category, City, Commune
 
-from .models import BusinessProfile, KycDocument, OtpCode, User
+from .models import BusinessProfile, KycDocument, Organization, OrganizationCategory, OtpCode, User
 
 
 class OtpCodeModelTests(TestCase):
@@ -295,34 +295,37 @@ class UuidAndCatalogReferenceTests(APITestCase):
         self.assertEqual(self.register(ville='12').status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(self.register(commune=str(uuid.uuid4())).status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_business_categories_stored_as_uuid_and_validated(self):
-        response = self.register(
-            user_type='ENTREPRISE',
-            business_profile={'business_name': 'Chez Alice', 'categories': [str(self.category.id)]},
-        )
+    def test_organization_categories_stored_as_uuid_and_validated(self):
+        owner = User.objects.create_user(email='owner@example.com', password='x', full_name='Alice', phone_verified=True)
+        self.client.force_authenticate(owner)
+        response = self.client.post(reverse('organizations'), {
+            'name': 'Chez Alice', 'org_type': 'ENTREPRISE', 'category_ids': [str(self.category.id)],
+        }, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
-        self.assertEqual(response.data['business_profile']['categories'], [str(self.category.id)])
-        profile = BusinessProfile.objects.get(business_name='Chez Alice')
-        self.assertEqual(profile.category_ids, [self.category.id])
-
-        bad = self.register(
-            email='bob@example.com', user_type='ENTREPRISE',
-            business_profile={'business_name': 'Chez Bob', 'categories': [str(uuid.uuid4())]},
+        self.assertEqual(response.data['category_ids'], [str(self.category.id)])
+        organization = Organization.objects.get(name='Chez Alice')
+        self.assertEqual(
+            list(OrganizationCategory.objects.filter(organization=organization).values_list('category_id', flat=True)),
+            [self.category.id],
         )
-        self.assertEqual(bad.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_business_list_has_no_query_per_user_for_catalog(self):
+        bad = self.client.post(reverse('organizations'), {
+            'name': 'Chez Bob', 'org_type': 'ENTREPRISE', 'category_ids': [str(uuid.uuid4())],
+        }, format='json')
+        self.assertEqual(bad.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('category_ids', bad.json())
+
+    def test_organization_list_has_no_query_per_organization_for_catalog(self):
         for i in range(3):
-            user = User.objects.create_user(
-                email=f'b{i}@example.com', password='x', full_name=f'B{i}', user_type='ENTREPRISE',
-                city_id=self.city.id, commune_id=self.commune.id,
+            organization = Organization.objects.create(
+                name=f'Boutique {i}', org_type='ENTREPRISE', city_id=self.city.id, commune_id=self.commune.id,
             )
-            profile = BusinessProfile.objects.create(user=user, business_name=f'Boutique {i}')
-            profile.set_category_ids([self.category.id])
-        with self.assertNumQueries(5):  # total, utilisateurs, catégories, villes, communes : indépendant du nombre de profils
-            response = self.client.get(reverse('business_list'))
+            OrganizationCategory.objects.create(organization=organization, category_id=self.category.id)
+        # total, organisations, catégories, exigences, pièces : indépendant du nombre d'organisations
+        with self.assertNumQueries(6):
+            response = self.client.get(reverse('organizations'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['results'][0]['ville_name'], 'Kinshasa')
+        self.assertEqual(response.data['results'][0]['city_id'], str(self.city.id))
 
     def test_kyc_urls_use_uuid(self):
         admin = make_kyc_reviewer('admin@example.com')
@@ -335,95 +338,6 @@ class UuidAndCatalogReferenceTests(APITestCase):
         self.assertEqual(
             self.client.post('/api/accounts/kyc/documents/1/decision/', {'decision': 'VALIDE'}).status_code,
             status.HTTP_404_NOT_FOUND,
-        )
-
-
-class PublicBusinessListTests(APITestCase):
-    """Règle 10 : la liste publique des entreprises n'expose aucune donnée personnelle."""
-
-    FORBIDDEN_KEYS = {
-        'email', 'phone', 'phone_verified', 'date_joined', 'nif', 'full_name', 'password',
-        'ville', 'commune', 'business_profile', 'user_type', 'photo',
-    }
-
-    def make_business(self, n, **extra):
-        user = User.objects.create_user(
-            email=f'biz{n}@example.com', phone=f'+24381000000{n}', password='x',
-            full_name=f'Personne Privée {n}', user_type='ENTREPRISE', **extra,
-        )
-        BusinessProfile.objects.create(user=user, business_name=f'Boutique {n}', bio='Vente de pagnes', nif='A123456')
-        return user
-
-    def test_only_whitelisted_keys_are_exposed(self):
-        self.make_business(1)
-        response = self.client.get(reverse('business_list'))
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        item = response.data['results'][0]
-        self.assertEqual(
-            set(item),
-            {'id', 'business_name', 'logo', 'bio', 'categories', 'ville_name', 'commune_name', 'is_verified'},
-        )
-        self.assertFalse(self.FORBIDDEN_KEYS & set(item))
-        raw = response.content.decode()
-        for secret in ('biz1@example.com', '+243810000001', 'A123456', 'Personne Privée'):
-            self.assertNotIn(secret, raw)
-
-    def test_inactive_users_and_profileless_users_are_hidden(self):
-        banned = self.make_business(1)
-        banned.is_active = False
-        banned.save(update_fields=['is_active'])
-        User.objects.create_user(email='noprofile@example.com', password='x', full_name='X', user_type='ENTREPRISE')
-        self.make_business(2)
-        names = [i['business_name'] for i in self.client.get(reverse('business_list')).data['results']]
-        self.assertEqual(names, ['Boutique 2'])
-
-    def test_list_is_paginated_and_search_ignores_personal_name(self):
-        for n in range(1, 4):
-            self.make_business(n)
-        data = self.client.get(reverse('business_list'), {'page_size': 2}).data
-        self.assertEqual((data['count'], len(data['results'])), (3, 2))
-        self.assertIsNotNone(data['next'])
-        self.assertEqual(self.client.get(reverse('business_list'), {'search': 'Boutique 2'}).data['count'], 1)
-        # Le nom de la personne n'est pas indexé par la recherche publique.
-        self.assertEqual(self.client.get(reverse('business_list'), {'search': 'Privée'}).data['count'], 0)
-
-
-class BusinessVerifiedFilterTests(APITestCase):
-    def make_business(self, n):
-        user = User.objects.create_user(
-            email=f'biz{n}@example.com', phone=f'+24381000000{n}', password='x',
-            full_name=f'Personne {n}', user_type='ENTREPRISE',
-        )
-        BusinessProfile.objects.create(user=user, business_name=f'Boutique {n}', bio='Vente')
-        return user
-
-    def setUp(self):
-        self.verified = self.make_business(1)
-        self.plain = self.make_business(2)
-        BusinessProfile.objects.filter(user=self.verified).update(is_verified=True)
-
-    def names(self, value):
-        response = self.client.get(reverse('business_list'), {'is_verified': value})
-        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
-        return [i['business_name'] for i in response.data['results']]
-
-    def test_filter_true_and_false(self):
-        self.assertEqual(self.names('true'), ['Boutique 1'])
-        self.assertEqual(self.names('FALSE'), ['Boutique 2'])
-        self.assertEqual(len(self.client.get(reverse('business_list')).data['results']), 2)
-
-    def test_invalid_value_is_rejected(self):
-        for value in ('1', 'yes', 'oui', ''):
-            response = self.client.get(reverse('business_list'), {'is_verified': value})
-            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, value)
-            self.assertIn('is_verified', response.data)
-
-    def test_keys_and_pagination_unchanged(self):
-        response = self.client.get(reverse('business_list'), {'is_verified': 'true', 'page_size': 1})
-        self.assertEqual(response.data['count'], 1)
-        self.assertEqual(
-            set(response.data['results'][0]),
-            {'id', 'business_name', 'logo', 'bio', 'categories', 'ville_name', 'commune_name', 'is_verified'},
         )
 
 

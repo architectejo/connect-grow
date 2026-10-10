@@ -150,9 +150,10 @@ def check_shape(label, obj, spec):
 
 
 SPEC_USER = {
-    'id': 'uuid', 'email': 'str', 'full_name': 'str', 'photo?': 'str|null', 'user_type': 'str',
+    # L0-09g : le compte est unique, plus de `user_type` ni de `business_profile` ; `phone_verified` en lecture seule.
+    'id': 'uuid', 'email': 'str', 'full_name': 'str', 'photo?': 'str|null',
     'phone?': 'str', 'ville?': 'uuid|null', 'ville_name?': 'str', 'commune?': 'uuid|null',
-    'commune_name?': 'str', 'business_profile?': 'obj|null', 'date_joined?': 'date', 'phone_verified?': 'bool',
+    'commune_name?': 'str', 'date_joined?': 'date', 'phone_verified': 'bool',
 }
 SPEC_SELLER = {
     'id': 'uuid', 'full_name': 'str', 'photo?': 'str|null', 'user_type': 'str',
@@ -184,9 +185,10 @@ SPEC_KYC = {
     'id': 'uuid', 'document_type': 'str', 'download_url?': 'str|null', 'status': 'str',
     'rejection_reason?': 'str', 'created_at': 'date', 'reviewed_at?': 'date|null',
 }
-SPEC_BUSINESS = {
-    'id': 'uuid', 'business_name': 'str', 'logo?': 'str|null', 'bio?': 'str', 'categories?': 'list',
-    'ville_name?': 'str|null', 'commune_name?': 'str|null', 'is_verified': 'bool',
+SPEC_ORGANIZATION = {
+    'id': 'uuid', 'name': 'str', 'org_type': 'str', 'description': 'str', 'logo': 'str|null',
+    'city_id': 'uuid|null', 'commune_id': 'uuid|null', 'category_ids': 'list', 'verified_claims': 'list',
+    'verification_summary': 'obj', 'member_since': 'date',
 }
 SPEC_PAGE = {'count': 'num', 'next': 'str|null', 'previous': 'str|null', 'results': 'list'}
 SPEC_FAV = {'id': 'uuid', 'post': 'obj', 'created_at': 'date'}
@@ -234,16 +236,23 @@ def main():
                 "non configuré par settings.py ?) - inscription par téléphone impossible en recette locale")
         return
     r = call('POST', 'accounts/register/', {
-        'full_name': 'Sandrine Mbala', 'password': pw, 'user_type': 'ENTREPRISE', 'phone': phone,
-        'otp_code': code, 'business_profile': {'business_name': f'Atelier {RUN}'},
+        'full_name': 'Sandrine Mbala', 'password': pw, 'phone': phone, 'otp_code': code,
+        # Anciens champs : ignorés par le serveur (compatibilité transitoire), aucune organisation créée.
+        'user_type': 'ENTREPRISE', 'business_profile': {'business_name': f'Atelier {RUN}'},
     }, ip=ip_reg)
-    expect('register téléphone+OTP (ENTREPRISE)', r, 201)
+    expect('register téléphone+OTP', r, 201)
     if r.status != 201:
         return
     check_shape('register -> User', r.json, SPEC_USER)
     if 'password' in r.json or 'otp_code' in r.json:
         finding('register expose password/otp_code')
+    if 'user_type' in r.json or 'business_profile' in r.json:
+        finding('register expose encore user_type/business_profile')
     seller_id = r.json['id']
+    # Les routes KYC historiques (`accounts/kyc/documents/`, retirées en T9) exigent encore un BusinessProfile,
+    # que l'inscription ne crée plus : le support de test est créé directement en base.
+    db("from apps.identity.models import User, BusinessProfile\n"
+       f"BusinessProfile.objects.create(user=User.objects.get(pk='{seller_id}'), business_name='Atelier {RUN}')")
 
     # Mauvais OTP, rejeu du même code
     r = call('POST', 'accounts/register/', {'full_name': 'X', 'password': pw, 'phone': phone, 'otp_code': code})
@@ -253,8 +262,7 @@ def main():
     emails = [f'acheteur{i}.{RUN}@example.com' for i in (1, 2, 3)]
     buyer_ids = []
     for i, em in enumerate(emails):
-        r = call('POST', 'accounts/register/', {'full_name': f'Acheteur Numéro{i}', 'password': pw, 'email': em,
-                                                'user_type': 'PARTICULIER'})
+        r = call('POST', 'accounts/register/', {'full_name': f'Acheteur Numéro{i}', 'password': pw, 'email': em})
         expect(f'register e-mail {i}', r, 201)
         buyer_ids.append(r.json['id'])
         if i == 0:
@@ -279,12 +287,9 @@ def main():
 
     r = call('GET', 'accounts/me/', token=s_access)
     expect('me vendeur', r, 200)
-    check_shape('me (ENTREPRISE)', r.json, SPEC_USER)
-    check_shape('me.business_profile', r.json.get('business_profile'),
-                {'business_name': 'str', 'categories?': 'list', 'bio?': 'str', 'logo?': 'str|null', 'nif?': 'str',
-                 'is_verified?': 'bool'})
+    check_shape('me', r.json, SPEC_USER)
     r = call('GET', 'accounts/me/', token=b_access)
-    check_shape('me (PARTICULIER par e-mail)', r.json, SPEC_USER)
+    check_shape('me (par e-mail)', r.json, SPEC_USER)
     r = call('GET', 'accounts/me/')
     expect('me sans jeton', r, 401)
     print('INFO  corps 401 :', r.json)
@@ -295,12 +300,13 @@ def main():
     expect('PATCH me full_name', r, 200)
     r = call('PATCH', 'accounts/me/', {'password': 'AutreMdp-2026!!'}, token=s_access)
     expect('PATCH me password refusé', r, 400)
-    r = call('PATCH', 'accounts/me/', {'business_profile': {'is_verified': True}}, token=s_access)
+    r = call('PATCH', 'accounts/me/', {'user_type': 'ENTREPRISE', 'phone_verified': False, 'business_profile': {'is_verified': True}}, token=s_access)
+    expect('PATCH me anciens champs ignorés', r, 200)
     r2 = call('GET', 'accounts/me/', token=s_access)
-    if r2.json['business_profile'].get('is_verified'):
-        finding("BLOQUANT règle 3 : is_verified modifiable par l'utilisateur via PATCH /me/")
+    if 'user_type' in r2.json or 'business_profile' in r2.json or r2.json.get('phone_verified') is not True:
+        finding("me : user_type/business_profile exposés, ou phone_verified modifiable (règle 3 / L0-09g)")
     else:
-        ok("is_verified non modifiable via PATCH /me/")
+        ok("me sans user_type ni business_profile ; phone_verified en lecture seule")
 
     # refresh : rotation + rejeu de l'ancien jeton
     r = call('POST', 'accounts/token/refresh/', {'refresh': b_refresh})
@@ -618,35 +624,42 @@ def main():
         finding('avis masqué toujours dans la liste publique')
     expect('modif avis masqué par son auteur', call('PATCH', f"interactions/reviews/{r2['id']}/", {'content': 'Modification après masquage'}, token=b2_access), 403, 'review_locked')
 
-    # 9. Entreprises : pagination et filtre is_verified
-    db("from apps.identity.models import User, BusinessProfile\n"
+    # 9. Organisations : liste publique (pagination, filtres) et ancienne liste supprimée
+    db("from apps.identity.models import Organization\n"
        f"for i in range(24):\n"
-       f"    u=User.objects.create_user(email='ent{{}}.{RUN}@example.com'.format(i), password='x', full_name='Ent %d' % i, user_type='ENTREPRISE')\n"
-       f"    BusinessProfile.objects.create(user=u, business_name='Zbiz {RUN} %02d' % i, is_verified=(i%3==0))")
-    r = call('GET', 'accounts/businesses/', params={'search': f'Zbiz+{RUN}'})
-    expect('entreprises page 1', r, 200)
-    check_shape('Paginated<PublicBusiness>', r.json, SPEC_PAGE)
-    print('INFO  entreprises count/next:', r.json['count'], r.json['next'])
-    check_shape('PublicBusiness', r.json['results'][0], SPEC_BUSINESS)
+       f"    Organization.objects.create(name='Zbiz {RUN} %02d' % i, org_type='ENTREPRISE', nif='NIF-SECRET-%d' % i)")
+    r = call('GET', 'accounts/organizations/', params={'search': f'Zbiz+{RUN}'})
+    expect('organisations page 1', r, 200)
+    check_shape('Paginated<PublicOrganization>', r.json, SPEC_PAGE)
+    print('INFO  organisations count/next:', r.json['count'], r.json['next'])
+    check_shape('PublicOrganization', r.json['results'][0], SPEC_ORGANIZATION)
     if len(r.json['results']) != 20 or r.json['count'] != 24 or not r.json['next']:
-        finding(f"pagination entreprises : {len(r.json['results'])} résultats, count {r.json['count']}, next {r.json['next']}")
-    for banned in ('phone', 'email', 'nif', 'date_joined', 'full_name'):
+        finding(f"pagination organisations : {len(r.json['results'])} résultats, count {r.json['count']}, next {r.json['next']}")
+    for banned in ('phone', 'email', 'nif', 'status', 'is_verified', 'members', 'created_by'):
         if banned in r.json['results'][0]:
-            finding(f"règle 10 : `{banned}` exposé par accounts/businesses/")
-    r = call('GET', 'accounts/businesses/', params={'search': f'Zbiz+{RUN}', 'page': 2})
+            finding(f"règle 10 : `{banned}` exposé par accounts/organizations/")
+    r = call('GET', 'accounts/organizations/', params={'search': f'Zbiz+{RUN}', 'page': 2})
     if len(r.json['results']) != 4 or r.json['next'] is not None:
-        finding(f"entreprises page 2 : {len(r.json['results'])} résultats, next {r.json['next']}")
-    r = call('GET', 'accounts/businesses/', params={'search': f'Zbiz+{RUN}', 'is_verified': 'true'})
-    if r.json['count'] != 8 or not all(x['is_verified'] for x in r.json['results']):
-        finding(f"filtre is_verified=true : count {r.json['count']} (attendu 8)")
-    else:
-        ok('filtre is_verified=true : 8 entreprises vérifiées')
-    r = call('GET', 'accounts/businesses/', params={'search': f'Zbiz+{RUN}', 'is_verified': 'false'})
-    if r.json['count'] != 16:
-        finding(f"filtre is_verified=false : count {r.json['count']} (attendu 16)")
-    expect('is_verified=peut-etre', call('GET', 'accounts/businesses/', params={'is_verified': 'peut-etre'}), 400)
-    r = call('GET', 'accounts/businesses/', params={'page': 99})
-    print('INFO  entreprises page=99 ->', r.status, r.raw[:100])
+        finding(f"organisations page 2 : {len(r.json['results'])} résultats, next {r.json['next']}")
+    r = call('GET', 'accounts/organizations/', params={'search': f'Zbiz+{RUN}', 'fully_verified': 'false'})
+    if r.json['count'] != 24:
+        finding(f"filtre fully_verified=false : count {r.json['count']} (attendu 24)")
+    expect('fully_verified=peut-etre', call('GET', 'accounts/organizations/', params={'fully_verified': 'peut-etre'}), 400)
+    expect('search trop long', call('GET', 'accounts/organizations/', params={'search': 'a' * 101}), 400)
+    expect('ancienne liste businesses/', call('GET', 'accounts/businesses/'), 404)
+    r = call('GET', 'accounts/organizations/', params={'page': 99})
+    print('INFO  organisations page=99 ->', r.status, r.raw[:100])
+    # Création par le vendeur (téléphone vérifié par OTP) puis détail interne
+    expect('organisation : anonyme', call('POST', 'accounts/organizations/', {'name': 'X', 'org_type': 'ENTREPRISE'}), 401)
+    r = call('POST', 'accounts/organizations/', {'name': f'Atelier {RUN}', 'org_type': 'ENTREPRISE'}, token=s_access)
+    expect('organisation : création', r, 201)
+    if r.status == 201:
+        if r.json.get('my_role') != 'OWNER':
+            finding(f"création : my_role {r.json.get('my_role')} (attendu OWNER)")
+        org_id = r.json['id']
+        expect('organisation : détail interne', call('GET', f'accounts/organizations/{org_id}/internal/', token=s_access), 200)
+        expect('organisation : détail interne par un tiers', call('GET', f'accounts/organizations/{org_id}/internal/', token=b_access), 403, 'DENY_RELATION')
+    expect('organisation : limites', call('GET', 'accounts/organizations/limits/', token=s_access), 200)
 
     # 10. KYC
     pdf = b'%PDF-1.4\n% fichier de test\n'

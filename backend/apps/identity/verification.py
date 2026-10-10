@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 # « solvable », ni « recommandée ». Présentation seulement : les pièces EXIGÉES viennent de la base.
 CLAIMS = {
     KycDocument.DOC_RCCM: ('RCCM_VERIFIED', "RCCM vérifié"),
-    KycDocument.DOC_ID_NATIONALE: ('ID_NATIONALE_VERIFIED', "Identification nationale vérifiée"),
+    KycDocument.DOC_ID_NATIONALE: ('NATIONAL_ID_VERIFIED', "Identification nationale vérifiée"),
     KycDocument.DOC_PIECE_GERANT: ('REPRESENTATIVE_VERIFIED', "Représentant vérifié"),
-    KycDocument.DOC_ARRETE_ONG: ('ONG_DECREE_VERIFIED', "Arrêté d'enregistrement de l'ONG vérifié"),
+    KycDocument.DOC_ARRETE_ONG: ('NGO_DECREE_VERIFIED', "Arrêté d'enregistrement de l'ONG vérifié"),
 }
 SUMMARY_LABEL = "Organisation vérifiée"
 

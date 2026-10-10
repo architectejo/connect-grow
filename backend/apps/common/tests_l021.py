@@ -100,10 +100,15 @@ class EmailCaseTests(RecetteBase):
 
 
 class AccountTypeReadOnlyTests(RecetteBase):
-    def test_user_type_cannot_be_changed_through_me(self):
-        response = self.as_user(self.buyer).patch('/api/accounts/me/', {'user_type': 'ENTREPRISE'}, format='json')
+    """ADR 0006, règle 1 : le compte est unique ; il n'a plus de type. `user_type` n'est ni exposé ni accepté
+    (compatibilité transitoire : un ancien client qui l'envoie encore n'a aucun effet)."""
+
+    def test_user_type_is_neither_exposed_nor_changed_through_me(self):
+        client = self.as_user(self.buyer)
+        self.assertNotIn('user_type', client.get('/api/accounts/me/').json())
+        response = client.patch('/api/accounts/me/', {'user_type': 'ENTREPRISE'}, format='json')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['user_type'], 'PARTICULIER')
+        self.assertNotIn('user_type', response.json())
         self.buyer.refresh_from_db()
         self.assertEqual(self.buyer.user_type, 'PARTICULIER')
 

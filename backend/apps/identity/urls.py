@@ -1,7 +1,6 @@
 from django.urls import path
 
 from .views import (
-    BusinessListView,
     ChangePasswordView,
     ContactChannelView,
     ContactPhoneVerifyView,
@@ -21,6 +20,10 @@ from .views import (
     RefreshView,
     RegisterView,
     UserDetailView,
+)
+from .views_organizations import (
+    OrganizationArchiveView, OrganizationDetailView, OrganizationInternalView, OrganizationLeaveView,
+    OrganizationLimitsView, OrganizationViewSet,
 )
 from .views_verification import (
     OrganizationKycDocumentDeleteView, OrganizationKycDocumentListCreateView, OrganizationVerificationView,
@@ -46,10 +49,17 @@ urlpatterns = [
     path('me/', UserDetailView.as_view(), name='user_me'),
 
     path('change-password/', ChangePasswordView.as_view(), name='change_password'),
-    path('businesses/', BusinessListView.as_view(), name='business_list'),
 
     # Contextes disponibles pour le compte (ADR 0006, 9.1)
     path('contexts/', ContextListView.as_view(), name='contexts'),
+
+    # Organisations (ADR 0006, 9.2 et 17.2) ; remplace `businesses/`
+    path('organizations/', OrganizationViewSet.as_view({'get': 'list', 'post': 'create'}), name='organizations'),
+    path('organizations/limits/', OrganizationLimitsView.as_view(), name='organization_limits'),
+    path('organizations/<uuid:pk>/', OrganizationDetailView.as_view(), name='organization_detail'),
+    path('organizations/<uuid:pk>/internal/', OrganizationInternalView.as_view(), name='organization_internal'),
+    path('organizations/<uuid:pk>/archive/', OrganizationArchiveView.as_view(), name='organization_archive'),
+    path('organizations/<uuid:pk>/leave/', OrganizationLeaveView.as_view(), name='organization_leave'),
 
     # Prestataire individuel (ADR 0006, 9.3)
     path('provider/', ProviderDetailView.as_view(), name='provider_detail'),

@@ -3,7 +3,6 @@ import logging
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from django.db.models import Q
 from django.http import FileResponse
 from rest_framework import generics, permissions, serializers, status
 from rest_framework.exceptions import AuthenticationFailed, NotFound
@@ -16,15 +15,14 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from apps.common.contexts import CONTEXT_ORGANIZATION
 from apps.common.exception_handler import CodedAPIException
-from apps.common.pagination import StandardPagination
 from apps.moderation.services import record_audit
 
 from .identifiers import normalize_identifier
 from .kyc_files import EXTENSION_TO_CONTENT_TYPE
-from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
+from .models import KycDocument, OtpCode, User, phone_validator
 from .permissions import CanReviewKyc
 from .serializers import (
-    IdentifierTokenObtainPairSerializer, KycDocumentSerializer, OrganizationKycDocumentSerializer, PublicBusinessSerializer,
+    IdentifierTokenObtainPairSerializer, KycDocumentSerializer, OrganizationKycDocumentSerializer,
     UserSerializer,
 )
 from .services import (
@@ -210,46 +208,6 @@ class LogoutAllView(APIView):
     def post(self, request):
         revoked = revoke_all_sessions(request.user)
         return Response({'message': "Toutes les sessions ont été fermées.", 'revoked': revoked})
-
-class BusinessListView(generics.ListAPIView):
-    """
-    Vue publique : liste paginée des entreprises actives. Ne renvoie que la fiche
-    publique (PublicBusinessSerializer) : aucune donnée de contact ni d'identité.
-    """
-    permission_classes = [permissions.AllowAny]
-    serializer_class = PublicBusinessSerializer
-    pagination_class = StandardPagination
-
-    def get_queryset(self):
-        queryset = (
-            User.objects.filter(
-                user_type='ENTREPRISE', is_active=True, business_profile__isnull=False,
-            )
-            .select_related('business_profile')
-            .prefetch_related('business_profile__category_links')
-            .order_by('business_profile__business_name', 'id')
-        )
-
-        search = self.request.query_params.get('search')
-        if search:
-            # Nom commercial et description seulement : jamais le nom de la personne.
-            queryset = queryset.filter(
-                Q(business_profile__business_name__icontains=search) |
-                Q(business_profile__bio__icontains=search)
-            )
-
-        # Filtre ?is_verified=true|false (strict, insensible à la casse). Toute autre valeur
-        # est refusée en 400 plutôt qu'ignorée : un filtre silencieusement perdu afficherait
-        # des entreprises non vérifiées sous une étiquette « vérifiées ».
-        is_verified = self.request.query_params.get('is_verified')
-        if is_verified is not None:
-            value = is_verified.strip().lower()
-            if value not in ('true', 'false'):
-                raise serializers.ValidationError({'is_verified': "Valeur attendue : true ou false."})
-            queryset = queryset.filter(business_profile__is_verified=(value == 'true'))
-
-        return queryset
-
 
 class OtpRequestView(APIView):
     """CDC 3.1 : envoi d'un code OTP par SMS pour l'inscription, la connexion

@@ -174,6 +174,24 @@ class ProviderWriteThrottle(UserWriteThrottle):
     scope = 'provider_write'
 
 
+class OrganizationCreateThrottle(UserWriteThrottle):
+    """Création d'organisation : 5/jour par compte (anti-abus, ADR 0006, 9.2)."""
+
+    scope = 'org_create'
+
+
+class OrganizationListThrottle(IpThrottle):
+    """Liste publique des organisations (recherche, filtres) : par adresse IP, anonymes compris."""
+
+    scope = 'org_list'
+
+
+class OrganizationWriteThrottle(UserWriteThrottle):
+    """Modification, archivage et sortie d'une organisation : 30/h par compte (ADR 0006, 9.2)."""
+
+    scope = 'org_write'
+
+
 class ContextsListThrottle(SimpleRateThrottle):
     """Lecture de la liste des contextes (appelée à chaque chargement du front) : par utilisateur."""
 

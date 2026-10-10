@@ -26,3 +26,12 @@ def sync_offer_shares(event):
 def refresh_scores_after_ranking_change(event):
     """Réglages du classement modifiés : recalcul idempotent des scores depuis les compteurs."""
     services.refresh_all_scores()
+
+
+@subscribe('messaging.contact_message_delivered', name='marketplace.mark_contact_delivered')
+def mark_contact_delivered(event):
+    """Le message de contact est dans la conversation du vendeur : preuve de remise (ADR 0005, C10)."""
+    contact_event_id = parse_uuid(event.payload.get('contact_event_id'))
+    if contact_event_id is None:
+        raise PermanentEventError("charge utile invalide")
+    services.mark_contact_delivered(contact_event_id)

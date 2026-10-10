@@ -70,6 +70,7 @@ class SettingsBoundsTests(ReviewsTestBase):
             recency_half_life_hours=8760, proximity_same_commune=5, proximity_same_city=5, proximity_default=5,
         ))
         contact = marketplace_services.create_contact_event(offer=self.offer, sender=self.buyer, message='Bonjour')
+        marketplace_services.mark_contact_delivered(contact.pk)  # message remis : preuve de contact
         type(contact).objects.filter(pk=contact.pk).update(created_at=timezone.now() - timedelta(hours=200))
         self.assertEqual(marketplace_services.refresh_all_scores(), 1)
         self.client.force_authenticate(self.buyer)

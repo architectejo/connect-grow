@@ -315,3 +315,10 @@ Extension de `apps/common/tests_privacy.py` (classe dédiée, mêmes jeux de don
 
 - **Version du texte et accords existants** (décision du chef de projet, dette LEG-PRV-03) : un consentement reste valable après un changement de `CONTACT_CONSENT_TEXT_VERSION`. Cible, si le texte change de façon substantielle : la version majeure invalide les accords et impose une nouvelle acceptation. L'implémentation actuelle ne le fait pas (la preuve garde la version acceptée) ; à traiter avec la réponse du client sur LEG-PRV-03.
 - **Migration `marketplace` 0005** : elle mêle schéma et remplissage de `delivered_at` ; son découpage est une dette notée (déjà fusionnée).
+
+### Ajouts T4 (preuve de remise et avis)
+
+- **Point de remise du message de contact** : `messaging.services.open_conversation_with_message` (appelée par l'abonné `messaging.open_contact_conversation`) publie `messaging.contact_message_delivered` dans la transaction qui crée le message, uniquement quand un `contact_event_id` est fourni (jamais pour les propositions d'échange). Charge utile : `contact_event_id`, `offer_id`, `conversation_id`, `message_id` ; ni texte ni numéro. Abonné `marketplace.mark_contact_delivered` -> `services.mark_contact_delivered` (idempotent, ne touche pas un `delivered_at` déjà posé).
+- **Délai de propagation** : la remise est un second événement, émis pendant la diffusion du premier ; `delivered_at` est posé à la passe suivante de `dispatch_outbox` (diffusion immédiate après commit ou cron), donc avec un léger décalage après le contact. `recorded_at` de la preuve reste `created_at` : le délai D5 est inchangé.
+- **Hypothèse** : « remis » = message déposé dans la conversation du vendeur (la messagerie temps réel du lot 2 n'a pas de notion de lecture ou d'accusé). Si un accusé de remise apparaît, il suffira de déplacer la publication.
+- `get_review_contact` exige `is_counted` ET `delivered_at` non nul. Les contacts `MESSAGE` créés avant T1 ont reçu `delivered_at = created_at` (migration 0005).

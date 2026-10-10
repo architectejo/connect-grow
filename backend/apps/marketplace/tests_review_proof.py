@@ -37,9 +37,10 @@ class ContactProofTests(MarketplaceTestBase):
     def test_get_review_contact_returns_the_oldest_contact_of_the_author(self):
         offer = self.make_offer()
         self.assertIsNone(services.get_review_contact(offer.id, self.buyer.id))
-        newer = ContactEvent.objects.create(offer=offer, sender=self.buyer, message='b', channel='CALL')
-        older = ContactEvent.objects.create(offer=offer, sender=self.buyer, message='a', channel='WHATSAPP')
-        ContactEvent.objects.filter(pk=older.pk).update(created_at=timezone.now() - timedelta(days=3))
+        now = timezone.now()
+        newer = ContactEvent.objects.create(offer=offer, sender=self.buyer, message='b', channel='CALL', delivered_at=now)
+        older = ContactEvent.objects.create(offer=offer, sender=self.buyer, message='a', channel='WHATSAPP', delivered_at=now)
+        ContactEvent.objects.filter(pk=older.pk).update(created_at=now - timedelta(days=3))
         ContactEvent.objects.create(offer=offer, sender=self.seller, message='c')
         proof = services.get_review_contact(offer.id, self.buyer.id)
         self.assertEqual((proof.contact_event_id, proof.channel), (older.id, 'WHATSAPP'))

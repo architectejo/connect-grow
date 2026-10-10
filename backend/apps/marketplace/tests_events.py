@@ -56,7 +56,7 @@ class ContactEventTests(MarketplaceTestBase):
         notification = Notification.objects.get()
         self.assertEqual((notification.user, notification.notification_type), (self.seller, 'CONTACT'))
         self.assertEqual(notification.content, f'Acheteur vous a contacté pour {self.offer.title}')
-        self.assertEqual(OutboxEvent.objects.get().status, 'done')
+        self.assertEqual(OutboxEvent.objects.get(event_type='marketplace.contact_recorded').status, 'done')
 
     def test_validation_errors_publish_nothing(self):
         with self.assertRaises(services.MarketplaceError):
@@ -79,11 +79,11 @@ class ContactEventTests(MarketplaceTestBase):
                 dispatch_outbox_now()
         # Le contact existe et le message de la conversation aussi ; seule la notification attend.
         self.assertEqual((ContactEvent.objects.count(), Message.objects.count(), Notification.objects.count()), (1, 1, 0))
-        self.assertEqual(OutboxEvent.objects.get().status, 'pending')
+        self.assertEqual(OutboxEvent.objects.get(event_type='marketplace.contact_recorded').status, 'pending')
         OutboxDelivery.objects.filter(status='pending').update(next_attempt_at=self.offer.created_at)
         dispatch_outbox_now()
         self.assertEqual((Message.objects.count(), Notification.objects.count()), (1, 1))
-        self.assertEqual(OutboxEvent.objects.get().status, 'done')
+        self.assertEqual(OutboxEvent.objects.get(event_type='marketplace.contact_recorded').status, 'done')
 
     def test_contact_deleted_with_its_offer_before_delivery_opens_nothing(self):
         self.contact()

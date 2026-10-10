@@ -27,8 +27,8 @@ _TYPES = (
     EventType('marketplace.contact_revealed'),
     EventType('marketplace.exchange_proposed'),
     EventType('marketplace.offer_expiring_soon'),
-    # ADR 0005, C10 : émetteur (`messaging`) et abonné `marketplace` ajoutés par T4.
-    EventType('messaging.contact_message_delivered', no_subscriber=True, emitter_pending=True),
+    # ADR 0005, C10 : abonné `marketplace` (pose `delivered_at`) ; ni texte ni numéro dans la charge utile.
+    EventType('messaging.contact_message_delivered'),
     EventType('visibility.offer_viewed'),
     EventType('visibility.offer_shared'),
     EventType('visibility.ranking_settings_changed'),

@@ -8,12 +8,13 @@ from datetime import timedelta
 from importlib import import_module
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.common.utils import parse_uuid, seconds_until_next_day
 from apps.notifications import services as notification_services
 
-from .models import AuditLog, ModerationSettings, Report
+from .models import AuditLog, ModerationSettings, Report, Sanction
 
 AUTHOR_RESPONSE_MAX_LENGTH = 1000
 
@@ -100,13 +101,29 @@ def get_settings() -> ModerationSettings:
 
 # Types de cible produits par les signalements automatiques (avis croisés, CDC 3.7) ; chacun
 # doit avoir un résolveur dans TARGET_RESOLVERS (test), sinon le signalement serait illisible.
-AUTOMATIC_TARGET_TYPES = frozenset({'review'})
+AUTOMATIC_TARGET_TYPES = frozenset({'review', 'user'})
 
 
 def record_audit(actor, action, target=None, details=''):
     """Journalise une action sensible (règle 12) dans l'AuditLog. Synchrone, sans outbox :
     une action sensible ne doit jamais exister sans sa trace (ADR 0002, notes R1)."""
     return AuditLog.record(actor, action, target=target, details=details)
+
+
+def count_audit_actions(actor_id, action, since) -> int:
+    """Nombre d'entrées du journal pour un acteur et une action depuis `since` (détection d'abus
+    répétés : plafonds de révélation de numéro dépassés)."""
+    return AuditLog.objects.filter(actor_id=actor_id, action=action, created_at__gte=since).count()
+
+
+def is_user_restricted(user_id) -> bool:
+    """Vrai si le compte fait l'objet d'une sanction active qui bloque le compte (suspension ou
+    bannissement non échus) : il ne peut alors ni contacter un vendeur ni obtenir un numéro.
+    Un avertissement ou le masquage d'une annonce ne restreint pas le contact."""
+    now = timezone.now()
+    return Sanction.objects.filter(
+        user_id=user_id, is_active=True, sanction_type__in=Sanction.ACCOUNT_BLOCKING_TYPES,
+    ).filter(Q(ends_at__isnull=True) | Q(ends_at__gt=now)).exists()
 
 
 def record_settings_change(actor, obj, old_values: dict, new_values: dict):
@@ -117,6 +134,7 @@ def record_settings_change(actor, obj, old_values: dict, new_values: dict):
 
 
 REASON_CONTACT_FICTIF = Report.REASON_CONTACT_FICTIF
+REASON_SPAM = Report.REASON_SPAM
 
 
 def has_resolved_report(target_type, target_id, reason) -> bool:

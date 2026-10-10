@@ -13,7 +13,6 @@ Numéros de la recette (distinctifs, pour que la recherche des quatre derniers c
 import json
 import logging
 import re
-import unittest
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -846,15 +845,14 @@ class Scenario8TraceLeakTests(RecetteContactBase):
                         found.append((name, 'quatre derniers chiffres ' + number[-4:], text[:120]))
         self.assertEqual(found, [], 'fuite du numéro dans les traces (voir rapport)')
 
-    def test_known_deviation_audit_of_consent_keeps_the_last_four_digits(self):
-        """Écart documenté (anomalie mineure R-C1) : l'ADR 0005 §6 prévoit « 4 derniers chiffres » dans
-        `contact.consent_granted`, ce que contredisent §8 et §11 (5) (« le numéro, complet ou masqué, n'y figure pas »).
-        Ce test fige l'état actuel : seul cet audit porte les quatre chiffres, aucune autre trace."""
+    def test_no_audit_carries_the_last_four_digits(self):
+        """ADR 0005 §8/§11 (5) : aucun numéro, même masqué, dans l'audit ; `phone_last4` reste dans le consentement."""
         self.seller_ready()
         self.reveal()
         dispatch_outbox_now()
+        self.assertTrue(AuditLog.objects.filter(action='contact.consent_granted').exists())
         carriers = {a.action for a in AuditLog.objects.all() if has_last4(a.details, SELLER_CONTACT)}
-        self.assertEqual(carriers, {'contact.consent_granted'})
+        self.assertEqual(carriers, set())
 
     def test_contact_verify_codes_do_not_linger_after_use(self):
         self.set_contact_number(SELLER_CONTACT)
@@ -883,7 +881,6 @@ class Scenario8bVisitorNameTests(RecetteContactBase):
         self.assertEqual(Conversation.objects.count(), 0)
         self.assertEqual(Message.objects.count(), 0)
 
-    @unittest.expectedFailure  # Anomalie mineure R-C2 : la notification utilise public_display_name (nom brut), pas requester_display_name.
     def test_a_hostile_visitor_name_is_neutralised_in_the_list_and_in_the_notification(self):
         hostile = self.user('hostile@example.com', '0899990000 Kabongo', phone='+243970000077',
                             old=timezone.now() - timedelta(days=90))

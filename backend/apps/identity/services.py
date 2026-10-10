@@ -545,7 +545,7 @@ def set_channel_consent(user, channel, *, enabled, text_version=None) -> None:
         ])
         record_audit(
             user, 'contact.consent_granted', target=user,
-            details=f"Canal {channel} activé ; texte {text_version} ; numéro se terminant par {last4}.",
+            details=f"Canal {channel} activé ; texte {text_version}.",
         )
 
 

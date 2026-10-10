@@ -46,10 +46,10 @@ def notify_contact(event):
 @subscribe('marketplace.contact_revealed', name='notifications.notify_contact_revealed')
 def notify_contact_revealed(event):
     """Le vendeur apprend qu'un utilisateur a obtenu son numéro (ADR 0005, C7) : nom d'affichage
-    « Marie K. » (`public_display_name`), jamais de numéro."""
+    « Marie K. » (`requester_display_name`, nettoyé comme la liste), jamais de numéro."""
     seller_id, sender_id, title = _require(event.payload, 'seller_id', 'sender_id', 'offer_title')
     sender = _user_id(sender_id)
-    name = identity_services.public_display_name(identity_services.get_full_names([sender]).get(sender))
+    name = identity_services.requester_display_name(identity_services.get_full_names([sender]).get(sender))
     services.notify(
         user_id=_user_id(seller_id), notification_type=services.CONTACT,
         title="Votre numéro a été demandé",

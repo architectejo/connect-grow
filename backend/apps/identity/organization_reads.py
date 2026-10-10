@@ -1,12 +1,9 @@
 """Lectures des organisations : état de vérification dérivé, liste publique, limites (ADR 0006, 9.2 et 17.2).
 
-Aucune écriture. Les « claims » (ce qui a été vérifié) sont DÉRIVÉS à la lecture des pièces `VALIDE` et du
-tableau `OrganizationDocumentRequirement` (règle 11) : il n'existe aucun champ qu'un plan, un rôle ou un
-autre code puisse écrire (règle 3, A6). Le libellé de synthèse n'est donné que si TOUTES les pièces exigées du
-type sont validées ET la liste d'exigences n'est pas vide.
-
-NOTE T4 : cette dérivation est le strict minimum nécessaire à `OrganizationInternal` et à la liste publique ;
-T4 (pièces et claims d'organisation) la reprendra/consolidera sans changer ces formes de sortie.
+Aucune écriture. Les « claims » et la synthèse sont dérivés par `identity.verification` (T4, source unique,
+règle 3 / A6) ; ce module ne fait que les présenter dans les formes documentées (ADR 9.2). Seuls les filtres
+`claim` et `fully_verified` de la liste publique sont exprimés en sous-requêtes ORM (pagination côté base) ; un
+test vérifie qu'ils restent cohérents avec `verification.get_verification_summaries`.
 
 Ce module est exposé par `identity.services` ; les autres domaines n'importent jamais ce sous-module.
 """
@@ -17,84 +14,38 @@ from django.db.models.functions import Lower
 from rest_framework import serializers
 from rest_framework.exceptions import ErrorDetail
 
-from . import organizations
+from . import organizations, verification
 from .models import KycDocument, Organization, OrganizationCategory, OrganizationDocumentRequirement
 
-# Codes de claim et libellés (en base de code ; le front traduit par la clé `code`).
-CLAIM_BY_DOCUMENT = {
-    KycDocument.DOC_RCCM: 'RCCM_VERIFIED',
-    KycDocument.DOC_ID_NATIONALE: 'NATIONAL_ID_VERIFIED',
-    KycDocument.DOC_PIECE_GERANT: 'REPRESENTATIVE_VERIFIED',
-    KycDocument.DOC_ARRETE_ONG: 'NGO_DECREE_VERIFIED',
-}
-DOCUMENT_BY_CLAIM = {code: document for document, code in CLAIM_BY_DOCUMENT.items()}
-CLAIM_LABELS = {
-    'RCCM_VERIFIED': "RCCM vérifié",
-    'NATIONAL_ID_VERIFIED': "Identification nationale vérifiée",
-    'REPRESENTATIVE_VERIFIED': "Représentant vérifié",
-    'NGO_DECREE_VERIFIED': "Arrêté d'enregistrement vérifié",
-}
-SUMMARY_LABEL = "Organisation vérifiée"
-
 STATE_NONE = 'NONE'
-
-
-def _document_label(document_type):
-    return dict(KycDocument.DOC_TYPE_CHOICES).get(document_type, document_type)
+STATE_MISSING_T4 = verification.STATUS_MISSING
 
 
 def get_verification_data(organizations_list) -> dict:
-    """État de vérification dérivé, par lot (une requête d'exigences, une requête de pièces) :
-    `{organization_id: {'required': [...], 'verified_claims': [...], 'summary': {...}}}`.
+    """Claims et synthèse par lot, pour la liste publique : `{organization_id: {'verified_claims': [...],
+    'summary': {...}}}`. Dérivation unique de `identity.verification` (T4) : rien n'est recalculé ici."""
+    return verification.get_verification_summaries([o.pk for o in organizations_list])
 
-    - `required` : une entrée par pièce exigée du type, `state` = `VALIDE` si une pièce de ce type est validée,
-      sinon le statut de la pièce la plus récente (`EN_ATTENTE`, `REFUSE`), sinon `NONE` ;
-    - `verified_claims` : un par pièce exigée VALIDE (jamais d'une pièce non exigée), avec `verified_at` ;
-    - `summary` : `complete` vrai seulement si les exigences existent et sont toutes validées."""
-    orgs = list(organizations_list)
-    if not orgs:
-        return {}
-    requirements = defaultdict(list)
-    for req in OrganizationDocumentRequirement.objects.filter(
-        org_type__in={o.org_type for o in orgs},
-    ).order_by('position', 'document_type'):
-        requirements[req.org_type].append(req.document_type)
 
-    documents = defaultdict(list)
-    rows = KycDocument.objects.filter(organization_id__in=[o.pk for o in orgs]).values(
-        'organization_id', 'document_type', 'status', 'reviewed_at', 'created_at',
-    ).order_by('-created_at')
-    for row in rows:
-        documents[row['organization_id']].append(row)
-
-    result = {}
-    for org in orgs:
-        required, claims = [], []
-        required_types = requirements.get(org.org_type, [])
-        for document_type in required_types:
-            of_type = [d for d in documents.get(org.pk, ()) if d['document_type'] == document_type]
-            validated = [d for d in of_type if d['status'] == KycDocument.STATUS_VALIDE]
-            if validated:
-                state = KycDocument.STATUS_VALIDE
-                code = CLAIM_BY_DOCUMENT.get(document_type)
-                if code:
-                    dates = [d['reviewed_at'] for d in validated if d['reviewed_at']]
-                    claims.append({
-                        'code': code, 'label': CLAIM_LABELS[code], 'verified_at': max(dates) if dates else None,
-                    })
-            elif of_type:
-                state = of_type[0]['status']
-            else:
-                state = STATE_NONE
-            required.append({
-                'document_type': document_type, 'label': _document_label(document_type), 'state': state,
-            })
-        complete = bool(required_types) and all(r['state'] == KycDocument.STATUS_VALIDE for r in required)
-        result[org.pk] = {
-            'required': required, 'verified_claims': claims,
-            'summary': {'complete': complete, 'label': SUMMARY_LABEL if complete else None},
-        }
-    return result
+def get_internal_verification(organization) -> dict:
+    """Bloc `verification` de `OrganizationInternal` (ADR 9.2) : `required[{document_type,label,state}]`,
+    `verified_claims`, `summary`. Construit depuis `verification.get_verification_state` (T4).
+    `state` : `VALIDE` si le type est prouvé (présent dans les claims), sinon le statut de la pièce la plus
+    récente (`EN_ATTENTE`, `REFUSE`), `NONE` si aucune pièce n'a été déposée (MANQUANTE côté T4)."""
+    data = verification.get_verification_state(organization)
+    proven = {c['code'] for c in data['verified_claims']}
+    required = []
+    for item in data['requirements']:
+        if item['claim_code'] in proven:
+            state = KycDocument.STATUS_VALIDE
+        elif item['status'] == STATE_MISSING_T4:
+            state = STATE_NONE
+        else:
+            state = item['status']
+        required.append({
+            'document_type': item['document_type'], 'label': item['document_type_label'], 'state': state,
+        })
+    return {'required': required, 'verified_claims': data['verified_claims'], 'summary': data['summary']}
 
 
 def get_category_ids_by_organization(organizations_list) -> dict:
@@ -149,7 +100,7 @@ def public_organizations_queryset(params):
 
     claim = params.get('claim')
     if claim:
-        document_type = DOCUMENT_BY_CLAIM.get(claim)
+        document_type = _document_for_claim(claim)
         if document_type is None:
             raise serializers.ValidationError({'claim': [ErrorDetail("Claim inconnu.", 'invalid_claim')]})
         # Pièce validée ET exigée pour ce type d'organisation (cohérent avec les claims affichés).
@@ -184,3 +135,11 @@ def _missing_requirement():
     return Exists(
         OrganizationDocumentRequirement.objects.filter(org_type=OuterRef('org_type')).filter(~Exists(validated))
     )
+
+
+def _document_for_claim(code):
+    """Type de pièce correspondant à un code de claim (table de présentation de `identity.verification`)."""
+    for document_type, (claim_code, _) in verification.CLAIMS.items():
+        if claim_code == code:
+            return document_type
+    return None

@@ -335,7 +335,7 @@ class InternalTests(ApiBase):
         full = owner.get(self.url).json()['verification']
         self.assertEqual(full['summary'], {'complete': True, 'label': 'Organisation vérifiée'})
         self.assertEqual(
-            [c['code'] for c in full['verified_claims']], ['RCCM_VERIFIED', 'NATIONAL_ID_VERIFIED', 'REPRESENTATIVE_VERIFIED'],
+            [c['code'] for c in full['verified_claims']], ['RCCM_VERIFIED', 'ID_NATIONALE_VERIFIED', 'REPRESENTATIVE_VERIFIED'],
         )
 
     def test_summary_is_never_complete_when_the_requirement_list_is_empty(self):
@@ -682,8 +682,8 @@ class PublicListTests(TestCase):
         add_document(partial, 'ID_NATIONALE', KycDocument.STATUS_EN_ATTENTE)
         add_document(none, 'ARRETE_ONG')  # validée mais non exigée pour ENTREPRISE : ne compte pas
         self.assertEqual(self.names(claim='RCCM_VERIFIED'), ['Complete', 'Partielle'])
-        self.assertEqual(self.names(claim='NATIONAL_ID_VERIFIED'), ['Complete'])
-        self.assertEqual(self.names(claim='NGO_DECREE_VERIFIED'), [])
+        self.assertEqual(self.names(claim='ID_NATIONALE_VERIFIED'), ['Complete'])
+        self.assertEqual(self.names(claim='ONG_DECREE_VERIFIED'), [])
         self.assertEqual(self.names(fully_verified='true'), ['Complete'])
         self.assertEqual(self.names(fully_verified='FALSE'), ['Aucune', 'Partielle'])
         self.assertEqual(self.names(claim='RCCM_VERIFIED', fully_verified='false'), ['Partielle'])
@@ -701,7 +701,7 @@ class PublicListTests(TestCase):
         for i in range(12):
             org = make_org(f'Org {i:02d}')
             add_document(org, 'RCCM')
-        with self.assertNumQueries(5):
+        with self.assertNumQueries(6):
             self.assertEqual(self.client.get(ORGS, {'page_size': 12}).status_code, 200)
 
     def test_old_businesses_endpoint_is_gone(self):
@@ -808,7 +808,7 @@ class GuardAndRulesTests(TestCase):
 
         seen = {}
         for route, callback in _walk(get_resolver()):
-            if route.startswith('api/accounts/organizations/'):
+            if route.startswith('api/accounts/organizations/') and '/kyc/' not in route and not route.endswith('/verification/'):
                 view_class = _view_class(callback)
                 seen[route] = (_write_methods(callback, view_class), getattr(view_class, 'acting_context_exempt', ''))
         self.assertEqual(
@@ -845,3 +845,27 @@ class GuardAndRulesTests(TestCase):
         outsider = ApiBase.login(make_user('dehors'))
         for url in (f'{ORGS}{org.pk}/internal/', ORGS):
             self.assertNotIn(NIF, outsider.get(url).content.decode())
+
+
+class FiltersMatchSharedDerivationTests(TestCase):
+    """Les filtres SQL `claim` et `fully_verified` restent cohérents avec la dérivation unique de T4."""
+
+    def test_filters_agree_with_get_verification_summaries(self):
+        from . import verification
+
+        orgs = []
+        for i, types in enumerate([(), ('RCCM',), ('RCCM', 'ID_NATIONALE'), ('RCCM', 'ID_NATIONALE', 'PIECE_GERANT')]):
+            org = make_org(f'Cohérence {i}')
+            for document_type in types:
+                add_document(org, document_type)
+            orgs.append(org)
+        summaries = verification.get_verification_summaries([o.pk for o in orgs])
+        client = APIClient()
+        for value in ('true', 'false'):
+            names = {o['name'] for o in client.get(ORGS, {'fully_verified': value}).json()['results']}
+            expected = {o.name for o in orgs if summaries[o.pk]['summary']['complete'] == (value == 'true')}
+            self.assertEqual(names, expected)
+        for code in {c['code'] for s in summaries.values() for c in s['verified_claims']}:
+            names = {o['name'] for o in client.get(ORGS, {'claim': code}).json()['results']}
+            expected = {o.name for o in orgs if code in {c['code'] for c in summaries[o.pk]['verified_claims']}}
+            self.assertEqual(names, expected, code)

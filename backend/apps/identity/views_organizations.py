@@ -22,7 +22,7 @@ from apps.common.utils import parse_uuid
 from . import capabilities
 from .services import (
     archive_organization, create_organization, get_active_role, get_category_ids_by_organization,
-    get_organization_for_member, get_organization_limits, get_verification_data, leave_organization, public_organizations_queryset,
+    get_internal_verification, get_organization_for_member, get_organization_limits, get_verification_data, leave_organization, public_organizations_queryset,
     update_organization,
 )
 from .throttles import OrganizationCreateThrottle, OrganizationWriteThrottle
@@ -83,7 +83,7 @@ def _extract(request, fields):
 
 def serialize_internal(request, organization, role):
     """`OrganizationInternal` (ADR 9.2) : détail réservé aux membres actifs."""
-    verification = get_verification_data([organization])[organization.pk]
+    verification = get_internal_verification(organization)
     category_ids = get_category_ids_by_organization([organization]).get(organization.pk, [])
     return {
         'id': str(organization.pk), 'name': organization.name, 'org_type': organization.org_type,

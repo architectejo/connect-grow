@@ -28,8 +28,8 @@ _TYPES = (
     EventType('identity.seller_context_status_changed', no_subscriber=True),
     # Identité d'une organisation modifiée (T8) : noms de champs seulement, aucune valeur.
     EventType('identity.organization_updated', no_subscriber=True),
-    # Émetteur : `decide_kyc_document` (T4).
-    EventType('identity.organization_verification_changed', no_subscriber=True, emitter_pending=True),
+    # Émetteur : `decide_kyc_document` (T4) ; abonné `notifications.notify_kyb_decision` ajouté par T6.
+    EventType('identity.organization_verification_changed', no_subscriber=True),
     EventType('marketplace.contact_recorded'),
     # ADR 0005 : sans aucun numéro dans la charge utile ; abonné : notifications (prévient le vendeur).
     EventType('marketplace.contact_revealed'),

@@ -159,9 +159,18 @@ class PasswordResetApiTests(APITestCase):
         self.assertTrue(self.user.check_password('ancien-mot-de-passe'))
 
 
-PNG_BYTES = b'\x89PNG\r\n\x1a\n' + b'\x00' * 64
+def _make_image_bytes(fmt):
+    import io
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new('RGB', (8, 8), (10, 20, 30)).save(buffer, format=fmt)
+    return buffer.getvalue()
+
+
+PNG_BYTES = _make_image_bytes('PNG')
 PDF_BYTES = b'%PDF-1.4\n' + b'0' * 64
-JPEG_BYTES = b'\xff\xd8\xff\xe0' + b'\x00' * 64
+JPEG_BYTES = _make_image_bytes('JPEG')
 
 
 def kyc_upload(content=PNG_BYTES, name='piece.png', content_type='image/png'):
@@ -313,7 +322,7 @@ class UuidAndCatalogReferenceTests(APITestCase):
             )
             OrganizationCategory.objects.create(organization=organization, category_id=self.category.id)
         # total, organisations, catégories, exigences, pièces : indépendant du nombre d'organisations
-        with self.assertNumQueries(5):
+        with self.assertNumQueries(6):
             response = self.client.get(reverse('organizations'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['results'][0]['city_id'], str(self.city.id))

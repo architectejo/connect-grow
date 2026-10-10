@@ -9,6 +9,7 @@ from apps.identity import services as identity_services
 from apps.reviews import services as reviews_services
 from apps.visibility import services as visibility_services
 
+from . import services
 from .models import ContactEvent, ExchangeProposal, Favorite, Offer, OfferImage
 
 
@@ -96,6 +97,16 @@ class OfferSerializer(serializers.ModelSerializer):
             'created_at', 'status', 'expires_at', 'visibility_score',
         ]
         list_serializer_class = OfferListSerializer
+
+    def get_fields(self):
+        """Troc désactivé : `is_exchangeable` est retiré du serializer, donc absent des réponses et
+        ignoré en écriture (la valeur en base des offres existantes n'est pas modifiée)."""
+        fields = super().get_fields()
+        if 'exchange_enabled' not in self.context:
+            self.context['exchange_enabled'] = services.is_exchange_enabled()
+        if not self.context['exchange_enabled']:
+            fields.pop('is_exchangeable', None)
+        return fields
 
     CONTEXT_KEY = 'marketplace_preload'
 

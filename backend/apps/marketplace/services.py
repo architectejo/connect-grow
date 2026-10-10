@@ -763,6 +763,19 @@ def to_received_reveals(events) -> list:
     ]
 
 
+FEATURE_DISABLED_MESSAGE = "Cette fonctionnalité n'est pas disponible."
+
+
+def is_exchange_enabled() -> bool:
+    """Le troc est-il activé dans les réglages de la marketplace (désactivé par défaut) ?"""
+    return MarketplaceSettings.get_solo().exchange_enabled
+
+
+def get_public_features() -> dict:
+    """Fonctionnalités activables, publiques et sans donnée personnelle (lues par le front)."""
+    return {'exchange_enabled': is_exchange_enabled()}
+
+
 def create_exchange_proposal(*, offer: Offer, sender, message: str) -> ExchangeProposal:
     _check_can_contact(offer, sender)
     with transaction.atomic():

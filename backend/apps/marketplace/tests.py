@@ -20,7 +20,7 @@ from apps.platform_core.testing import dispatch_outbox_now
 from apps.visibility.models import DailyVisibilityCounter, OfferUniqueView, RankingSettings
 
 from . import services
-from .models import ContactEvent, Favorite, Offer, OfferImage
+from .models import ContactEvent, Favorite, MarketplaceSettings, Offer, OfferImage
 
 
 class MarketplaceTestBase(APITestCase):
@@ -30,6 +30,12 @@ class MarketplaceTestBase(APITestCase):
         self.category = Category.objects.create(name='Électronique', slug='electronique')
         self.seller = User.objects.create_user(email='seller@example.com', password='x', full_name='Vendeur')
         self.buyer = User.objects.create_user(email='buyer@example.com', password='x', full_name='Acheteur')
+
+    def enable_exchange(self):
+        """Le troc est éteint par défaut (L0-14) : les tests qui l'exercent l'allument."""
+        MarketplaceSettings.objects.update_or_create(
+            pk=MarketplaceSettings.SINGLETON_ID, defaults={'exchange_enabled': True},
+        )
 
     def make_offer(self, **kwargs):
         defaults = dict(
@@ -337,6 +343,7 @@ class OfferFilterTests(MarketplaceTestBase):
         self.assertEqual(self.ids(price_max='1' * 60), {str(self.cheap_usd.id), str(self.expensive_cdf.id)})
 
     def test_filter_by_exchangeable(self):
+        self.enable_exchange()
         ids = self.ids(is_exchangeable='false')
         self.assertIn(str(self.expensive_cdf.id), ids)
         self.assertNotIn(str(self.cheap_usd.id), ids)
@@ -746,6 +753,7 @@ class ContactTests(MarketplaceTestBase):
         self.assertEqual(self.client.delete(reverse('contact-detail', args=[event.id])).status_code, 405)
 
     def test_exchange_proposal_flow(self):
+        self.enable_exchange()
         offer = self.make_offer()
         self.client.force_authenticate(self.buyer)
         response = self.client.post(reverse('exchange-list'), {'post': str(offer.id), 'message': 'Je propose un troc.'})
@@ -838,7 +846,7 @@ class ContractTests(MarketplaceTestBase):
         self.assertEqual(set(data), {
             'id', 'seller', 'seller_name', 'category', 'category_name', 'commune', 'commune_name', 'post_type',
             'title', 'description', 'price', 'currency', 'condition', 'stock', 'is_price_negotiable',
-            'is_exchangeable', 'main_image', 'images', 'views_count', 'likes_count',
+            'main_image', 'images', 'views_count', 'likes_count',
             'shares_count', 'created_at', 'status', 'expires_at', 'visibility_score', 'visibility_rank',
             'offer_rating', 'seller_rating', 'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored', 'allowed_channels',
         })

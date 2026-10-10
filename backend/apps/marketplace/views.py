@@ -170,7 +170,8 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(condition=condition)
 
         is_exchangeable = params.get('is_exchangeable')
-        if is_exchangeable is not None:
+        # Troc désactivé : le filtre est ignoré (comme tout paramètre inconnu).
+        if is_exchangeable is not None and services.is_exchange_enabled():
             queryset = queryset.filter(is_exchangeable=is_exchangeable.lower() == 'true')
 
         for param, lookup in (('price_min', 'price__gte'), ('price_max', 'price__lte')):
@@ -461,6 +462,15 @@ class ExchangeProposalViewSet(_OfferMessageViewSet):
     throttle_scopes = {'create': 'exchange'}
     serializer_class = ExchangeProposalSerializer
     model = ExchangeProposal
+
+    def check_permissions(self, request):
+        """Troc désactivé : 403 `feature_disabled` pour tout appel authentifié, avant validation,
+        limitation de débit et création (aucun effet de bord)."""
+        super().check_permissions(request)
+        if not services.is_exchange_enabled():
+            raise CodedAPIException(
+                services.FEATURE_DISABLED_MESSAGE, 'feature_disabled', status.HTTP_403_FORBIDDEN,
+            )
 
     def create_with_service(self, offer, message):
         return services.create_exchange_proposal(offer=offer, sender=self.request.user, message=message)

@@ -59,6 +59,13 @@ class MarketplaceSettings(SingletonSettingsModel):
         help_text="Période (en jours, 1 à 90) sur laquelle les dépassements de plafond sont comptés.",
     )
 
+    # Troc (CDC §8.3, périmètre V1 non confirmé par le client) : désactivé par défaut. Éteint, les
+    # propositions d'échange sont refusées et `is_exchangeable` n'est plus ni lu, ni écrit, ni filtré.
+    exchange_enabled = models.BooleanField(
+        default=False, verbose_name="Troc activé",
+        help_text="Active les propositions d'échange (troc) et l'indicateur « échangeable » des annonces.",
+    )
+
     class Meta:
         verbose_name = "Paramètres de la marketplace"
         verbose_name_plural = "Paramètres de la marketplace"

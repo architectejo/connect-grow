@@ -58,7 +58,8 @@ proxy_set_header X-Forwarded-Proto $scheme;
 - En-têtes de cache : `ApiCacheHeadersMiddleware` pose `Vary: Authorization` sur toute réponse de `/api/` et `Cache-Control: private` si la requête porte un jeton ou si la réponse pose un cookie (`anon_id`).
 - Vie privée (L0-10a-a) : aucune réponse d'API n'expose le téléphone ni l'e-mail d'un autre utilisateur (`seller.phone` a disparu de l'offre). Le numéro ne sortira que par l'action de contact (L0-10a-c). `apps/common/tests_privacy.py` parcourt toutes les routes GET (anonyme, tiers, contrepartie, vendeur, modérateur) et échoue à la moindre clé ou valeur `phone`/`email` hors `/api/accounts/me/`.
 - Inscription et changement de numéro (`POST register/`, `PATCH me/`) : l'erreur `phone` « déjà utilisé » n'existe plus ; un numéro pris donne la même réponse qu'un code faux (`otp_code : Code invalide ou expiré.`). L'e-mail garde l'erreur d'unicité (dette, ADR 0002) ; limites `register` 20/h par IP et `profile_write` 30/h par utilisateur (60/h par IP).
-- `GET /api/accounts/businesses/?is_verified=true|false` filtre les entreprises ; toute autre valeur donne un 400 (`{"is_verified": [...]}`).
+- Organisations (L0-09g, ADR 0006 §9.2) : `GET /api/accounts/organizations/` remplace `businesses/` (supprimé, 404). Liste publique paginée, filtres `search` (100 caractères au plus), `org_type`, `claim` (ex. `RCCM_VERIFIED`) et `fully_verified=true|false` ; toute valeur invalide donne un 400. Aucune donnée personnelle ni NIF. `POST organizations/` (téléphone de connexion vérifié exigé, 5 créations par jour), `GET organizations/<uuid>/internal/`, `PATCH organizations/<uuid>/`, `POST .../archive/`, `POST .../leave/` et `GET organizations/limits/`. L'en-tête `X-Context` est ignoré sur ces routes.
+- `register/` et `me/` n'ont plus de `user_type` ni de `business_profile` (un ancien client qui les envoie encore n'a aucun effet) ; `phone_verified` est exposé en lecture seule.
 
 ## Envois de fichiers et tâches planifiées
 

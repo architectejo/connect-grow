@@ -611,3 +611,28 @@ Ces points s'ajoutent à la section 15 (dettes et registre de recette) et préva
 7. **Motif de refus.** `rejection_reason` : 500 caractères au plus, visible du déposant ; il ne doit contenir **aucune donnée personnelle**. **Dette : liste codée de motifs (L1-xx).**
 8. **Lecture.** `verification/` et la liste des pièces restent lisibles pour une organisation suspendue ou archivée ; les écritures sont refusées.
 9. **Prérequis de production et recette.** Limite de taille du corps de requête côté Nginx (alignée sur `KYC_MAX_FILE_MB`) ; limite par IP sur le dépôt de pièces à prévoir en plus du débit par compte ; test de concurrence MySQL (dépôt/décision simultanés sous `select_for_update`) au registre de recette, SQLite sérialisant les écrivains.
+
+## 18. Amendement 2 (10/10/2026) : API des organisations (T8), verrous, minimisation et prérequis de production
+
+- **Statut :** proposé, même validation que l'ADR. En cas de divergence, cette section prévaut pour les points listés.
+
+### 18.1 Décisions du chef de projet appliquées en T8
+
+1. **Codes de claim alignés sur le contrat figé (§9.2)** : `RCCM_VERIFIED`, `NATIONAL_ID_VERIFIED`, `REPRESENTATIVE_VERIFIED`, `NGO_DECREE_VERIFIED` (table `CLAIMS` de `identity/verification.py`, filtre `?claim=`). Libellés français inchangés.
+2. **Verrous d'identité (A13 étendu).** Le renommage est refusé (409 `name_locked_by_verification`) tant qu'une pièce de l'organisation est `VALIDE` **ou `EN_ATTENTE`** ; le NIF est refusé (409 `nif_locked_by_verification`) dès qu'une pièce est `VALIDE`. Un nom ou un NIF inchangé après normalisation n'est pas un changement. Une pièce `REFUSE` ne verrouille rien. Le personnel passe par l'administration.
+3. **Minimisation du NIF (règle 10).** `OrganizationInternal.nif` n'est renseigné que pour les rôles ayant `org.edit_profile` (propriétaire, administrateur) ; pour un éditeur ou un analyste la clé existe et vaut `null`. Il n'est jamais dans la liste publique.
+4. **Logo.** Validé par décodage réel (taille, pixels, ré-encodage) avant toute écriture ; une image tronquée ou corrompue est un 400 `invalid_logo`, jamais une erreur serveur, et ne laisse aucun fichier.
+5. **Villes.** `PATCH {"city_id": null}` retire aussi la commune (cohérence). Une commune d'une autre ville reste refusée (`unknown_commune`).
+6. **Noms d'organisation et de prestataire.** Un nom mêlant latin, cyrillique et grec est refusé (`invalid_name`) pour limiter les homoglyphes (« Rawbаnk »).
+7. **Liste publique.** Throttle par IP `org_list` (600/h) en plus des défauts anonyme/utilisateur ; création : `org_create` (5/jour) ; écritures : `org_write` (30/h). `search` est borné à 100 caractères (400 `search_too_long`).
+8. **Événement ajouté** `identity.organization_updated` (noms de champs seulement, sans abonné) ; codes ajoutés : `org_type_immutable`, `invalid_claim`, `invalid_filter`, `search_too_long`, `nif_locked_by_verification`.
+9. **Forme de `required`** dans `OrganizationInternal.verification` : `{document_type, label, state}` avec `state` = `VALIDE` si le claim du type est prouvé, sinon statut de la pièce la plus récente, `NONE` si rien n'est déposé. L'endpoint `organizations/<id>/verification/` (T4) garde son contrat propre (`requirements`, `MANQUANTE`).
+
+### 18.2 Dettes et prérequis de production
+
+- **Prérequis de production (DoD) : cache partagé obligatoire.** Les throttles (`org_*`, `provider_write`, OTP, etc.) s'appuient sur le cache Django, aujourd'hui `LocMemCache` par processus : sous plusieurs processus Daphne, les plafonds ne sont pas globaux. Un cache partagé (autre que LocMem, sans Redis imposé par les choix actuels : base ou fichier à évaluer) est requis avant la mise en production.
+- **Collision de noms avec une organisation vérifiée** (usurpation) et **signalement d'usurpation à la modération** : non codés ; dette pour la modération et L1-01 (avec la liste de noms réservés, §17.3).
+- **`SellerSummary.user_type`** (et `business_profile`) : retirés en T9 avec `BusinessProfile` et `User.user_type`.
+- **6 requêtes pour la liste publique** (compte, page, catégories, plus trois requêtes de vérification : organisations, exigences, pièces validées) : valeur volontaire, indépendante du nombre d'organisations ; ne pas « optimiser » sans test de non-régression.
+- **Imports et code morts** (sérialiseurs, vues et tests liés à `BusinessProfile`/`user_type`) : à contrôler en T9 (`grep -rn "user_type\|BusinessProfile\|business_profile" backend/apps`).
+- **`scripts/recette_contrat_http.py`** : section organisations et inscription réécrites en T8 (non exécutée en CI) ; les routes KYC historiques y utilisent un `BusinessProfile` créé en base jusqu'à T9.

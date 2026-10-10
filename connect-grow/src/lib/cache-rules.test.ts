@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { isCacheableApiContent, isContactRevealRequest } from "./cache-rules";
+import { isCacheableApiContent, isContactRevealRequest, isContextsRequest } from "./cache-rules";
 
 const call = (path: string, headers: Record<string, string> = {}, method = "GET") =>
   isCacheableApiContent({
@@ -78,5 +78,27 @@ describe("configuration des fonctionnalités (L0-14)", () => {
   it("aucune règle Workbox de vite.config.ts ne cible config/features", () => {
     const config = readFileSync(resolve(process.cwd(), "vite.config.ts"), "utf-8");
     expect(config).not.toMatch(/config\/features/);
+  });
+});
+
+describe("liste des profils (accounts/contexts/) : jamais en cache hors ligne", () => {
+  const match = (path: string) => isContextsRequest({ url: new URL(path, "http://localhost") });
+
+  it("reconnaît contexts/ avec ou sans /v1/", () => {
+    expect(match("/api/accounts/contexts/")).toBe(true);
+    expect(match("/api/v1/accounts/contexts/")).toBe(true);
+    expect(match("/api/accounts/contacts/")).toBe(false);
+  });
+  it("n'est jamais éligible au cache de contenus publics", () => {
+    expect(call("/api/accounts/contexts/")).toBe(false);
+    expect(call("/api/v1/accounts/contexts/")).toBe(false);
+  });
+  it("la configuration PWA la déclare en NetworkOnly, avant toute règle de cache", () => {
+    const config = readFileSync(resolve(process.cwd(), "vite.config.ts"), "utf-8");
+    const rule = config.search(/urlPattern:\s*isContextsRequest,\s*handler:\s*"NetworkOnly"/);
+    expect(rule).toBeGreaterThan(-1);
+    expect(rule).toBeLessThan(config.indexOf('handler: "CacheFirst"'));
+    expect(rule).toBeLessThan(config.indexOf('handler: "StaleWhileRevalidate"'));
+    expect(rule).toBeLessThan(config.indexOf('handler: "NetworkFirst"'));
   });
 });

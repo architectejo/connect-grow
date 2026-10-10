@@ -346,3 +346,31 @@ export interface ReceivedReveal {
 export interface FeaturesResponse {
   features: { exchange_enabled: boolean };
 }
+
+// --- Contextes (profils) du compte : GET accounts/contexts/ (ADR 0006 §9.1) ---
+
+export type ContextType = "USER" | "PROVIDER" | "ORGANIZATION";
+export type OrganizationRole = "OWNER" | "ADMIN" | "EDITOR" | "ANALYST";
+export type OrganizationType = "ENTREPRISE" | "BOUTIQUE" | "ONG" | "ORGANISATEUR_EVENEMENTS";
+
+/** Élément de `contexts/` : un profil sous lequel le compte peut agir. `capabilities` ne sert qu'à masquer des boutons. */
+export interface AvailableContext {
+  type: ContextType;
+  id: Uuid;
+  name: string;
+  /** Rôle dans l'organisation ; null pour le profil personnel et le prestataire. */
+  role: OrganizationRole | null;
+  org_type: OrganizationType | null;
+  /** Prestataire : photo du compte (pas de champ propre). */
+  photo: string | null;
+  capabilities: string[];
+  /** Organisation issue d'un ancien compte entreprise. */
+  migrated_from_business: boolean;
+}
+
+export interface ContextsResponse {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: AvailableContext[];
+}

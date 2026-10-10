@@ -26,6 +26,41 @@ const fr = {
     theme: "Thème",
     mainNavigation: "Navigation principale",
   },
+  context: {
+    actAs: "Agir en tant que",
+    active: "Profil actif",
+    activeAria: "Profil actif : {{name}}, {{type}}. Changer de profil.",
+    personalProfile: "Profil personnel",
+    bannerPersonal: "Vous agissez en tant que : profil personnel",
+    bannerProvider: "Vous agissez en tant que prestataire : {{name}}",
+    bannerOrganization: "Vous agissez au nom de {{name}} · {{role}}",
+    switchToPersonal: "Passer au profil personnel",
+    change: "Changer de profil",
+    switched: "Vous agissez maintenant : {{name}}.",
+    type: {
+      USER: "Personnel",
+      PROVIDER: "Prestataire",
+      ORGANIZATION: "Organisation",
+    },
+    myProfiles: "Mes profils",
+    createOrg: "Créer une organisation",
+    loading: "Chargement de vos profils",
+    loadError: "Impossible de charger vos profils.",
+    offlineNeeded: "Connexion requise.",
+    alwaysPersonal: "Cette action est toujours faite avec votre profil personnel.",
+  },
+  role: {
+    OWNER: "Propriétaire",
+    ADMIN: "Administrateur",
+    EDITOR: "Éditeur",
+    ANALYST: "Analyste",
+  },
+  orgType: {
+    ENTREPRISE: "Entreprise",
+    BOUTIQUE: "Boutique",
+    ONG: "ONG",
+    ORGANISATEUR_EVENEMENTS: "Organisateur d'événements",
+  },
   theme: {
     toggle: "Changer le thème",
     light: "Clair",
@@ -288,9 +323,50 @@ const fr = {
     notFound: "Cette ressource est introuvable.",
     forbidden: "Vous n'avez pas le droit d'effectuer cette action.",
     conflict: "Cette action a déjà été effectuée.",
+    deny: {
+      CONTEXT: {
+        lost: "Le profil sélectionné n'est pas disponible. Vous agissez maintenant sous votre profil personnel.",
+        action: "Cette action n'est pas possible avec le profil sélectionné.",
+      },
+      RELATION: {
+        lost: "Vous ne faites plus partie de cette organisation. Vous agissez maintenant sous votre profil personnel.",
+        action: "Vous n'avez pas accès à cet élément.",
+      },
+      PERMISSION: {
+        org: "Votre rôle ne permet pas cette action. Demandez à un propriétaire ou à un administrateur de l'organisation.",
+        generic: "Vous n'avez pas le droit d'effectuer cette action.",
+      },
+      SECURITY: {
+        lost: "Cette organisation est suspendue. Vous agissez maintenant sous votre profil personnel.",
+        action: "Cette action est temporairement impossible : le compte ou l'organisation est limité. Contactez le support de Connecte+.",
+      },
+      OBJECT_STATE: {
+        lost: "Ce profil est archivé. Vous agissez maintenant sous votre profil personnel.",
+        action: "Cet élément n'est plus dans un état qui permet cette action.",
+      },
+    },
+    code: {
+      last_owner:
+        "Vous êtes le dernier propriétaire : vous ne pouvez pas quitter l'organisation. Un autre propriétaire doit d'abord être nommé, ou l'organisation doit être archivée.",
+      last_owner_demote: "Une organisation doit toujours avoir au moins un propriétaire.",
+      organization_limit_reached:
+        "Vous avez atteint le nombre maximal d'organisations pour un compte. Quittez ou archivez une organisation pour en créer une nouvelle.",
+      phone_verification_required: "Vérifiez d'abord votre numéro de téléphone de connexion pour créer une organisation.",
+      name_locked_by_verification:
+        "Le nom ne peut plus être modifié car une pièce de vérification a été validée. Pour le changer, contactez le support de Connecte+.",
+      seller_not_settable: "L'opération n'a pas abouti. Réessayez.",
+    },
+    lost: {
+      title: "Votre profil actif a changé",
+      profile: "Profil concerné : {{name}}",
+      left: "Vous avez quitté l'organisation. Vous agissez maintenant sous votre profil personnel.",
+      archived: "L'organisation est archivée. Vous agissez maintenant sous votre profil personnel.",
+      dismiss: "J'ai compris",
+    },
   },
   common: {
     cancel: "Annuler",
+    offlineAction: "Reconnectez-vous pour effectuer cette action.",
   },
   auth: {
     logoutAllFailed: "Déconnexion locale uniquement : les autres appareils n'ont pas pu être déconnectés.",
@@ -393,6 +469,7 @@ const fr = {
     offline: "Connexion perdue. Les contenus déjà chargés restent consultables.",
     backOnline: "Connexion rétablie",
     loading: "Chargement…",
+    accessDeniedTitle: "Accès refusé",
   },
 };
 

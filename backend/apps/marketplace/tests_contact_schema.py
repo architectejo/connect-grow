@@ -1,6 +1,4 @@
 """Schéma posé par l'ADR 0005 (T1) côté marketplace : réglages de révélation, delivered_at, index, événements."""
-import uuid
-
 from django.contrib.admin.sites import site as admin_site
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
@@ -58,8 +56,13 @@ class ContactEventSchemaTests(MarketplaceTestBase):
 class DeliveredAtBackfillTests(TransactionTestCase):
     """La migration marketplace 0005 remplit delivered_at des contacts existants."""
 
-    migrate_from = [('marketplace', '0004_validateurs_prix_stock'), ('identity', '0003_emails_en_minuscules')]
-    migrate_to = [('marketplace', '0005_contactevent_delivered_at_and_reveal_limits'), ('identity', '0003_emails_en_minuscules')]
+    migrate_from = [
+        ('marketplace', '0004_validateurs_prix_stock'), ('identity', '0003_emails_en_minuscules'), ('catalog', '0001_initial'),
+    ]
+    migrate_to = [
+        ('marketplace', '0005_contactevent_delivered_at_and_reveal_limits'), ('identity', '0003_emails_en_minuscules'),
+        ('catalog', '0001_initial'),
+    ]
 
     def tearDown(self):
         call_command('migrate', verbosity=0)
@@ -71,10 +74,16 @@ class DeliveredAtBackfillTests(TransactionTestCase):
         User = old_apps.get_model('identity', 'User')
         Offer = old_apps.get_model('marketplace', 'Offer')
         Event = old_apps.get_model('marketplace', 'ContactEvent')
+        City = old_apps.get_model('catalog', 'City')
+        Commune = old_apps.get_model('catalog', 'Commune')
+        Category = old_apps.get_model('catalog', 'Category')
+        city = City.objects.create(name='Kinshasa', name_key='kinshasa', slug='kinshasa')
+        commune = Commune.objects.create(city=city, name='Gombe', name_key='gombe')
+        category = Category.objects.create(name='Électronique', name_key='electronique', slug='electronique')
         seller = User.objects.create(email='s@example.com')
         buyer = User.objects.create(email='b@example.com')
         offer = Offer.objects.create(
-            seller=seller, category_id=uuid.uuid4(), commune_id=uuid.uuid4(), title='Un joli canapé à vendre',
+            seller=seller, category_id=category.id, commune_id=commune.id, title='Un joli canapé à vendre',
             description='Description suffisamment longue pour passer.', price=1, expires_at=timezone.now(),
         )
         event = Event.objects.create(offer=offer, sender=buyer, message='Bonjour', channel='MESSAGE')
@@ -85,6 +94,14 @@ class DeliveredAtBackfillTests(TransactionTestCase):
         migrated = new_apps.get_model('marketplace', 'ContactEvent').objects.get(pk=event.pk)
         self.assertIsNotNone(migrated.delivered_at)
         self.assertEqual(migrated.delivered_at, migrated.created_at)
+
+        # Retour arrière : la migration est réversible et la colonne disparaît.
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_from)
+        back_apps = executor.loader.project_state(self.migrate_from).apps
+        back_event = back_apps.get_model('marketplace', 'ContactEvent')
+        self.assertNotIn('delivered_at', {f.name for f in back_event._meta.get_fields()})
+        self.assertTrue(back_event.objects.filter(pk=event.pk).exists())
 
 
 class ContactEventsCatalogTests(MarketplaceTestBase):

@@ -223,6 +223,10 @@ L'adresse IP n'est pas journalisée (LEG-PRV-07 ouverte). La durée de conservat
 | **Détournement du lien WhatsApp** | `wa.me` construit côté serveur depuis le numéro vérifié, avec le titre encodé seulement. |
 | **Pas de numéro sans trace** | `ContactEvent` créé dans la transaction avant l'envoi de la réponse ; si l'écriture échoue, la réponse est une erreur et ne contient pas de numéro. |
 | **Contact fictif pour obtenir un avis** | C10 (preuve de remise réelle) + délai D5 + signalement « contact fictif » existant (`reviews.reject_fictitious_contact`). |
+| **SMS arbitraire vers un numéro saisi** (L0-24, audit m2) | Un compte sans identifiant vérifié ne peut déclencher un SMS `CONTACT_VERIFY` qu'après `CONTACT_SMS_MIN_ACCOUNT_AGE_HOURS` heures (réglage `settings.py`, 24 par défaut) ; sinon 403 `account_too_new`. Le SMS nomme son but (« code pour publier ce numéro comme contact Connecte+ ; ne le communiquez à personne »). Les limites d'envoi des OTP s'ajoutent. |
+| **Course entre vérification et changement de numéro** (L0-24, audit M1) | La vérification est une mise à jour conditionnelle (`pk`, `phone` du code, non vérifié) : si le numéro a changé entre-temps, rien n'est vérifié (`otp_invalid`). La création du `ContactPoint` est verrouillée (`select_for_update`) et rattrape une création concurrente par relecture. |
+| **Preuve d'accord et numéro** (L0-24, audit m1) | `get_contact_endpoint` exige que `phone_last4` du consentement égale les 4 derniers chiffres du numéro actuel ; `set_channel_consent` n'écrit pas un accord si le numéro a changé pendant l'opération. |
+| **Codes OTP et administration** (L0-24, audit m3, LEG-PRV-12) | Les codes `CONTACT_VERIFY` sont supprimés dès qu'ils ont servi (le numéro ne reste pas dans `OtpCode`) et l'admin `OtpCode` exclut ce but de sa liste. Un code non utilisé disparaît avec la purge OTP existante. |
 | **Dénombrement à la baisse** (rafales parallèles dépassant le quota) | Comptage en base à chaque appel ; sous SQLite les écritures sont sérialisées ; sous MySQL (fin de projet) ajouter un verrou applicatif court ou un contrôle après insertion. Dette notée, comme celle de `create_contact_event`. |
 
 ## 9. Questions LEG-PRV restantes (à poser au client, ne bloquent pas le développement)
@@ -292,3 +296,8 @@ Extension de `apps/common/tests_privacy.py` (classe dédiée, mêmes jeux de don
 - Valeurs par défaut (15, 3, 30, 24 h) et version de texte `2026-10-v1` provisoires, à valider avec le client.
 - Aucun mécanisme de blocage de visiteur (lot 2).
 - Pas de « mes révélations » côté visiteur (LEG-PRV-04, question 6).
+
+### Ajouts L0-24 (audit sécurité et relecture de T1/T2)
+
+- **Version du texte et accords existants** (décision du chef de projet, dette LEG-PRV-03) : un consentement reste valable après un changement de `CONTACT_CONSENT_TEXT_VERSION`. Cible, si le texte change de façon substantielle : la version majeure invalide les accords et impose une nouvelle acceptation. L'implémentation actuelle ne le fait pas (la preuve garde la version acceptée) ; à traiter avec la réponse du client sur LEG-PRV-03.
+- **Migration `marketplace` 0005** : elle mêle schéma et remplissage de `delivered_at` ; son découpage est une dette notée (déjà fusionnée).

@@ -121,10 +121,12 @@ class ReviewContact:
 
 def get_review_contact(offer_id, user_id) -> Optional[ReviewContact]:
     """Plus ancien contact de `user_id` sur l'offre, ou None s'il n'a jamais contacté le vendeur.
-    Seuls les contacts comptés (`is_counted`) valent preuve. Limite connue : « un message
-    effectivement échangé » (réponse du vendeur) comme preuve viendra avec L0-10a."""
+    Valent preuve les contacts comptés (`is_counted`) ET remis (`delivered_at` non nul : numéro
+    révélé, ou message déposé chez le vendeur ; ADR 0005, C10). La réponse du vendeur n'est pas exigée."""
     row = (
-        ContactEvent.objects.filter(offer_id=offer_id, sender_id=user_id, is_counted=True)
+        ContactEvent.objects.filter(
+            offer_id=offer_id, sender_id=user_id, is_counted=True, delivered_at__isnull=False,
+        )
         .order_by('created_at', 'id').values_list('id', 'channel', 'created_at').first()
     )
     return None if row is None else ReviewContact(contact_event_id=row[0], channel=row[1], recorded_at=row[2])
@@ -423,6 +425,12 @@ def get_contact_message(contact_event_id) -> Optional[str]:
     """Texte à poser dans la conversation pour un contact, ou None si le contact n'existe plus
     (annonce supprimée entre-temps). Lu à la diffusion : le message ne transite pas par l'outbox."""
     return ContactEvent.objects.filter(pk=contact_event_id).values_list('message', flat=True).first()
+
+
+def mark_contact_delivered(contact_event_id) -> None:
+    """Pose `delivered_at` d'un contact par message une fois remis au vendeur. Idempotent : une
+    seconde diffusion ne modifie pas l'horodatage ; un contact disparu est ignoré."""
+    ContactEvent.objects.filter(pk=contact_event_id, delivered_at__isnull=True).update(delivered_at=timezone.now())
 
 
 def get_exchange_message(proposal_id) -> Optional[str]:

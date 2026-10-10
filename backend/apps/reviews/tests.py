@@ -47,11 +47,15 @@ class ReviewsTestBase(APITestCase):
             price=100, main_image=make_test_image(), **extra,
         )
 
-    def make_contact(self, offer=None, user=None, channel=ContactEvent.CHANNEL_MESSAGE):
-        return ContactEvent.objects.create(
+    def make_contact(self, offer=None, user=None, channel=ContactEvent.CHANNEL_MESSAGE, delivered=True):
+        """Contact remis par défaut (`delivered_at` posé) : seul un contact remis ouvre le droit d'avis."""
+        contact = ContactEvent.objects.create(
             offer=offer or self.offer, sender=user or self.buyer, message='Bonjour, toujours disponible ?',
             channel=channel,
         )
+        if delivered:
+            ContactEvent.objects.filter(pk=contact.pk).update(delivered_at=contact.created_at)
+        return contact
 
     def make_review(self, offer=None, user=None, **kwargs):
         """Avis créé directement (sans passer par l'API), avec son contact si nécessaire."""

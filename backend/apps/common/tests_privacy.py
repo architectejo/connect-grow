@@ -249,6 +249,10 @@ class NoPersonalContactLeakTests(APITestCase):
             self.assertLess(response.status_code, 500, name)
             self.assertIn(response.status_code, (200, 201), f'{name} : {response.content[:200]}')
             self.assert_clean(response, reverse(name), viewer)
+            if name == 'contact-list':  # la remise du message (2 passes d'outbox) ouvre le droit d'avis
+                from apps.platform_core.testing import dispatch_outbox_now
+                dispatch_outbox_now()
+                dispatch_outbox_now()
         favorite = self.client_for('third').post(reverse('offer-favorite', args=[self.offer.id]))
         self.assertEqual(favorite.status_code, 200)
         self.assert_clean(favorite, 'favorite', 'third')

@@ -1,5 +1,8 @@
 """Interface publique du domaine `messaging` pour les autres domaines."""
+from django.db import transaction
+
 from apps.notifications import services as notification_services
+from apps.platform_core.services import publish_event
 
 from .models import Conversation, Message
 
@@ -39,12 +42,25 @@ def send_message(*, conversation: Conversation, sender, content: str, notify: bo
     return message
 
 
-def open_conversation_with_message(*, offer_id, sender_id, recipient_id, content: str) -> Message:
+def open_conversation_with_message(*, offer_id, sender_id, recipient_id, content: str, contact_event_id=None) -> Message:
     """Ouvre (ou retrouve) la conversation d'une offre entre l'expéditeur et le destinataire, puis
-    y dépose le message, sans notification (la demande de contact notifie déjà le vendeur)."""
-    conversation = get_or_create_offer_conversation(offer_id=offer_id, user_ids=[sender_id, recipient_id])
-    message = Message.objects.create(conversation=conversation, sender_id=sender_id, content=content)
-    conversation.save(update_fields=['updated_at'])
+    y dépose le message, sans notification (la demande de contact notifie déjà le vendeur).
+
+    Si le message vient d'un contact (`contact_event_id`), publie `messaging.contact_message_delivered`
+    dans la même transaction : le message est alors réellement remis au vendeur (ADR 0005, C10).
+    La charge utile ne contient que des identifiants, ni le texte ni aucun numéro."""
+    with transaction.atomic():
+        conversation = get_or_create_offer_conversation(offer_id=offer_id, user_ids=[sender_id, recipient_id])
+        message = Message.objects.create(conversation=conversation, sender_id=sender_id, content=content)
+        conversation.save(update_fields=['updated_at'])
+        if contact_event_id is not None:
+            publish_event(
+                'messaging.contact_message_delivered', aggregate_type='conversation', aggregate_id=conversation.pk,
+                payload={
+                    'contact_event_id': str(contact_event_id), 'offer_id': str(offer_id),
+                    'conversation_id': str(conversation.pk), 'message_id': str(message.pk),
+                },
+            )
     return message
 
 

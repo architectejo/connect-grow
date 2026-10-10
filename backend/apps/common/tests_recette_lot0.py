@@ -346,6 +346,8 @@ class ContractTests(RecetteBase):
         second = self.make_offer(self.seller, title='Deuxième offre pour la limite')
         self.contact_via_api(self.buyer)
         self.contact_via_api(self.buyer, second)
+        dispatch_outbox_now()
+        dispatch_outbox_now()  # remise du message = preuve de contact pour l'avis
         client = self.as_user(self.buyer)
         self.assertEqual(client.post(REVIEWS_URL, {'post': str(self.offer.id), **GOOD}, format='json').status_code, 201)
         limited = client.post(REVIEWS_URL, {'post': str(second.id), **GOOD}, format='json')
@@ -460,6 +462,7 @@ class JourneyTests(RecetteBase):
         for buyer in (self.buyer, self.buyer2, self.other):
             self.assertEqual(self.contact_via_api(buyer).status_code, 201)
         dispatch_outbox_now()
+        dispatch_outbox_now()  # 2e passe : `messaging.contact_message_delivered` (preuve de remise, ADR 0005)
         seller = self.as_user(self.seller)
         notifications = self.rows(seller.get('/api/interactions/notifications/'))
         self.assertEqual(len(notifications), 3)
@@ -867,7 +870,8 @@ class OutboxScenarioTests(RecetteBase):
         self.assertEqual(Notification.objects.filter(notification_type='CONTACT').count(), 2)
         self.assertEqual(Conversation.objects.count(), 2)  # l'abonné déjà réussi n'est pas rejoué
         self.assertEqual(Message.objects.count(), 2)
-        self.assertEqual(OutboxEvent.objects.filter(status='done').count(), 2)
+        # 2 `contact_recorded` + 2 `contact_message_delivered` (émis par la conversation ouverte, sans abonné en panne).
+        self.assertEqual(OutboxEvent.objects.filter(status='done').count(), 4)
         call_command('dispatch_outbox', '--stats', verbosity=0)  # plus aucune livraison morte
 
     def test_unknown_event_version_is_a_permanent_failure(self):
@@ -880,7 +884,8 @@ class OutboxScenarioTests(RecetteBase):
     def test_purge_removes_old_done_and_dead_events_only(self):
         self.make_contacts(3)
         call_command('dispatch_outbox', verbosity=0)
-        events = list(OutboxEvent.objects.order_by('created_at'))
+        events = list(OutboxEvent.objects.filter(event_type='marketplace.contact_recorded').order_by('created_at'))
+        OutboxEvent.objects.exclude(pk__in=[e.pk for e in events]).delete()  # événements de remise : hors sujet ici
         old, recent, dead = events
         OutboxEvent.objects.filter(pk=old.pk).update(completed_at=timezone.now() - timedelta(days=8))
         OutboxEvent.objects.filter(pk=dead.pk).update(status='dead', completed_at=timezone.now() - timedelta(days=10))
@@ -895,6 +900,7 @@ class OutboxScenarioTests(RecetteBase):
     def test_review_events_reach_the_right_people(self):
         self.contact_via_api(self.buyer)
         call_command('dispatch_outbox', verbosity=0)
+        call_command('dispatch_outbox', verbosity=0)  # 2e passe : remise du message de contact
         Notification.objects.all().delete()
         created = self.as_user(self.buyer).post(REVIEWS_URL, {'post': str(self.offer.id), **GOOD}, format='json').json()
         self.as_user(self.seller).post(f"{REVIEWS_URL}{created['id']}/reply/", {'reply_content': 'Merci !'}, format='json')

@@ -50,7 +50,10 @@ class RevealTestBase(MarketplaceTestBase):
     def grant(user, channel):
         ContactConsent.objects.update_or_create(
             user=user, channel=channel,
-            defaults={'is_granted': True, 'text_version': CONTACT_CONSENT_TEXT_VERSION, 'granted_at': timezone.now()},
+            defaults={
+                'is_granted': True, 'text_version': CONTACT_CONSENT_TEXT_VERSION, 'granted_at': timezone.now(),
+                'phone_last4': SELLER_NUMBER[-4:],  # preuve d'accord exigée par get_contact_endpoint (L0-24)
+            },
         )
 
     def reveal(self, offer=None, channel='CALL', **extra):

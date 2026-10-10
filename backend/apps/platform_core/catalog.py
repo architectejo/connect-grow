@@ -26,8 +26,8 @@ _TYPES = (
     # Abonnés ajoutés par T5 à T7 ; le drapeau no_subscriber est alors retiré.
     EventType('identity.membership_changed', no_subscriber=True),
     EventType('identity.seller_context_status_changed', no_subscriber=True),
-    # Émetteur : `decide_kyc_document` (T4).
-    EventType('identity.organization_verification_changed', no_subscriber=True, emitter_pending=True),
+    # Émetteur : `decide_kyc_document` (T4) ; abonné `notifications.notify_kyb_decision` ajouté par T6.
+    EventType('identity.organization_verification_changed', no_subscriber=True),
     EventType('marketplace.contact_recorded'),
     # ADR 0005 : sans aucun numéro dans la charge utile ; abonné : notifications (prévient le vendeur).
     EventType('marketplace.contact_revealed'),

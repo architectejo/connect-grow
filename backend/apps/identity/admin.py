@@ -15,10 +15,11 @@ from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 
 from apps.common.admin_mixins import SingletonSettingsAdminMixin
-from apps.common.contexts import ContextDenied
+from apps.common.contexts import CONTEXT_ORGANIZATION, ContextDenied
 from apps.moderation.services import record_audit
 
 from . import services
+from .permissions import REVIEW_KYC_PERMISSION
 from .models import (
     BusinessProfile, BusinessProfileCategory, ContactConsent, IdentitySettings, KycDocument, Membership, OtpCode,
     Organization, OrganizationDocumentRequirement, ProviderProfile, User,
@@ -108,16 +109,48 @@ class BusinessProfileAdmin(admin.ModelAdmin):
 
 @admin.register(KycDocument)
 class KycDocumentAdmin(admin.ModelAdmin):
-    """Consultation seule : ni fichier, ni saisie des décisions (voir KycDecisionView)."""
+    """Consultation seule : ni fichier, ni saisie des décisions (voir KycDecisionView).
 
-    list_display = ('business_profile', 'document_type', 'status', 'reviewed_by', 'created_at')
+    Pièces d'organisation (KYB) : visibles seulement par le personnel qui détient `review_kycdocument`
+    (liste et fiche), et chaque consultation d'une fiche est journalisée (règle 12). Aucun contact de membre
+    n'est affiché."""
+
+    list_display = ('business_profile', 'organization', 'document_type', 'status', 'reviewed_by', 'created_at')
     list_filter = ('status', 'document_type')
-    search_fields = ('business_profile__business_name',)
-    exclude = ('file',)
+    search_fields = ('business_profile__business_name', 'organization__name')
+    exclude = ('file', 'uploaded_by')
+    list_select_related = ('business_profile', 'organization', 'reviewed_by')
     readonly_fields = (
-        'business_profile', 'document_type', 'status', 'rejection_reason', 'reviewed_by', 'reviewed_at',
-        'created_at', 'updated_at',
+        'business_profile', 'organization', 'document_type', 'status', 'rejection_reason',
+        'reviewed_by', 'reviewed_at', 'created_at', 'updated_at',
     )
+
+    @staticmethod
+    def _may_see_organization_documents(request):
+        return request.user.has_perm(REVIEW_KYC_PERMISSION)
+
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request)
+        if not self._may_see_organization_documents(request):
+            queryset = queryset.filter(organization__isnull=True)
+        return queryset
+
+    def has_view_permission(self, request, obj=None):
+        if obj is not None and obj.organization_id is not None and not self._may_see_organization_documents(request):
+            return False
+        return super().has_view_permission(request, obj)
+
+    def change_view(self, request, object_id, form_url='', extra_context=None):
+        response = super().change_view(request, object_id, form_url, extra_context)
+        if request.method == 'GET' and response.status_code == 200:
+            document = KycDocument.objects.filter(pk=object_id, organization__isnull=False).first()
+            if document is not None:
+                record_audit(
+                    request.user, 'KYC_ADMIN_VIEWED', target=document,
+                    details=f"organization={document.organization_id}; document_type={document.document_type}",
+                    context=(CONTEXT_ORGANIZATION, document.organization_id),
+                )
+        return response
 
     def has_add_permission(self, request):
         return False
@@ -288,4 +321,7 @@ class OrganizationDocumentRequirementAdmin(admin.ModelAdmin):
 
 @admin.register(IdentitySettings)
 class IdentitySettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
-    list_display = ('max_organizations_per_account', 'max_categories_per_context', 'org_phone_channels_enabled')
+    list_display = (
+        'max_organizations_per_account', 'max_categories_per_context', 'org_phone_channels_enabled',
+        'kyb_file_retention_days',
+    )

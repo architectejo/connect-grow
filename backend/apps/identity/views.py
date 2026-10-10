@@ -14,6 +14,7 @@ from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+from apps.common.contexts import CONTEXT_ORGANIZATION
 from apps.common.exception_handler import CodedAPIException
 from apps.common.pagination import StandardPagination
 from apps.moderation.services import record_audit
@@ -23,10 +24,12 @@ from .kyc_files import EXTENSION_TO_CONTENT_TYPE
 from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
 from .permissions import CanReviewKyc
 from .serializers import (
-    IdentifierTokenObtainPairSerializer, KycDocumentSerializer, PublicBusinessSerializer, UserSerializer,
+    IdentifierTokenObtainPairSerializer, KycDocumentSerializer, OrganizationKycDocumentSerializer, PublicBusinessSerializer,
+    UserSerializer,
 )
 from .services import (
     ContactSettingsError, KycError, decide_kyc_document, get_contact_settings, get_contexts_for_user,
+    get_document_for_download,
     revoke_all_sessions, set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
 )
 from .sms import send_otp_sms
@@ -400,7 +403,9 @@ class KycReviewQueueView(generics.ListAPIView):
 
     serializer_class = KycDocumentSerializer
     permission_classes = [CanReviewKyc]
-    queryset = KycDocument.objects.filter(status=KycDocument.STATUS_EN_ATTENTE).select_related('business_profile')
+    queryset = KycDocument.objects.filter(status=KycDocument.STATUS_EN_ATTENTE).select_related(
+        'business_profile', 'organization',
+    )
 
 
 class KycDecisionView(APIView):
@@ -430,9 +435,9 @@ class KycDocumentDownloadView(APIView):
 
     def get(self, request, pk):
         try:
-            doc = KycDocument.objects.get(pk=pk)
-        except KycDocument.DoesNotExist:
-            return Response({'error': "Document introuvable."}, status=status.HTTP_404_NOT_FOUND)
+            doc = get_document_for_download(pk, request.user)
+        except KycError as exc:
+            return Response({'error': exc.message}, status=exc.status_code)
         try:
             handle = doc.file.open('rb')
         except (ValueError, OSError):
@@ -440,6 +445,7 @@ class KycDocumentDownloadView(APIView):
         record_audit(
             request.user, 'KYC_DOWNLOADED', target=doc,
             details=f"Pièce {doc.get_document_type_display()} consultée.",
+            context=(CONTEXT_ORGANIZATION, doc.organization_id) if doc.organization_id else None,
         )
         extension = doc.file.name.rsplit('.', 1)[-1].lower() if '.' in doc.file.name else 'bin'
         response = FileResponse(

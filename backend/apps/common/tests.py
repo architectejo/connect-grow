@@ -32,6 +32,7 @@ EXPECTED_PUBLIC = {
     ('post', 'api/accounts/register/'),
     ('post', 'api/accounts/login/'),
     ('post', 'api/accounts/token/refresh/'),
+    ('get', 'api/config/features/'),  # fonctionnalités activables, sans donnée personnelle (L0-14)
     ('post', 'api/accounts/logout/'),  # public : le refresh du corps prouve la session (L0-19)
     ('post', 'api/accounts/otp/request/'),
     ('post', 'api/accounts/password-reset/confirm/'),

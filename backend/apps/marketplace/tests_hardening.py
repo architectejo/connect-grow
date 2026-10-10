@@ -55,6 +55,7 @@ class WriteThrottleTests(MarketplaceTestBase):
         self.assertEqual(ok.status_code, status.HTTP_201_CREATED)
 
     def test_exchange_share_favorite_and_upload_are_limited(self):
+        self.enable_exchange()
         offers = [self.make_offer(title=f'Annonce numéro {i} à vendre') for i in range(2)]
         with rate('exchange', '1/hour'):
             self.assert_limited(*[
@@ -182,6 +183,7 @@ class AvailabilityTests(MarketplaceTestBase):
         return [hidden, paused, sold, trashed]
 
     def test_contact_exchange_and_favorite_refuse_unavailable_offers(self):
+        self.enable_exchange()
         self.client.force_authenticate(self.buyer)
         for offer in self.make_unavailable():
             payload = {'post': str(offer.id), 'message': 'Bonjour'}
@@ -301,6 +303,7 @@ class QueryCountTests(MarketplaceTestBase):
         self.assert_constant('offer-trash', grow)
 
     def test_contacts_and_exchanges(self):
+        self.enable_exchange()
         def grow(i):
             offer = self.make_offer(title=f'Annonce contactée numéro {i}')
             ContactEvent.objects.create(offer=offer, sender=self.buyer, message='Bonjour')

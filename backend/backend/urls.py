@@ -8,6 +8,7 @@ urlpatterns = [
     # Référentiels du catalogue : URL historiques conservées jusqu'à L0-11.
     path('api/marketplace/', include('apps.catalog.urls')),
     path('api/marketplace/', include('apps.marketplace.urls')),
+    path('api/config/', include('apps.marketplace.urls_config')),
     path('api/accounts/', include('apps.identity.urls')),
     path('api/payments/', include('apps.payments.urls')),
     # Interactions : URL historiques conservées jusqu'à L0-11, servies par plusieurs domaines.

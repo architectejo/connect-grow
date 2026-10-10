@@ -145,6 +145,7 @@ REST_FRAMEWORK = {
         'contact_reveal_user': '60/hour',  # révélation de numéro, filet technique par utilisateur
         'contact_reveals_list': '120/hour',  # liste « qui a demandé mon numéro », par utilisateur
         'exchange': '10/hour',
+        'features': '120/hour',  # configuration publique des fonctionnalités, par IP (anonymes)
         'share': '30/hour',
         'message': '120/hour',
         'review': '10/hour',

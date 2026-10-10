@@ -168,6 +168,12 @@ class ContactSettingsThrottle(UserWriteThrottle):
     scope = 'contact_settings'
 
 
+class ProviderWriteThrottle(UserWriteThrottle):
+    """Activation, modification et archivage du profil prestataire : par utilisateur."""
+
+    scope = 'provider_write'
+
+
 class ContextsListThrottle(SimpleRateThrottle):
     """Lecture de la liste des contextes (appelée à chaque chargement du front) : par utilisateur."""
 

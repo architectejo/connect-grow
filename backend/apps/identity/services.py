@@ -24,6 +24,12 @@ from .organizations import (  # noqa: F401
     reactivate_organization, revoke_member, suspend_organization, transfer_ownership,
 )
 
+# Prestataire individuel (ADR 0006, 9.3) : façade publique.
+from .providers import (  # noqa: F401
+    ProviderError, activate_provider, archive_provider, get_provider_category_ids, get_provider_profile,
+    update_provider,
+)
+
 
 def revoke_all_sessions(user) -> int:
     """Révoque tous les refresh tokens en cours de `user` (déconnexion de tous les

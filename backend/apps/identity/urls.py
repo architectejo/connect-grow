@@ -22,6 +22,7 @@ from .views import (
     RegisterView,
     UserDetailView,
 )
+from .views_provider import ProviderActivateView, ProviderArchiveView, ProviderDetailView
 
 
 urlpatterns = [
@@ -46,6 +47,11 @@ urlpatterns = [
 
     # Contextes disponibles pour le compte (ADR 0006, 9.1)
     path('contexts/', ContextListView.as_view(), name='contexts'),
+
+    # Prestataire individuel (ADR 0006, 9.3)
+    path('provider/', ProviderDetailView.as_view(), name='provider_detail'),
+    path('provider/activate/', ProviderActivateView.as_view(), name='provider_activate'),
+    path('provider/archive/', ProviderArchiveView.as_view(), name='provider_archive'),
 
     # Réglages de contact vendeur (ADR 0005)
     path('contact-settings/', ContactSettingsView.as_view(), name='contact_settings'),

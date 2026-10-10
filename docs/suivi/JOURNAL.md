@@ -15,3 +15,7 @@ Une entrée par tâche terminée ou décision prise, la plus récente en haut.
 - Création de `CLAUDE.md`, des 11 agents de `.claude/agents/`, du backlog et de l'ADR 0001.
 - État constaté : 98 tests backend verts sur SQLite ; écarts avec la v1.2 listés dans le lot 0.
 - Prochaine étape : L0-01 (CI) et L0-02 / L0-03 (SQLite seul, retrait de Redis).
+
+## 2026-10-10 — L0-13 : gel de `payments.Transaction` (dev-paiements)
+- Constat : sur la branche `backend`, le module `payments` est déjà inerte par construction (R3, ADR 0002) : `urlpatterns = []`, aucune vue, aucun webhook, aucune commande cron, aucun admin. Le `FeatureFlag` annoncé n'existe pas (aucune occurrence dans le code).
+- Décision : aucun interrupteur créé, car il ne garderait aucun code (code mort, et un réglage « activable » sans implémentation serait trompeur en matière financière). Le gel est garanti par l'absence de code et verrouillé par des tests (`FrozenModuleTests`). L1-12 livrera le module et son interrupteur (désactivé par défaut) en s'appuyant sur `FeatureFlag` (L0-16), avec journalisation AuditLog.

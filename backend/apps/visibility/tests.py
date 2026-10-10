@@ -15,7 +15,7 @@ class VisibilityTestBase(TestCase):
     def setUp(self):
         self.seller = User.objects.create_user(email='seller@example.com', password='x', full_name='Vendeur')
         self.offer_id = uuid.uuid4()
-        self.today = timezone.now().date()
+        self.today = timezone.localdate()
 
     def counter(self, days_ago, views, offer_id=None, contacts=0):
         return DailyVisibilityCounter.objects.create(
@@ -261,3 +261,36 @@ class SellerStatsTests(VisibilityTestBase):
         OfferUniqueView.objects.create(offer_id=self.offer_id, date=self.today, viewer_key='k')
         services.delete_offer_data([self.offer_id])
         self.assertFalse(DailyVisibilityCounter.objects.exists() or OfferUniqueView.objects.exists())
+
+
+class DayBoundaryTests(TestCase):
+    """L0-23 : « aujourd'hui » est le jour du fuseau de l'application (Africa/Kinshasa, UTC+1), pas le jour UTC."""
+
+    def freeze(self, *args):
+        from datetime import datetime, timezone as dt_timezone
+        from unittest import mock
+        return mock.patch('django.utils.timezone.now', return_value=datetime(*args, tzinfo=dt_timezone.utc))
+
+    def check(self, frozen):
+        seller = User.objects.create_user(email='s@example.com', password='x', full_name='V')
+        offer_id = uuid.uuid4()
+        with frozen:
+            today = timezone.localdate()
+            DailyVisibilityCounter.objects.create(offer_id=offer_id, seller=seller, date=today, views=10)
+            for days in range(1, 6):
+                DailyVisibilityCounter.objects.create(
+                    offer_id=offer_id, seller=seller, date=today - timedelta(days=days), views=1,
+                )
+            stats = services.get_seller_stats(seller.id)
+            self.assertEqual(stats.today_views, 10)
+            self.assertEqual(services.trending_offer_ids([offer_id]), {offer_id})
+            return today
+
+    def test_23h30_utc_is_already_next_day_in_kinshasa(self):
+        # 10/10 23:30 UTC = 11/10 00:30 à Kinshasa
+        today = self.check(self.freeze(2026, 10, 10, 23, 30))
+        self.assertEqual(today.isoformat(), '2026-10-11')
+
+    def test_midday_utc_same_day(self):
+        today = self.check(self.freeze(2026, 10, 10, 12, 0))
+        self.assertEqual(today.isoformat(), '2026-10-10')

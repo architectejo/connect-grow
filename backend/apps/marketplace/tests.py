@@ -503,7 +503,7 @@ class UniqueViewTests(MarketplaceTestBase):
 class TrendingBadgeTests(MarketplaceTestBase):
     def counter(self, offer, days_ago, views):
         return DailyVisibilityCounter.objects.create(
-            offer_id=offer.id, seller=self.seller, views=views, date=timezone.now().date() - timedelta(days=days_ago),
+            offer_id=offer.id, seller=self.seller, views=views, date=timezone.localdate() - timedelta(days=days_ago),
         )
 
     def test_not_trending_without_history(self):
@@ -604,7 +604,7 @@ class ScheduledTasksTests(MarketplaceTestBase):
 
     def test_purge_offer_trash_also_clears_visibility_data(self):
         offer = self.make_offer()
-        DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=timezone.now().date(), views=3)
+        DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=timezone.localdate(), views=3)
         Offer.objects.filter(pk=offer.pk).update(is_deleted=True, deleted_at=timezone.now() - timedelta(days=31))
         call_command('purge_offer_trash', verbosity=0)
         self.assertFalse(DailyVisibilityCounter.objects.filter(offer_id=offer.id).exists())
@@ -645,7 +645,7 @@ class ScheduledTasksTests(MarketplaceTestBase):
 class DashboardStatsTests(MarketplaceTestBase):
     def test_dashboard_summary_and_history(self):
         offer = self.make_offer()
-        today = timezone.now().date()
+        today = timezone.localdate()
         DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=today, views=4, contacts=2)
         DailyVisibilityCounter.objects.create(
             offer_id=offer.id, seller=self.seller, date=today - timedelta(days=2), views=6,
@@ -669,7 +669,7 @@ class DashboardStatsTests(MarketplaceTestBase):
 
     def test_offer_stats_only_for_the_seller(self):
         offer = self.make_offer()
-        DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=timezone.now().date(), views=3)
+        DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=timezone.localdate(), views=3)
         url = reverse('offer_stats', args=[offer.id])
         self.client.force_authenticate(self.seller)
         self.assertEqual(self.client.get(url).data['history'][0]['views'], 3)
@@ -1012,3 +1012,29 @@ class OfferPrivacyTests(MarketplaceTestBase):
         rows = rows['results'] if isinstance(rows, dict) else rows
         self.assertTrue(rows)
         self.assertTrue(all('is_hidden_by_moderation' not in row for row in rows))
+
+
+class DayBoundaryDashboardTests(MarketplaceTestBase):
+    """L0-23 : le tableau de bord compte « aujourd'hui » dans le fuseau de l'application."""
+
+    def run_at(self, *args):
+        from datetime import datetime, timezone as dt_timezone
+        from unittest import mock
+        offer = self.make_offer()
+        with mock.patch('django.utils.timezone.now', return_value=datetime(*args, tzinfo=dt_timezone.utc)):
+            today = timezone.localdate()
+            DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=today, views=4)
+            DailyVisibilityCounter.objects.create(
+                offer_id=offer.id, seller=self.seller, date=today - timedelta(days=2), views=6,
+            )
+            self.client.force_authenticate(self.seller)
+            response = self.client.get(reverse('dashboard_stats'))
+        self.assertEqual(response.data['summary']['today_views'], 4)
+        self.assertEqual([p['views'] for p in response.data['history']], [6, 4])
+        return today
+
+    def test_23h30_utc_counts_as_next_local_day(self):
+        self.assertEqual(self.run_at(2026, 10, 10, 23, 30).isoformat(), '2026-10-11')
+
+    def test_midday_utc(self):
+        self.assertEqual(self.run_at(2026, 10, 10, 12, 0).isoformat(), '2026-10-10')

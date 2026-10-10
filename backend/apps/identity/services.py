@@ -200,7 +200,11 @@ def acts_for_context(user_id, context_type, context_id) -> bool:
     """Vrai si ce compte agit pour le contexte désigné (ADR 0006, 7.1) : `USER` = soi-même ; `PROVIDER` =
     titulaire du profil (même archivé) ; `ORGANIZATION` = membre ACTIF, de tout rôle, d'une organisation non
     suspendue. Faux sinon (dont membre révoqué). Sert au refus « je ne note pas et ne contacte pas ma
-    propre offre ». Aucun cache : relu en base à chaque appel."""
+    propre offre ». Aucun cache : relu en base à chaque appel.
+
+    NE PAS L'UTILISER POUR AUTORISER UNE ÉCRITURE : elle ignore le rôle, l'état du compte et, contrairement
+    à la résolution du contexte actif, tolère une organisation archivée et un profil prestataire archivé.
+    Pour autoriser, utiliser `can` / `authorize_on` (capacité du rôle réel)."""
     from apps.common.contexts import CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER
     from apps.common.utils import parse_uuid
 

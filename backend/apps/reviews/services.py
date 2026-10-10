@@ -444,8 +444,9 @@ def _offer_title(offer):
 
 
 def can_reply(review: Review, user) -> bool:
-    """Le vendeur concerné (et lui seul) répond à l'avis, via `identity.acts_for_context`."""
-    return identity_services.acts_for_context(user.pk, review.seller_context_type, review.seller_context_id)
+    """Le vendeur concerné répond à l'avis. Contexte personnel : le titulaire ; organisation : la capacité
+    `review.reply` (propriétaire, administrateur, éditeur ; jamais l'analyste), relue en base."""
+    return identity_services.can(user.pk, review.seller_context_type, review.seller_context_id, 'review.reply')
 
 
 def reply_to_review(review: Review, replier, content: str) -> Review:

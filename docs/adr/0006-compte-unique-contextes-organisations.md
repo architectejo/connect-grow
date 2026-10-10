@@ -87,7 +87,7 @@ Index : `(status, org_type)`, `(name)`. Pas d'unicité. Propriétés de modèle 
 - Index `(user, status)` (liste des contextes), `(organization, role, status)` (comptage des propriétaires, destinataires).
 - Aucune règle « au moins un propriétaire » en base : garantie en couche service sous verrou (section 7.2).
 
-`ProviderProfile` : `user` OneToOneField(`User`, CASCADE) (une seule ligne par compte, unicité inconditionnelle), `display_name` CharField(255), `bio` TextField blank (2 000), `status` CharField(10) (`ACTIVE`, `ARCHIVED`), `archived_at` nul. `ProviderProfileCategory(provider FK, category_id UUID)` comme pour l'organisation. Photo publique : celle du compte.
+`ProviderProfile` : `user` OneToOneField(`User`, CASCADE) (une seule ligne par compte, unicité inconditionnelle), `display_name` CharField(255), `bio` TextField blank (2 000), `status` CharField(10) (`ACTIVE`, `ARCHIVED`), `archived_at` nul. `ProviderProfileCategory(provider FK, category_id UUID)` comme pour l'organisation. Photo publique : celle du compte (le profil prestataire n'a pas de photo propre ; `contexts/` renvoie donc la photo du compte pour `PROVIDER`).
 
 `IdentitySettings(SingletonSettingsModel)` (règle 11, back-office) : `max_organizations_per_account` (PositiveInteger, défaut 10, validateurs 1 à 100) ; `org_phone_channels_enabled` (Boolean, **défaut faux**, voir Q-CLI5). Les modifications passent par `moderation.record_settings_change` (comme les autres réglages).
 
@@ -161,7 +161,7 @@ CORS : ajouter `x-context` à `CORS_ALLOW_HEADERS` (liste par défaut de `django
 | `ORGANIZATION:<id>` archivée | 403 `DENY_OBJECT_STATE` | 1 |
 | mal formé | 403 `DENY_CONTEXT` | 0 |
 
-Budget : au plus **1** requête SQL de plus que la requête sans contexte (cible spec : 2). `is_staff` et `is_superuser` ne contournent rien. Un compte désactivé est refusé par l'authentification (401) avant toute résolution ; les restrictions qui n'éteignent pas `is_active` sont contrôlées par les services d'écriture (`moderation.is_user_restricted`, comme aujourd'hui), pas par la résolution (budget de requêtes).
+Budget (amendé par l'audit L0-30) : **garde du compte** (2 requêtes : `User.is_active` relu en base, puis `moderation.is_user_restricted`) **+ au plus 1** requête pour le contexte. La garde s'applique à tout contexte, y compris le personnel sans en-tête : un compte désactivé ou sous suspension/bannissement est refusé en `DENY_SECURITY` (`_ensure_actor_usable`, même logique que `_authorize_member`), par `resolve_acting_context`, `authorize_on`, `can`, le mixin et `capability_permission`. Seule exception : la capacité `org.leave` (sortie volontaire). `is_staff` et `is_superuser` ne contournent rien. L'attribut `is_active` d'un objet en mémoire n'est jamais cru.
 
 **Aucun cache** : ni `lru_cache`, ni cache Django, ni claim JWT ne portent un rôle ou une appartenance. Le résultat est mémorisé sur `request` pour la durée de la requête seulement. Révocation d'un membre = refus à la requête suivante, jeton d'accès toujours valide pour le contexte personnel.
 
@@ -174,6 +174,8 @@ Budget : au plus **1** requête SQL de plus que la requête sans contexte (cible
 - Le message d'erreur est en français et ne contient jamais le nom d'une organisation ni d'autre membre.
 
 ### 6.4 Quels endpoints lisent l'en-tête
+
+**Règle de la brique** : création et listes « de mon contexte » = en-tête (`acting_context`, `authorize_capability`) ; objet existant = propriétaire réel de l'objet (`authorize_object` du mixin, qui appelle `authorize_on` et ignore l'en-tête). Sans cela, un membre éditeur de A et analyste de B agirait sur un objet de B en présentant l'en-tête de A. **Écritures sensibles** : le contrôle fait par la vue précède l'écriture ; le service doit refaire `authorize_on` sous `transaction.atomic()`, juste avant d'écrire, pour prendre en compte une révocation ou une suspension survenue entre-temps. **Garde-fou** : `identity/tests_route_guard.py` échoue pour toute nouvelle vue d'écriture sans `ActingContextMixin`/`capability_permission` ni `acting_context_exempt`. **Cache** : toute réponse d'`/api/` porte `Vary: Authorization, X-Context` ; une requête portant `X-Context` reçoit `Cache-Control: private, no-store`.
 
 | Catégorie | Endpoints | Règle |
 |---|---|---|
@@ -249,7 +251,7 @@ Toutes les réponses d'erreur d'autorisation de cette section sont des 403 avec 
    "photo": "https://.../organization_logos/x.webp", "capabilities": ["org.view_internal", "..."]}
 ]}
 ```
-Ordre : `USER`, puis `PROVIDER` s'il est actif, puis les organisations par nom. Exclut : membership révoqué, organisation suspendue ou archivée, prestataire archivé. `capabilities` sert à masquer des boutons ; l'autorisation reste serveur (doc 06 §24). Au plus 1 requête de plus que le profil (assertNumQueries).
+Ordre : `USER`, puis `PROVIDER` s'il est actif, puis les organisations par nom. Exclut : membership révoqué, organisation suspendue ou archivée, prestataire archivé. `capabilities` sert à masquer des boutons ; l'autorisation reste serveur (doc 06 §24). Exactement 2 requêtes (profil prestataire, puis appartenances avec leur organisation), quel que soit le nombre d'organisations (`assertNumQueries`). Throttle `contexts` : **600/h** par utilisateur. Note front : `staleTime` suffisant, pas de rechargement au retour de focus, et ne jamais retirer le contexte actif sur un 429 (garder le contexte courant et réessayer plus tard).
 
 ### 9.2 Organisations
 

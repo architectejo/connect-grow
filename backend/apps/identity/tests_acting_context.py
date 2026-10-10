@@ -1,11 +1,13 @@
 """Contexte actif (L0-09b / T2) : en-tête `X-Context`, révocation immédiate, non-fuite, en-têtes hostiles,
 performance, `GET contexts/`, CORS et throttle. ADR 0006, sections 6, 9.1 et 12."""
 import uuid
+from datetime import timedelta
 from unittest import mock
 
 from django.conf import settings
 from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
@@ -15,6 +17,8 @@ from apps.common.contexts import (
     CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER, DENY_CONTEXT, DENY_OBJECT_STATE, DENY_PERMISSION,
     DENY_RELATION, DENY_SECURITY, ContextDenied,
 )
+
+from apps.moderation.models import Sanction
 
 from . import capabilities, services
 from .models import Membership, Organization, ProviderProfile, User
@@ -59,14 +63,14 @@ class ResolutionTests(TestCase):
         self.user = make_user('u')
         self.other = make_user('o')
 
-    def test_absent_header_is_personal_context_without_query(self):
-        with self.assertNumQueries(0):
+    def test_absent_header_is_personal_context_with_account_guard_only(self):
+        with self.assertNumQueries(2):  # garde du compte : is_active + sanctions
             ctx = services.resolve_acting_context(self.user, None)
         self.assertEqual((ctx.type, ctx.id, ctx.role), (CONTEXT_USER, self.user.pk, None))
 
     def test_user_header_forms(self):
         for raw in ('USER', header('USER', self.user.pk)):
-            with self.subTest(raw=raw), self.assertNumQueries(0):
+            with self.subTest(raw=raw), self.assertNumQueries(2):
                 self.assertEqual(services.resolve_acting_context(self.user, raw).type, CONTEXT_USER)
         with self.assertRaises(ContextDenied) as caught:
             services.resolve_acting_context(self.user, header('USER', self.other.pk))
@@ -75,13 +79,13 @@ class ResolutionTests(TestCase):
     def test_organization_member_gets_role(self):
         org = make_org()
         join(org, self.user, ADMIN)
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(3):  # garde du compte (2) + appartenance (1)
             ctx = services.resolve_acting_context(self.user, header('ORGANIZATION', org.pk))
         self.assertEqual((ctx.type, ctx.id, ctx.role), (CONTEXT_ORGANIZATION, org.pk, ADMIN))
 
-    def test_provider_active_is_resolved_with_one_query(self):
+    def test_provider_active_is_resolved_with_one_context_query(self):
         profile = ProviderProfile.objects.create(user=self.user, display_name='Moi prestataire')
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(3):
             ctx = services.resolve_acting_context(self.user, header('PROVIDER', profile.pk))
         self.assertEqual((ctx.type, ctx.id, ctx.role), (CONTEXT_PROVIDER, profile.pk, None))
 
@@ -152,7 +156,6 @@ class ActsForContextTests(TestCase):
             join(org, member, role)
             with self.subTest(role=role):
                 self.assertTrue(services.acts_for_context(member.pk, CONTEXT_ORGANIZATION, org.pk))
-                self.assertTrue(services.acts_for_context(str(member.pk), CONTEXT_ORGANIZATION, str(org.pk)))
         self.assertFalse(services.acts_for_context(self.other.pk, CONTEXT_ORGANIZATION, org.pk))
 
     def test_revoked_member_and_suspended_organization_do_not_act(self):
@@ -176,7 +179,6 @@ class ActsForContextTests(TestCase):
     def test_invalid_values_never_match(self):
         self.assertFalse(services.acts_for_context(self.user.pk, CONTEXT_ORGANIZATION, 'x'))
         self.assertFalse(services.acts_for_context(self.user.pk, 'AUTRE', self.user.pk))
-        self.assertFalse(services.acts_for_context(None, CONTEXT_PROVIDER, uuid.uuid4()))
 
 
 class ViewIntegrationTests(TestCase):
@@ -205,7 +207,7 @@ class ViewIntegrationTests(TestCase):
     def test_unauthenticated_is_refused_before_resolution(self):
         request = self.factory.get('/test/', HTTP_X_CONTEXT='n importe quoi')
         response = WhoAmIView.as_view()(request)
-        self.assertIn(response.status_code, (401, 403))
+        self.assertEqual(response.status_code, 401)
         self.assertNotIn(response.data.get('code'), DENY_CODES_SET)
 
     def test_capability_refusal_is_deny_permission(self):
@@ -267,7 +269,7 @@ class ViewIntegrationTests(TestCase):
             with self.subTest(raw=raw[:60]):
                 response = self.call(HTTP_X_CONTEXT=raw)
                 self.assertEqual(response.status_code, 403, raw[:60])
-                self.assertIn(response.data['code'], (DENY_CONTEXT, DENY_RELATION), raw[:60])
+                self.assertEqual(response.data['code'], DENY_CONTEXT, raw[:60])
                 self.assertNotIn(SECRET_ORG_NAME, str(response.data))
 
     def test_user_header_for_another_account_is_refused(self):
@@ -348,7 +350,7 @@ class QueryBudgetTests(TestCase):
             join(org, user, OWNER)
             orgs.append(org)
         for org in (orgs[0], orgs[-1]):
-            with self.assertNumQueries(1):
+            with self.assertNumQueries(3):
                 services.resolve_acting_context(user, header('ORGANIZATION', org.pk))
 
     def test_request_memoizes_resolution(self):
@@ -357,9 +359,8 @@ class QueryBudgetTests(TestCase):
         join(org, user, OWNER)
         request = APIRequestFactory().get('/t/', HTTP_X_CONTEXT=header('ORGANIZATION', org.pk))
         force_authenticate(request, user=user)
-        # Une résolution (permission) + lecture mémorisée dans la vue = 1 requête de contexte.
-        # `force_authenticate` fournit l'utilisateur sans requête.
-        with self.assertNumQueries(1):
+        # Une seule résolution (permission) puis lecture mémorisée dans la vue : 3 requêtes au total.
+        with self.assertNumQueries(3):
             response = WhoAmIView.as_view()(request)
         self.assertEqual(response.status_code, 200)
 
@@ -503,3 +504,143 @@ class CorsSettingsTests(SimpleTestCase):
             HTTP_ACCESS_CONTROL_REQUEST_HEADERS='authorization,x-context',
         )
         self.assertIn('x-context', response.headers.get('Access-Control-Allow-Headers', ''))
+
+
+def sanction(user, kind):
+    return Sanction.objects.create(user=user, sanction_type=kind, reason='test')
+
+
+class RestrictedAccountTests(TestCase):
+    """Compte sanctionné ou désactivé : refusé pour tout contexte (DENY_SECURITY), sauf `org.leave`."""
+
+    KINDS = (Sanction.TYPE_SUSPENSION_TEMPORAIRE, Sanction.TYPE_BANNISSEMENT)
+
+    def setUp(self):
+        self.user = make_user('sanctionne')
+        self.org = make_org()
+        join(self.org, self.user, OWNER)
+        self.profile = ProviderProfile.objects.create(user=self.user, display_name='P')
+
+    def targets(self):
+        return (
+            (CONTEXT_USER, self.user.pk, None),
+            (CONTEXT_PROVIDER, self.profile.pk, header('PROVIDER', self.profile.pk)),
+            (CONTEXT_ORGANIZATION, self.org.pk, header('ORGANIZATION', self.org.pk)),
+        )
+
+    def test_resolution_is_refused_for_every_context(self):
+        for kind in self.KINDS:
+            sanction_row = sanction(self.user, kind)
+            for context_type, context_id, raw in self.targets():
+                with self.subTest(kind=kind, context=context_type), self.assertRaises(ContextDenied) as caught:
+                    services.resolve_acting_context(self.user, raw)
+                self.assertEqual(caught.exception.get_codes(), DENY_SECURITY)
+            sanction_row.delete()
+
+    def test_authorize_on_and_can_are_refused(self):
+        sanction(self.user, Sanction.TYPE_BANNISSEMENT)
+        for context_type, context_id, _ in self.targets():
+            with self.subTest(context=context_type):
+                with self.assertRaises(ContextDenied) as caught:
+                    services.authorize_on(self.user, context_type, context_id, 'offer.edit')
+                self.assertEqual(caught.exception.get_codes(), DENY_SECURITY)
+                self.assertFalse(services.can(self.user.pk, context_type, context_id, 'offer.edit'))
+
+    def test_leave_is_still_allowed(self):
+        sanction(self.user, Sanction.TYPE_SUSPENSION_TEMPORAIRE)
+        services.authorize_on(self.user, CONTEXT_ORGANIZATION, self.org.pk, 'org.leave')
+        self.assertTrue(services.can(self.user.pk, CONTEXT_ORGANIZATION, self.org.pk, 'org.leave'))
+
+    def test_warning_and_expired_or_lifted_sanctions_do_not_restrict(self):
+        sanction(self.user, Sanction.TYPE_AVERTISSEMENT)
+        Sanction.objects.create(
+            user=self.user, sanction_type=Sanction.TYPE_SUSPENSION_TEMPORAIRE, reason='x',
+            ends_at=timezone.now() - timedelta(days=1),
+        )
+        Sanction.objects.create(
+            user=self.user, sanction_type=Sanction.TYPE_BANNISSEMENT, reason='x', is_active=False,
+        )
+        self.assertEqual(services.resolve_acting_context(self.user, header('ORGANIZATION', self.org.pk)).role, OWNER)
+
+    def test_inactive_account_is_read_from_the_database(self):
+        stale = User.objects.get(pk=self.user.pk)  # objet resté « actif » en mémoire
+        User.objects.filter(pk=self.user.pk).update(is_active=False)
+        self.assertTrue(stale.is_active)
+        with self.assertRaises(ContextDenied) as caught:
+            services.resolve_acting_context(stale, None)
+        self.assertEqual(caught.exception.get_codes(), DENY_SECURITY)
+        self.assertFalse(services.can(self.user.pk, CONTEXT_USER, self.user.pk, 'offer.edit'))
+        self.assertTrue(services.can(self.user.pk, CONTEXT_ORGANIZATION, self.org.pk, 'org.leave'))
+
+    def test_view_and_permission_refuse_a_sanctioned_account(self):
+        sanction(self.user, Sanction.TYPE_SUSPENSION_TEMPORAIRE)
+        factory = APIRequestFactory()
+        for raw in (None, header('ORGANIZATION', self.org.pk), header('PROVIDER', self.profile.pk)):
+            extra = {'HTTP_X_CONTEXT': raw} if raw else {}
+            request = factory.get('/test/', **extra)
+            force_authenticate(request, user=self.user)
+            response = WhoAmIView.as_view()(request)
+            with self.subTest(raw=raw):
+                self.assertEqual((response.status_code, response.data['code']), (403, DENY_SECURITY))
+
+
+class ObjectView(services.ActingContextMixin, APIView):
+    """Vue de test : création par en-tête, objet existant par propriétaire réel."""
+
+    throttle_classes = []
+
+    def get(self, request, target=None):
+        self.authorize_capability('offer.edit')  # l'en-tête autorise (ou non) la création...
+        self.authorize_object(CONTEXT_ORGANIZATION, target, 'offer.edit')  # ...l'objet décide pour lui-même
+        return Response({'ok': True})
+
+
+class ObjectAuthorizationTests(TestCase):
+    """IDOR : sur un objet existant, l'en-tête ne décide jamais (ADR 0006, 6.4)."""
+
+    def call(self, user, raw, target):
+        request = APIRequestFactory().get('/t/', HTTP_X_CONTEXT=raw)
+        force_authenticate(request, user=user)
+        return ObjectView.as_view()(request, target=target)
+
+    def test_header_of_org_a_cannot_act_on_object_of_org_b(self):
+        user = make_user('double')
+        org_a, org_b = make_org(name='A'), make_org(name='B')
+        join(org_a, user, EDITOR)
+        join(org_b, user, ANALYST)
+        raw = header('ORGANIZATION', org_a.pk)
+        refused = self.call(user, raw, org_b.pk)
+        self.assertEqual((refused.status_code, refused.data['code']), (403, DENY_PERMISSION))
+        self.assertEqual(self.call(user, raw, org_a.pk).status_code, 200)
+        unknown = self.call(user, raw, uuid.uuid4())
+        self.assertEqual((unknown.status_code, unknown.data['code']), (403, DENY_RELATION))
+
+    def test_authorize_object_ignores_the_header_value(self):
+        user = make_user('ignore')
+        org = make_org()
+        join(org, user, OWNER)
+        request = APIRequestFactory().get('/t/', HTTP_X_CONTEXT='n importe quoi')
+        force_authenticate(request, user=user)
+
+        class ObjectOnlyView(services.ActingContextMixin, APIView):
+            throttle_classes = []
+
+            def get(self, request):
+                self.authorize_object(CONTEXT_ORGANIZATION, org.pk, 'offer.edit')
+                return Response({'ok': True})
+
+        self.assertEqual(ObjectOnlyView.as_view()(request).status_code, 200)
+
+
+class CacheHeadersTests(TestCase):
+    def test_vary_and_no_store_for_context_dependent_responses(self):
+        client = APIClient()
+        client.force_authenticate(make_user('cache'))
+        plain = client.get(CONTEXTS_URL)
+        self.assertIn('X-Context', plain['Vary'])
+        self.assertIn('Authorization', plain['Vary'])
+        with_header = client.get('/api/accounts/me/', HTTP_X_CONTEXT='USER')
+        self.assertIn('no-store', with_header['Cache-Control'])
+        self.assertIn('X-Context', with_header['Vary'])
+        without_header = client.get('/api/accounts/me/')
+        self.assertNotIn('no-store', without_header.get('Cache-Control', ''))

@@ -159,6 +159,10 @@ class PhoneTests(Base):
 
     @override_settings(CACHES=LOCMEM_CACHE)
     def test_code_requests_are_throttled(self):
+        # Le setUp a vidé le cache par défaut, pas ce cache local : on le vide ici pour qu'aucun
+        # compteur d'un autre test (même IP, même numéro) ne fuie jusqu'ici (cause d'un test instable).
+        cache.clear()
+        self.addCleanup(cache.clear)
         for _ in range(3):
             self.assertEqual(self.put_phone(phone=CONTACT).status_code, 200)
         throttled = self.put_phone(phone=CONTACT)
@@ -330,6 +334,8 @@ class ChannelTests(Base):
 
     @override_settings(CACHES=LOCMEM_CACHE)
     def test_channel_writes_are_throttled(self):
+        cache.clear()
+        self.addCleanup(cache.clear)  # vidé aussi à la sortie (le cache local ne doit rien laisser derrière)
         for _ in range(20):
             self.channel('CALL', enabled=False)
         self.assertEqual(self.channel('CALL', enabled=False).status_code, 429)

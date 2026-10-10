@@ -12,9 +12,22 @@ from django.conf import settings
 logger = logging.getLogger('apps.identity.sms')
 
 
+CONTACT_VERIFY_TEXT = (
+    "Connecte+ : {code} est votre code pour publier ce numéro comme contact Connecte+. "
+    "Ne le communiquez à personne."
+)
+
+
+def build_otp_message(code: str, purpose: str) -> str:
+    """Texte du SMS. Le code de vérification du numéro de contact nomme son but (anti-hameçonnage)."""
+    if purpose == 'CONTACT_VERIFY':
+        return CONTACT_VERIFY_TEXT.format(code=code)
+    return f"Connecte+ : votre code de vérification est {code}."
+
+
 def send_otp_sms(phone: str, code: str, purpose: str) -> None:
     if settings.DEBUG:
-        logger.info("[OTP DEV] %s pour %s (%s)", code, phone, purpose)
+        logger.info("[OTP DEV] %s pour %s (%s) : %s", code, phone, purpose, build_otp_message(code, purpose))
         return
     raise NotImplementedError(
         "Aucun fournisseur SMS configuré. Brancher le fournisseur retenu (CDC 2.4) ici."

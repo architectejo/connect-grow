@@ -15,6 +15,8 @@ class ContactModelsTests(TestCase):
         self.user = User.objects.create_user(email='v@example.com', password='x')
 
     def test_text_version_constant(self):
+        # Garde-fou : changer la version est un acte juridique (texte de consentement). Ce test oblige
+        # à le faire en connaissance de cause (texte affiché au front, ADR 0005 §8, dette LEG-PRV-03).
         self.assertEqual(CONTACT_CONSENT_TEXT_VERSION, '2026-10-v1')
 
     def test_one_contact_point_per_account(self):

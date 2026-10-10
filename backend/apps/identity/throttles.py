@@ -162,6 +162,12 @@ class KycWriteThrottle(UserWriteThrottle):
     scope = 'kyc_write'
 
 
+class ContactSettingsThrottle(UserWriteThrottle):
+    """Écritures des réglages de contact vendeur (numéro, code, canaux) : par utilisateur."""
+
+    scope = 'contact_settings'
+
+
 class FailureLimiter:
     """Compteur d'ÉCHECS par clé (couple identifiant+IP), avec délai croissant.
 

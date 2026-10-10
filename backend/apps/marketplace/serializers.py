@@ -77,6 +77,7 @@ class OfferSerializer(serializers.ModelSerializer):
     is_trending = serializers.SerializerMethodField()
     # Le Boost payant (lot 1) n'existe pas encore ; toujours False pour l'instant.
     is_sponsored = serializers.SerializerMethodField()
+    allowed_channels = serializers.SerializerMethodField()
 
     class Meta:
         model = Offer
@@ -88,7 +89,7 @@ class OfferSerializer(serializers.ModelSerializer):
             'likes_count', 'shares_count', 'created_at',
             'status', 'expires_at', 'visibility_score', 'visibility_rank',
             'offer_rating', 'seller_rating', 'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored',
-            'is_hidden_by_moderation',
+            'is_hidden_by_moderation', 'allowed_channels',
         ]
         read_only_fields = [
             'is_hidden_by_moderation', 'seller', 'views_count', 'likes_count', 'shares_count',
@@ -106,6 +107,7 @@ class OfferSerializer(serializers.ModelSerializer):
         cache = context.setdefault(cls.CONTEXT_KEY, {
             'categories': {}, 'communes': {}, 'sellers': {}, 'trending': set(), 'seen': set(),
             'favorite_counts': {}, 'favorited': set(), 'offer_ratings': {}, 'seller_ratings': {},
+            'allowed_channels': {},
         })
         new = [o for o in offers if o.id not in cache['seen']]
         if not new:
@@ -137,6 +139,9 @@ class OfferSerializer(serializers.ModelSerializer):
         cache['seller_ratings'].update(reviews_services.get_seller_ratings(
             CONTEXT_USER, {o.seller_id for o in new} - cache['seller_ratings'].keys(),
         ))
+        # Canaux de contact ouverts (ADR 0005, C11) : une requête pour la page, jamais de numéro.
+        missing_channels = {o.seller_id for o in new} - cache['allowed_channels'].keys()
+        cache['allowed_channels'].update(identity_services.get_allowed_channels(missing_channels))
         cache['seen'] |= ids
 
     def _cache(self, obj):
@@ -209,6 +214,10 @@ class OfferSerializer(serializers.ModelSerializer):
 
     def get_is_trending(self, obj):
         return obj.id in self._cache(obj)['trending']
+
+    def get_allowed_channels(self, obj):
+        # Par défaut le message interne ; CALL/WHATSAPP seulement si le vendeur les a ouverts.
+        return self._cache(obj)['allowed_channels'].get(obj.seller_id, ['MESSAGE'])
 
     def get_is_sponsored(self, obj):
         return False

@@ -179,13 +179,17 @@ class OfferOwnershipTests(MarketplaceTestBase):
         offer = self.make_offer()
         Offer.objects.filter(pk=offer.pk).update(is_deleted=True)
         self.client.force_authenticate(self.buyer)
+        # Offre en corbeille (non publique) : 404 uniforme pour un étranger, aucun oracle d'existence.
         for name in ('restore', 'soft-delete', 'pause', 'unpause', 'mark-sold', 'renew'):
             response = self.client.post(reverse(f'offer-{name}', args=[offer.id]))
-            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, name)
-            self.assertEqual(response.data['code'], 'DENY_RELATION', name)
+            self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND, name)
         response = self.client.delete(reverse('offer-hard-delete', args=[offer.id]))
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertEqual(response.data['code'], 'DENY_RELATION')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        # Offre publique : DENY_RELATION (elle est déjà visible de tous).
+        Offer.objects.filter(pk=offer.pk).update(is_deleted=False)
+        for name in ('restore', 'soft-delete', 'pause', 'unpause', 'mark-sold', 'renew'):
+            response = self.client.post(reverse(f'offer-{name}', args=[offer.id]))
+            self.assertEqual((response.status_code, response.data['code']), (403, 'DENY_RELATION'), name)
         self.assertTrue(Offer.objects.filter(pk=offer.pk).exists())
 
     def test_unknown_offer_gives_404_not_500(self):

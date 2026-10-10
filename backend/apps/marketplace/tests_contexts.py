@@ -26,7 +26,9 @@ from apps.platform_core.testing import dispatch_outbox_now
 from apps.visibility.models import DailyVisibilityCounter
 
 from . import services
-from .models import Offer
+from apps.common.factories import make_test_image
+
+from .models import ContactEvent, Offer
 from .tests import MarketplaceTestBase
 
 OWNER, ADMIN, EDITOR, ANALYST = 'OWNER', 'ADMIN', 'EDITOR', 'ANALYST'
@@ -624,10 +626,15 @@ class SellerObjectTests(ContextBase):
         self.client.force_authenticate(self.buyer)
         for channel in ('CALL', 'WHATSAPP'):
             response = self.client.post(reverse('contact-reveal'), {'offer': str(offer.id), 'channel': channel})
-            self.assertEqual((response.status_code, response.data['code']), (403, 'channel_not_allowed'))
+            self.assertEqual((response.status_code, response.data['code']), (403, 'seller_contact_unavailable'))
             self.assertNotIn(SENTINEL_PHONE, json.dumps(response.data, default=str))
-        self.assertEqual(self.client.post(reverse('contact-list'), {'post': str(offer.id), 'message': 'Bonjour'}).status_code, 403)
-        self.assertEqual(self.client.post(reverse('contact-list'), {'post': str(offer.id), 'message': 'Bonjour'}).data['code'], 'channel_not_allowed')
+            self.assertNotIn('écrire', response.data['detail'])  # aucun repli vers un autre canal
+        contact = self.client.post(reverse('contact-list'), {'post': str(offer.id), 'message': 'Bonjour'})
+        self.assertEqual((contact.status_code, contact.data['code']), (403, 'seller_contact_unavailable'))
+        self.assertEqual(ContactEvent.objects.count(), 0)
+        self.enable_exchange()
+        exchange = self.client.post(reverse('exchange-list'), {'post': str(offer.id), 'message': 'Echange ?'})
+        self.assertEqual((exchange.status_code, exchange.data['code']), (403, 'seller_contact_unavailable'))
 
     def test_a_member_cannot_contact_or_review_the_offer_of_his_own_organization(self):
         self.join(self.member, role=EDITOR)
@@ -707,6 +714,202 @@ class SellerObjectTests(ContextBase):
         self.assertEqual(small, large)
 
 
+make_image = make_test_image
+
+
+class NoExistenceOracleTests(ContextBase):
+    """Un étranger au contexte reçoit 404 quand l'offre n'est pas publique, 403 DENY_RELATION sinon ;
+    un membre au rôle insuffisant reçoit toujours DENY_PERMISSION."""
+
+    def test_stranger_gets_404_on_every_non_public_state_and_403_on_a_public_offer(self):
+        states = {
+            'pause': {'status': 'PAUSED', 'is_active': False},
+            'masquée': {'is_hidden_by_moderation': True, 'is_active': False},
+            'corbeille': {'is_deleted': True}, 'vendeur non public': {'seller_is_public': False},
+        }
+        self.client.force_authenticate(self.buyer)
+        for label, fields in states.items():
+            offer = self.make_offer(title=f'Offre dans l état {label}')
+            Offer.objects.filter(pk=offer.pk).update(**fields)
+            with self.subTest(state=label):
+                for response in (
+                    self.client.patch(reverse('offer-detail', args=[offer.id]), {'price': 1}),
+                    self.client.post(reverse('offer-pause', args=[offer.id])),
+                    self.client.get(reverse('offer_stats', args=[offer.id])),
+                    self.client.post(reverse('offer-images', args=[offer.id]), {}, format='multipart'),
+                ):
+                    self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        public = self.make_offer(title='Offre publique du vendeur')
+        for response in (
+            self.client.patch(reverse('offer-detail', args=[public.id]), {'price': 1}),
+            self.client.get(reverse('offer_stats', args=[public.id])),
+        ):
+            self.assertEqual((response.status_code, response.data['code']), (403, 'DENY_RELATION'))
+
+    def test_insufficient_role_stays_403_even_on_a_non_public_offer(self):
+        analyst = User.objects.create_user(email='an@example.com', password='x', full_name='An')
+        self.join(analyst, role=ANALYST)
+        offer = self.org_offer(creator=self.buyer, is_deleted=True)
+        self.client.force_authenticate(analyst)
+        response = self.client.post(reverse('offer-restore', args=[offer.id]))
+        self.assertEqual((response.status_code, response.data['code']), (403, 'DENY_PERMISSION'))
+
+
+class AuditTrailTests(ContextBase):
+    def test_every_write_is_audited_with_its_context_and_no_personal_value(self):
+        self.join(self.member, role=EDITOR)
+        self.client.force_authenticate(self.member)
+        offer = self.org_offer(creator=self.member, title='Titre sentinelle confidentiel')
+        url = reverse('offer-detail', args=[offer.id])
+        self.client.patch(url, {'price': 4242, 'title': 'Nouveau titre sentinelle'})
+        for name in ('pause', 'unpause', 'renew', 'mark-sold', 'soft-delete', 'restore'):
+            self.assertEqual(self.client.post(reverse(f'offer-{name}', args=[offer.id])).status_code, 200, name)
+        images = self.client.post(
+            reverse('offer-images', args=[offer.id]), {'image': make_image()}, format='multipart',
+        )
+        self.assertEqual(images.status_code, 201, images.data)
+        removed = self.client.delete(f"{reverse('offer-images', args=[offer.id])}?image_id={images.data[0]['id']}")
+        self.assertEqual(removed.status_code, 204)
+        actions = set(AuditLog.objects.filter(action__startswith='OFFER_').values_list('action', flat=True))
+        self.assertEqual(actions, {
+            'OFFER_UPDATED', 'OFFER_PAUSED', 'OFFER_RESUMED', 'OFFER_RENEWED', 'OFFER_SOLD', 'OFFER_TRASHED',
+            'OFFER_RESTORED', 'OFFER_IMAGES_ADDED', 'OFFER_IMAGE_DELETED',
+        })
+        for entry in AuditLog.objects.filter(action__startswith='OFFER_'):
+            self.assertEqual((entry.context_type, entry.context_id, entry.actor), ('ORGANIZATION', self.org.pk, self.member))
+            self.assertNotIn('sentinelle', entry.details)
+            self.assertNotIn('4242', entry.details)
+        self.assertEqual(AuditLog.objects.get(action='OFFER_UPDATED').details, 'fields=price,title')
+
+    def test_images_are_reauthorized_in_the_service(self):
+        from apps.common.contexts import ContextDenied
+
+        offer = self.org_offer(creator=self.member)
+        membership = self.join(self.member, role=EDITOR)
+        membership.status = Membership.STATUS_REVOKED
+        membership.save()
+        with self.assertRaises(ContextDenied):
+            services.add_offer_images(offer, actor=self.member, files=[make_image()])
+        self.assertEqual(offer.images.count(), 0)
+
+    def test_gallery_limits_and_errors_come_from_the_service(self):
+        offer = self.make_offer()
+        with self.assertRaises(services.MarketplaceError):
+            services.add_offer_images(offer, actor=self.seller, files=[])
+        with self.assertRaises(services.MarketplaceError):
+            services.add_offer_images(offer, actor=self.seller, files=[make_image() for _ in range(8)])
+        self.assertFalse(services.delete_offer_image(offer, actor=self.seller, image_id=uuid.uuid4()))
+
+    def test_admin_deletion_is_audited_with_context(self):
+        from django.contrib.admin.sites import site
+
+        admin = site._registry[Offer]
+        offer = self.org_offer(creator=self.member)
+
+        class _Req:
+            user = self.buyer
+
+        admin.delete_model(_Req(), offer)
+        entry = AuditLog.objects.get(action='OFFER_DELETED')
+        self.assertEqual((entry.context_type, entry.context_id), ('ORGANIZATION', self.org.pk))
+
+    def test_a_personal_offer_also_writes_the_legacy_seller(self):
+        response = self.create(self.seller)
+        self.assertEqual(Offer.objects.get(pk=response.data['id']).seller, self.seller)
+        profile = self.provider()
+        response = self.create(self.seller, ctx_header('PROVIDER', profile.pk), title='Offre du prestataire')
+        self.assertIsNone(Offer.objects.get(pk=response.data['id']).seller)
+
+
+class SynchronousVisibilityTests(ContextBase):
+    """Aucune fenêtre d'incohérence : la visibilité suit dans la même requête, sans diffusion de l'outbox
+    (OUTBOX_INLINE_DISPATCH désactivé dans les tests, aucun `dispatch_outbox_now` ici)."""
+
+    def test_account_deactivation_is_immediate(self):
+        offer = self.make_offer()
+        identity_services.set_account_active(self.seller.pk, False)
+        offer.refresh_from_db()
+        self.assertFalse(offer.seller_is_public)
+        identity_services.set_account_active(self.seller.pk, True)
+        offer.refresh_from_db()
+        self.assertTrue(offer.seller_is_public)
+
+    def test_organization_archive_and_provider_archive_are_immediate(self):
+        self.join(self.member, role=OWNER)
+        org_offer = self.org_offer(creator=self.member)
+        identity_services.archive_organization(self.member, self.org.pk)
+        org_offer.refresh_from_db()
+        self.assertFalse(org_offer.seller_is_public)
+        profile = self.provider()
+        provider_offer = self.make_offer(
+            seller=None, seller_context_type='PROVIDER', seller_context_id=profile.pk, created_by=self.seller,
+        )
+        identity_services.archive_provider(self.seller)
+        provider_offer.refresh_from_db()
+        self.assertFalse(provider_offer.seller_is_public)
+
+    def test_sanction_is_immediate(self):
+        offer = self.make_offer()
+        sanction = Sanction.objects.create(user=self.seller, sanction_type=Sanction.TYPE_BANNISSEMENT, reason='x')
+        sanction.apply()
+        offer.refresh_from_db()
+        self.assertFalse(offer.seller_is_public)
+
+    def test_direct_is_active_change_in_the_admin_goes_through_the_single_point(self):
+        from django.contrib.admin.sites import site
+
+        offer = self.make_offer()
+        admin = site._registry[User]
+
+        class _Form:
+            changed_data = ['is_active']
+
+        class _Req:
+            user = self.buyer
+
+        self.seller.is_active = False
+        admin.save_model(_Req(), self.seller, _Form(), True)
+        offer.refresh_from_db()
+        self.assertFalse(offer.seller_is_public)
+
+
+class RequestContextsMemoTests(ContextBase):
+    def test_retrieve_reads_the_user_contexts_once(self):
+        from django.db import connection as conn
+        from django.test.utils import CaptureQueriesContext
+
+        self.join(self.member, role=OWNER)
+        offer = self.org_offer(creator=self.member)
+        self.client.force_authenticate(self.member)
+        self.client.get(reverse('offer-detail', args=[offer.id]))  # échauffement
+        with CaptureQueriesContext(conn) as captured:
+            response = self.client.get(reverse('offer-detail', args=[offer.id]))
+        self.assertEqual(response.status_code, 200)
+        role_queries = [q for q in captured if 'identity_membership' in q['sql'] or 'identity_providerprofile' in q['sql']]
+        self.assertLessEqual(len(role_queries), 3)
+
+
+class ExpirationRecipientsTests(ContextBase):
+    def soon(self, offer):
+        Offer.objects.filter(pk=offer.pk).update(expires_at=timezone.now() + timezone.timedelta(hours=2))
+
+    def test_organization_without_active_editor_notifies_nobody(self):
+        offer = self.org_offer(creator=self.member)
+        analyst = User.objects.create_user(email='an@example.com', password='x', full_name='An')
+        self.join(analyst, role=ANALYST)  # l'analyste n'a pas `offer.edit`
+        self.soon(offer)
+        services.expire_offers()
+        self.assertEqual(OutboxEvent.objects.filter(event_type='marketplace.offer_expiring_soon').count(), 0)
+
+    def test_organization_with_two_editors_notifies_each(self):
+        offer = self.org_offer(creator=self.member)
+        for label, role in (('o', OWNER), ('e', EDITOR)):
+            self.join(User.objects.create_user(email=f'{label}@example.com', password='x', full_name=label), role=role)
+        self.soon(offer)
+        services.expire_offers()
+        self.assertEqual(OutboxEvent.objects.filter(event_type='marketplace.offer_expiring_soon').count(), 2)
+
+
 class AuditAndAdminTests(ContextBase):
     def test_admin_does_not_let_the_owner_be_edited(self):
         from django.contrib.admin.sites import site
@@ -714,7 +917,7 @@ class AuditAndAdminTests(ContextBase):
         from .models import Offer as OfferModel
 
         admin = site._registry[OfferModel]
-        for field in ('seller_context_type', 'seller_context_id', 'created_by', 'seller_is_public'):
+        for field in ('seller', 'seller_context_type', 'seller_context_id', 'created_by', 'seller_is_public'):
             self.assertIn(field, admin.readonly_fields)
 
 

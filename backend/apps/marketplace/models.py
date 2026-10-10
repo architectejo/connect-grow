@@ -206,8 +206,9 @@ class Offer(BaseModel):
 
     def save(self, *args, **kwargs):
         self.main_image = sanitize_uploaded_field(self.main_image)
-        # Passerelle de l'étape « étendre » : un appelant qui ne connaît que l'ancien rattachement au compte
-        # (`seller`) obtient un contexte personnel. Retirée avec `seller` à la contraction (T9).
+        # TODO(T9) : passerelle de l'étape « étendre », à retirer avec `seller` à la contraction. Un appelant qui
+        # ne connaît que l'ancien rattachement au compte (`seller`) obtient un contexte personnel ; `seller_is_public`
+        # garde son défaut (vrai) : la réconciliation horaire `sync_seller_visibility` le corrige si besoin.
         if self.seller_context_type is None and self.seller_id is not None:
             self.seller_context_type = CONTEXT_USER
             self.seller_context_id = self.seller_id

@@ -121,8 +121,8 @@ class DailyVisibilityCounter(BaseModel):
         ]
 
     def save(self, *args, **kwargs):
-        # Passerelle de l'étape « étendre » (ADR 0006, 10) : un appelant qui ne connaît que l'ancien
-        # rattachement au compte obtient un contexte personnel. Retirée avec `seller` à la contraction (T9).
+        # TODO(T9) : passerelle de l'étape « étendre » (ADR 0006, 10), à retirer avec `seller` à la contraction.
+        # Un appelant qui ne connaît que l'ancien rattachement au compte obtient un contexte personnel.
         if self.seller_context_type is None and self.seller_id is not None:
             self.seller_context_type = 'USER'
             self.seller_context_id = self.seller_id

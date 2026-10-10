@@ -6,6 +6,10 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
+    """Schéma de l'étape « étendre » (ADR 0006, 10.2). Retour arrière : `seller` redevient NOT NULL ; il échoue
+    donc s'il existe des offres sans `seller` (offres créées pour un prestataire ou une organisation). Dans ce
+    cas, supprimer ces offres avant de revenir en arrière (restauration de sauvegarde en production)."""
+
 
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),

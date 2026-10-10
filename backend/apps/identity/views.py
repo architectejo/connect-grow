@@ -26,13 +26,13 @@ from .serializers import (
     IdentifierTokenObtainPairSerializer, KycDocumentSerializer, PublicBusinessSerializer, UserSerializer,
 )
 from .services import (
-    ContactSettingsError, KycError, decide_kyc_document, get_contact_settings, revoke_all_sessions,
+    ContactSettingsError, get_contexts_for_user, KycError, decide_kyc_document, get_contact_settings, revoke_all_sessions,
     set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
 )
 from .sms import send_otp_sms
 from .throttles import (
     ContactSettingsThrottle, ProfileWriteIpThrottle, ProfileWriteThrottle, RegisterIpThrottle,
-    ChangePasswordThrottle, FailureLimiter, KycWriteThrottle, LoginIpThrottle, OtpConfirmIpThrottle,
+    ChangePasswordThrottle, ContextsListThrottle, FailureLimiter, KycWriteThrottle, LoginIpThrottle, OtpConfirmIpThrottle,
     LogoutIpThrottle, OtpRequestIpThrottle, OtpRequestPhoneDailyThrottle, OtpRequestPhoneThrottle, RefreshIpThrottle,
 )
 
@@ -113,6 +113,30 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         return self.request.user
+
+class ContextListView(APIView):
+    """GET : contextes que le compte peut activer (ADR 0006, 9.1). Liste bornée, non paginée, servie dans
+    l'enveloppe des autres listes. Ignore `X-Context` : elle décrit tous les contextes. `capabilities` sert
+    à masquer des boutons ; l'autorisation reste côté serveur. Jamais mise en cache (rôles sensibles)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ContextsListThrottle]
+
+    def get(self, request):
+        results = [
+            {
+                'type': item.type, 'id': str(item.id), 'name': item.name, 'role': item.role,
+                'org_type': item.org_type,
+                'photo': request.build_absolute_uri(item.photo) if item.photo else None,
+                'capabilities': list(item.capabilities),
+                'migrated_from_business': item.migrated_from_business,
+            }
+            for item in get_contexts_for_user(request.user)
+        ]
+        response = Response({'count': len(results), 'next': None, 'previous': None, 'results': results})
+        response['Cache-Control'] = 'private, no-store'
+        return response
+
 
 def password_error(exc):
     """Réponse 400 uniforme pour un mot de passe refusé (clé `error` comme ailleurs)."""

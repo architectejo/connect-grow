@@ -7,6 +7,7 @@ from .views import (
     ContactPhoneVerifyView,
     ContactPhoneView,
     ContactSettingsView,
+    ContextListView,
     KycDecisionView,
     KycDocumentDeleteView,
     KycDocumentDownloadView,
@@ -42,6 +43,9 @@ urlpatterns = [
 
     path('change-password/', ChangePasswordView.as_view(), name='change_password'),
     path('businesses/', BusinessListView.as_view(), name='business_list'),
+
+    # Contextes disponibles pour le compte (ADR 0006, 9.1)
+    path('contexts/', ContextListView.as_view(), name='contexts'),
 
     # Réglages de contact vendeur (ADR 0005)
     path('contact-settings/', ContactSettingsView.as_view(), name='contact_settings'),

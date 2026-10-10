@@ -11,6 +11,12 @@ from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, Ou
 
 from apps.moderation.services import record_audit
 
+# Contexte actif (ADR 0006, section 6) : façade publique.
+from .acting import (  # noqa: F401
+    ActingContextMixin, AvailableContext, authorize, authorize_on, can, capability_permission, get_acting_context,
+    get_contexts_for_user, resolve_acting_context,
+)
+
 # Organisations et équipes (ADR 0006) : façade publique, les autres domaines n'importent jamais le sous-module.
 from .organizations import (  # noqa: F401
     OrganizationError, SUSPENSION_REASONS, add_member, assert_account_removable, archive_organization, change_member_role,
@@ -185,15 +191,27 @@ def get_full_names(ids: Iterable) -> dict:
 
 
 def acts_for_context(user_id, context_type, context_id) -> bool:
-    """Vrai si ce compte agit pour le contexte désigné (couture L0-09). Aujourd'hui, seul le
-    contexte personnel existe : le compte agit pour lui-même. L0-09 étendra la règle aux membres
-    d'une organisation sans changer les appelants."""
-    from apps.common.contexts import CONTEXT_USER
+    """Vrai si ce compte agit pour le contexte désigné (ADR 0006, 7.1) : `USER` = soi-même ; `PROVIDER` =
+    titulaire du profil (même archivé) ; `ORGANIZATION` = membre ACTIF, de tout rôle, d'une organisation non
+    suspendue. Faux sinon (dont membre révoqué). Sert au refus « je ne note pas et ne contacte pas ma
+    propre offre ». Aucun cache : relu en base à chaque appel."""
+    from apps.common.contexts import CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER
+    from apps.common.utils import parse_uuid
 
-    return (
-        context_type == CONTEXT_USER and user_id is not None and context_id is not None
-        and str(user_id) == str(context_id)
-    )
+    from .models import Membership, Organization, ProviderProfile
+
+    user_uuid, context_uuid = parse_uuid(user_id), parse_uuid(context_id)
+    if user_uuid is None or context_uuid is None or user_id is None or context_id is None:
+        return False
+    if context_type == CONTEXT_USER:
+        return user_uuid == context_uuid
+    if context_type == CONTEXT_PROVIDER:
+        return ProviderProfile.objects.filter(pk=context_uuid, user_id=user_uuid).exists()
+    if context_type == CONTEXT_ORGANIZATION:
+        return Membership.objects.filter(
+            user_id=user_uuid, organization_id=context_uuid, status=Membership.STATUS_ACTIVE,
+        ).exclude(organization__status=Organization.STATUS_SUSPENDED).exists()
+    return False
 
 
 def public_display_name(full_name) -> str:

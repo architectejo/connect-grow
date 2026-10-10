@@ -168,6 +168,17 @@ class ContactSettingsThrottle(UserWriteThrottle):
     scope = 'contact_settings'
 
 
+class ContextsListThrottle(SimpleRateThrottle):
+    """Lecture de la liste des contextes (appelée à chaque chargement du front) : par utilisateur."""
+
+    scope = 'contexts'
+
+    def get_cache_key(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return None
+        return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
+
+
 class FailureLimiter:
     """Compteur d'ÉCHECS par clé (couple identifiant+IP), avec délai croissant.
 

@@ -496,6 +496,7 @@ Scission décidée de L0-09f : f1 (T6) et f2 (T7), parallélisables après T5 ; 
 - **Conflits de fichiers** : `identity/views.py` et `serializers.py` sont partagés entre T3, T4 et T8 ; chaque tâche crée ses propres fichiers (`views_organizations.py`, `views_provider.py`, `views_verification.py`, et sérialiseurs homonymes) et ne touche `urls.py` que pour ajouter ses routes.
 
 **Dettes signalées**
+- Voir la section 17.3 : suppression de compte et dernier propriétaire (chemin de secours audité, organisations orphelines), ajout direct de membre non exposable (invitation et acceptation en L1-01, revue sécurité), noms réservés et signalement d'usurpation, recette MySQL des verrous.
 - `Message.is_read` partagé du côté organisation ; boîte d'équipe et attribution : L2-09.
 - Durées de conservation de `AuditLog`, des pièces et des événements : LEG-PRV.
 - `LegacyAccountMapping` et `Organization.legacy_business_profile_id` à retirer après la mise à jour des bases de développement.
@@ -581,3 +582,17 @@ Le chemin critique (T1 → T2 → {T3, T4, T8} → T5 → {T6, T7} → T9 → T1
 4. Partie C non validée par le client : seuls les noms de routes, la forme d'un membre et les rôles sont stables ; le mécanisme d'ajout (direct ou invitation) est tranché en L1-01.
 5. `leave/` sur organisation archivée : volontaire (quitter n'est jamais bloqué).
 6. Question client ouverte, inchangée : afficher en lecture seule les profils suspendus ou archivés (spec 15.1 n°6).
+
+### 17.3 Compléments issus de la relecture et de l'audit de T1 (L0-09a)
+
+Ces points s'ajoutent à la section 15 (dettes et registre de recette) et prévalent sur les sections 1 à 16 en cas de divergence.
+
+1. **Dernier propriétaire et suppression de compte (dette).** `identity.services.assert_account_removable(user)` refuse (409 `last_owner_account`) la suppression d'un compte qui est seul propriétaire actif d'une organisation active ; elle est branchée sur la suppression d'un compte dans l'admin (unitaire et en masse). Elle ne bloque pas la désactivation par sanction ou modération (`is_active = False`). **Dette à livrer avec L1-01 / la suppression de compte :** un chemin de secours audité du personnel (réattribution du propriétaire sur preuve) et le sort d'une organisation devenue orpheline. Conséquence connue : l'admin Membership étant en lecture seule, Django refuse aussi de supprimer depuis l'admin un compte qui a des appartenances ; ces comptes doivent d'abord quitter leurs organisations.
+2. **Ajout direct de membre : INTERDIT d'exposition.** `add_member` est un service interne, sans le consentement de la cible. Aucun endpoint ne doit l'appeler en l'état. **L1-01 doit implémenter l'invitation et son acceptation par la cible** (plafond d'organisations vérifié à l'acceptation, pas à l'envoi), avec **revue obligatoire de `auditeur-securite`**. Les refus portant sur la cible (compte inconnu, inactif, restreint ou au plafond) renvoient une réponse unique et neutre (400 `user_unavailable`) pour ne pas révéler l'existence ni l'état d'un compte ; `change_member_role` et `transfer_ownership` appliquent la même réponse à une cible inactive ou restreinte.
+3. **Noms d'organisation.** Normalisation NFKC, refus des caractères Unicode de catégories Cc, Cf, Zl et Zp (contrôle, direction, largeur nulle, séparateurs de ligne), repli des espaces multiples, retrait des espaces de bord ; longueur contrôlée après normalisation (code `invalid_name`). **Tâche L1-01 / modération (non codée ici) :** liste de noms réservés configurable et signalement d'usurpation d'une organisation.
+4. **Verrou de la cible à l'ajout.** `add_member` verrouille le compte cible et vérifie son plafond avant toute lecture de ses appartenances. **Registre de recette MySQL :** vérifier, sur MySQL réel (le verrou de ligne est sans effet sous SQLite), deux ajouts simultanés d'un même compte à deux organisations quand il lui reste une seule place, et deux départs simultanés de deux propriétaires.
+5. **Quota.** Le plafond d'organisations ne compte que les appartenances actives dans des organisations actives (une organisation archivée ou suspendue libère la place).
+6. **Organisation archivée.** Le dernier propriétaire peut transférer la propriété puis quitter une organisation archivée (tracé dans `AuditLog`) ; sur une organisation active, `last_owner` reste appliqué.
+7. **Entrées des services.** Types vérifiés (erreur de validation 400, jamais 500), `nif` refusé au-delà de 50 caractères (plus de troncature), logo validé (taille, pixels) avant écriture et supprimé du stockage si la transaction échoue. Limite : une transaction englobante annulée plus tard n'est pas détectable par le service.
+8. **Codes de validation** posés dès T1 : `invalid_name`, `invalid_org_type`, `invalid_description`, `invalid_nif`, `invalid_logo`, `too_many_categories`, `unknown_category`, `unknown_city`, `unknown_commune`.
+9. **Contacts.** Contrainte `CHECK` « exactement un de `user` et `organization` » sur `ContactPoint` et `ContactConsent` (migration `identity 0008`).

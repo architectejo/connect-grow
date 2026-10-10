@@ -203,15 +203,24 @@ class AuditLog(BaseModel):
     target_type = models.CharField(max_length=50, blank=True, default='')
     target_id = models.UUIDField(null=True, blank=True)
     details = models.TextField(blank=True)
+    # Contexte sous lequel l'action a été exécutée (ADR 0006, A10) : retrouve tout ce qui s'est fait
+    # sous une organisation. Nul = action hors contexte (personnel, système, personnel du site).
+    context_type = models.CharField(max_length=20, null=True, blank=True)
+    context_id = models.UUIDField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ['-created_at']
         indexes = [models.Index(fields=['target_type', 'target_id'], name='audit_target')]
 
     @classmethod
-    def record(cls, actor, action, target=None, details=''):
-        """`target` : instance d'un modèle à clé UUID (son nom de modèle devient `target_type`)."""
+    def record(cls, actor, action, target=None, details='', context=None):
+        """`target` : instance d'un modèle à clé UUID (son nom de modèle devient `target_type`).
+        `context` : couple facultatif `(type, id)` ou objet portant `.type` et `.id` (`ActingContext`)."""
         entry = cls(actor=actor, action=action, details=details)
+        if context is not None:
+            if hasattr(context, 'type'):
+                context = (context.type, context.id)
+            entry.context_type, entry.context_id = context
         if target is not None:
             entry.target_type = target._meta.model_name
             entry.target_id = target.pk

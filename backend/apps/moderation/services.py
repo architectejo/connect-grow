@@ -104,10 +104,11 @@ def get_settings() -> ModerationSettings:
 AUTOMATIC_TARGET_TYPES = frozenset({'review', 'user'})
 
 
-def record_audit(actor, action, target=None, details=''):
+def record_audit(actor, action, target=None, details='', context=None):
     """Journalise une action sensible (règle 12) dans l'AuditLog. Synchrone, sans outbox :
-    une action sensible ne doit jamais exister sans sa trace (ADR 0002, notes R1)."""
-    return AuditLog.record(actor, action, target=target, details=details)
+    une action sensible ne doit jamais exister sans sa trace (ADR 0002, notes R1).
+    `context` : `(type, id)` ou `ActingContext` du contexte sous lequel l'action s'exécute (ADR 0006, A10)."""
+    return AuditLog.record(actor, action, target=target, details=details, context=context)
 
 
 def count_audit_days(actor_id, action, since) -> int:

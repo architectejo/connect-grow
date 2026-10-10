@@ -1,3 +1,4 @@
+import logging
 import secrets
 from datetime import timedelta
 
@@ -5,7 +6,9 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.core.files.storage import FileSystemStorage
 from django.core.validators import MaxLengthValidator, MaxValueValidator, MinValueValidator, RegexValidator
-from django.db import models
+from django.db import models, transaction
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.db.models import F
 from django.conf import settings
 from django.utils import timezone
@@ -15,6 +18,8 @@ from apps.common.models import BaseModel, SingletonSettingsModel
 
 from .capabilities import ROLE_CHOICES
 from .kyc_files import kyc_upload_to
+
+logger = logging.getLogger(__name__)
 
 # CDC 2.3 : numéros togolais... congolais au format +243 suivi de 9 chiffres.
 phone_validator = RegexValidator(
@@ -312,6 +317,23 @@ class KycDocument(BaseModel):
         return f"{self.get_document_type_display()} — {owner} ({self.status})"
 
 
+@receiver(post_delete, sender=KycDocument)
+def delete_kyc_file_with_row(sender, instance, **kwargs):
+    """Le fichier privé disparaît avec sa ligne (suppression directe ou en cascade), une fois la transaction
+    validée : un retour arrière ne perd jamais de fichier. Un échec disque est journalisé, jamais remonté."""
+    stored_file = instance.file
+    if not stored_file or not stored_file.name:
+        return
+
+    def remove():
+        try:
+            stored_file.delete(save=False)
+        except OSError:
+            logger.exception("Suppression du fichier de la pièce %s impossible.", instance.pk)
+
+    transaction.on_commit(remove)
+
+
 # Version courante du texte de consentement au contact (ADR 0005, C4). Provisoire (LEG-PRV-03).
 CONTACT_CONSENT_TEXT_VERSION = '2026-10-v1'
 
@@ -437,6 +459,12 @@ class IdentitySettings(SingletonSettingsModel):
         default=False,
         help_text="Autorise les canaux Appel et WhatsApp pour une organisation (fermé tant que le client n'a pas "
                   "validé le consentement des organisations).",
+    )
+
+    kyb_file_retention_days = models.PositiveIntegerField(
+        default=0, validators=[MaxValueValidator(3650)],
+        help_text="Jours de conservation du FICHIER d'une pièce d'organisation après sa décision ; 0 = illimité "
+                  "(durée à fixer par le client, LEG-PRV). La ligne et le résultat de la décision sont conservés.",
     )
 
     class Meta:

@@ -321,4 +321,7 @@ class OrganizationDocumentRequirementAdmin(admin.ModelAdmin):
 
 @admin.register(IdentitySettings)
 class IdentitySettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
-    list_display = ('max_organizations_per_account', 'max_categories_per_context', 'org_phone_channels_enabled')
+    list_display = (
+        'max_organizations_per_account', 'max_categories_per_context', 'org_phone_channels_enabled',
+        'kyb_file_retention_days',
+    )

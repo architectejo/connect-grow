@@ -80,10 +80,14 @@ function PhoneBlock({ settings }: { settings: ContactSettings }) {
   const [error, setError] = useState<string>();
   const { user } = useAuth();
   const phone = settings.phone;
-  // Avant tout numéro de contact, le contrat (ADR 0005 §5.1) ne donne pas le masque du numéro de connexion : on masque celui du compte (4 derniers chiffres)
-  const login = phone
-    ? { masked: phone.login_phone_masked, available: phone.can_use_login_phone }
-    : { masked: maskPhone(user?.phone), available: !!user?.phone && !!user.phone_verified };
+  // Le serveur fournit le masque du numéro de connexion à la racine (ADR 0005 §5.1). Sans ce champ (ancienne réponse),
+  // repli : le masque du bloc `phone`, ou à défaut celui du compte calculé ici (4 derniers chiffres).
+  const login =
+    settings.can_use_login_phone !== undefined || settings.login_phone_masked !== undefined
+      ? { masked: settings.login_phone_masked ?? "", available: settings.can_use_login_phone ?? false }
+      : phone
+        ? { masked: phone.login_phone_masked, available: phone.can_use_login_phone }
+        : { masked: maskPhone(user?.phone), available: !!user?.phone && !!user.phone_verified };
   const awaitingCode = !!phone && !phone.is_verified && !editing;
   const choosing = !phone || editing;
 

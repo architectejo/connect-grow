@@ -42,6 +42,29 @@ describe("ContactSettingsSection", () => {
     expect(screen.getByTestId("contact-phone-masked")).toHaveTextContent("+243 81 *** ** 45");
   });
 
+  it("sans numéro de contact : utilise le masque du numéro de connexion fourni par le serveur", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: fixture({ phone: null, login_phone_masked: "+243 99 *** ** 07", can_use_login_phone: true }),
+    });
+    renderSection();
+    expect(await screen.findByText("Utiliser mon numéro de connexion (+243 99 *** ** 07)")).toBeInTheDocument();
+    expect(screen.queryByText(/5678/)).not.toBeInTheDocument();
+  });
+
+  it("racine : can_use_login_phone faux désactive l'usage du numéro de connexion, même si le compte a un téléphone", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: fixture({ phone: null, login_phone_masked: "+243 99 *** ** 07", can_use_login_phone: false }),
+    });
+    renderSection();
+    expect(await screen.findByText(/Vérifiez d'abord votre numéro de connexion/)).toBeInTheDocument();
+  });
+
+  it("ancienne réponse sans champs racine : repli sur le masque calculé côté client", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: fixture({ phone: null }) });
+    renderSection();
+    expect(await screen.findByText("Utiliser mon numéro de connexion (+243 ••• ••• 5678)")).toBeInTheDocument();
+  });
+
   it("Appel et WhatsApp restent verrouillés tant que le numéro n'est pas vérifié", async () => {
     vi.mocked(apiClient.get).mockResolvedValue({
       data: fixture({ phone: { masked: "+243 81 *** ** 45", is_verified: false, login_phone_masked: "", can_use_login_phone: false } }),

@@ -17,6 +17,7 @@ const KNOWN_CODES = [
   "otp_attempts_exceeded",
   "contact_phone_missing",
   "channel_unknown",
+  "account_too_new",
 ] as const;
 
 /** Message français d'une erreur `{detail, code}` des réglages de contact ; le code machine prime sur le `detail` du serveur. */

@@ -16,6 +16,7 @@ describe("contactSettingsErrorMessage", () => {
     ["otp_attempts_exceeded", 429, "Trop d'essais"],
     ["contact_phone_missing", 404, "Enregistrez d'abord"],
     ["channel_unknown", 404, "n'existe pas"],
+    ["account_too_new", 403, "trop récent pour enregistrer un numéro de contact"],
   ])("%s donne un message français", (code, status, expected) => {
     expect(contactSettingsErrorMessage(apiError(status, code))).toContain(expected);
   });

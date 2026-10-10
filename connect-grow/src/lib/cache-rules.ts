@@ -17,7 +17,9 @@ export function isCacheableApiContent({ url, request }: { url: URL; request: Req
 
 /**
  * Routes qui portent ou listent des numéros de contact (ADR 0005 §5.4 et §5.5) : toujours réseau seul
- * (stratégie NetworkOnly), quelle que soit la méthode. Même contrainte d'autonomie que ci-dessus.
+ * (stratégie NetworkOnly). Workbox n'enregistre cette règle que pour les requêtes GET (méthode par défaut) :
+ * le POST de révélation n'est jamais intercepté ni mis en cache par le service worker, il part directement au réseau.
+ * Même contrainte d'autonomie que ci-dessus.
  */
 export function isContactRevealRequest({ url }: { url: URL }): boolean {
   return /\/api\/(v1\/)?interactions\/contacts\/(reveal|reveals\/received)\/?$/.test(url.pathname);

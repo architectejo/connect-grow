@@ -120,6 +120,8 @@ export interface Post {
     shares_count?: number;
     /** Réservé au vendeur : l'offre est masquée par la modération. */
     is_hidden_by_moderation?: boolean;
+    /** Moyens de contact acceptés par le vendeur (ADR 0005 §5.2). Jamais de numéro. Absent des anciennes réponses. */
+    allowed_channels?: ContactChannel[];
 }
 
 export interface Category {
@@ -309,3 +311,28 @@ export interface ContactSettings {
 }
 
 export type ContactPhoneInput = { use_login_phone: true } | { phone: string };
+
+/** Canaux qui révèlent un numéro (le message passe par POST interactions/contacts/). */
+export type RevealChannel = "CALL" | "WHATSAPP";
+
+/**
+ * Réponse de POST interactions/contacts/reveal/ (ADR 0005 §5.4). Contient le numéro du vendeur :
+ * à garder en état local uniquement, jamais en cache persistant, stockage ni journal.
+ */
+export interface RevealedContact {
+    contact_event_id: Uuid;
+    channel: RevealChannel;
+    created: boolean;
+    phone: string;
+    tel_url: string | null;
+    whatsapp_url: string | null;
+}
+
+/** Ligne de « Qui a demandé » (ADR 0005 §5.5) : nom abrégé et offre, jamais d'identifiant du visiteur ni de numéro. */
+export interface ReceivedReveal {
+    id: Uuid;
+    channel: RevealChannel;
+    created_at: string;
+    requester_display_name: string;
+    offer: { id: Uuid; title: string };
+}

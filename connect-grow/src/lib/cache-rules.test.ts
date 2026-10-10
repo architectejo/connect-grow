@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { isCacheableApiContent } from "./cache-rules";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { isCacheableApiContent, isContactRevealRequest } from "./cache-rules";
 
 const call = (path: string, headers: Record<string, string> = {}, method = "GET") =>
   isCacheableApiContent({
@@ -41,5 +43,31 @@ describe("isCacheableApiContent", () => {
   });
   it("refuse toute requête portant Authorization, y compris sur les routes publiques", () => {
     expect(call("/api/accounts/businesses/", { Authorization: "Bearer x" })).toBe(false);
+  });
+});
+
+describe("isContactRevealRequest (révélation du numéro : réseau seul)", () => {
+  const match = (path: string) => isContactRevealRequest({ url: new URL(path, "http://localhost") });
+
+  it("reconnaît reveal et reveals/received, avec ou sans /v1/ et paramètres", () => {
+    expect(match("/api/interactions/contacts/reveal/")).toBe(true);
+    expect(match("/api/v1/interactions/contacts/reveal/")).toBe(true);
+    expect(match("/api/interactions/contacts/reveals/received/")).toBe(true);
+    expect(match("/api/interactions/contacts/reveals/received/?channel=CALL&page=2")).toBe(true);
+  });
+  it("ne couvre pas les autres routes", () => {
+    expect(match("/api/interactions/contacts/")).toBe(false);
+    expect(match("/api/marketplace/posts/")).toBe(false);
+  });
+  it("ces routes ne sont jamais éligibles au cache de contenus publics", () => {
+    expect(call("/api/interactions/contacts/reveals/received/")).toBe(false);
+    expect(call("/api/interactions/contacts/reveal/", {}, "POST")).toBe(false);
+  });
+  it("la configuration PWA la déclare en premier, en NetworkOnly", () => {
+    const config = readFileSync(resolve(process.cwd(), "vite.config.ts"), "utf-8");
+    const rules = config.slice(config.indexOf("runtimeCaching"));
+    const first = rules.slice(0, rules.indexOf("},") + 2);
+    expect(first).toContain("isContactRevealRequest");
+    expect(first).toContain('handler: "NetworkOnly"');
   });
 });

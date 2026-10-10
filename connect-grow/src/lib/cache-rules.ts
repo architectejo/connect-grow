@@ -14,3 +14,11 @@ export function isCacheableApiContent({ url, request }: { url: URL; request: Req
   if (/\/(accounts\/kyc|interactions)\//.test(url.pathname)) return false;
   return /\/api\/(v1\/)?(marketplace\/posts|accounts\/businesses)\//.test(url.pathname);
 }
+
+/**
+ * Routes qui portent ou listent des numéros de contact (ADR 0005 §5.4 et §5.5) : toujours réseau seul
+ * (stratégie NetworkOnly), quelle que soit la méthode. Même contrainte d'autonomie que ci-dessus.
+ */
+export function isContactRevealRequest({ url }: { url: URL }): boolean {
+  return /\/api\/(v1\/)?interactions\/contacts\/(reveal|reveals\/received)\/?$/.test(url.pathname);
+}

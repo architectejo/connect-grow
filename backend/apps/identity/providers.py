@@ -13,23 +13,22 @@ Ce module est exposé par `identity.services` ; les autres domaines n'importent 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import serializers
-from rest_framework.exceptions import ErrorDetail
 
 from apps.common.contexts import CONTEXT_PROVIDER, DENY_OBJECT_STATE, DENY_SECURITY, ContextDenied
 from apps.common.exception_handler import CodedAPIException
-from apps.common.utils import parse_uuid
 from apps.moderation.services import is_user_restricted, record_audit
 from apps.platform_core.services import publish_event
 
 from .models import ProviderProfile, ProviderProfileCategory, User
-from .organizations import get_identity_settings, normalize_name
+from .organizations import (
+    STATUS_REASON_ARCHIVED, _error, normalize_name, validate_category_ids,
+)
 
 DISPLAY_NAME_MIN_LENGTH = 2
 DISPLAY_NAME_MAX_LENGTH = 255
 BIO_MAX_LENGTH = 2000
 
 STATUS_REASON_ACTIVATED = 'activated'
-STATUS_REASON_ARCHIVED = 'archived'
 
 
 class ProviderError(CodedAPIException):
@@ -60,10 +59,6 @@ def get_provider_category_ids(provider) -> list:
 
 # --- Validation -------------------------------------------------------------------------------
 
-def _error(message, code):
-    return [ErrorDetail(message, code=code)]
-
-
 def _validate_display_name(value):
     normalized = normalize_name(value)
     if normalized is None:
@@ -90,30 +85,22 @@ def _validate_bio(value):
     return value.strip()
 
 
-def _validate_categories(category_ids):
-    """Liste facultative (vide permise), doublons ignorés, plafond réglable (règle 11)."""
-    from apps.catalog import services as catalog
-
-    if category_ids is None:
-        return []
-    if not isinstance(category_ids, (list, tuple)):
-        raise serializers.ValidationError({'category_ids': _error("Une catégorie est inconnue.", 'unknown_category')})
-    parsed = [parse_uuid(c) for c in category_ids]
-    if any(p is None for p in parsed):
-        raise serializers.ValidationError({'category_ids': _error("Une catégorie est inconnue.", 'unknown_category')})
-    wanted = list(dict.fromkeys(parsed))
-    if len(wanted) > get_identity_settings().max_categories_per_context:
-        raise serializers.ValidationError({'category_ids': _error("Trop de catégories.", 'too_many_categories')})
-    if wanted and len(catalog.existing_category_ids(wanted)) != len(wanted):
-        raise serializers.ValidationError({'category_ids': _error("Une catégorie est inconnue.", 'unknown_category')})
-    return wanted
-
-
 def _ensure_account_allowed(user):
     if not user.is_active:
         raise ContextDenied(DENY_SECURITY, "Votre compte est désactivé.")
     if is_user_restricted(user.pk):
         raise ContextDenied(DENY_SECURITY, "Votre compte fait l'objet d'une restriction.")
+
+
+def _default_display_name(user):
+    """Forme publique du nom du compte (« Marie K. »), jamais le nom complet (règle 10) ; repli
+    « Utilisateur » si elle est invalide ou trop courte."""
+    from .services import public_display_name
+
+    candidate = normalize_name(public_display_name(user.full_name))
+    if not candidate or len(candidate) < DISPLAY_NAME_MIN_LENGTH:
+        return "Utilisateur"
+    return candidate[:DISPLAY_NAME_MAX_LENGTH]
 
 
 def _set_categories(profile, wanted):
@@ -170,19 +157,18 @@ def activate_provider(user, display_name=None, bio=None, category_ids=None, fiel
     else:
         name = None
     new_bio = _validate_bio(bio) if 'bio' in fields else None
-    wanted = _validate_categories(category_ids) if 'category_ids' in fields else None
+    wanted = validate_category_ids(category_ids) if 'category_ids' in fields else None
 
     with transaction.atomic():
-        User.objects.select_for_update().filter(pk=user.pk).first()  # sérialise les activations du compte
+        locked_user = User.objects.select_for_update().filter(pk=user.pk).first()  # sérialise les activations
+        _ensure_account_allowed(locked_user or user)  # état du compte relu après verrou (ADR 6.4)
         profile = ProviderProfile.objects.select_for_update().filter(user_id=user.pk).first()
         if profile is not None and profile.status == ProviderProfile.STATUS_ACTIVE:
             return profile, False  # une requête concurrente a déjà activé
         created = profile is None
         if created:
-            from .services import public_display_name
-
             profile = ProviderProfile(
-                user=user, display_name=name or normalize_name(public_display_name(user.full_name)) or "Utilisateur",
+                user=user, display_name=name or _default_display_name(user),
                 bio=new_bio or '', status=ProviderProfile.STATUS_ACTIVE,
             )
             try:
@@ -224,9 +210,11 @@ def update_provider(user, **changes) -> ProviderProfile:
 
     name = _validate_display_name(changes['display_name']) if 'display_name' in changes else None
     new_bio = _validate_bio(changes['bio']) if 'bio' in changes else None
-    wanted = _validate_categories(changes['category_ids']) if 'category_ids' in changes else None
+    wanted = validate_category_ids(changes['category_ids']) if 'category_ids' in changes else None
 
     with transaction.atomic():
+        locked_user = User.objects.select_for_update().filter(pk=user.pk).first()
+        _ensure_account_allowed(locked_user or user)
         profile = _lock_profile(user)
         if profile.status != ProviderProfile.STATUS_ACTIVE:
             raise ContextDenied(DENY_OBJECT_STATE, "Ce profil de prestataire est archivé.")

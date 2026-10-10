@@ -214,6 +214,31 @@ def _error(message, code):
     return [ErrorDetail(message, code=code)]
 
 
+def validate_category_ids(category_ids):
+    """Catégories d'un contexte (organisation ou prestataire, ADR 0006 Q-F5) : liste facultative, vide
+    permise, doublons ignorés, plafond réglable (`max_categories_per_context`). Retourne la liste d'UUID
+    dédoublonnée ; lève `ValidationError({'category_ids': [...]})` code `unknown_category` ou
+    `too_many_categories`."""
+    from apps.catalog import services as catalog
+
+    def fail(message, code):
+        raise serializers.ValidationError({'category_ids': _error(message, code)})
+
+    if category_ids is None:
+        return []
+    if not isinstance(category_ids, (list, tuple, set)):
+        fail("Les catégories doivent former une liste.", 'unknown_category')
+    parsed = [parse_uuid(c) for c in category_ids]
+    if any(p is None for p in parsed):
+        fail("Une catégorie est inconnue.", 'unknown_category')
+    wanted = list(dict.fromkeys(parsed))
+    if len(wanted) > get_identity_settings().max_categories_per_context:
+        fail("Trop de catégories.", 'too_many_categories')
+    if wanted and len(catalog.existing_category_ids(wanted)) != len(wanted):
+        fail("Une catégorie est inconnue.", 'unknown_category')
+    return wanted
+
+
 def _validate_creation_input(name, org_type, description, nif, category_ids, city_id, commune_id, logo):
     from apps.catalog import services as catalog
 
@@ -246,20 +271,10 @@ def _validate_creation_input(name, org_type, description, nif, category_ids, cit
             errors['nif'] = _error(f"Le NIF ne doit pas dépasser {NIF_MAX_LENGTH} caractères.", 'invalid_nif')
 
     wanted = []
-    if category_ids is None:
-        category_ids = ()
-    if not isinstance(category_ids, (list, tuple, set)):
-        errors['category_ids'] = _error("Les catégories doivent former une liste.", 'unknown_category')
-    else:
-        parsed = [parse_uuid(c) for c in category_ids]
-        if any(p is None for p in parsed):
-            errors['category_ids'] = _error("Une catégorie est inconnue.", 'unknown_category')
-        else:
-            wanted = list(dict.fromkeys(parsed))
-            if len(wanted) > get_identity_settings().max_categories_per_context:
-                errors['category_ids'] = _error("Trop de catégories.", 'too_many_categories')
-            elif wanted and len(catalog.existing_category_ids(wanted)) != len(wanted):
-                errors['category_ids'] = _error("Une catégorie est inconnue.", 'unknown_category')
+    try:
+        wanted = validate_category_ids(category_ids)
+    except serializers.ValidationError as exc:
+        errors['category_ids'] = exc.detail['category_ids']
     if city_id is not None and not catalog.city_exists(city_id):
         errors['city_id'] = _error("Ville inconnue.", 'unknown_city')
     if commune_id is not None:

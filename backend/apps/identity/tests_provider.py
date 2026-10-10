@@ -361,12 +361,16 @@ class ArchiveTests(ProviderBase):
         client.force_authenticate(make_user('vide'))
         self.assertEqual(client.post(ARCHIVE).status_code, 404)
 
-    def test_event_type_has_no_subscriber_yet(self):
-        # À RETIRER quand l'abonné marketplace de T5 (`sync_seller_visibility`) arrive : le drapeau
-        # `no_subscriber` sera alors supprimé du catalogue.
+    def test_status_event_has_the_marketplace_subscriber(self):
+        # T5a : l'abonné `marketplace.sync_seller_visibility` remplace le drapeau `no_subscriber`.
         from apps.platform_core.catalog import EVENT_TYPES
+        from apps.platform_core.registry import subscribers_for
 
-        self.assertTrue(EVENT_TYPES['identity.seller_context_status_changed'].no_subscriber)
+        self.assertFalse(EVENT_TYPES['identity.seller_context_status_changed'].no_subscriber)
+        self.assertIn(
+            'marketplace.sync_seller_visibility',
+            [s.name for s in subscribers_for('identity.seller_context_status_changed')],
+        )
 
 
 class ContextIntegrationTests(ProviderBase):

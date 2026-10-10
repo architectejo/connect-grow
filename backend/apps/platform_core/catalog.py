@@ -25,7 +25,8 @@ _TYPES = (
     # ADR 0006, section 8. Charges utiles : UUID et valeurs simples, aucune donnée personnelle.
     # Abonnés ajoutés par T5 à T7 ; le drapeau no_subscriber est alors retiré.
     EventType('identity.membership_changed', no_subscriber=True),
-    EventType('identity.seller_context_status_changed', no_subscriber=True),
+    # Abonné : `marketplace.sync_seller_visibility` (T5a) ; `notifications.notify_organization_status` viendra avec T6.
+    EventType('identity.seller_context_status_changed'),
     # Identité d'une organisation modifiée (T8) : noms de champs seulement, aucune valeur.
     EventType('identity.organization_updated', no_subscriber=True),
     # Émetteur : `decide_kyc_document` (T4) ; abonné `notifications.notify_kyb_decision` ajouté par T6.

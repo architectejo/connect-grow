@@ -368,6 +368,7 @@ class TestStorageCleanupTests(SimpleTestCase):
 SCHEDULED_COMMANDS = {
     'purge_offer_trash', 'expire_offers', 'lift_expired_sanctions',
     'purge_otp_codes', 'refresh_daily_contacts', 'refresh_visibility_scores', 'purge_offer_views', 'dispatch_outbox', 'purge_outbox',
+    'sync_seller_visibility',
 }
 
 

@@ -55,7 +55,7 @@ class ContactCountingTests(MarketplaceTestBase):
         )
         self.assertEqual(services.recount_contacts(self.offer.id), 1)
         rows = services.count_contacts_by_offer(timezone.localdate())
-        self.assertEqual(rows, [(self.offer.id, self.seller.id, 1)])
+        self.assertEqual(rows, [(self.offer.id, 'USER', self.seller.id, 1)])
 
     def test_the_window_comes_from_the_settings(self):
         row = MarketplaceSettings.get_solo()

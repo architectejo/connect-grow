@@ -171,8 +171,11 @@ class Sanction(BaseModel):
         if self.sanction_type == self.TYPE_MASQUAGE_ANNONCE and self.related_offer_id:
             marketplace_services.hide_by_moderation(self.related_offer_id)
         elif self.sanction_type in self.ACCOUNT_BLOCKING_TYPES:
+            from apps.identity import services as identity_services
+
+            # Point unique de changement de `User.is_active` : publie le changement de visibilité des offres.
+            identity_services.set_account_active(self.user_id, False, actor=self.issued_by)
             self.user.is_active = False
-            self.user.save(update_fields=['is_active'])
 
     def lift(self):
         from apps.marketplace import services as marketplace_services
@@ -187,8 +190,10 @@ class Sanction(BaseModel):
                 user_id=self.user_id, is_active=True, sanction_type__in=self.ACCOUNT_BLOCKING_TYPES,
             ).exclude(pk=self.pk).exists()
             if not still_blocked:
+                from apps.identity import services as identity_services
+
+                identity_services.set_account_active(self.user_id, True)
                 self.user.is_active = True
-                self.user.save(update_fields=['is_active'])
 
     def __str__(self):
         return f"{self.get_sanction_type_display()} — {self.user}"

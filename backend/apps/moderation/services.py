@@ -137,6 +137,20 @@ def is_user_restricted(user_id) -> bool:
     ).filter(Q(ends_at__isnull=True) | Q(ends_at__gt=now)).exists()
 
 
+def get_restricted_user_ids(user_ids) -> set:
+    """Parmi `user_ids`, les comptes sous sanction bloquante en cours (une requête) : variante par lot de
+    `is_user_restricted`, pour recalculer la visibilité publique de vendeurs (ADR 0006, A7)."""
+    wanted = list(user_ids)
+    if not wanted:
+        return set()
+    now = timezone.now()
+    return set(
+        Sanction.objects.filter(
+            user_id__in=wanted, is_active=True, sanction_type__in=Sanction.ACCOUNT_BLOCKING_TYPES,
+        ).filter(Q(ends_at__isnull=True) | Q(ends_at__gt=now)).values_list('user_id', flat=True)
+    )
+
+
 def record_settings_change(actor, obj, old_values: dict, new_values: dict):
     """Journalise la modification d'un réglage du back-office (règle 12) avec l'ancienne et la
     nouvelle valeur de chaque champ modifié."""

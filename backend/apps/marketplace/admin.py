@@ -14,10 +14,15 @@ class OfferImageInline(admin.TabularInline):
 
 @admin.register(Offer)
 class OfferAdmin(admin.ModelAdmin):
-    list_display = ('title', 'offer_type', 'status', 'price', 'currency', 'seller', 'is_deleted', 'expires_at')
-    list_filter = ('offer_type', 'status', 'currency', 'is_deleted')
+    list_display = (
+        'title', 'offer_type', 'status', 'price', 'currency', 'seller_context_type', 'seller_context_id',
+        'seller_is_public', 'is_deleted', 'expires_at',
+    )
+    list_filter = ('offer_type', 'status', 'currency', 'is_deleted', 'seller_context_type', 'seller_is_public')
     search_fields = ('title', 'description')
-    raw_id_fields = ('seller',)
+    # Le propriétaire d'une offre ne se change pas depuis l'administration (ADR 0006) ; la visibilité du vendeur
+    # est recalculée depuis `identity`.
+    readonly_fields = ('seller', 'seller_context_type', 'seller_context_id', 'created_by', 'seller_is_public')
     inlines = [OfferImageInline]
 
     def save_model(self, request, obj, form, change):
@@ -26,12 +31,18 @@ class OfferAdmin(admin.ModelAdmin):
                      details=f"Champs : {', '.join(form.changed_data)}")
 
     def delete_model(self, request, obj):
-        record_audit(request.user, 'OFFER_DELETED', target=obj, details=obj.title)
+        record_audit(
+            request.user, 'OFFER_DELETED', target=obj, details='offer deleted',
+            context=(obj.seller_context_type, obj.seller_context_id) if obj.seller_context_type else None,
+        )
         services.delete_offers(Offer.objects.filter(pk=obj.pk))
 
     def delete_queryset(self, request, queryset):
         for offer in queryset:
-            record_audit(request.user, 'OFFER_DELETED', target=offer, details=offer.title)
+            record_audit(
+                request.user, 'OFFER_DELETED', target=offer, details='offer deleted',
+                context=(offer.seller_context_type, offer.seller_context_id) if offer.seller_context_type else None,
+            )
         services.delete_offers(queryset)
 
 

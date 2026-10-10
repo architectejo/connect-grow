@@ -332,7 +332,7 @@ class TimezoneTests(MarketplaceTestBase):
             created_at=datetime.combine(day, datetime.min.time(), tz) - timedelta(seconds=1),
         )
         rows = services.count_contacts_by_offer(day)
-        self.assertEqual(rows, [(offer.id, self.seller.id, 2)])
+        self.assertEqual(rows, [(offer.id, 'USER', self.seller.id, 2)])
 
 
 class UploadLimitTests(MarketplaceTestBase):

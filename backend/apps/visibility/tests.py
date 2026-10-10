@@ -27,16 +27,16 @@ class VisibilityTestBase(TestCase):
 class RecordViewTests(VisibilityTestBase):
     def test_a_viewer_counts_once_per_day(self):
         key = services.build_viewer_key(None, 'abc')
-        self.assertTrue(services.record_view(offer_id=self.offer_id, seller_id=self.seller.id, viewer_key=key))
-        self.assertFalse(services.record_view(offer_id=self.offer_id, seller_id=self.seller.id, viewer_key=key))
+        self.assertTrue(services.record_view(offer_id=self.offer_id, seller_context_type='USER', seller_context_id=self.seller.id, viewer_key=key))
+        self.assertFalse(services.record_view(offer_id=self.offer_id, seller_context_type='USER', seller_context_id=self.seller.id, viewer_key=key))
         self.assertEqual(DailyVisibilityCounter.objects.get(offer_id=self.offer_id).views, 1)
 
     def test_same_viewer_counts_again_the_next_day(self):
         key = services.build_viewer_key(None, 'abc')
         services.record_view(
-            offer_id=self.offer_id, seller_id=self.seller.id, viewer_key=key, day=self.today - timedelta(days=1),
+            offer_id=self.offer_id, seller_context_type='USER', seller_context_id=self.seller.id, viewer_key=key, day=self.today - timedelta(days=1),
         )
-        self.assertTrue(services.record_view(offer_id=self.offer_id, seller_id=self.seller.id, viewer_key=key))
+        self.assertTrue(services.record_view(offer_id=self.offer_id, seller_context_type='USER', seller_context_id=self.seller.id, viewer_key=key))
         self.assertEqual(DailyVisibilityCounter.objects.filter(offer_id=self.offer_id).count(), 2)
 
     def test_viewer_keys(self):
@@ -245,15 +245,15 @@ class SellerStatsTests(VisibilityTestBase):
         stranger = User.objects.create_user(email='x@example.com', password='x', full_name='X')
         DailyVisibilityCounter.objects.create(offer_id=uuid.uuid4(), seller=stranger, date=self.today, views=77)
 
-        stats = services.get_seller_stats(self.seller.id)
+        stats = services.get_seller_stats('USER', self.seller.id)
         self.assertEqual((stats.total_views, stats.today_views, stats.contacts_count), (110, 4, 2))
         self.assertEqual([p.views for p in stats.history], [6, 4])
 
     def test_offer_history_and_contacts_aggregate(self):
         self.counter(1, 3)
         self.assertEqual([p.views for p in services.get_offer_history(self.offer_id)], [3])
-        services.set_daily_contacts(self.today, [(self.offer_id, self.seller.id, 5)])
-        services.set_daily_contacts(self.today, [(self.offer_id, self.seller.id, 6)])
+        services.set_daily_contacts(self.today, [(self.offer_id, 'USER', self.seller.id, 5)])
+        services.set_daily_contacts(self.today, [(self.offer_id, 'USER', self.seller.id, 6)])
         self.assertEqual(DailyVisibilityCounter.objects.get(offer_id=self.offer_id, date=self.today).contacts, 6)
 
     def test_delete_offer_data(self):
@@ -281,7 +281,7 @@ class DayBoundaryTests(TestCase):
                 DailyVisibilityCounter.objects.create(
                     offer_id=offer_id, seller=seller, date=today - timedelta(days=days), views=1,
                 )
-            stats = services.get_seller_stats(seller.id)
+            stats = services.get_seller_stats('USER', seller.id)
             self.assertEqual(stats.today_views, 10)
             self.assertEqual(services.trending_offer_ids([offer_id]), {offer_id})
             return today

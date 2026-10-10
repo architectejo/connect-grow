@@ -217,7 +217,8 @@ class RevealRefusalTests(RevealTestBase):
         self.assertEqual(ContactEvent.objects.count(), 0)
 
     def test_offer_of_a_deactivated_seller_is_a_404(self):
-        User.objects.filter(pk=self.seller.pk).update(is_active=False)
+        identity_services.set_account_active(self.seller.pk, False)
+        dispatch_outbox_now()  # l'abonné recalcule `seller_is_public` (ADR 0006, A7)
         self.assertEqual(self.code_of(self.reveal()), (404, 'offer_not_found'))
 
     def test_own_offer(self):

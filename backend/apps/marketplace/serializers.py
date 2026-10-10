@@ -2,7 +2,6 @@ from django.db.models import Count
 from rest_framework import serializers
 
 from apps.catalog import services as catalog_services
-from apps.common.contexts import CONTEXT_USER
 from apps.common.images import validate_image_pixels, validate_image_upload_size
 from apps.common.serializers import PreloadingListSerializer
 from apps.identity import services as identity_services
@@ -20,28 +19,21 @@ def _media_url(request, path):
 
 
 class SellerSerializer(serializers.Serializer):
-    """Fiche publique du vendeur, construite à partir d'identity.services.SellerSummary.
-    Jamais de téléphone ni d'e-mail (règle 10, L0-10a-a)."""
+    """Fiche publique du contexte vendeur, construite à partir d'identity.services.SellerSummary (ADR 0006, 9.6).
+    Le type de vendeur est toujours affiché (CDC 3.3). Jamais de téléphone, d'e-mail, de NIF ni de membres
+    (règle 10). `verified_claims` et `verification_summary` sont dérivés des pièces validées (règle 3)."""
 
-    id = serializers.UUIDField()
-    full_name = serializers.CharField()
-    user_type = serializers.CharField()
-    date_joined = serializers.DateTimeField()
+    context_type = serializers.CharField()
+    context_id = serializers.UUIDField()
+    display_name = serializers.CharField()
     photo = serializers.SerializerMethodField()
-    business_profile = serializers.SerializerMethodField()
+    org_type = serializers.CharField(allow_null=True)
+    verified_claims = serializers.ListField()
+    verification_summary = serializers.DictField()
+    member_since = serializers.DateTimeField()
 
     def get_photo(self, obj):
         return _media_url(self.context.get('request'), obj.photo)
-
-    def get_business_profile(self, obj):
-        if obj.business is None:
-            return None
-        return {
-            'business_name': obj.business.business_name,
-            'bio': obj.business.bio,
-            'logo': _media_url(self.context.get('request'), obj.business.logo),
-            'is_verified': obj.business.is_verified,
-        }
 
 
 class OfferImageSerializer(serializers.ModelSerializer):
@@ -65,7 +57,7 @@ class OfferSerializer(serializers.ModelSerializer):
     category_name = serializers.SerializerMethodField()
     commune_name = serializers.SerializerMethodField()
     seller = serializers.SerializerMethodField()
-    seller_name = serializers.ReadOnlyField(source='seller.full_name')
+    seller_name = serializers.SerializerMethodField()
     main_image = serializers.ImageField(
         required=False, allow_null=True, validators=[validate_image_upload_size, validate_image_pixels],
     )
@@ -120,6 +112,10 @@ class OfferSerializer(serializers.ModelSerializer):
             'favorite_counts': {}, 'favorited': set(), 'offer_ratings': {}, 'seller_ratings': {},
             'allowed_channels': {},
         })
+        if 'user_contexts' not in context:
+            request = context.get('request')
+            # Contextes dans lesquels le demandeur peut agir (2 requêtes, une fois par requête) : « mon annonce ».
+            context['user_contexts'] = services.get_request_user_contexts(request) if request is not None else {}
         new = [o for o in offers if o.id not in cache['seen']]
         if not new:
             return
@@ -127,7 +123,7 @@ class OfferSerializer(serializers.ModelSerializer):
 
         missing_categories = {o.category_id for o in new} - cache['categories'].keys()
         missing_communes = {o.commune_id for o in new} - cache['communes'].keys()
-        missing_sellers = {o.seller_id for o in new} - cache['sellers'].keys()
+        missing_sellers = {(o.seller_context_type, o.seller_context_id) for o in new} - cache['sellers'].keys()
         cache['categories'].update(catalog_services.get_categories_by_ids(missing_categories))
         cache['communes'].update(catalog_services.get_communes_by_ids(missing_communes))
         cache['sellers'].update(identity_services.get_seller_summaries(missing_sellers))
@@ -147,12 +143,15 @@ class OfferSerializer(serializers.ModelSerializer):
         # Notes affichées : calculées à la lecture, jamais stockées (ADR 0004). Deux requêtes pour
         # toute la liste ; `reviews` applique le seuil d'affichage.
         cache['offer_ratings'].update(reviews_services.get_offer_ratings(ids))
-        cache['seller_ratings'].update(reviews_services.get_seller_ratings(
-            CONTEXT_USER, {o.seller_id for o in new} - cache['seller_ratings'].keys(),
-        ))
-        # Canaux de contact ouverts (ADR 0005, C11) : une requête pour la page, jamais de numéro.
-        missing_channels = {o.seller_id for o in new} - cache['allowed_channels'].keys()
-        cache['allowed_channels'].update(identity_services.get_allowed_channels(missing_channels))
+        missing_ratings = missing_sellers - cache['seller_ratings'].keys()
+        for context_type in {kind for kind, _ in missing_ratings}:
+            ratings = reviews_services.get_seller_ratings(
+                context_type, {context_id for kind, context_id in missing_ratings if kind == context_type},
+            )
+            cache['seller_ratings'].update({(context_type, context_id): value for context_id, value in ratings.items()})
+        # Canaux de contact ouverts (ADR 0005, C11) : requêtes par lot pour la page, jamais de numéro.
+        missing_channels = {(o.seller_context_type, o.seller_context_id) for o in new} - cache['allowed_channels'].keys()
+        cache['allowed_channels'].update(identity_services.get_context_allowed_channels(missing_channels))
         cache['seen'] |= ids
 
     def _cache(self, obj):
@@ -166,17 +165,21 @@ class OfferSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         # Le masquage par la modération n'est connu que du vendeur (L0-19).
-        request = self.context.get('request')
-        is_owner = request is not None and request.user.is_authenticated and request.user.id == instance.seller_id
+        self._cache(instance)  # charge `user_contexts` si l'objet est sérialisé seul
+        is_owner = (instance.seller_context_type, instance.seller_context_id) in self.context['user_contexts']
         if not is_owner:
             data.pop('is_hidden_by_moderation', None)
         return data
 
     def get_seller(self, obj):
-        summary = self._cache(obj)['sellers'].get(obj.seller_id)
+        summary = self._cache(obj)['sellers'].get((obj.seller_context_type, obj.seller_context_id))
         if summary is None:
             return None
         return SellerSerializer(summary, context=self.context).data
+
+    def get_seller_name(self, obj):
+        summary = self._cache(obj)['sellers'].get((obj.seller_context_type, obj.seller_context_id))
+        return summary.display_name if summary is not None else None
 
     @staticmethod
     def _rating(summary):
@@ -189,7 +192,7 @@ class OfferSerializer(serializers.ModelSerializer):
         return self._rating(self._cache(obj)['offer_ratings'].get(obj.id))
 
     def get_seller_rating(self, obj):
-        return self._rating(self._cache(obj)['seller_ratings'].get(obj.seller_id))
+        return self._rating(self._cache(obj)['seller_ratings'].get((obj.seller_context_type, obj.seller_context_id)))
 
     def get_category_name(self, obj):
         category = self._cache(obj)['categories'].get(obj.category_id)
@@ -228,7 +231,7 @@ class OfferSerializer(serializers.ModelSerializer):
 
     def get_allowed_channels(self, obj):
         # Aucun canal par défaut : seul `identity` dit ce que le vendeur a ouvert.
-        return self._cache(obj)['allowed_channels'].get(obj.seller_id, [])
+        return self._cache(obj)['allowed_channels'].get((obj.seller_context_type, obj.seller_context_id), [])
 
     def get_is_sponsored(self, obj):
         return False
@@ -251,7 +254,7 @@ class FavoriteSerializer(serializers.ModelSerializer):
     # Clés JSON `post` / `post_id` conservées jusqu'à L0-11.
     post = OfferSerializer(source='offer', read_only=True)
     post_id = serializers.PrimaryKeyRelatedField(
-        source='offer', queryset=Offer.objects.filter(is_deleted=False, is_active=True, seller__is_active=True), write_only=True,
+        source='offer', queryset=Offer.objects.filter(is_deleted=False, is_active=True, seller_is_public=True), write_only=True,
     )
 
     class Meta:

@@ -37,6 +37,13 @@ from .verification import (  # noqa: F401
     list_kyb_documents, submit_kyb_document,
 )
 
+# Contextes vendeur : fiches publiques, visibilité, destinataires, canaux, état du compte (ADR 0006, 7.1).
+from .sellers import (  # noqa: F401
+    SellerSummary, context_has_capability, get_contact_accounts, get_context_allowed_channels, get_context_recipients,
+    get_seller_context_public_flags, get_seller_summaries, get_user_context_roles, is_seller_context_public,
+    set_account_active, announce_account_status,
+)
+
 # Prestataire individuel (ADR 0006, 9.3) : façade publique.
 from .providers import (  # noqa: F401
     ProviderError, activate_provider, archive_provider, get_provider_category_ids, get_provider_profile,
@@ -225,52 +232,6 @@ def decide_kyc_document(document_id, reviewer, decision, reason=''):
                 details=doc.rejection_reason or f"Document {doc.get_document_type_display()} validé.",
             )
     return doc
-
-
-@dataclass(frozen=True)
-class SellerBusiness:
-    business_name: str
-    bio: str
-    logo: Optional[str]  # URL relative du média, ou None
-    is_verified: bool
-
-
-@dataclass(frozen=True)
-class SellerSummary:
-    """Fiche publique d'un vendeur affichée sur ses offres. Ni téléphone ni e-mail
-    (règle 10) : le numéro ne sort que par l'action de contact (L0-10a-c)."""
-
-    id: uuid.UUID
-    full_name: str
-    photo: Optional[str]
-    user_type: str
-    business: Optional[SellerBusiness]
-    date_joined: object
-
-
-def get_seller_summaries(ids: Iterable) -> dict:
-    """Fiches vendeur indexées par UUID, en une requête (profil business compris)."""
-    from apps.common.utils import parse_uuid
-
-    from .models import User
-
-    wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
-    if not wanted:
-        return {}
-    summaries = {}
-    for user in User.objects.filter(id__in=wanted).select_related('business_profile'):
-        profile = getattr(user, 'business_profile', None)
-        business = None
-        if profile is not None:
-            business = SellerBusiness(
-                business_name=profile.business_name, bio=profile.bio,
-                logo=profile.logo.url if profile.logo else None, is_verified=profile.is_verified,
-            )
-        summaries[user.id] = SellerSummary(
-            id=user.id, full_name=user.full_name, photo=user.photo.url if user.photo else None,
-            user_type=user.user_type, business=business, date_joined=user.date_joined,
-        )
-    return summaries
 
 
 def get_full_names(ids: Iterable) -> dict:

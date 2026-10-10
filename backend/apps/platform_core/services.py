@@ -50,9 +50,12 @@ def _backoff(attempts):
 
 # --- Publication -------------------------------------------------------------------
 
-def publish_event(event_type, *, aggregate_type, aggregate_id, payload, version=None, require_atomic=True):
+def publish_event(
+    event_type, *, aggregate_type, aggregate_id, payload, version=None, require_atomic=True, deliver_now=False,
+):
     """Écrit l'événement et une livraison par abonné, dans la transaction de l'émetteur.
 
+    `deliver_now=True` diffuse tout de suite aux abonnés, dans la transaction.
     Lève OutboxError hors `transaction.atomic()` (l'événement doit être validé ou annulé avec
     le changement qui l'a produit), pour un type absent du catalogue, une version qui n'est pas
     celle du catalogue, ou une charge utile non sérialisable ou trop grosse. N'appelle aucun
@@ -84,6 +87,11 @@ def publish_event(event_type, *, aggregate_type, aggregate_id, payload, version=
         OutboxDelivery.objects.bulk_create([
             OutboxDelivery(event=event, handler=s.name, next_attempt_at=now) for s in subscribers
         ])
+        if deliver_now:
+            # Abonnés exécutés dans la transaction de l'émetteur (état dérivé qui ne doit pas rester périmé,
+            # ex. visibilité publique d'un vendeur). Un échec d'abonné n'annule rien : la livraison reste
+            # reprise par le cron.
+            dispatch_for_event(event.pk)
         if settings.OUTBOX_INLINE_DISPATCH:
             transaction.on_commit(lambda: dispatch_for_event(event.pk))
     return event.pk

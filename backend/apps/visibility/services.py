@@ -47,7 +47,9 @@ def build_viewer_key(user, anon_fingerprint) -> str:
     return f"anon:{digest}"
 
 
-def record_view(*, offer_id, seller_id, viewer_key: str, day: Optional[date] = None) -> bool:
+def record_view(
+    *, offer_id, seller_context_type, seller_context_id, viewer_key: str, day: Optional[date] = None,
+) -> bool:
     """Enregistre une vue unique (offre, jour, visiteur). Renvoie True si elle est nouvelle.
     Une vue nouvelle publie `visibility.offer_viewed` dans la même transaction : le total de
     l'offre et son score sont recalculés par l'abonné de `marketplace`."""
@@ -56,7 +58,7 @@ def record_view(*, offer_id, seller_id, viewer_key: str, day: Optional[date] = N
         _, is_new = OfferUniqueView.objects.get_or_create(offer_id=offer_id, date=day, viewer_key=viewer_key)
         if not is_new:
             return False
-        _increment_counter(offer_id, seller_id, day, 'views')
+        _increment_counter(offer_id, seller_context_type, seller_context_id, day, 'views')
         publish_event(
             'visibility.offer_viewed', aggregate_type='offer', aggregate_id=offer_id,
             payload={'offer_id': str(offer_id), 'date': day.isoformat()},
@@ -64,9 +66,10 @@ def record_view(*, offer_id, seller_id, viewer_key: str, day: Optional[date] = N
     return True
 
 
-def _increment_counter(offer_id, seller_id, day, field) -> None:
+def _increment_counter(offer_id, seller_context_type, seller_context_id, day, field) -> None:
     counter, _ = DailyVisibilityCounter.objects.get_or_create(
-        offer_id=offer_id, date=day, defaults={'seller_id': seller_id},
+        offer_id=offer_id, date=day,
+        defaults={'seller_context_type': seller_context_type, 'seller_context_id': seller_context_id},
     )
     DailyVisibilityCounter.objects.filter(pk=counter.pk).update(**{field: F(field) + 1})
 
@@ -74,7 +77,9 @@ def _increment_counter(offer_id, seller_id, day, field) -> None:
 SHARE_KEY_PREFIX = 'share:'
 
 
-def record_share(*, offer_id, seller_id, actor_key: str, day: Optional[date] = None) -> bool:
+def record_share(
+    *, offer_id, seller_context_type, seller_context_id, actor_key: str, day: Optional[date] = None,
+) -> bool:
     """Un partage compte une fois par (offre, utilisateur, jour). Renvoie True s'il est nouveau.
     L'unicité de la journée s'appuie sur OfferUniqueView (clé préfixée « share: », purgée comme
     les vues) ; le total durable est le compteur journalier `shares`, qui survit à cette purge.
@@ -86,7 +91,7 @@ def record_share(*, offer_id, seller_id, actor_key: str, day: Optional[date] = N
         )
         if not is_new:
             return False
-        _increment_counter(offer_id, seller_id, day, 'shares')
+        _increment_counter(offer_id, seller_context_type, seller_context_id, day, 'shares')
         publish_event(
             'visibility.offer_shared', aggregate_type='offer', aggregate_id=offer_id,
             payload={'offer_id': str(offer_id), 'date': day.isoformat()},
@@ -179,11 +184,13 @@ def trending_offer_ids(offer_ids: Iterable, today: Optional[date] = None) -> set
     return trending
 
 
-def get_seller_stats(seller_id, today: Optional[date] = None) -> SellerStats:
-    """Historique de vues des 30 derniers jours et totaux d'un vendeur (CDC 3.9)."""
+def get_seller_stats(seller_context_type, seller_context_id, today: Optional[date] = None) -> SellerStats:
+    """Historique de vues des 30 derniers jours et totaux d'un contexte vendeur (CDC 3.9)."""
     today = today or timezone.localdate()
     since = today - timedelta(days=HISTORY_DAYS)
-    counters = DailyVisibilityCounter.objects.filter(seller_id=seller_id)
+    counters = DailyVisibilityCounter.objects.filter(
+        seller_context_type=seller_context_type, seller_context_id=seller_context_id,
+    )
 
     history = [
         DailyViews(date=row['date'], views=row['views'])
@@ -208,11 +215,13 @@ def get_offer_history(offer_id, today: Optional[date] = None) -> list:
 
 
 def set_daily_contacts(day: date, rows: Iterable) -> int:
-    """Fixe le nombre de contacts reçus un jour donné. `rows` : (offer_id, seller_id, total)."""
+    """Fixe le nombre de contacts reçus un jour donné. `rows` : (offer_id, type du contexte vendeur,
+    id du contexte vendeur, total)."""
     count = 0
-    for offer_id, seller_id, total in rows:
+    for offer_id, context_type, context_id, total in rows:
         DailyVisibilityCounter.objects.update_or_create(
-            offer_id=offer_id, date=day, defaults={'seller_id': seller_id, 'contacts': total},
+            offer_id=offer_id, date=day,
+            defaults={'seller_context_type': context_type, 'seller_context_id': context_id, 'contacts': total},
         )
         count += 1
     return count

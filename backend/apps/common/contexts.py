@@ -19,18 +19,13 @@ CONTEXT_USER = 'USER'
 CONTEXT_PROVIDER = 'PROVIDER'
 CONTEXT_ORGANIZATION = 'ORGANIZATION'
 
-# Choix historiques (deux entrées) : encore utilisés par `Review.seller_context_type`, dont le
-# changement de `choices` est porté par la migration de T5 (ADR 0006, section 10.2). T5 fera pointer
-# `CONTEXT_CHOICES` vers `ALL_CONTEXT_CHOICES` et supprimera cette distinction.
-CONTEXT_CHOICES = (
-    (CONTEXT_USER, "Compte personnel"),
-    (CONTEXT_ORGANIZATION, "Organisation"),
-)
 ALL_CONTEXT_CHOICES = (
     (CONTEXT_USER, "Compte personnel"),
     (CONTEXT_PROVIDER, "Prestataire individuel"),
     (CONTEXT_ORGANIZATION, "Organisation"),
 )
+# Choix des champs `seller_context_type` (offres, compteurs, avis) : les trois contextes (ADR 0006, T5).
+CONTEXT_CHOICES = ALL_CONTEXT_CHOICES
 
 # Codes de refus d'autorisation (ADR 0006, A14) : tous en 403, en majuscules.
 DENY_CONTEXT = 'DENY_CONTEXT'

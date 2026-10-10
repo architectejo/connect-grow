@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index.tsx";
 import { ThemeProvider } from "./components/theme-provider";
 import { AuthProvider } from "./contexts/AuthContext";
+import { ActiveContextProvider } from "./contexts/ActiveContextContext";
 import { BottomNav } from "./components/layout/BottomNav";
 import { OfflineBanner } from "./components/common/OfflineBanner";
 import { PwaUpdater } from "./components/layout/PwaUpdater";
@@ -81,6 +82,7 @@ const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <ActiveContextProvider>
         <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
           <TooltipProvider>
             <Toaster />
@@ -123,6 +125,7 @@ const App = () => {
             </BrowserRouter>
           </TooltipProvider>
         </ThemeProvider>
+        </ActiveContextProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

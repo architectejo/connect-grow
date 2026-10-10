@@ -24,3 +24,11 @@ export function isCacheableApiContent({ url, request }: { url: URL; request: Req
 export function isContactRevealRequest({ url }: { url: URL }): boolean {
   return /\/api\/(v1\/)?interactions\/contacts\/(reveal|reveals\/received)\/?$/.test(url.pathname);
 }
+
+/**
+ * Liste des profils du compte (`accounts/contexts/`) : rôles et capacités, jamais mis en cache hors ligne
+ * (le serveur répond déjà `Cache-Control: private, no-store`). Réseau seul. Même contrainte d'autonomie que ci-dessus.
+ */
+export function isContextsRequest({ url }: { url: URL }): boolean {
+  return /\/api\/(v1\/)?accounts\/contexts\/?$/.test(url.pathname);
+}

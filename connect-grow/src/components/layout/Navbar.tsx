@@ -15,6 +15,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { UserAvatar } from "@/components/common/UserAvatar";
 import NotificationDropdown from "@/components/landing/NotificationDropdown";
 import { ModeToggle } from "@/components/mode-toggle";
+import { ActiveContextBanner, MANAGEMENT_LINKS_READY } from "./ActiveContextBanner";
+import { ContextSwitcher } from "./ContextSwitcher";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { userContactLine } from "@/lib/user-contact";
@@ -45,8 +47,9 @@ const Navbar = () => {
     navigate("/");
   };
 
-  const displayName = user?.business_profile?.business_name || user?.full_name;
-  const avatarSrc = user?.photo || user?.business_profile?.logo;
+  // Le menu du compte montre toujours le nom du compte, jamais celui d'une organisation (le profil actif a sa pastille)
+  const displayName = user?.full_name;
+  const avatarSrc = user?.photo;
 
   return (
     <header
@@ -90,6 +93,9 @@ const Navbar = () => {
                   {t("nav.publish")}
                 </Link>
               </Button>
+              <div className="hidden md:block">
+                <ContextSwitcher variant="pill" showManagementLinks={MANAGEMENT_LINKS_READY} />
+              </div>
               <NotificationDropdown />
               <Button variant="ghost" size="icon" asChild className="hidden rounded-full md:inline-flex">
                 <Link to="/messages" aria-label={t("nav.messages")}>
@@ -231,6 +237,7 @@ const Navbar = () => {
           </Sheet>
         </div>
       </nav>
+      <ActiveContextBanner />
     </header>
   );
 };

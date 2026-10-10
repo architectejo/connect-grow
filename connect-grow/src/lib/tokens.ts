@@ -7,6 +7,9 @@ export const AUTH_EXPIRED_EVENT = "connecte:auth-expired";
 /** Clé du brouillon d'annonce (PostEditor) : données de l'utilisateur, purgées à la déconnexion. */
 export const POST_DRAFT_KEY = "connecte:post-draft";
 
+/** Profil actif mémorisé (nom, type, identifiant, lié au compte) : purgé à la déconnexion. Aucune capacité, aucun contact. */
+export const ACTIVE_CONTEXT_KEY = "connecte.activeContext.v1";
+
 /** Cache PWA des contenus d'annonces : purgé à la déconnexion pour ne rien laisser d'une session précédente. */
 export const API_CONTENT_CACHE = "api-annonces-v2";
 
@@ -51,6 +54,7 @@ export const tokenStorage = {
       localStorage.removeItem("user_full_name");
       localStorage.removeItem("user_id");
       localStorage.removeItem(POST_DRAFT_KEY);
+      localStorage.removeItem(ACTIVE_CONTEXT_KEY);
     } catch {
       /* rien à nettoyer */
     }

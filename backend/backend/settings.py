@@ -9,6 +9,7 @@ from datetime import timedelta
 
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
+from corsheaders.defaults import default_headers
 
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
@@ -138,7 +139,7 @@ REST_FRAMEWORK = {
         'logout': '60/hour',        # déconnexion (publique), par IP
         'change_password': '10/hour',  # par utilisateur
         'kyc_write': '20/hour',     # dépôt/suppression de pièces KYC, par utilisateur
-        'contexts': '300/hour',     # liste des contextes disponibles, par utilisateur
+        'contexts': '600/hour',     # liste des contextes disponibles, par utilisateur
         'contact_settings': '20/hour',  # réglages de contact vendeur (numéro, code, canaux), par utilisateur
         # Écritures du marketplace et des interactions (par utilisateur ; par IP pour la vue anonyme).
         'contact': '20/hour',
@@ -190,8 +191,6 @@ CORS_EXPOSE_HEADERS = ['Retry-After']
 
 # En-tête du contexte actif (ADR 0006, 6.1) : en plus des en-têtes par défaut de django-cors-headers,
 # sinon la requête préalable du navigateur le refuse.
-from corsheaders.defaults import default_headers  # noqa: E402
-
 CORS_ALLOW_HEADERS = (*default_headers, 'x-context')
 
 # 3. Assure-toi que ces méthodes sont autorisées

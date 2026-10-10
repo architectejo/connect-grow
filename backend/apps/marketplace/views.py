@@ -1,4 +1,5 @@
 import uuid
+from urllib.parse import quote
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
@@ -12,8 +13,12 @@ from rest_framework.response import Response
 
 from apps.catalog import services as catalog_services
 from apps.common.images import validate_image_pixels, validate_image_upload_size
-from apps.common.pagination import OptionalPagination
-from apps.common.throttles import ActionScopedThrottleMixin, AnonymousOrUserScopedThrottle, AnonymousScopedThrottle
+from apps.common.exception_handler import CodedAPIException, throttled_message
+from apps.common.pagination import OptionalPagination, StandardPagination
+from apps.common.throttles import (
+    ActionScopedThrottleMixin, AnonymousOrUserScopedThrottle, AnonymousScopedThrottle, RevealIpThrottle,
+    RevealUserThrottle,
+)
 from apps.moderation.permissions import can_moderate
 from apps.moderation.services import record_audit
 from apps.common.utils import parse_uuid
@@ -24,7 +29,7 @@ from .models import ContactEvent, ExchangeProposal, Favorite, Offer, OfferImage
 from .permissions import IsOfferOwner
 from .serializers import (
     ContactEventSerializer, ExchangeProposalSerializer, FavoriteSerializer, OfferImageSerializer,
-    OfferSerializer,
+    OfferSerializer, ReceivedRevealSerializer, RevealRequestSerializer, RevealResponseSerializer,
 )
 
 PRICE_LIMIT = Decimal('99999999.99')  # borne de Offer.price (10 chiffres dont 2 décimales)
@@ -377,16 +382,79 @@ class _OfferMessageViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
         try:
             serializer.instance = self.create_with_service(offer, serializer.validated_data['message'])
         except services.MarketplaceError as exc:
+            if exc.code:
+                raise CodedAPIException(exc.message, exc.code, exc.status_code, wait=exc.wait)
             raise ValidationError({'post': str(exc)})
 
 
 class ContactEventViewSet(_OfferMessageViewSet):
-    throttle_scopes = {'create': 'contact'}
+    throttle_scopes = {'create': 'contact', 'reveals_received': 'contact_reveals_list'}
     serializer_class = ContactEventSerializer
     model = ContactEvent
 
     def create_with_service(self, offer, message):
         return services.create_contact_event(offer=offer, sender=self.request.user, message=message)
+
+    # --- Révélation du numéro de contact (ADR 0005, 5.4 et 5.5) ---
+
+    def get_throttles(self):
+        throttles = super().get_throttles()
+        if self.action == 'reveal':
+            throttles += [RevealIpThrottle(), RevealUserThrottle()]
+        return throttles
+
+    def check_throttles(self, request):
+        """Pour la révélation, un dépassement répond 429 avec le code de la limite atteinte
+        (`reveal_quota_ip`) et `Retry-After`."""
+        if self.action != 'reveal':
+            return super().check_throttles(request)
+        for throttle in self.get_throttles():
+            if not throttle.allow_request(request, self):
+                wait = throttle.wait()
+                raise CodedAPIException(
+                    throttled_message(wait) + " " + services.REVEAL_FALLBACK,
+                    getattr(throttle, 'code', 'throttled'), status.HTTP_429_TOO_MANY_REQUESTS,
+                    wait=None if wait is None else max(1, int(wait)),
+                )
+
+    @staticmethod
+    def _no_store(response):
+        response['Cache-Control'] = 'no-store'
+        response['Pragma'] = 'no-cache'
+        return response
+
+    @action(detail=False, methods=['post'], url_path='reveal')
+    def reveal(self, request):
+        body = RevealRequestSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        try:
+            result = services.reveal_contact(
+                offer_id=body.validated_data['offer'], sender=request.user, channel=body.validated_data['channel'],
+            )
+        except services.RevealError as exc:
+            raise CodedAPIException(exc.message, exc.code, exc.status_code, wait=exc.wait)
+        digits = result.phone.lstrip('+')
+        is_call = result.channel == ContactEvent.CHANNEL_CALL
+        data = {
+            'contact_event_id': result.contact_event_id, 'channel': result.channel, 'created': result.created,
+            'phone': result.phone,
+            'tel_url': f"tel:{result.phone}" if is_call else None,
+            # Le texte prérempli ne contient que le titre public de l'offre.
+            'whatsapp_url': None if is_call else f"https://wa.me/{digits}?text={quote(result.offer_title, safe='')}",
+        }
+        response = Response(RevealResponseSerializer(data).data, status=201 if result.created else 200)
+        return self._no_store(response)
+
+    @action(detail=False, methods=['get'], url_path='reveals/received')
+    def reveals_received(self, request):
+        channel = request.query_params.get('channel')
+        if channel and channel not in services.REVEAL_CHANNELS:
+            raise CodedAPIException("Moyen de contact invalide.", 'channel_invalid', status.HTTP_400_BAD_REQUEST)
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(services.list_reveals_for_seller(request.user, channel), request, view=self)
+        rows = services.to_received_reveals(page)
+        response = paginator.get_paginated_response(ReceivedRevealSerializer(rows, many=True).data)
+        return self._no_store(response)
 
 
 class ExchangeProposalViewSet(_OfferMessageViewSet):

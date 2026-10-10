@@ -281,3 +281,34 @@ class ContactEventSerializer(_OfferMessageSerializer):
 class ExchangeProposalSerializer(_OfferMessageSerializer):
     class Meta(_OfferMessageSerializer.Meta):
         model = ExchangeProposal
+
+
+class RevealRequestSerializer(serializers.Serializer):
+    """Corps de la révélation. `offer` reste une chaîne : un identifiant inconnu ou mal formé donne
+    le même 404 uniforme que n'importe quelle offre indisponible (anti-énumération) ; le canal est
+    validé par le service (400 `channel_invalid`)."""
+
+    offer = serializers.CharField(max_length=64)
+    channel = serializers.CharField(max_length=20)
+
+
+class RevealResponseSerializer(serializers.Serializer):
+    contact_event_id = serializers.UUIDField()
+    channel = serializers.CharField()
+    created = serializers.BooleanField()
+    phone = serializers.CharField()
+    tel_url = serializers.CharField(allow_null=True)
+    whatsapp_url = serializers.CharField(allow_null=True)
+
+
+class ReceivedRevealSerializer(serializers.Serializer):
+    """Ligne de la liste vendeur : nom d'affichage et offre, jamais d'identifiant du visiteur ni de numéro."""
+
+    id = serializers.UUIDField()
+    channel = serializers.CharField()
+    created_at = serializers.DateTimeField()
+    requester_display_name = serializers.CharField()
+    offer = serializers.SerializerMethodField()
+
+    def get_offer(self, obj):
+        return {'id': str(obj.offer_id), 'title': obj.offer_title}

@@ -3,7 +3,7 @@
 `ScopedRateThrottle` compte par utilisateur connecté, ou par IP pour un anonyme. Les vues
 déclarent `throttle_scopes = {action: scope}` via `ActionScopedThrottleMixin`. Les dépassements
 renvoient 429 avec l'en-tête `Retry-After`."""
-from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.throttling import ScopedRateThrottle, SimpleRateThrottle
 
 
 class ActionScopedThrottleMixin:
@@ -33,3 +33,37 @@ class AnonymousScopedThrottle(ScopedRateThrottle):
         if request.user and request.user.is_authenticated:
             return True
         return super().allow_request(request, view)
+
+
+class _RevealThrottle(SimpleRateThrottle):
+    """Révélation de numéro : ne compte que les POST ; chaque tentative compte (refusée ou non).
+    Les compteurs vivent dans le cache et expirent seuls : aucune adresse IP n'est persistée
+    (ADR 0005, C9)."""
+
+    code = 'throttled'
+
+    def allow_request(self, request, view):
+        if request.method != 'POST':
+            return True
+        return super().allow_request(request, view)
+
+
+class RevealIpThrottle(_RevealThrottle):
+    """30/h par adresse IP (lue selon NUM_PROXIES), connectée ou non."""
+
+    scope = 'contact_reveal_ip'
+    code = 'reveal_quota_ip'
+
+    def get_cache_key(self, request, view):
+        return self.cache_format % {'scope': self.scope, 'ident': self.get_ident(request)}
+
+
+class RevealUserThrottle(_RevealThrottle):
+    """Filet technique contre les rafales, par utilisateur (les vrais plafonds métier sont en base)."""
+
+    scope = 'contact_reveal_user'
+
+    def get_cache_key(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return None
+        return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}

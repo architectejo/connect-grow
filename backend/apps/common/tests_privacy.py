@@ -29,6 +29,8 @@ CONTACT_SETTINGS_ROUTES = (
     'api/accounts/contact-settings/', 'api/accounts/contact-settings/phone/',
     'api/accounts/contact-settings/phone/verify/', 'api/accounts/contact-settings/channels/<str:channel>/',
 )
+# Routes de l'ADR 0005 (5.4 et 5.5) : seule la première renvoie un numéro de contact.
+REVEAL_ROUTES = ('api/interactions/contacts/reveal/', 'api/interactions/contacts/reveals/received/')
 LEAKY_KEY_RE = re.compile(r'phone|email|whatsapp|mobile|tel', re.IGNORECASE)
 PARAM_RE = re.compile(r'<(?:\w+:)?\w+>')
 REGEX_PARAM_RE = re.compile(r'\(\?P<(\w+)>[^)]*\)')
@@ -264,14 +266,120 @@ class NoPersonalContactLeakTests(APITestCase):
                     results = payload['results'] if isinstance(payload, dict) else payload
                     self.assertEqual(results, [], f'{name} trouve le vendeur par « {term} »')
 
-    # --- pas de route de révélation ---------------------------------------------------
+    # --- une seule route renvoie un numéro de contact ----------------------------------
 
-    def test_no_phone_reveal_route(self):
-        """Aucune route ne s'appelle numéro, téléphone, révélation ou lot, hormis les quatre routes de
-        réglages du titulaire (ADR 0005, 5.1), qui ne renvoient que son numéro masqué ; la révélation
-        encadrée par consentement viendra avec L0-10a-c."""
+    def test_only_the_adr_routes_look_like_phone_reveal_routes(self):
+        """Hors les routes de réglages du titulaire (numéro masqué), les seules routes qui parlent de
+        révélation sont celles de l'ADR 0005 (5.4 et 5.5) : pas de route par lot, par numéro ni par utilisateur."""
         routes = [r for r in iter_routes() if re.search(r'phone|reveal|bulk|batch|numero', r)]
-        self.assertEqual(sorted(set(routes) - set(CONTACT_SETTINGS_ROUTES)), [])
+        self.assertEqual(sorted(set(routes) - set(CONTACT_SETTINGS_ROUTES)), sorted(REVEAL_ROUTES))
+
+    def post_everywhere(self, viewer):
+        """POST sur chaque route de l'API avec un corps riche (offre, canal, conversation...) : renvoie
+        {chemin: réponse}. L'inventaire prouve qu'aucune route, sauf la révélation, ne produit le numéro."""
+        client = self.client_for(viewer)
+        body = {
+            'offer': str(self.offer.id), 'post': str(self.offer.id), 'channel': 'CALL',
+            'conversation': str(self.conversation.id), 'message': 'Bonjour', 'content': 'Bonjour',
+        }
+        responses = {}
+        for route in iter_routes():
+            for path in self.expand(route):
+                response = client.post('/' + path, body, format='json')
+                self.assertLess(response.status_code, 500, f'{path} : {response.status_code}')
+                responses.setdefault(route, []).append((path, response))
+        return responses
+
+    def test_inventory_no_route_but_reveal_returns_the_contact_number(self):
+        seller_number = self.CONTACT_NUMBERS['seller']
+        revealing = []
+        for route, items in self.post_everywhere('buyer').items():
+            for path, response in items:
+                body = response.content.decode('utf-8', errors='ignore')
+                if seller_number in body or seller_number[4:] in body:
+                    revealing.append((route, response.status_code))
+        self.assertEqual(sorted(set(revealing)), [('api/interactions/contacts/reveal/', 201)])
+
+    def test_inventory_other_viewers_never_get_the_seller_number_from_any_route(self):
+        for viewer in ('third', 'moderator'):
+            for route, items in self.post_everywhere(viewer).items():
+                if route == 'api/interactions/contacts/reveal/':
+                    continue  # un compte quelconque obtient le numéro consenti, comme le visiteur
+                for path, response in items:
+                    self.assert_clean(response, '/' + path, viewer)
+
+    def test_reveal_is_the_only_response_with_the_number_and_it_is_not_cacheable(self):
+        response = self.client_for('buyer').post(
+            '/api/interactions/contacts/reveal/', {'offer': str(self.offer.id), 'channel': 'WHATSAPP'}, format='json',
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertIn('no-store', response['Cache-Control'])
+        self.assertIn(self.CONTACT_NUMBERS['seller'], response.content.decode())
+        # Anonyme : refusé, sans numéro.
+        refused = self.client_for(None).post(
+            '/api/interactions/contacts/reveal/', {'offer': str(self.offer.id), 'channel': 'CALL'}, format='json',
+        )
+        self.assertEqual(refused.status_code, 401)
+        self.assertNotIn('891111111', refused.content.decode())
+
+    def reveal_as_buyer(self):
+        response = self.client_for('buyer').post(
+            '/api/interactions/contacts/reveal/', {'offer': str(self.offer.id), 'channel': 'CALL'}, format='json',
+        )
+        self.assertIn(response.status_code, (200, 201))
+
+    def test_after_a_reveal_the_number_is_nowhere_else_in_the_api(self):
+        self.reveal_as_buyer()
+        for viewer in (None, 'buyer', 'third', 'moderator', 'admin'):
+            self.crawl(viewer)
+
+    def test_the_seller_never_sees_the_visitor_number_or_identifier(self):
+        self.reveal_as_buyer()
+        self.crawl('seller')
+        response = self.client_for('seller').get('/api/interactions/contacts/reveals/received/')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('no-store', response['Cache-Control'])
+        text = response.content.decode()
+        self.assertIn('Buyer', text)  # le nom d'affichage, seule identité montrée
+        for forbidden in (str(self.users['buyer'].id), self.PEOPLE['buyer'][1], self.PEOPLE['buyer'][0],
+                          self.CONTACT_NUMBERS['buyer'], self.CONTACT_NUMBERS['seller']):
+            self.assertNotIn(forbidden, text)
+        for key in keys_of(response.json()):
+            self.assertFalse(LEAKY_KEY_RE.search(key), key)
+
+    def test_the_received_list_is_empty_for_moderators_and_administrators(self):
+        self.reveal_as_buyer()
+        for viewer in ('moderator', 'admin', 'third', 'buyer'):
+            response = self.client_for(viewer).get('/api/interactions/contacts/reveals/received/')
+            self.assertEqual(response.json()['count'], 0, viewer)
+
+    def test_the_number_is_in_no_event_audit_notification_or_stored_message(self):
+        from apps.moderation.models import AuditLog
+        from apps.notifications.models import Notification
+        from apps.platform_core.models import OutboxEvent
+        from apps.platform_core.testing import dispatch_outbox_now
+
+        self.reveal_as_buyer()
+        self.reveal_as_buyer()  # renvoi idempotent : un second audit
+        dispatch_outbox_now()
+        stored = [
+            *(f'{a.action} {a.details}' for a in AuditLog.objects.all()),
+            *(str(e.payload) for e in OutboxEvent.objects.all()),
+            *(f'{n.title} {n.content} {n.link}' for n in Notification.objects.all()),
+            *(m.content for m in Message.objects.all()),
+            *(c.message for c in ContactEvent.objects.all()),
+            *(r.description for r in Report.objects.all()),
+        ]
+        # Témoins : l'audit, l'événement et la notification existent bel et bien.
+        self.assertEqual(sum('contact.number_revealed' in text for text in stored), 2)
+        self.assertTrue(OutboxEvent.objects.filter(event_type='marketplace.contact_revealed').exists())
+        self.assertTrue(any('demandé votre numéro' in text for text in stored))
+        number = self.CONTACT_NUMBERS['seller']
+        for text in stored:
+            for value in (number, number[4:], f'+243 {number[4:6]} *** ** {number[-2:]}'):
+                self.assertNotIn(value, text)
+        self.assertFalse(Notification.objects.filter(content__contains='demandé votre numéro').exclude(
+            user=self.users['seller']).exists())
 
     # --- réglages de contact (ADR 0005, T2) --------------------------------------------
 

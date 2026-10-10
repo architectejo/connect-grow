@@ -5,8 +5,9 @@ modèles de `marketplace` : ils passent par ces fonctions, qui renvoient des str
 immuables et proposent des variantes par lot (`*_by_ids`). La logique métier du cycle de
 vie d'une offre (publication, pause, vente, renouvellement, corbeille, score) est ici.
 """
+import math
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Iterable, Optional
 
@@ -17,6 +18,9 @@ from django.utils import timezone
 from apps.catalog import services as catalog_services
 from apps.common.contexts import CONTEXT_USER
 from apps.common.utils import day_bounds, parse_uuid
+from apps.identity import services as identity_services
+from apps.moderation import services as moderation_services
+from apps.moderation.services import record_audit
 from apps.platform_core.services import publish_event
 from apps.visibility import services as visibility_services
 
@@ -24,7 +28,15 @@ from .models import ContactEvent, ExchangeProposal, Favorite, MarketplaceSetting
 
 
 class MarketplaceError(Exception):
-    """Refus métier (message en français destiné à l'utilisateur)."""
+    """Refus métier (message en français destiné à l'utilisateur). `code` renseigné : refus codé
+    (`{detail, code}` au statut `status_code`) plutôt qu'une erreur de champ."""
+
+    def __init__(self, message, code=None, status_code=400, wait=None):
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.status_code = status_code
+        self.wait = wait  # secondes avant de pouvoir réessayer (en-tête Retry-After des 429)
 
 
 class OfferHiddenError(MarketplaceError):
@@ -448,13 +460,20 @@ def create_contact_event(*, offer: Offer, sender, message: str, channel: str = C
     MySQL, deux contacts pourraient être comptés). L'effet est borné : `contacts_count` est
     recompté à la source et corrigé à chaque rafraîchissement horaire (`refresh_all_scores`)."""
     _check_can_contact(offer, sender)
+    if channel == ContactEvent.CHANNEL_MESSAGE and ContactEvent.CHANNEL_MESSAGE not in (
+        identity_services.get_allowed_channels([offer.seller_id]).get(offer.seller_id, [])
+    ):
+        raise MarketplaceError("Ce vendeur n'accepte pas ce moyen de contact.", 'channel_not_allowed', 403)
     window_hours = MarketplaceSettings.get_solo().duplicate_contact_window_hours
+    # Le doublon se juge par canal : obtenir un numéro n'empêche pas d'écrire au vendeur, et
+    # inversement (l'engagement, lui, ne compte qu'un contact par fenêtre : `is_countable_contact`).
     recent = ContactEvent.objects.filter(
-        offer=offer, sender=sender, created_at__gte=timezone.now() - timedelta(hours=window_hours),
+        offer=offer, sender=sender, channel=channel, created_at__gte=timezone.now() - timedelta(hours=window_hours),
     )
     if recent.exists():
         raise MarketplaceError(
-            f"Vous avez déjà contacté le vendeur pour cette annonce ces dernières {window_hours} heures."
+            f"Vous avez déjà contacté le vendeur pour cette annonce ces dernières {window_hours} heures.",
+            'contact_duplicate', 400,
         )
     with transaction.atomic():
         # Engagement : un contact compte une fois par expéditeur et par offre dans la fenêtre,
@@ -472,6 +491,217 @@ def create_contact_event(*, offer: Offer, sender, message: str, channel: str = C
             payload={**_interaction_payload(offer, sender, contact_event_id=event.pk), 'channel': event.channel},
         )
     return event
+
+
+# --- Révélation du numéro de contact (ADR 0005) ---------------------------------------
+
+REVEAL_CHANNELS = (ContactEvent.CHANNEL_CALL, ContactEvent.CHANNEL_WHATSAPP)
+REVEAL_QUOTA_WINDOW = timedelta(hours=24)  # fenêtre glissante des plafonds « par jour » (ADR 0005, C9)
+REVEAL_FALLBACK = "Vous pouvez écrire au vendeur par message en attendant."
+_QUOTA_MESSAGES = {
+    'reveal_quota_account': "Vous avez atteint le nombre maximal de numéros obtenus sur 24 heures. ",
+    'reveal_quota_new_account': "Votre compte est récent : le nombre de numéros obtenus sur 24 heures est limité. ",
+}
+
+
+class RevealError(MarketplaceError):
+    """Refus d'une révélation de numéro : message français, code machine, statut HTTP."""
+
+    def __init__(self, message, code, status_code=403, wait=None):
+        super().__init__(message, code, status_code, wait)
+
+
+class _QuotaExceeded(Exception):
+    def __init__(self, code, wait):
+        super().__init__(code)
+        self.code = code
+        self.wait = wait
+
+
+@dataclass(frozen=True)
+class RevealResult:
+    """Numéro remis au visiteur. `phone` n'est jamais journalisé ni publié (règle 10)."""
+
+    contact_event_id: uuid.UUID
+    channel: str
+    created: bool
+    offer_title: str
+    phone: str = field(repr=False)
+
+
+def _revealable_offer(offer_id) -> Offer:
+    """Offre visible, ou refus uniforme 404 : inconnue, mal formée, en corbeille, masquée ou
+    expirée ne se distinguent pas (anti-énumération)."""
+    parsed = parse_uuid(offer_id)
+    offer = None
+    if parsed is not None:
+        offer = Offer.objects.select_related('seller').filter(
+            pk=parsed, is_active=True, is_deleted=False, seller__is_active=True,
+        ).first()
+    if offer is None:
+        raise RevealError("Cette annonce n'est pas disponible.", 'offer_not_found', 404)
+    return offer
+
+
+def _is_new_account(user, new_account_hours, now) -> bool:
+    """Compte neuf : inscrit depuis moins de `new_account_hours` OU numéro non vérifié (il n'existe
+    pas de vérification d'e-mail : décision du chef de projet)."""
+    return (not user.phone_verified) or user.date_joined > now - timedelta(hours=new_account_hours)
+
+
+def _quota_of(sender, row, now) -> tuple:
+    if _is_new_account(sender, row.new_account_hours, now):
+        return row.reveal_daily_limit_new_account, 'reveal_quota_new_account'
+    return row.reveal_daily_limit_account, 'reveal_quota_account'
+
+
+def _reveal_times(sender, now) -> list:
+    """Dates des numéros obtenus par ce compte sur la fenêtre glissante, de la plus ancienne à la plus récente."""
+    return list(
+        ContactEvent.objects.filter(
+            sender=sender, channel__in=REVEAL_CHANNELS, created_at__gt=now - REVEAL_QUOTA_WINDOW,
+        ).order_by('created_at').values_list('created_at', flat=True)
+    )
+
+
+def _quota_wait(times, limit, now) -> int:
+    """Secondes avant que assez de révélations sortent de la fenêtre pour repasser sous le plafond."""
+    index = max(0, len(times) - limit)
+    return max(1, math.ceil((times[index] + REVEAL_QUOTA_WINDOW - now).total_seconds()))
+
+
+def _enforce_reveal_quota(sender, row, now) -> None:
+    limit, code = _quota_of(sender, row, now)
+    times = _reveal_times(sender, now)
+    if len(times) >= limit:
+        raise _QuotaExceeded(code, _quota_wait(times, limit, now))
+
+
+def _refuse_quota(sender, offer, row, exceeded, now):
+    """Trace le dépassement (hors transaction métier : la trace survit au refus), signale à la
+    modération un abus répété, puis lève le refus 429 avec `Retry-After`."""
+    record_audit(sender, 'contact.reveal_refused', target=offer, details=f"Plafond atteint : {exceeded.code}")
+    record_audit(sender, 'contact.reveal_quota_exceeded', target=sender, details=exceeded.code)
+    since = now - timedelta(days=row.reveal_abuse_window_days)
+    if moderation_services.count_audit_actions(
+        sender.pk, 'contact.reveal_quota_exceeded', since,
+    ) >= row.reveal_abuse_threshold:
+        moderation_services.file_automatic_report(
+            'user', sender.pk, moderation_services.REASON_SPAM,
+            "Plafond de révélation de numéros dépassé à répétition (collecte possible de numéros).",
+        )
+    raise RevealError(_QUOTA_MESSAGES[exceeded.code] + REVEAL_FALLBACK, exceeded.code, 429, wait=exceeded.wait)
+
+
+def _find_recent_reveal(offer, sender, channel, window_hours, now):
+    return ContactEvent.objects.filter(
+        offer=offer, sender=sender, channel=channel, created_at__gte=now - timedelta(hours=window_hours),
+    ).order_by('-created_at').first()
+
+
+def reveal_contact(*, offer_id, sender, channel: str) -> RevealResult:
+    """Remet au visiteur le numéro de contact du vendeur pour un canal consenti (ADR 0005).
+
+    Ordre des contrôles : canal, offre (404 uniforme), propre annonce, sanction, plafonds,
+    consentement. Le plafond précède le consentement pour qu'un refus ne révèle pas quel vendeur
+    a consenti. Une demande répétée dans la fenêtre anti-doublon renvoie le même contact sans
+    nouveau contact ni plafond consommé (mais avec une entrée d'audit : le numéro sort).
+
+    Le numéro n'est lu chez `identity` qu'avant la transaction et n'est renvoyé qu'après son
+    commit (contact + événement + audit). Il n'entre ni dans l'événement, ni dans l'audit."""
+    if channel not in REVEAL_CHANNELS:
+        raise RevealError("Moyen de contact invalide.", 'channel_invalid', 400)
+    offer = _revealable_offer(offer_id)
+    if offer.seller_id == sender.pk:
+        raise RevealError("Vous ne pouvez pas contacter votre propre annonce.", 'own_offer', 403)
+    if moderation_services.is_user_restricted(sender.pk):
+        raise RevealError("Votre compte ne peut pas contacter de vendeur pour le moment.", 'contact_restricted', 403)
+
+    row = MarketplaceSettings.get_solo()
+    window_hours = row.duplicate_contact_window_hours
+    now = timezone.now()
+    try:
+        if _find_recent_reveal(offer, sender, channel, window_hours, now) is None:
+            _enforce_reveal_quota(sender, row, now)
+    except _QuotaExceeded as exceeded:
+        _refuse_quota(sender, offer, row, exceeded, now)
+
+    try:
+        endpoint = identity_services.get_contact_endpoint(offer.seller_id, channel)
+    except identity_services.ChannelNotConsented:
+        record_audit(sender, 'contact.reveal_refused', target=offer, details=f"Moyen {channel} refusé : channel_not_allowed")
+        raise RevealError("Ce vendeur n'accepte pas ce moyen de contact.", 'channel_not_allowed', 403)
+
+    try:
+        with transaction.atomic():
+            # Relecture sous le verrou d'écriture : deux demandes simultanées ne créent qu'un contact.
+            event = _find_recent_reveal(offer, sender, channel, window_hours, now)
+            created = event is None
+            if created:
+                event = ContactEvent.objects.create(
+                    offer=offer, sender=sender, channel=channel,
+                    is_counted=is_countable_contact(offer, sender, window_hours),
+                )
+                ContactEvent.objects.filter(pk=event.pk).update(delivered_at=event.created_at)
+                # Garde-fou de concurrence : recomptage APRÈS insertion, dans la transaction. Une
+                # rafale qui a passé le contrôle préalable est refusée et annulée ici (SQLite
+                # sérialise les écritures ; sous MySQL, voir ADR 0005, section 8).
+                limit, code = _quota_of(sender, row, now)
+                later = timezone.now()
+                times = _reveal_times(sender, later)
+                if len(times) > limit:
+                    raise _QuotaExceeded(code, _quota_wait(times, limit, later))
+                recount_contacts(offer.id)
+                offer.refresh_from_db(fields=['views_count', 'likes_count', 'shares_count', 'contacts_count'])
+                refresh_visibility_score(offer)
+                publish_event(
+                    'marketplace.contact_revealed', aggregate_type='offer', aggregate_id=offer.id,
+                    payload={**_interaction_payload(offer, sender, contact_event_id=event.pk), 'channel': channel},
+                )
+            record_audit(
+                sender, 'contact.number_revealed', target=offer,
+                details=f"Moyen {channel} ; vendeur {offer.seller_id} ; {'nouveau' if created else 'renvoi'}",
+            )
+    except _QuotaExceeded as exceeded:
+        _refuse_quota(sender, offer, row, exceeded, now)
+    return RevealResult(
+        contact_event_id=event.pk, channel=channel, created=created, offer_title=offer.title,
+        phone=endpoint.phone_e164,
+    )
+
+
+@dataclass(frozen=True)
+class ReceivedReveal:
+    """Ligne de la liste « qui a demandé mon numéro » : ni numéro, ni identifiant du visiteur."""
+
+    id: uuid.UUID
+    channel: str
+    created_at: object
+    requester_display_name: str
+    offer_id: uuid.UUID
+    offer_title: str
+
+
+def list_reveals_for_seller(seller, channel=None):
+    """Révélations de numéro sur les offres du vendeur, les plus récentes d'abord (queryset paginable) ;
+    `to_received_reveals` convertit une page."""
+    queryset = ContactEvent.objects.filter(offer__seller=seller, channel__in=REVEAL_CHANNELS)
+    if channel:
+        queryset = queryset.filter(channel=channel)
+    return queryset.select_related('offer').order_by('-created_at', '-id')
+
+
+def to_received_reveals(events) -> list:
+    """Convertit une page de contacts : noms résolus en une requête (« Marie K. »)."""
+    names = identity_services.get_full_names([event.sender_id for event in events])
+    return [
+        ReceivedReveal(
+            id=event.id, channel=event.channel, created_at=event.created_at,
+            requester_display_name=identity_services.public_display_name(names.get(event.sender_id)),
+            offer_id=event.offer_id, offer_title=event.offer.title,
+        )
+        for event in events
+    ]
 
 
 def create_exchange_proposal(*, offer: Offer, sender, message: str) -> ExchangeProposal:

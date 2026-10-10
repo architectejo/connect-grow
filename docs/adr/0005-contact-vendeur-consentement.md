@@ -194,7 +194,7 @@ Actions `AuditLog` (acteur, cible, détails sans numéro ni IP) :
 |---|---|---|
 | `contact.phone_changed` | `user` du vendeur | « Numéro de contact modifié ; CALL et WHATSAPP désactivés » |
 | `contact.phone_verified` | `user` | |
-| `contact.consent_granted` | `user` | canal, version du texte, 4 derniers chiffres |
+| `contact.consent_granted` | `user` | canal, version du texte (jamais de chiffre du numéro : la preuve des 4 derniers chiffres est dans `ContactConsent.phone_last4`) |
 | `contact.consent_revoked` | `user` | canal, motif |
 | `contact.number_revealed` | `offer` | canal, vendeur (UUID), `created` vrai/faux |
 | `contact.reveal_refused` | `offer` | motif (`channel_not_allowed`, quota…) ; seulement pour les refus de quota et de consentement, pas pour les 401 |

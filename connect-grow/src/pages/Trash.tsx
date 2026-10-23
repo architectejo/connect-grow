@@ -14,6 +14,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { AccountShell } from "@/components/layout/AccountShell";
+import { ScopeLine } from "@/components/profiles/ScopeLine";
+import { useCan } from "@/contexts/ActiveContextContext";
 import { EmptyState, ErrorState, ImageWithFallback, PageHeader } from "@/components/common";
 import { usePostLifecycle, useTrash } from "@/hooks/use-account";
 import { formatPrice } from "@/lib/format";
@@ -23,10 +25,15 @@ const Trash = () => {
   const { data: posts = [], isLoading, isError, refetch } = useTrash();
   const { restore, destroy } = usePostLifecycle();
   const [deleting, setDeleting] = useState<Post | null>(null);
+  // Restaurer ou supprimer : capacités d'édition et de suppression de l'offre (le serveur reste le juge)
+  const canEditOffers = useCan("offer.edit");
+  const canDeleteOffers = useCan("offer.delete");
+  const canManage = canEditOffers || canDeleteOffers;
 
   return (
     <AccountShell>
       <PageHeader title="Corbeille" description="Les annonces supprimées restent ici 30 jours avant d'être effacées définitivement." />
+      <ScopeLine className="-mt-4 mb-5 flex items-center gap-1.5 text-sm text-muted-foreground" />
 
       <div className="mb-5 flex items-start gap-3 rounded-xl bg-info/10 p-4 text-sm text-foreground">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden />
@@ -54,6 +61,7 @@ const Trash = () => {
                   <p className="text-sm text-muted-foreground">{formatPrice(post.price, post.currency)}</p>
                 </div>
               </div>
+              {canManage && (
               <div className="flex gap-2 sm:shrink-0">
                 <Button
                   variant="outline"
@@ -71,6 +79,7 @@ const Trash = () => {
                   <Trash2 aria-hidden /> Supprimer
                 </Button>
               </div>
+              )}
             </li>
           ))}
         </ul>

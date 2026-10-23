@@ -1,14 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { BadgeCheck, Camera, Loader2, LogOut, Phone, Save } from "lucide-react";
+import { BadgeCheck, Loader2, LogOut, Phone, Save, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
@@ -22,7 +21,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AccountShell } from "@/components/layout/AccountShell";
-import { PageHeader, StatusBadge, UserAvatar } from "@/components/common";
+import { PageHeader } from "@/components/common";
+import { ImageField } from "@/components/common/ImageField";
 import { CommuneSelect } from "@/components/common/CommuneSelect";
 import { errorProps, Field, fieldInputClass, FormAlert, PasswordInput, PhoneInput } from "@/components/auth/FormFields";
 import { ContactSettingsSection } from "@/components/settings/ContactSettingsSection";
@@ -31,52 +31,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useChangePassword, useUpdateProfile } from "@/hooks/use-account";
 import { useCities } from "@/hooks/use-marketplace";
 import { useRequestOtp } from "@/hooks/use-otp";
-import { compressImage } from "@/lib/image";
 import { formatLocalPhone, localPhoneSchema, parseApiErrors, passwordSchema, toE164 } from "@/lib/validation";
-
-const BIO_MAX = 500;
-
-/** Choix d'image (photo, logo) avec aperçu local et compression. */
-function ImageField({
-  label,
-  src,
-  name,
-  shape,
-  onSelect,
-}: {
-  label: string;
-  src?: string | null;
-  name?: string;
-  shape: "circle" | "square";
-  onSelect: (file: File, preview: string) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  return (
-    <div className="flex items-center gap-4">
-      <UserAvatar src={src} name={name} size="xl" shape={shape} />
-      <div>
-        <Button type="button" variant="outline" onClick={() => inputRef.current?.click()}>
-          <Camera aria-hidden /> {label}
-        </Button>
-        <p className="mt-1.5 text-xs text-muted-foreground">JPG, PNG ou WebP · optimisée automatiquement</p>
-      </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        className="sr-only"
-        tabIndex={-1}
-        onChange={async (e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          if (!file) return;
-          const compressed = await compressImage(file);
-          onSelect(compressed, URL.createObjectURL(compressed));
-        }}
-      />
-    </div>
-  );
-}
 
 // --- Profil ---
 
@@ -86,6 +41,7 @@ const profileSchema = z.object({
 });
 
 function ProfileTab() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { data: cities = [] } = useCities();
   const update = useUpdateProfile();
@@ -122,7 +78,7 @@ function ProfileTab() {
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-6">
       <ImageField
-        label="Changer la photo"
+        label={t("imageField.photo")}
         src={photo?.preview ?? user?.photo}
         name={user?.full_name}
         shape="circle"
@@ -144,85 +100,11 @@ function ProfileTab() {
       <Button type="submit" disabled={update.isPending}>
         {update.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Save aria-hidden />} Enregistrer
       </Button>
-    </form>
-  );
-}
-
-// --- Boutique (comptes entreprise) ---
-
-const shopSchema = z.object({
-  business_name: z.string().trim().min(2, "Saisissez le nom de votre entreprise.").max(255),
-  bio: z.string().max(BIO_MAX, `${BIO_MAX} caractères maximum.`),
-  nif: z.string().max(50),
-});
-
-function ShopTab() {
-  const { user } = useAuth();
-  const update = useUpdateProfile();
-  const profile = user?.business_profile;
-  const [logo, setLogo] = useState<{ file: File; preview: string } | null>(null);
-  const [error, setError] = useState<string>();
-
-  const form = useForm<z.infer<typeof shopSchema>>({
-    resolver: zodResolver(shopSchema),
-    defaultValues: { business_name: profile?.business_name ?? "", bio: profile?.bio ?? "", nif: profile?.nif ?? "" },
-  });
-  const bio = form.watch("bio");
-
-  const onSubmit = form.handleSubmit(async (values) => {
-    setError(undefined);
-    // Notation pointée comprise par DRF pour le profil imbriqué en multipart
-    const data = new FormData();
-    data.append("business_profile.business_name", values.business_name.trim());
-    data.append("business_profile.bio", values.bio.trim());
-    data.append("business_profile.nif", values.nif.trim());
-    if (logo) data.append("business_profile.logo", logo.file);
-    try {
-      await update.mutateAsync(data);
-      setLogo(null);
-      toast.success("Boutique mise à jour.");
-    } catch (err) {
-      const { fields, general } = parseApiErrors(err);
-      // Image refusée (format, poids, plus de 16 millions de pixels) : clé `logo`
-      setError(general ?? fields.logo ?? fields.business_name ?? fields.bio ?? fields.nif ?? "La mise à jour a échoué.");
-    }
-  });
-
-  return (
-    <form onSubmit={onSubmit} noValidate className="space-y-6">
-      <div className="flex items-center gap-2">
-        {profile?.is_verified ? (
-          <StatusBadge kind="verified" size="md" />
-        ) : (
-          <span className="rounded-full bg-muted px-2.5 py-1.5 text-xs font-semibold text-muted-foreground">Boutique non vérifiée</span>
-        )}
-      </div>
-      <ImageField
-        label="Changer le logo"
-        src={logo?.preview ?? profile?.logo}
-        name={profile?.business_name}
-        shape="square"
-        onSelect={(file, preview) => setLogo({ file, preview })}
-      />
-      <Field label="Nom de l'entreprise" htmlFor="business_name" error={form.formState.errors.business_name?.message}>
-        <Input id="business_name" autoComplete="organization" className={fieldInputClass} {...errorProps("business_name", form.formState.errors.business_name?.message)} {...form.register("business_name")} />
-      </Field>
-      <Field
-        label="Présentation"
-        htmlFor="bio"
-        error={form.formState.errors.bio?.message}
-        aside={<span className="text-xs tabular-nums text-muted-foreground">{bio.length}/{BIO_MAX}</span>}
-        hint="Activité, spécialités, horaires, lieu de retrait… Elle apparaît sur votre vitrine."
-      >
-        <Textarea id="bio" maxLength={BIO_MAX} className="min-h-[120px] rounded-xl bg-card" {...form.register("bio")} />
-      </Field>
-      <Field label="Numéro d'identification fiscale (NIF)" htmlFor="nif" hint="Facultatif. Non affiché publiquement.">
-        <Input id="nif" className={fieldInputClass} {...form.register("nif")} />
-      </Field>
-      <FormAlert message={error} />
-      <Button type="submit" disabled={update.isPending}>
-        {update.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Save aria-hidden />} Enregistrer
-      </Button>
+      <p className="border-t pt-4 text-sm">
+        <Link to="/profiles" className="inline-flex items-center gap-2 font-semibold text-primary underline-offset-2 hover:underline">
+          <Users className="h-4 w-4" aria-hidden /> {t("settings.manageProfiles")}
+        </Link>
+      </p>
     </form>
   );
 }
@@ -462,17 +344,19 @@ function SecurityTab() {
   );
 }
 
+const TABS = ["profile", "contact", "security"] as const;
+
 const Settings = () => {
-  const { user } = useAuth();
-  const isBusiness = user?.user_type === "ENTREPRISE";
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requested = searchParams.get("tab");
+  const tab = TABS.find((value) => value === requested) ?? "profile";
 
   return (
     <AccountShell>
       <PageHeader title="Paramètres" description="Gérez votre profil public, vos coordonnées et la sécurité de votre compte." />
-      <Tabs defaultValue="profile">
+      <Tabs value={tab} onValueChange={(value) => setSearchParams(value === "profile" ? {} : { tab: value }, { replace: true })}>
         <TabsList className="mb-6 h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-muted p-1 scrollbar-none sm:w-auto">
           <TabsTrigger value="profile" className="rounded-lg px-4 py-2">Profil</TabsTrigger>
-          {isBusiness && <TabsTrigger value="shop" className="rounded-lg px-4 py-2">Boutique</TabsTrigger>}
           <TabsTrigger value="contact" className="rounded-lg px-4 py-2">Coordonnées</TabsTrigger>
           <TabsTrigger value="security" className="rounded-lg px-4 py-2">Sécurité</TabsTrigger>
         </TabsList>
@@ -480,11 +364,6 @@ const Settings = () => {
           <TabsContent value="profile" className="mt-0">
             <ProfileTab />
           </TabsContent>
-          {isBusiness && (
-            <TabsContent value="shop" className="mt-0">
-              <ShopTab />
-            </TabsContent>
-          )}
           <TabsContent value="contact" className="mt-0">
             <ContactTab />
           </TabsContent>

@@ -3,8 +3,9 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Building2, Check, Loader2, Mail, Smartphone, UserRound } from "lucide-react";
+import { Check, Loader2, Mail, Smartphone } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import apiClient from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,13 +20,10 @@ import { cn } from "@/lib/utils";
 import { emailSchema, localPhoneSchema, parseApiErrors, passwordSchema, toE164 } from "@/lib/validation";
 
 type Method = "phone" | "email";
-type UserType = "PARTICULIER" | "ENTREPRISE";
 
 const schema = z
   .object({
-    userType: z.enum(["PARTICULIER", "ENTREPRISE"]),
     fullName: z.string().trim().min(2, "Saisissez votre nom complet.").max(255),
-    businessName: z.string().trim(),
     method: z.enum(["phone", "email"]),
     phone: z.string(),
     email: z.string(),
@@ -35,8 +33,6 @@ const schema = z
   .superRefine((values, ctx) => {
     const result = values.method === "phone" ? localPhoneSchema.safeParse(values.phone) : emailSchema.safeParse(values.email);
     if (!result.success) ctx.addIssue({ code: "custom", path: [values.method], message: result.error.issues[0].message });
-    if (values.userType === "ENTREPRISE" && values.businessName.length < 2)
-      ctx.addIssue({ code: "custom", path: ["businessName"], message: "Saisissez le nom de votre entreprise." });
   });
 
 type FormValues = z.infer<typeof schema>;
@@ -44,11 +40,6 @@ type FormValues = z.infer<typeof schema>;
 const methods = [
   { value: "phone" as const, label: "Téléphone", icon: Smartphone },
   { value: "email" as const, label: "E-mail", icon: Mail },
-];
-
-const accountTypes: { value: UserType; title: string; description: string; icon: typeof UserRound }[] = [
-  { value: "PARTICULIER", title: "Particulier", description: "Acheter, vendre, troquer", icon: UserRound },
-  { value: "ENTREPRISE", title: "Entreprise", description: "Boutique, artisan, prestataire", icon: Building2 },
 ];
 
 // Champs renvoyés par l'API → champs du formulaire
@@ -92,6 +83,7 @@ const Register = () => {
   const next = safeNext(searchParams.get("next"));
   const { login, isAuthenticated } = useAuth();
   const requestOtp = useRequestOtp();
+  const { t } = useTranslation();
 
   const [step, setStep] = useState<1 | 2>(1);
   const [otpCode, setOtpCode] = useState("");
@@ -111,9 +103,7 @@ const Register = () => {
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      userType: "PARTICULIER",
       fullName: "",
-      businessName: "",
       method: "phone",
       phone: "",
       email: "",
@@ -121,7 +111,7 @@ const Register = () => {
       acceptTerms: false,
     },
   });
-  const [userType, method, password, phone] = watch(["userType", "method", "password", "phone"]);
+  const [method, password, phone] = watch(["method", "password", "phone"]);
 
   useEffect(() => {
     // Déjà connecté (hors création en cours) : pas besoin de s'inscrire
@@ -134,9 +124,7 @@ const Register = () => {
     const payload: Record<string, unknown> = {
       full_name: values.fullName.trim(),
       password: values.password,
-      user_type: values.userType,
       ...(values.method === "phone" ? { phone: toE164(values.phone), otp_code: code } : { email: values.email.trim() }),
-      ...(values.userType === "ENTREPRISE" && { business_profile: { business_name: values.businessName.trim() } }),
     };
 
     try {
@@ -164,12 +152,8 @@ const Register = () => {
 
     try {
       await login(values.method === "phone" ? { phone: toE164(values.phone), password: values.password } : { email: values.email.trim(), password: values.password });
-      toast.success("Bienvenue sur Connecte+ !", {
-        description:
-          values.userType === "ENTREPRISE"
-            ? "Pensez à envoyer vos documents pour obtenir le badge Vérifié."
-            : "Votre compte est prêt.",
-      });
+      // Un seul type de compte (règle 1) : les profils s'ajoutent ensuite depuis « Mes profils »
+      toast.success(t("register.welcomeTitle"), { description: t("register.welcomeDescription") });
       navigate(next, { replace: true });
     } catch {
       // Compte créé mais connexion automatique impossible : l'utilisateur se connecte lui-même
@@ -243,37 +227,6 @@ const Register = () => {
         />
       ) : (
         <form onSubmit={handleSubmit(onAccountSubmit)} noValidate className="space-y-5">
-          <fieldset>
-            <legend className="mb-2 text-sm font-semibold">Vous êtes</legend>
-            <div role="radiogroup" className="grid grid-cols-2 gap-3">
-              {accountTypes.map(({ value, title, description, icon: Icon }) => {
-                const selected = userType === value;
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => setValue("userType", value)}
-                    className={cn(
-                      "relative flex flex-col items-start gap-2 rounded-xl border-2 p-3.5 text-left transition-colors",
-                      selected ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/40",
-                    )}
-                  >
-                    <span className={cn("flex h-9 w-9 items-center justify-center rounded-lg", selected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
-                      <Icon className="h-5 w-5" aria-hidden />
-                    </span>
-                    <span>
-                      <span className="block text-sm font-bold">{title}</span>
-                      <span className="block text-xs text-muted-foreground">{description}</span>
-                    </span>
-                    {selected && <Check className="absolute right-3 top-3 h-4 w-4 text-primary" aria-hidden />}
-                  </button>
-                );
-              })}
-            </div>
-          </fieldset>
-
           <Field label="Nom complet" htmlFor="fullName" error={errors.fullName?.message}>
             <Input
               id="fullName"
@@ -284,24 +237,6 @@ const Register = () => {
               {...register("fullName")}
             />
           </Field>
-
-          {userType === "ENTREPRISE" && (
-            <Field
-              label="Nom de l'entreprise"
-              htmlFor="businessName"
-              error={errors.businessName?.message}
-              hint="Le badge Vérifié s'obtient ensuite en envoyant vos documents (RCCM, identité du gérant)."
-            >
-              <Input
-                id="businessName"
-                autoComplete="organization"
-                placeholder="Ex. : Boutique Ma Campagne"
-                className={fieldInputClass}
-                {...errorProps("businessName", errors.businessName?.message)}
-                {...register("businessName")}
-              />
-            </Field>
-          )}
 
           <div className="space-y-3">
             <p className="text-sm font-semibold">S'inscrire avec</p>
@@ -375,6 +310,8 @@ const Register = () => {
               </p>
             )}
           </div>
+
+          <p className="text-sm text-muted-foreground">{t("register.oneAccount")}</p>
 
           <FormAlert message={generalError} />
 

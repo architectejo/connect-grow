@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { AlwaysPersonalNote } from "@/components/profiles/AlwaysPersonalNote";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ExternalLink, Loader2, MessageSquare, Phone } from "lucide-react";
@@ -87,6 +88,7 @@ export function ContactRevealDialog({ offerId, sellerName, channel, onClose, onM
           <div className="space-y-2 text-sm">
             <p>{t("reveal.notice")}</p>
             {channel === "WHATSAPP" && <p className="text-muted-foreground">{t("reveal.noticeWhatsapp")}</p>}
+            <AlwaysPersonalNote />
           </div>
         )}
 

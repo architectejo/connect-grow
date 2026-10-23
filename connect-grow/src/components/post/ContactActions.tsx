@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { MessageSquare, Phone } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { ContactChannel, RevealChannel, Uuid } from "@/api/types";
+import type { ContactChannel, RevealChannel, SellerContextType, Uuid } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { ContactRevealDialog } from "@/components/post/ContactRevealDialog";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,11 @@ interface ContactActionsProps {
   sellerName: string;
   /** Moyens acceptés par le vendeur (`allowed_channels`). Un moyen absent n'est pas affiché. */
   allowedChannels: ContactChannel[];
+  /**
+   * Type du vendeur : pour une organisation, le client suit `allowed_channels` du serveur (qui tient compte de
+   * l'interrupteur des canaux téléphoniques) et ne déduit rien du type. Sert seulement à choisir le texte explicatif.
+   */
+  sellerType?: SellerContextType;
   onMessage: () => void;
   /** « stack » : boutons empilés (panneau vendeur) ; « bar » : barre compacte mobile. */
   layout?: "stack" | "bar";
@@ -40,7 +45,7 @@ function WhatsAppIcon({ className }: { className?: string }) {
  * Contact du vendeur selon ses consentements. Aucun numéro ni lien de téléphone ou de WhatsApp n'est dans la page :
  * le numéro n'arrive qu'après un clic, dans la boîte de dialogue (règle 10).
  */
-export function ContactActions({ offerId, sellerName, allowedChannels, onMessage, layout = "stack", className }: ContactActionsProps) {
+export function ContactActions({ offerId, sellerName, allowedChannels, sellerType, onMessage, layout = "stack", className }: ContactActionsProps) {
   const { t } = useTranslation();
   const [channel, setChannel] = useState<RevealChannel | null>(null);
   const canMessage = allowedChannels.includes("MESSAGE");
@@ -48,8 +53,15 @@ export function ContactActions({ offerId, sellerName, allowedChannels, onMessage
   const canWhatsapp = allowedChannels.includes("WHATSAPP");
 
   if (!canMessage && !canCall && !canWhatsapp) {
-    return <p className={cn("text-center text-sm text-muted-foreground", className)}>{t("post.contact.none")}</p>;
+    // Aucun bouton de contact, avec une explication (organisation sans canal : `seller_contact_unavailable`)
+    return (
+      <p className={cn("text-center text-sm text-muted-foreground", className)}>
+        {sellerType === "ORGANIZATION" ? t("contact.orgUnavailable") : t("post.contact.none")}
+      </p>
+    );
   }
+  const orgMessageOnly = sellerType === "ORGANIZATION" && canMessage && !canCall && !canWhatsapp;
+  const note = orgMessageOnly ? <p className="text-center text-xs text-muted-foreground">{t("contact.orgMessageOnly")}</p> : null;
 
   const dialog = (
     <ContactRevealDialog
@@ -63,7 +75,7 @@ export function ContactActions({ offerId, sellerName, allowedChannels, onMessage
 
   if (layout === "bar") {
     return (
-      <div className={cn("flex gap-2", className)}>
+      <div className={cn("flex flex-wrap gap-2", className)}>
         {canMessage && (
           <Button className="h-12 flex-1 rounded-xl" onClick={onMessage}>
             <MessageSquare aria-hidden /> {t("post.contact.sendMessageShort")}
@@ -90,6 +102,7 @@ export function ContactActions({ offerId, sellerName, allowedChannels, onMessage
           </Button>
         )}
         {dialog}
+        {note && <div className="w-full">{note}</div>}
       </div>
     );
   }
@@ -112,6 +125,7 @@ export function ContactActions({ offerId, sellerName, allowedChannels, onMessage
         </Button>
       )}
       {dialog}
+      {note}
     </div>
   );
 }

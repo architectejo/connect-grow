@@ -8,6 +8,10 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import apiClient from "@/api/client";
+import { AccessDenied } from "@/components/common";
+import { AppShell } from "@/components/layout/AppShell";
+import { RequireAuth } from "@/components/layout/AccountShell";
+import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { messageKeys, useConversationMessages, useConversations, type ConversationItem, type MessageItem } from "@/hooks/use-messages";
 import { apiErrorMessage } from "@/lib/errors";
@@ -24,7 +28,10 @@ const Messages = () => {
     const { t } = useTranslation();
     const queryClient = useQueryClient();
     const { user } = useAuth();
-    const conversationsQuery = useConversations();
+    const { active } = useActiveContext();
+    // Messages d'une organisation : propriétaire et administrateurs (`message.reply`). Capacités inconnues : on ne masque rien.
+    const canReply = !active.confirmed || active.capabilities.includes("message.reply");
+    const conversationsQuery = useConversations(canReply);
     const conversations = conversationsQuery.data ?? [];
     const [activeConv, setActiveConv] = useState<ConversationItem | null>(null);
     const thread = useConversationMessages(activeConv?.id);
@@ -66,6 +73,16 @@ const Messages = () => {
             setIsSending(false);
         }
     };
+
+    if (!canReply) {
+        return (
+            <RequireAuth>
+                <AppShell withFooter={false}>
+                    <AccessDenied description={t("scope.messagesDenied")} />
+                </AppShell>
+            </RequireAuth>
+        );
+    }
 
     if (isLoading) {
         return (

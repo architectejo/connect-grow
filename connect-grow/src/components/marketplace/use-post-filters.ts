@@ -15,6 +15,7 @@ export const FILTER_KEYS = [
   "price_max",
   "ordering",
   "seller",
+  "seller_type",
 ] as const satisfies readonly (keyof PostFilters)[];
 
 export type FilterKey = (typeof FILTER_KEYS)[number];

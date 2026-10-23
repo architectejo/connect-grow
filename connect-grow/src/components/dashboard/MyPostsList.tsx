@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EmptyState, ErrorState, ImageWithFallback } from "@/components/common";
+import { useActiveContext, useCan } from "@/contexts/ActiveContextContext";
 import { usePostLifecycle } from "@/hooks/use-account";
 import { formatCount, formatPrice, formatRelativeDate } from "@/lib/format";
 
@@ -31,6 +32,12 @@ interface MyPostsListProps {
 export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListProps) {
   const { t } = useTranslation();
   const { moveToTrash } = usePostLifecycle();
+  const { active, contexts } = useActiveContext();
+  const canPublish = useCan("offer.publish");
+  const canEdit = useCan("offer.edit");
+  const canDelete = useCan("offer.delete");
+  // Après la migration d'un ancien compte entreprise, les offres vivent sous l'organisation : on le dit à la place d'un vide trompeur
+  const otherProfiles = active.type === "USER" && contexts.some((c) => c.type !== "USER");
   const [query, setQuery] = useState("");
   const [trashing, setTrashing] = useState<Post | null>(null);
 
@@ -47,6 +54,7 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
           </h2>
           <p className="text-sm text-muted-foreground">{posts.length} annonce{posts.length > 1 ? "s" : ""} en ligne</p>
         </div>
+        {!canEdit && !canDelete && posts.length > 0 && <p className="text-xs text-muted-foreground sm:order-last sm:w-full">{t("scope.readOnlyOffers")}</p>}
         {posts.length > 4 && (
           <label className="relative sm:w-64">
             <span className="sr-only">Rechercher dans mes annonces</span>
@@ -80,13 +88,27 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
         <EmptyState
           className="m-5"
           title="Vous n'avez encore rien publié"
-          description="Une annonce gratuite, quelques photos, et les acheteurs de votre commune vous trouvent."
+          description={
+            <>
+              Une annonce gratuite, quelques photos, et les acheteurs de votre commune vous trouvent.
+              {otherProfiles && <span className="mt-2 block">{t("emptyOffers.otherProfiles")}</span>}
+            </>
+          }
           action={
-            <Button asChild>
-              <Link to="/create-post">
-                <Plus aria-hidden /> Publier ma première annonce
-              </Link>
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {canPublish && (
+                <Button asChild>
+                  <Link to="/create-post">
+                    <Plus aria-hidden /> Publier ma première annonce
+                  </Link>
+                </Button>
+              )}
+              {otherProfiles && (
+                <Button asChild variant="outline">
+                  <Link to="/profiles">{t("emptyOffers.changeProfile")}</Link>
+                </Button>
+              )}
+            </div>
           }
         />
       ) : filtered.length === 0 ? (
@@ -120,20 +142,24 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
               </div>
 
               <div className="hidden shrink-0 gap-1 sm:flex">
-                <Button asChild variant="ghost" size="icon" aria-label={`Modifier « ${post.title} »`}>
-                  <Link to={`/edit-post/${post.id}`}>
-                    <Pencil />
-                  </Link>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => setTrashing(post)}
-                  aria-label={`Mettre « ${post.title} » à la corbeille`}
-                >
-                  <Trash2 />
-                </Button>
+                {canEdit && (
+                  <Button asChild variant="ghost" size="icon" aria-label={`Modifier « ${post.title} »`}>
+                    <Link to={`/edit-post/${post.id}`}>
+                      <Pencil />
+                    </Link>
+                  </Button>
+                )}
+                {canDelete && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => setTrashing(post)}
+                    aria-label={`Mettre « ${post.title} » à la corbeille`}
+                  >
+                    <Trash2 />
+                  </Button>
+                )}
               </div>
 
               <DropdownMenu>
@@ -148,15 +174,19 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
                       <ExternalLink className="h-4 w-4" /> Voir l'annonce
                     </Link>
                   </DropdownMenuItem>
-                  <DropdownMenuItem asChild className="gap-2">
-                    <Link to={`/edit-post/${post.id}`}>
-                      <Pencil className="h-4 w-4" /> Modifier
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onSelect={() => setTrashing(post)}>
-                    <Trash2 className="h-4 w-4" /> Mettre à la corbeille
-                  </DropdownMenuItem>
+                  {canEdit && (
+                    <DropdownMenuItem asChild className="gap-2">
+                      <Link to={`/edit-post/${post.id}`}>
+                        <Pencil className="h-4 w-4" /> Modifier
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
+                  {canDelete && <DropdownMenuSeparator />}
+                  {canDelete && (
+                    <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onSelect={() => setTrashing(post)}>
+                      <Trash2 className="h-4 w-4" /> Mettre à la corbeille
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </li>

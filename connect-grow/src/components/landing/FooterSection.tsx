@@ -10,7 +10,7 @@ const columns: { title: string; links: FooterLink[] }[] = [
     links: [
       { label: "Toutes les annonces", to: "/marketplace" },
       { label: "Annonces échangeables", to: "/marketplace?is_exchangeable=true", exchangeOnly: true },
-      { label: "Entreprises", to: "/businesses" },
+      { label: "Organisations", to: "/businesses" },
       { label: "Publier une annonce", to: "/create-post" },
     ],
   },

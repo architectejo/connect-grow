@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Building2, Heart, LayoutDashboard, LogOut, Menu, MessageSquare, Plus, Settings, ShoppingBag, Trash2 } from "lucide-react";
+import { Building2, Heart, LayoutDashboard, LogOut, Menu, MessageSquare, Plus, Settings, ShoppingBag, Trash2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -17,6 +17,7 @@ import NotificationDropdown from "@/components/landing/NotificationDropdown";
 import { ModeToggle } from "@/components/mode-toggle";
 import { ActiveContextBanner, MANAGEMENT_LINKS_READY } from "./ActiveContextBanner";
 import { ContextSwitcher } from "./ContextSwitcher";
+import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { userContactLine } from "@/lib/user-contact";
@@ -31,6 +32,10 @@ const Navbar = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { user, isAuthenticated, logout } = useAuth();
+  const { active } = useActiveContext();
+  // Capacités du profil actif : masquer ne décide de rien (le serveur refuse), mais évite des boutons sans effet.
+  // Tant que le serveur n'a pas répondu, on ne masque rien.
+  const can = (capability: string) => !active.confirmed || active.capabilities.includes(capability);
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -87,21 +92,25 @@ const Navbar = () => {
 
           {isAuthenticated ? (
             <>
-              <Button asChild size="sm" className="hidden shadow-glow md:inline-flex">
-                <Link to="/create-post">
-                  <Plus aria-hidden />
-                  {t("nav.publish")}
-                </Link>
-              </Button>
+              {can("offer.publish") && (
+                <Button asChild size="sm" className="hidden shadow-glow md:inline-flex">
+                  <Link to="/create-post">
+                    <Plus aria-hidden />
+                    {t("nav.publish")}
+                  </Link>
+                </Button>
+              )}
               <div className="hidden md:block">
                 <ContextSwitcher variant="pill" showManagementLinks={MANAGEMENT_LINKS_READY} />
               </div>
               <NotificationDropdown />
-              <Button variant="ghost" size="icon" asChild className="hidden rounded-full md:inline-flex">
-                <Link to="/messages" aria-label={t("nav.messages")}>
-                  <MessageSquare className="!h-5 !w-5" />
-                </Link>
-              </Button>
+              {can("message.reply") && (
+                <Button variant="ghost" size="icon" asChild className="hidden rounded-full md:inline-flex">
+                  <Link to="/messages" aria-label={t("nav.messages")}>
+                    <MessageSquare className="!h-5 !w-5" />
+                  </Link>
+                </Button>
+              )}
 
               <DropdownMenu>
                 <DropdownMenuTrigger className="hidden rounded-full md:block" aria-label={t("nav.profile")}>
@@ -124,6 +133,11 @@ const Navbar = () => {
                   <DropdownMenuItem asChild className="gap-2 rounded-lg py-2">
                     <Link to="/favorites">
                       <Heart className="h-4 w-4" /> {t("nav.favorites")}
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="gap-2 rounded-lg py-2">
+                    <Link to="/profiles">
+                      <Users className="h-4 w-4" /> {t("context.myProfiles")}
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild className="gap-2 rounded-lg py-2">
@@ -190,6 +204,7 @@ const Navbar = () => {
                     ? ([
                         { to: "/dashboard", key: "nav.dashboard", icon: LayoutDashboard },
                         { to: "/favorites", key: "nav.favorites", icon: Heart },
+                        { to: "/profiles", key: "context.myProfiles", icon: Users },
                         { to: "/settings", key: "nav.settings", icon: Settings },
                         { to: "/trash", key: "nav.trash", icon: Trash2 },
                       ] as const)

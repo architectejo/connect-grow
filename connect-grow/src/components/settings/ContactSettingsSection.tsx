@@ -4,16 +4,17 @@ import { REGEXP_ONLY_DIGITS } from "input-otp";
 import { BadgeCheck, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import type { ContactChannel, ContactSettings } from "@/api/types";
-import { ErrorState } from "@/components/common";
+import { AccessDenied, ErrorState } from "@/components/common";
 import { Field, FormAlert, PhoneInput } from "@/components/auth/FormFields";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useContactSettings, useSetContactChannel, useSetContactPhone, useVerifyContactPhone } from "@/hooks/use-contact-settings";
-import { CONSENT_CHANNELS, CONSENT_TEXT_VERSION, contactSettingsErrorMessage, maskPhone } from "@/lib/contact-settings";
+import { availableChannels, CONSENT_CHANNELS, CONSENT_TEXT_VERSION, contactSettingsErrorMessage, maskPhone } from "@/lib/contact-settings";
 import { localPhoneSchema, toE164 } from "@/lib/validation";
 
 const OTP_LENGTH = 6;
@@ -70,7 +71,7 @@ function ConsentDialog({
 
 // --- Numéro de contact ---
 
-function PhoneBlock({ settings }: { settings: ContactSettings }) {
+function PhoneBlock({ settings, allowLoginPhone = true }: { settings: ContactSettings; allowLoginPhone?: boolean }) {
   const { t } = useTranslation();
   const setPhone = useSetContactPhone();
   const verify = useVerifyContactPhone();
@@ -187,19 +188,22 @@ function PhoneBlock({ settings }: { settings: ContactSettings }) {
       {choosing && (
         <div className="space-y-3">
           {editing && <p className="text-xs text-muted-foreground">{t("contactSettings.phone.changeWarning")}</p>}
-          <div className="space-y-1">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!login.available || setPhone.isPending}
-              onClick={() => void save({ use_login_phone: true })}
-            >
-              {t("contactSettings.phone.useLogin", { masked: login.masked })}
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              {login.available ? t("contactSettings.phone.useLoginHint") : t("contactSettings.phone.loginUnverified")}
-            </p>
-          </div>
+          {/* Le numéro personnel d'un membre n'est jamais proposé comme numéro de l'organisation */}
+          {allowLoginPhone && (
+            <div className="space-y-1">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!login.available || setPhone.isPending}
+                onClick={() => void save({ use_login_phone: true })}
+              >
+                {t("contactSettings.phone.useLogin", { masked: login.masked })}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                {login.available ? t("contactSettings.phone.useLoginHint") : t("contactSettings.phone.loginUnverified")}
+              </p>
+            </div>
+          )}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -255,7 +259,11 @@ function PhoneBlock({ settings }: { settings: ContactSettings }) {
 
 export function ContactSettingsSection() {
   const { t } = useTranslation();
-  const query = useContactSettings();
+  const { active } = useActiveContext();
+  const isOrganization = active.type === "ORGANIZATION";
+  // Réglages d'une organisation : `contact.manage_channels` (propriétaire, administrateurs). Le serveur reste le juge.
+  const denied = isOrganization && active.confirmed && !active.capabilities.includes("contact.manage_channels");
+  const query = useContactSettings(!denied);
   const setChannel = useSetContactChannel();
   const [pendingChannel, setPendingChannel] = useState<ContactChannel | null>(null);
   const [consentError, setConsentError] = useState<string>();
@@ -269,6 +277,9 @@ export function ContactSettingsSection() {
     if (pendingChannel && !verified) setPendingChannel(null);
   }, [pendingChannel, verified]);
 
+  if (denied) {
+    return <AccessDenied description={t("contactSettings.orgDenied")} />;
+  }
   if (query.isLoading) {
     return (
       <div className="space-y-3" aria-busy="true" data-testid="contact-settings-loading">
@@ -309,23 +320,27 @@ export function ContactSettingsSection() {
     }
   };
 
+  const channels = availableChannels(settings, active.type);
+  const phoneChannels = channels.some((channel) => needsConsent(channel));
+
   return (
     <section aria-labelledby="contact-settings-title" className="space-y-4">
       <div>
         <h2 id="contact-settings-title" className="font-display text-lg font-bold">
-          {t("contactSettings.title")}
+          {isOrganization ? t("contactSettings.titleFor", { name: active.name }) : t("contactSettings.title")}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">{t("contactSettings.intro")}</p>
+        {!phoneChannels && <p className="mt-2 text-sm text-muted-foreground">{t("contactSettings.orgMessageOnly")}</p>}
       </div>
 
-      <PhoneBlock settings={settings} />
+      {phoneChannels && <PhoneBlock settings={settings} allowLoginPhone={!isOrganization} />}
 
       <section aria-labelledby="contact-channels-title" className="space-y-1 rounded-xl border p-4">
         <h3 id="contact-channels-title" className="font-semibold">
           {t("contactSettings.channels.title")}
         </h3>
         <ul className="divide-y">
-          {CHANNELS.map((channel) => {
+          {CHANNELS.filter((channel) => channels.includes(channel)).map((channel) => {
             const locked = needsConsent(channel) && !verified;
             const hintId = `contact-channel-${channel}-hint`;
             return (

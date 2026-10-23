@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { Post } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { AccountShell } from "@/components/layout/AccountShell";
+import { AlwaysPersonalNote } from "@/components/profiles/AlwaysPersonalNote";
 import { EmptyState, ErrorState, PageHeader, PostCard, PostGrid, PostGridSkeleton } from "@/components/common";
 import { accountKeys, useFavorites } from "@/hooks/use-account";
 import { useToggleFavorite } from "@/hooks/use-marketplace";
@@ -28,6 +29,7 @@ const Favorites = () => {
         title="Mes favoris"
         description={favorites.length ? `${favorites.length} annonce${favorites.length > 1 ? "s" : ""} enregistrée${favorites.length > 1 ? "s" : ""}` : undefined}
       />
+      <AlwaysPersonalNote className="-mt-4 mb-5" />
 
       {isLoading ? (
         <PostGridSkeleton count={6} className="lg:grid-cols-3" />

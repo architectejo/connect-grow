@@ -45,5 +45,5 @@ export function ActiveContextBanner() {
   );
 }
 
-/** Passe à true quand les écrans « Mes profils » et « Créer une organisation » existent (F2). */
-export const MANAGEMENT_LINKS_READY = false;
+/** Les écrans « Mes profils » (/profiles) et « Créer une organisation » (/organizations/new) existent (F2). */
+export const MANAGEMENT_LINKS_READY = true;

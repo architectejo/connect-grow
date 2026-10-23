@@ -6,7 +6,6 @@
 /** Identifiant UUID (chaîne) de toute ressource de l'API. */
 export type Uuid = string;
 
-export type UserType = "PARTICULIER" | "ENTREPRISE";
 export type Currency = "USD" | "CDF";
 export type PostType = "PRODUIT" | "SERVICE";
 export type PostCondition = "NEUF" | "OCCASION" | "RECONDITIONNE";
@@ -23,54 +22,54 @@ export interface RatingSummary {
     count: number;
 }
 
-export interface BusinessProfile {
-    business_name: string;
-    categories?: Uuid[];
-    bio?: string;
-    logo?: string | null;
-    nif?: string;
-    is_verified?: boolean;
-}
-
-/** Fiche publique d'une entreprise (PublicBusinessSerializer) : liste blanche, plus de téléphone, e-mail ni NIF. */
-export interface PublicBusiness {
-    id: Uuid;
-    business_name: string;
-    logo?: string | null;
-    bio?: string;
-    categories?: Uuid[];
-    ville_name?: string | null;
-    commune_name?: string | null;
-    is_verified: boolean;
-}
-
 export interface User {
     id: Uuid;
     /** Null pour un compte inscrit par téléphone. */
     email: string | null;
     full_name: string;
     photo?: string | null;
-    user_type: UserType;
     /** Null pour un compte inscrit par e-mail. */
     phone?: string | null;
     ville?: Uuid | null;
     ville_name?: string | null;
     commune?: Uuid | null;
     commune_name?: string | null;
-    business_profile?: BusinessProfile | null;
     date_joined?: string;
+    /** Le numéro de connexion a été vérifié par SMS (lecture seule ; ADR 0006 §17.1). */
     phone_verified?: boolean;
 }
 
-/** Vendeur tel qu'imbriqué dans une annonce (SellerSerializer). Ni téléphone ni e-mail : règle 10. */
+/** Mention de vérification précise (« RCCM vérifié ») ; le libellé du serveur ne sert que de repli (ADR 0006 §9.2). */
+export interface VerifiedClaim {
+    code: ClaimCode | string;
+    label: string;
+    verified_at: string | null;
+}
+
+export type ClaimCode = "RCCM_VERIFIED" | "NATIONAL_ID_VERIFIED" | "REPRESENTATIVE_VERIFIED" | "NGO_DECREE_VERIFIED";
+
+/** « Organisation vérifiée » n'existe que si toutes les pièces exigées sont validées, et se lit avec la liste des mentions. */
+export interface VerificationSummary {
+    complete: boolean;
+    label: string | null;
+}
+
+export type SellerContextType = "USER" | "PROVIDER" | "ORGANIZATION";
+
+/**
+ * Vendeur d'une offre (ADR 0006 §9.6) : le profil sous lequel l'offre est publiée. Ni téléphone, ni e-mail, ni
+ * identifiant de compte (règle 10). Ne jamais le renvoyer dans un POST/PATCH d'offre (400 `seller_not_settable`).
+ */
 export interface Seller {
-    id: Uuid;
-    full_name: string;
+    context_type: SellerContextType;
+    context_id: Uuid;
+    display_name: string;
     photo?: string | null;
-    user_type: UserType;
-    business_profile?: Pick<BusinessProfile, "business_name" | "bio" | "logo" | "is_verified"> | null;
+    org_type?: OrganizationType | null;
+    verified_claims: VerifiedClaim[];
+    verification_summary: VerificationSummary;
     /** Source unique de l'ancienneté (« Sur Connecte+ depuis <mois année> »). */
-    date_joined?: string;
+    member_since?: string | null;
 }
 
 export interface PostImage {
@@ -123,6 +122,8 @@ export interface Post {
     is_hidden_by_moderation?: boolean;
     /** Moyens de contact acceptés par le vendeur (ADR 0005 §5.2). Jamais de numéro. */
     allowed_channels: ContactChannel[];
+    /** Le demandeur peut modifier cette offre (membre avec `offer.edit`, ou titulaire) ; ADR 0006 §9.6. */
+    is_owner?: boolean;
 }
 
 export interface Category {
@@ -162,7 +163,9 @@ export interface PostFilters {
     price_min?: string;
     price_max?: string;
     ordering?: PostOrdering | "";
+    /** Identifiant du contexte vendeur (et non d'un compte), avec `seller_type` pour lever l'ambiguïté. */
     seller?: string;
+    seller_type?: SellerContextType;
     /** Commune de référence pour la proximité (D) du classement ; un identifiant invalide est ignoré par l'API. */
     near?: string;
 }
@@ -270,19 +273,24 @@ export interface AppNotification {
     link?: string | null;
     is_read: boolean;
     created_at: string;
+    /** Profil auquel la notification est rattachée (organisation, prestataire) ; null pour le profil personnel (ADR 0006 §9.8). */
+    context?: { type: ContextType; id: Uuid; name: string } | null;
 }
 
-export type KycDocumentType = "RCCM" | "ID_NATIONALE" | "PIECE_GERANT";
+export type KycDocumentType = "RCCM" | "ID_NATIONALE" | "PIECE_GERANT" | "ARRETE_ONG";
 export type KycStatus = "EN_ATTENTE" | "VALIDE" | "REFUSE";
 
-export interface KycDocument {
+/**
+ * Pièce de vérification d'une organisation (ADR 0006 §9.4). Le serveur ne renvoie jamais l'URL ni le contenu du
+ * fichier : seuls les examinateurs habilités le téléchargent.
+ */
+export interface OrganizationKycDocument {
     id: Uuid;
     document_type: KycDocumentType;
-    /** URL authentifiée de téléchargement, renvoyée aux seuls examinateurs habilités (sinon null). */
-    download_url?: string | null;
+    document_type_label: string;
     status: KycStatus;
     rejection_reason?: string;
-    created_at: string;
+    uploaded_at: string;
     reviewed_at?: string | null;
 }
 
@@ -305,6 +313,14 @@ export interface ContactChannelState {
 }
 
 export interface ContactSettings {
+    /** Profil auquel s'appliquent ces réglages (ADR 0006 §9.8). Absent des anciennes réponses. */
+    context?: { type: ContextType; id: Uuid };
+    /**
+     * Canaux que ce profil a le droit de configurer (ADR 0006 §17.1, Q-F3) : une organisation n'a que `MESSAGE`
+     * tant que l'appel et WhatsApp lui sont fermés. Différent de `allowed_channels` d'une offre (canal effectif).
+     * Absent : profil personnel ou prestataire, les trois canaux.
+     */
+    available_channels?: ContactChannel[];
     /** null tant qu'aucun numéro de contact n'existe. */
     phone: ContactPhoneState | null;
     /** Masque du numéro de connexion fourni par le serveur à la racine (null sans numéro). Absent des anciennes réponses. */
@@ -373,4 +389,140 @@ export interface ContextsResponse {
   next: string | null;
   previous: string | null;
   results: AvailableContext[];
+}
+
+// --- Organisations (ADR 0006 §9.2, §17.2, §19.1) ---
+
+export type OrganizationStatus = "ACTIVE" | "SUSPENDED" | "ARCHIVED";
+
+/** État d'une pièce exigée dans `OrganizationInternal.verification.required`. */
+export type RequiredDocumentState = "NONE" | "EN_ATTENTE" | "VALIDE" | "REFUSE";
+
+export interface RequiredDocument {
+    document_type: KycDocumentType;
+    label: string;
+    state: RequiredDocumentState;
+}
+
+export interface OrganizationVerificationBlock {
+    required: RequiredDocument[];
+    verified_claims: VerifiedClaim[];
+    summary: VerificationSummary;
+}
+
+/** Détail réservé aux membres actifs. `nif` n'est renseigné que pour le propriétaire et les administrateurs (règle 10). */
+export interface OrganizationInternal {
+    id: Uuid;
+    name: string;
+    org_type: OrganizationType;
+    description: string;
+    logo: string | null;
+    nif: string | null;
+    city_id: Uuid | null;
+    commune_id: Uuid | null;
+    category_ids: Uuid[];
+    status: OrganizationStatus;
+    created_at: string;
+    my_role: OrganizationRole;
+    capabilities: string[];
+    /** Organisation issue d'un ancien compte entreprise. Absent : faux (la clé disparaîtra avec la migration). */
+    migrated_from_business?: boolean;
+    verification: OrganizationVerificationBlock;
+}
+
+/** Élément de la liste publique `organizations/` : liste blanche stricte, ni NIF, ni statut, ni coordonnées, ni membres. */
+export interface PublicOrganization {
+    id: Uuid;
+    name: string;
+    org_type: OrganizationType;
+    description: string;
+    logo: string | null;
+    city_id: Uuid | null;
+    commune_id: Uuid | null;
+    category_ids: Uuid[];
+    verified_claims: VerifiedClaim[];
+    verification_summary: VerificationSummary;
+    member_since: string;
+}
+
+export interface OrganizationFilters {
+    search?: string;
+    org_type?: OrganizationType | "";
+    claim?: ClaimCode | "";
+    fully_verified?: boolean;
+}
+
+/** `organizations/limits/` : limites lues dans les réglages du serveur (le front ne code aucune limite). */
+export interface OrganizationLimits {
+    max_categories_per_context: number;
+    max_organizations_per_account: number;
+    name_min_length: number;
+    name_max_length: number;
+    description_max_length: number;
+}
+
+/** Corps de création/modification : jamais `status`, `id`, `my_role`, ni `org_type` en modification. */
+export interface OrganizationInput {
+    name: string;
+    org_type?: OrganizationType;
+    description: string;
+    nif: string;
+    category_ids: Uuid[];
+    city_id: Uuid | null;
+    commune_id: Uuid | null;
+}
+
+/** État de vérification renvoyé par `organizations/<id>/verification/` (ADR 0006 §9.4 ; état `MANQUANTE` si rien n'est déposé). */
+export type RequirementStatus = KycStatus | "MANQUANTE";
+
+export interface VerificationRequirement {
+    document_type: KycDocumentType;
+    document_type_label: string;
+    claim_code: ClaimCode | string;
+    claim_label: string;
+    status: RequirementStatus;
+    rejection_reason: string;
+}
+
+export interface OrganizationVerification {
+    verified_claims: VerifiedClaim[];
+    summary: VerificationSummary;
+    requirements: VerificationRequirement[];
+}
+
+// --- Prestataire individuel (ADR 0006 §9.3) ---
+
+export type ProviderStatus = "ACTIVE" | "ARCHIVED";
+
+export interface ProviderProfile {
+    id: Uuid;
+    display_name: string;
+    bio: string;
+    category_ids: Uuid[];
+    status: ProviderStatus;
+    created_at: string;
+}
+
+export interface ProviderInput {
+    display_name?: string;
+    bio?: string;
+    category_ids?: Uuid[];
+}
+
+// --- Profil public d'un vendeur (ADR 0006 §9.7) ---
+
+/** `marketplace/sellers/<user|provider|organization>/<uuid>/` : aucun téléphone, e-mail, adresse exacte ni membre. */
+export interface SellerProfileData {
+    context_type: SellerContextType;
+    context_id: Uuid;
+    display_name: string;
+    photo: string | null;
+    /** Description de l'organisation, bio du prestataire, null pour un compte personnel. */
+    description: string | null;
+    org_type: OrganizationType | null;
+    verified_claims: VerifiedClaim[];
+    verification_summary: VerificationSummary;
+    member_since: string | null;
+    seller_rating: RatingSummary;
+    active_offers_count: number;
 }

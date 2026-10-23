@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { isCacheableApiContent, isContactRevealRequest, isContextsRequest } from "./cache-rules";
+import { isCacheableApiContent, isContactRevealRequest, isContextsRequest, isSensitiveIdentityRequest } from "./cache-rules";
 
 const call = (path: string, headers: Record<string, string> = {}, method = "GET") =>
   isCacheableApiContent({
@@ -13,7 +13,15 @@ describe("isCacheableApiContent", () => {
   it("accepte une lecture publique", () => {
     expect(call("/api/marketplace/posts/")).toBe(true);
     expect(call("/api/v1/marketplace/posts/12/")).toBe(true);
-    expect(call("/api/accounts/businesses/3/")).toBe(true);
+    expect(call("/api/marketplace/sellers/organization/3/")).toBe(true);
+    expect(call("/api/v1/marketplace/sellers/provider/3/")).toBe(true);
+  });
+  it("accepte la liste publique des organisations, avec filtres", () => {
+    expect(call("/api/accounts/organizations/")).toBe(true);
+    expect(call("/api/v1/accounts/organizations/?org_type=ONG&claim=RCCM_VERIFIED&page=2")).toBe(true);
+  });
+  it("l'ancienne liste des entreprises n'est plus une lecture publique mise en cache", () => {
+    expect(call("/api/accounts/businesses/3/")).toBe(false);
   });
   it("refuse une requête authentifiée", () => {
     expect(call("/api/marketplace/posts/", { Authorization: "Bearer x" })).toBe(false);
@@ -42,7 +50,8 @@ describe("isCacheableApiContent", () => {
     expect(call("/api/interactions/notifications/")).toBe(false);
   });
   it("refuse toute requête portant Authorization, y compris sur les routes publiques", () => {
-    expect(call("/api/accounts/businesses/", { Authorization: "Bearer x" })).toBe(false);
+    expect(call("/api/accounts/organizations/", { Authorization: "Bearer x" })).toBe(false);
+    expect(call("/api/marketplace/sellers/user/3/", { Authorization: "Bearer x" })).toBe(false);
   });
 });
 
@@ -96,6 +105,50 @@ describe("liste des profils (accounts/contexts/) : jamais en cache hors ligne", 
   it("la configuration PWA la déclare en NetworkOnly, avant toute règle de cache", () => {
     const config = readFileSync(resolve(process.cwd(), "vite.config.ts"), "utf-8");
     const rule = config.search(/urlPattern:\s*isContextsRequest,\s*handler:\s*"NetworkOnly"/);
+    expect(rule).toBeGreaterThan(-1);
+    expect(rule).toBeLessThan(config.indexOf('handler: "CacheFirst"'));
+    expect(rule).toBeLessThan(config.indexOf('handler: "StaleWhileRevalidate"'));
+    expect(rule).toBeLessThan(config.indexOf('handler: "NetworkFirst"'));
+  });
+});
+
+describe("espace d'une organisation, prestataire et pièces : jamais en cache hors ligne", () => {
+  const match = (path: string) => isSensitiveIdentityRequest({ url: new URL(path, "http://localhost") });
+  const ID = "11111111-1111-4111-8111-111111111111";
+  const privatePaths = [
+    `/api/accounts/organizations/${ID}/internal/`,
+    `/api/accounts/organizations/${ID}/kyc/documents/`,
+    `/api/accounts/organizations/${ID}/kyc/documents/${ID}/`,
+    `/api/accounts/organizations/${ID}/verification/`,
+    `/api/accounts/organizations/${ID}/leave/`,
+    `/api/accounts/organizations/${ID}/archive/`,
+    `/api/accounts/organizations/${ID}/`,
+    "/api/accounts/organizations/limits/",
+    "/api/accounts/provider/",
+    "/api/accounts/provider/activate/",
+    "/api/accounts/contexts/",
+    "/api/accounts/kyc/documents/",
+    `/api/v1/accounts/organizations/${ID}/internal/`,
+    "/api/v1/accounts/provider/",
+  ];
+
+  it.each(privatePaths)("%s n'est jamais éligible au cache de contenus publics, même sans Authorization", (path) => {
+    expect(call(path)).toBe(false);
+  });
+
+  it("les routes sensibles (hors contexts, couvert plus haut) sont reconnues pour la règle NetworkOnly", () => {
+    for (const path of privatePaths.filter((p) => !p.includes("/contexts/"))) expect(match(path), path).toBe(true);
+  });
+
+  it("la liste publique des organisations n'est pas une route sensible", () => {
+    expect(match("/api/accounts/organizations/")).toBe(false);
+    expect(match("/api/accounts/organizations/?search=a")).toBe(false);
+    expect(match("/api/marketplace/sellers/organization/3/")).toBe(false);
+  });
+
+  it("la configuration PWA la déclare en NetworkOnly, avant toute règle de cache", () => {
+    const config = readFileSync(resolve(process.cwd(), "vite.config.ts"), "utf-8");
+    const rule = config.search(/urlPattern:\s*isSensitiveIdentityRequest,\s*handler:\s*"NetworkOnly"/);
     expect(rule).toBeGreaterThan(-1);
     expect(rule).toBeLessThan(config.indexOf('handler: "CacheFirst"'));
     expect(rule).toBeLessThan(config.indexOf('handler: "StaleWhileRevalidate"'));

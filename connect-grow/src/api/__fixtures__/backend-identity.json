@@ -1,0 +1,1537 @@
+{
+  "_note": "Réponses réelles du backend d'intégration integ/L0-09 (apps/identity, apps/marketplace), enregistrées par un script jetable hors dépôt dans une base de test en mémoire. Données fictives, aucun secret. Absents car non livrés à la date d'enregistrement : marketplace/sellers/<type>/<id>/ (T5b) ainsi que `context` et `available_channels` de contact-settings (T7) ; le front les consomme d'après l'ADR 0006.",
+  "provider_not_found_error": {
+    "status": 404,
+    "body": {
+      "detail": "Vous n'avez pas de profil de prestataire.",
+      "code": "provider_not_found"
+    }
+  },
+  "provider_activated": {
+    "id": "200c58da-3236-4dd7-91a1-e4ea65e52fa4",
+    "display_name": "Marie couture",
+    "bio": "Couture sur mesure",
+    "category_ids": [
+      "0c03ed87-b488-42de-9ffa-4a37ad9b70c2"
+    ],
+    "status": "ACTIVE",
+    "created_at": "2026-10-10T17:27:54.909040Z"
+  },
+  "provider": {
+    "id": "200c58da-3236-4dd7-91a1-e4ea65e52fa4",
+    "display_name": "Marie couture",
+    "bio": "Couture sur mesure",
+    "category_ids": [
+      "0c03ed87-b488-42de-9ffa-4a37ad9b70c2"
+    ],
+    "status": "ACTIVE",
+    "created_at": "2026-10-10T17:27:54.909040Z"
+  },
+  "provider_patched": {
+    "id": "200c58da-3236-4dd7-91a1-e4ea65e52fa4",
+    "display_name": "Marie couture",
+    "bio": "Couture et retouches",
+    "category_ids": [
+      "0c03ed87-b488-42de-9ffa-4a37ad9b70c2"
+    ],
+    "status": "ACTIVE",
+    "created_at": "2026-10-10T17:27:54.909040Z"
+  },
+  "provider_archived": {
+    "id": "200c58da-3236-4dd7-91a1-e4ea65e52fa4",
+    "display_name": "Marie couture",
+    "bio": "Couture et retouches",
+    "category_ids": [
+      "0c03ed87-b488-42de-9ffa-4a37ad9b70c2"
+    ],
+    "status": "ARCHIVED",
+    "created_at": "2026-10-10T17:27:54.909040Z"
+  },
+  "provider_patch_archived_error": {
+    "status": 403,
+    "body": {
+      "detail": "Ce profil de prestataire est archivé.",
+      "code": "DENY_OBJECT_STATE"
+    }
+  },
+  "provider_reactivated": {
+    "id": "200c58da-3236-4dd7-91a1-e4ea65e52fa4",
+    "display_name": "Marie couture",
+    "bio": "Couture et retouches",
+    "category_ids": [
+      "0c03ed87-b488-42de-9ffa-4a37ad9b70c2"
+    ],
+    "status": "ACTIVE",
+    "created_at": "2026-10-10T17:27:54.909040Z"
+  },
+  "contexts": {
+    "count": 3,
+    "next": null,
+    "previous": null,
+    "results": [
+      {
+        "type": "USER",
+        "id": "22586ee0-e730-4201-a556-730f1b6ae954",
+        "name": "Nom owner",
+        "role": null,
+        "org_type": null,
+        "photo": null,
+        "capabilities": [
+          "contact.manage_channels",
+          "contact.view_requesters",
+          "message.reply",
+          "offer.delete",
+          "offer.edit",
+          "offer.publish",
+          "offer.view_internal",
+          "review.reply",
+          "stats.view"
+        ],
+        "migrated_from_business": false
+      },
+      {
+        "type": "PROVIDER",
+        "id": "200c58da-3236-4dd7-91a1-e4ea65e52fa4",
+        "name": "Marie couture",
+        "role": null,
+        "org_type": null,
+        "photo": null,
+        "capabilities": [
+          "contact.manage_channels",
+          "contact.view_requesters",
+          "message.reply",
+          "offer.delete",
+          "offer.edit",
+          "offer.publish",
+          "offer.view_internal",
+          "review.reply",
+          "stats.view"
+        ],
+        "migrated_from_business": false
+      },
+      {
+        "type": "ORGANIZATION",
+        "id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+        "name": "Atelier Test",
+        "role": "OWNER",
+        "org_type": "ENTREPRISE",
+        "photo": null,
+        "capabilities": [
+          "contact.manage_channels",
+          "contact.view_requesters",
+          "message.reply",
+          "offer.delete",
+          "offer.edit",
+          "offer.publish",
+          "offer.view_internal",
+          "org.archive",
+          "org.edit_profile",
+          "org.leave",
+          "org.manage_members",
+          "org.manage_roles",
+          "org.verification_submit",
+          "org.view_internal",
+          "review.reply",
+          "stats.view"
+        ],
+        "migrated_from_business": false
+      }
+    ]
+  },
+  "limits": {
+    "max_categories_per_context": 5,
+    "max_organizations_per_account": 10,
+    "name_min_length": 2,
+    "name_max_length": 255,
+    "description_max_length": 2000
+  },
+  "organization_internal_owner": {
+    "id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+    "name": "Atelier Test",
+    "org_type": "ENTREPRISE",
+    "description": "",
+    "logo": null,
+    "nif": "",
+    "city_id": null,
+    "commune_id": null,
+    "category_ids": [],
+    "status": "ACTIVE",
+    "created_at": "2026-10-10T18:27:54.309707+01:00",
+    "my_role": "OWNER",
+    "capabilities": [
+      "contact.manage_channels",
+      "contact.view_requesters",
+      "message.reply",
+      "offer.delete",
+      "offer.edit",
+      "offer.publish",
+      "offer.view_internal",
+      "org.archive",
+      "org.edit_profile",
+      "org.leave",
+      "org.manage_members",
+      "org.manage_roles",
+      "org.verification_submit",
+      "org.view_internal",
+      "review.reply",
+      "stats.view"
+    ],
+    "migrated_from_business": false,
+    "verification": {
+      "required": [
+        {
+          "document_type": "RCCM",
+          "label": "RCCM",
+          "state": "NONE"
+        },
+        {
+          "document_type": "ID_NATIONALE",
+          "label": "Identification nationale",
+          "state": "NONE"
+        },
+        {
+          "document_type": "PIECE_GERANT",
+          "label": "Pièce d'identité du gérant",
+          "state": "NONE"
+        }
+      ],
+      "verified_claims": [],
+      "summary": {
+        "complete": false,
+        "label": null
+      }
+    }
+  },
+  "organization_internal_analyst": {
+    "id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+    "name": "Atelier Test",
+    "org_type": "ENTREPRISE",
+    "description": "",
+    "logo": null,
+    "nif": null,
+    "city_id": null,
+    "commune_id": null,
+    "category_ids": [],
+    "status": "ACTIVE",
+    "created_at": "2026-10-10T18:27:54.309707+01:00",
+    "my_role": "ANALYST",
+    "capabilities": [
+      "offer.view_internal",
+      "org.leave",
+      "org.view_internal",
+      "stats.view"
+    ],
+    "migrated_from_business": false,
+    "verification": {
+      "required": [
+        {
+          "document_type": "RCCM",
+          "label": "RCCM",
+          "state": "NONE"
+        },
+        {
+          "document_type": "ID_NATIONALE",
+          "label": "Identification nationale",
+          "state": "NONE"
+        },
+        {
+          "document_type": "PIECE_GERANT",
+          "label": "Pièce d'identité du gérant",
+          "state": "NONE"
+        }
+      ],
+      "verified_claims": [],
+      "summary": {
+        "complete": false,
+        "label": null
+      }
+    }
+  },
+  "organization_internal_outsider_error": {
+    "status": 403,
+    "body": {
+      "detail": "Vous n'êtes pas membre de cette organisation.",
+      "code": "DENY_RELATION"
+    }
+  },
+  "organization_patched": {
+    "id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+    "name": "Atelier Test",
+    "org_type": "ENTREPRISE",
+    "description": "Atelier de couture de Gombe",
+    "logo": null,
+    "nif": "A1234567B",
+    "city_id": "0bbc6cdf-a888-4eef-a4f3-214010e77b12",
+    "commune_id": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+    "category_ids": [
+      "0c03ed87-b488-42de-9ffa-4a37ad9b70c2"
+    ],
+    "status": "ACTIVE",
+    "created_at": "2026-10-10T18:27:54.309707+01:00",
+    "my_role": "OWNER",
+    "capabilities": [
+      "contact.manage_channels",
+      "contact.view_requesters",
+      "message.reply",
+      "offer.delete",
+      "offer.edit",
+      "offer.publish",
+      "offer.view_internal",
+      "org.archive",
+      "org.edit_profile",
+      "org.leave",
+      "org.manage_members",
+      "org.manage_roles",
+      "org.verification_submit",
+      "org.view_internal",
+      "review.reply",
+      "stats.view"
+    ],
+    "migrated_from_business": false,
+    "verification": {
+      "required": [
+        {
+          "document_type": "RCCM",
+          "label": "RCCM",
+          "state": "NONE"
+        },
+        {
+          "document_type": "ID_NATIONALE",
+          "label": "Identification nationale",
+          "state": "NONE"
+        },
+        {
+          "document_type": "PIECE_GERANT",
+          "label": "Pièce d'identité du gérant",
+          "state": "NONE"
+        }
+      ],
+      "verified_claims": [],
+      "summary": {
+        "complete": false,
+        "label": null
+      }
+    }
+  },
+  "organization_patch_forbidden_error": {
+    "status": 403,
+    "body": {
+      "detail": "Votre rôle ne permet pas cette action.",
+      "code": "DENY_PERMISSION"
+    }
+  },
+  "organization_patch_type_error": {
+    "status": 400,
+    "body": {
+      "org_type": [
+        "Le type d'une organisation ne peut pas être modifié."
+      ]
+    }
+  },
+  "organization_create_bad_name_error": {
+    "status": 400,
+    "body": {
+      "name": [
+        "Le nom doit contenir de 2 à 255 caractères."
+      ]
+    }
+  },
+  "organization_create_phone_error": {
+    "status": 403,
+    "body": {
+      "detail": "Vérifiez votre numéro de téléphone avant de créer une organisation.",
+      "code": "phone_verification_required"
+    }
+  },
+  "me_unverified": {
+    "id": "fd57fbf2-5ed7-45f8-81b9-27f0bf3c8ff0",
+    "email": "nophone@example.com",
+    "photo": null,
+    "full_name": "Nom nophone",
+    "ville": null,
+    "ville_name": null,
+    "commune": null,
+    "commune_name": null,
+    "phone": null,
+    "phone_verified": false,
+    "date_joined": "2026-10-10T18:27:55.514075+01:00"
+  },
+  "organization_created": {
+    "id": "750ef446-90e5-4a44-a872-03b0749e0da3",
+    "name": "Aide Kin",
+    "org_type": "ONG",
+    "description": "",
+    "logo": null,
+    "nif": "",
+    "city_id": null,
+    "commune_id": null,
+    "category_ids": [
+      "0c03ed87-b488-42de-9ffa-4a37ad9b70c2"
+    ],
+    "status": "ACTIVE",
+    "created_at": "2026-10-10T18:27:55.552510+01:00",
+    "my_role": "OWNER",
+    "capabilities": [
+      "contact.manage_channels",
+      "contact.view_requesters",
+      "message.reply",
+      "offer.delete",
+      "offer.edit",
+      "offer.publish",
+      "offer.view_internal",
+      "org.archive",
+      "org.edit_profile",
+      "org.leave",
+      "org.manage_members",
+      "org.manage_roles",
+      "org.verification_submit",
+      "org.view_internal",
+      "review.reply",
+      "stats.view"
+    ],
+    "migrated_from_business": false,
+    "verification": {
+      "required": [
+        {
+          "document_type": "ARRETE_ONG",
+          "label": "Arrêté d'enregistrement de l'ONG",
+          "state": "NONE"
+        },
+        {
+          "document_type": "ID_NATIONALE",
+          "label": "Identification nationale",
+          "state": "NONE"
+        },
+        {
+          "document_type": "PIECE_GERANT",
+          "label": "Pièce d'identité du gérant",
+          "state": "NONE"
+        }
+      ],
+      "verified_claims": [],
+      "summary": {
+        "complete": false,
+        "label": null
+      }
+    }
+  },
+  "organization_limit_error": {
+    "status": 409,
+    "body": {
+      "detail": "Vous avez atteint le nombre maximal d'organisations.",
+      "code": "organization_limit_reached"
+    }
+  },
+  "organization_last_owner_error": {
+    "status": 409,
+    "body": {
+      "detail": "Une organisation doit garder au moins un propriétaire.",
+      "code": "last_owner"
+    }
+  },
+  "organization_archived": {
+    "id": "750ef446-90e5-4a44-a872-03b0749e0da3",
+    "name": "Aide Kin",
+    "org_type": "ONG",
+    "description": "",
+    "logo": null,
+    "nif": "",
+    "city_id": null,
+    "commune_id": null,
+    "category_ids": [
+      "0c03ed87-b488-42de-9ffa-4a37ad9b70c2"
+    ],
+    "status": "ARCHIVED",
+    "created_at": "2026-10-10T18:27:55.552510+01:00",
+    "my_role": "OWNER",
+    "capabilities": [
+      "contact.manage_channels",
+      "contact.view_requesters",
+      "message.reply",
+      "offer.delete",
+      "offer.edit",
+      "offer.publish",
+      "offer.view_internal",
+      "org.archive",
+      "org.edit_profile",
+      "org.leave",
+      "org.manage_members",
+      "org.manage_roles",
+      "org.verification_submit",
+      "org.view_internal",
+      "review.reply",
+      "stats.view"
+    ],
+    "migrated_from_business": false,
+    "verification": {
+      "required": [
+        {
+          "document_type": "ARRETE_ONG",
+          "label": "Arrêté d'enregistrement de l'ONG",
+          "state": "NONE"
+        },
+        {
+          "document_type": "ID_NATIONALE",
+          "label": "Identification nationale",
+          "state": "NONE"
+        },
+        {
+          "document_type": "PIECE_GERANT",
+          "label": "Pièce d'identité du gérant",
+          "state": "NONE"
+        }
+      ],
+      "verified_claims": [],
+      "summary": {
+        "complete": false,
+        "label": null
+      }
+    }
+  },
+  "organization_internal_archived_error": {
+    "status": 403,
+    "body": {
+      "detail": "Cette organisation est archivée.",
+      "code": "DENY_OBJECT_STATE"
+    }
+  },
+  "contexts_after_leave": {
+    "count": 1,
+    "next": null,
+    "previous": null,
+    "results": [
+      {
+        "type": "USER",
+        "id": "d34ae811-97b1-46a9-9a1b-635a40589356",
+        "name": "Nom founder",
+        "role": null,
+        "org_type": null,
+        "photo": null,
+        "capabilities": [
+          "contact.manage_channels",
+          "contact.view_requesters",
+          "message.reply",
+          "offer.delete",
+          "offer.edit",
+          "offer.publish",
+          "offer.view_internal",
+          "review.reply",
+          "stats.view"
+        ],
+        "migrated_from_business": false
+      }
+    ]
+  },
+  "verification_empty": {
+    "verified_claims": [],
+    "summary": {
+      "complete": false,
+      "label": null
+    },
+    "requirements": [
+      {
+        "document_type": "RCCM",
+        "document_type_label": "RCCM",
+        "claim_code": "RCCM_VERIFIED",
+        "claim_label": "RCCM vérifié",
+        "status": "MANQUANTE",
+        "rejection_reason": ""
+      },
+      {
+        "document_type": "ID_NATIONALE",
+        "document_type_label": "Identification nationale",
+        "claim_code": "NATIONAL_ID_VERIFIED",
+        "claim_label": "Identification nationale vérifiée",
+        "status": "MANQUANTE",
+        "rejection_reason": ""
+      },
+      {
+        "document_type": "PIECE_GERANT",
+        "document_type_label": "Pièce d'identité du gérant",
+        "claim_code": "REPRESENTATIVE_VERIFIED",
+        "claim_label": "Représentant vérifié",
+        "status": "MANQUANTE",
+        "rejection_reason": ""
+      }
+    ]
+  },
+  "kyc_document_created": {
+    "id": "315a919b-cae1-45ec-a684-fce20b5636ea",
+    "document_type": "RCCM",
+    "document_type_label": "RCCM",
+    "status": "EN_ATTENTE",
+    "rejection_reason": "",
+    "uploaded_at": "2026-10-10T18:27:55.801229+01:00",
+    "reviewed_at": null
+  },
+  "kyc_document_created_idn": {
+    "id": "95f979c5-1f78-40fe-8ad1-34c56ec7f387",
+    "document_type": "ID_NATIONALE",
+    "document_type_label": "Identification nationale",
+    "status": "EN_ATTENTE",
+    "rejection_reason": "",
+    "uploaded_at": "2026-10-10T18:27:55.845820+01:00",
+    "reviewed_at": null
+  },
+  "kyc_error_permission": {
+    "status": 403,
+    "body": {
+      "detail": "Votre rôle ne permet pas cette action dans ce contexte.",
+      "code": "DENY_PERMISSION"
+    }
+  },
+  "kyc_error_not_required": {
+    "status": 400,
+    "body": {
+      "document_type": [
+        "Cette pièce n'est pas exigée pour ce type d'organisation."
+      ]
+    }
+  },
+  "kyc_error_bad_file": {
+    "status": 400,
+    "body": {
+      "file": [
+        "Format non accepté. Envoyez un fichier JPEG, PNG ou PDF."
+      ]
+    }
+  },
+  "verification_pending": {
+    "verified_claims": [],
+    "summary": {
+      "complete": false,
+      "label": null
+    },
+    "requirements": [
+      {
+        "document_type": "RCCM",
+        "document_type_label": "RCCM",
+        "claim_code": "RCCM_VERIFIED",
+        "claim_label": "RCCM vérifié",
+        "status": "EN_ATTENTE",
+        "rejection_reason": ""
+      },
+      {
+        "document_type": "ID_NATIONALE",
+        "document_type_label": "Identification nationale",
+        "claim_code": "NATIONAL_ID_VERIFIED",
+        "claim_label": "Identification nationale vérifiée",
+        "status": "EN_ATTENTE",
+        "rejection_reason": ""
+      },
+      {
+        "document_type": "PIECE_GERANT",
+        "document_type_label": "Pièce d'identité du gérant",
+        "claim_code": "REPRESENTATIVE_VERIFIED",
+        "claim_label": "Représentant vérifié",
+        "status": "MANQUANTE",
+        "rejection_reason": ""
+      }
+    ]
+  },
+  "organization_internal_pending": {
+    "id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+    "name": "Atelier Test",
+    "org_type": "ENTREPRISE",
+    "description": "Atelier de couture de Gombe",
+    "logo": null,
+    "nif": "A1234567B",
+    "city_id": "0bbc6cdf-a888-4eef-a4f3-214010e77b12",
+    "commune_id": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+    "category_ids": [
+      "0c03ed87-b488-42de-9ffa-4a37ad9b70c2"
+    ],
+    "status": "ACTIVE",
+    "created_at": "2026-10-10T18:27:54.309707+01:00",
+    "my_role": "OWNER",
+    "capabilities": [
+      "contact.manage_channels",
+      "contact.view_requesters",
+      "message.reply",
+      "offer.delete",
+      "offer.edit",
+      "offer.publish",
+      "offer.view_internal",
+      "org.archive",
+      "org.edit_profile",
+      "org.leave",
+      "org.manage_members",
+      "org.manage_roles",
+      "org.verification_submit",
+      "org.view_internal",
+      "review.reply",
+      "stats.view"
+    ],
+    "migrated_from_business": false,
+    "verification": {
+      "required": [
+        {
+          "document_type": "RCCM",
+          "label": "RCCM",
+          "state": "EN_ATTENTE"
+        },
+        {
+          "document_type": "ID_NATIONALE",
+          "label": "Identification nationale",
+          "state": "EN_ATTENTE"
+        },
+        {
+          "document_type": "PIECE_GERANT",
+          "label": "Pièce d'identité du gérant",
+          "state": "NONE"
+        }
+      ],
+      "verified_claims": [],
+      "summary": {
+        "complete": false,
+        "label": null
+      }
+    }
+  },
+  "organization_name_locked_pending_error": {
+    "status": 409,
+    "body": {
+      "detail": "Le nom ne peut plus être modifié : une pièce de l'organisation est validée ou en cours d'examen. Contactez le support pour un changement de nom.",
+      "code": "name_locked_by_verification"
+    }
+  },
+  "kyc_documents": {
+    "count": 2,
+    "next": null,
+    "previous": null,
+    "results": [
+      {
+        "id": "95f979c5-1f78-40fe-8ad1-34c56ec7f387",
+        "document_type": "ID_NATIONALE",
+        "document_type_label": "Identification nationale",
+        "status": "REFUSE",
+        "rejection_reason": "Document illisible",
+        "uploaded_at": "2026-10-10T18:27:55.845820+01:00",
+        "reviewed_at": "2026-10-10T18:27:56.032214+01:00"
+      },
+      {
+        "id": "315a919b-cae1-45ec-a684-fce20b5636ea",
+        "document_type": "RCCM",
+        "document_type_label": "RCCM",
+        "status": "VALIDE",
+        "rejection_reason": "",
+        "uploaded_at": "2026-10-10T18:27:55.801229+01:00",
+        "reviewed_at": "2026-10-10T18:27:56.016216+01:00"
+      }
+    ]
+  },
+  "verification_mixed": {
+    "verified_claims": [
+      {
+        "code": "RCCM_VERIFIED",
+        "label": "RCCM vérifié",
+        "verified_at": "2026-10-10T17:27:56.016216Z"
+      }
+    ],
+    "summary": {
+      "complete": false,
+      "label": null
+    },
+    "requirements": [
+      {
+        "document_type": "RCCM",
+        "document_type_label": "RCCM",
+        "claim_code": "RCCM_VERIFIED",
+        "claim_label": "RCCM vérifié",
+        "status": "VALIDE",
+        "rejection_reason": ""
+      },
+      {
+        "document_type": "ID_NATIONALE",
+        "document_type_label": "Identification nationale",
+        "claim_code": "NATIONAL_ID_VERIFIED",
+        "claim_label": "Identification nationale vérifiée",
+        "status": "REFUSE",
+        "rejection_reason": "Document illisible"
+      },
+      {
+        "document_type": "PIECE_GERANT",
+        "document_type_label": "Pièce d'identité du gérant",
+        "claim_code": "REPRESENTATIVE_VERIFIED",
+        "claim_label": "Représentant vérifié",
+        "status": "MANQUANTE",
+        "rejection_reason": ""
+      }
+    ]
+  },
+  "organization_internal_validated": {
+    "id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+    "name": "Atelier Test",
+    "org_type": "ENTREPRISE",
+    "description": "Atelier de couture de Gombe",
+    "logo": null,
+    "nif": "A1234567B",
+    "city_id": "0bbc6cdf-a888-4eef-a4f3-214010e77b12",
+    "commune_id": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+    "category_ids": [
+      "0c03ed87-b488-42de-9ffa-4a37ad9b70c2"
+    ],
+    "status": "ACTIVE",
+    "created_at": "2026-10-10T18:27:54.309707+01:00",
+    "my_role": "OWNER",
+    "capabilities": [
+      "contact.manage_channels",
+      "contact.view_requesters",
+      "message.reply",
+      "offer.delete",
+      "offer.edit",
+      "offer.publish",
+      "offer.view_internal",
+      "org.archive",
+      "org.edit_profile",
+      "org.leave",
+      "org.manage_members",
+      "org.manage_roles",
+      "org.verification_submit",
+      "org.view_internal",
+      "review.reply",
+      "stats.view"
+    ],
+    "migrated_from_business": false,
+    "verification": {
+      "required": [
+        {
+          "document_type": "RCCM",
+          "label": "RCCM",
+          "state": "VALIDE"
+        },
+        {
+          "document_type": "ID_NATIONALE",
+          "label": "Identification nationale",
+          "state": "REFUSE"
+        },
+        {
+          "document_type": "PIECE_GERANT",
+          "label": "Pièce d'identité du gérant",
+          "state": "NONE"
+        }
+      ],
+      "verified_claims": [
+        {
+          "code": "RCCM_VERIFIED",
+          "label": "RCCM vérifié",
+          "verified_at": "2026-10-10T18:27:56.016216+01:00"
+        }
+      ],
+      "summary": {
+        "complete": false,
+        "label": null
+      }
+    }
+  },
+  "organization_name_locked_error": {
+    "status": 409,
+    "body": {
+      "detail": "Le nom ne peut plus être modifié : une pièce de l'organisation est validée ou en cours d'examen. Contactez le support pour un changement de nom.",
+      "code": "name_locked_by_verification"
+    }
+  },
+  "organization_nif_locked_error": {
+    "status": 409,
+    "body": {
+      "detail": "Le NIF ne peut plus être modifié : une pièce de l'organisation est validée. Contactez le support pour un changement.",
+      "code": "nif_locked_by_verification"
+    }
+  },
+  "kyc_delete_validated_error": {
+    "status": 409,
+    "body": {
+      "detail": "Une pièce validée ne peut pas être supprimée.",
+      "code": "document_validated"
+    }
+  },
+  "organizations_list": {
+    "count": 1,
+    "next": null,
+    "previous": null,
+    "results": [
+      {
+        "id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+        "name": "Atelier Test",
+        "org_type": "ENTREPRISE",
+        "description": "Atelier de couture de Gombe",
+        "logo": null,
+        "city_id": "0bbc6cdf-a888-4eef-a4f3-214010e77b12",
+        "commune_id": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+        "category_ids": [
+          "0c03ed87-b488-42de-9ffa-4a37ad9b70c2"
+        ],
+        "verified_claims": [
+          {
+            "code": "RCCM_VERIFIED",
+            "label": "RCCM vérifié",
+            "verified_at": "2026-10-10T18:27:56.016216+01:00"
+          }
+        ],
+        "verification_summary": {
+          "complete": false,
+          "label": null
+        },
+        "member_since": "2026-10-10T18:27:54.309707+01:00"
+      }
+    ]
+  },
+  "post_detail_user": {
+    "id": "77da908a-2d43-4891-ba8c-a372e52cce5b",
+    "seller": {
+      "context_type": "USER",
+      "context_id": "22586ee0-e730-4201-a556-730f1b6ae954",
+      "display_name": "Nom O.",
+      "photo": null,
+      "org_type": null,
+      "verified_claims": [],
+      "verification_summary": {
+        "complete": false,
+        "label": null
+      },
+      "member_since": "2026-10-10T18:27:54.110781+01:00"
+    },
+    "seller_name": "Nom O.",
+    "category": "0c03ed87-b488-42de-9ffa-4a37ad9b70c2",
+    "category_name": "Mode et couture",
+    "commune": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+    "commune_name": "Gombe",
+    "post_type": "PRODUIT",
+    "title": "Robe en pagne wax",
+    "description": "Description suffisamment longue pour valider.",
+    "price": "10.00",
+    "currency": "USD",
+    "condition": null,
+    "stock": 1,
+    "is_price_negotiable": false,
+    "main_image": "http://testserver/media/offers/f85d0915d0b4472b913756a96e96b9f1.webp",
+    "images": [],
+    "views_count": 0,
+    "likes_count": 0,
+    "shares_count": 0,
+    "created_at": "2026-10-10T18:27:57.612812+01:00",
+    "status": "ACTIVE",
+    "expires_at": "2026-12-09T18:27:57.611809+01:00",
+    "visibility_score": 0.0,
+    "visibility_rank": "Faible",
+    "offer_rating": {
+      "average": null,
+      "count": 0
+    },
+    "seller_rating": {
+      "average": null,
+      "count": 0
+    },
+    "is_favorited": false,
+    "favorites_count": 0,
+    "is_trending": false,
+    "is_sponsored": false,
+    "allowed_channels": [
+      "MESSAGE"
+    ]
+  },
+  "post_detail_provider": {
+    "id": "dc072084-d249-40a3-9d48-a4ec56f7b760",
+    "seller": {
+      "context_type": "PROVIDER",
+      "context_id": "200c58da-3236-4dd7-91a1-e4ea65e52fa4",
+      "display_name": "Marie couture",
+      "photo": null,
+      "org_type": null,
+      "verified_claims": [],
+      "verification_summary": {
+        "complete": false,
+        "label": null
+      },
+      "member_since": "2026-10-10T18:27:54.909040+01:00"
+    },
+    "seller_name": "Marie couture",
+    "category": "0c03ed87-b488-42de-9ffa-4a37ad9b70c2",
+    "category_name": "Mode et couture",
+    "commune": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+    "commune_name": "Gombe",
+    "post_type": "PRODUIT",
+    "title": "Retouches de vêtements",
+    "description": "Description suffisamment longue pour valider.",
+    "price": "10.00",
+    "currency": "USD",
+    "condition": null,
+    "stock": 1,
+    "is_price_negotiable": false,
+    "main_image": "http://testserver/media/offers/ff318c05f7f747968c8ffcc0aca790da.webp",
+    "images": [],
+    "views_count": 0,
+    "likes_count": 0,
+    "shares_count": 0,
+    "created_at": "2026-10-10T18:27:57.898421+01:00",
+    "status": "ACTIVE",
+    "expires_at": "2026-12-09T18:27:57.898421+01:00",
+    "visibility_score": 0.0,
+    "visibility_rank": "Faible",
+    "offer_rating": {
+      "average": null,
+      "count": 0
+    },
+    "seller_rating": {
+      "average": null,
+      "count": 0
+    },
+    "is_favorited": false,
+    "favorites_count": 0,
+    "is_trending": false,
+    "is_sponsored": false,
+    "allowed_channels": [
+      "MESSAGE"
+    ]
+  },
+  "post_detail_organization": {
+    "id": "70772a8b-b0ea-4ede-9af6-9927d86ddf2a",
+    "seller": {
+      "context_type": "ORGANIZATION",
+      "context_id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+      "display_name": "Atelier Test",
+      "photo": null,
+      "org_type": "ENTREPRISE",
+      "verified_claims": [
+        {
+          "code": "RCCM_VERIFIED",
+          "label": "RCCM vérifié",
+          "verified_at": "2026-10-10T17:27:56.016216Z"
+        }
+      ],
+      "verification_summary": {
+        "complete": false,
+        "label": null
+      },
+      "member_since": "2026-10-10T18:27:54.309707+01:00"
+    },
+    "seller_name": "Atelier Test",
+    "category": "0c03ed87-b488-42de-9ffa-4a37ad9b70c2",
+    "category_name": "Mode et couture",
+    "commune": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+    "commune_name": "Gombe",
+    "post_type": "PRODUIT",
+    "title": "Costume sur mesure",
+    "description": "Description suffisamment longue pour valider.",
+    "price": "10.00",
+    "currency": "USD",
+    "condition": null,
+    "stock": 1,
+    "is_price_negotiable": false,
+    "main_image": "http://testserver/media/offers/6c6085bd0fe44c0a82f64e2674987f4c.webp",
+    "images": [],
+    "views_count": 0,
+    "likes_count": 0,
+    "shares_count": 0,
+    "created_at": "2026-10-10T18:27:58.061637+01:00",
+    "status": "ACTIVE",
+    "expires_at": "2026-12-09T18:27:58.061637+01:00",
+    "visibility_score": 0.0,
+    "visibility_rank": "Faible",
+    "offer_rating": {
+      "average": null,
+      "count": 0
+    },
+    "seller_rating": {
+      "average": null,
+      "count": 0
+    },
+    "is_favorited": false,
+    "favorites_count": 0,
+    "is_trending": false,
+    "is_sponsored": false,
+    "allowed_channels": []
+  },
+  "post_detail_organization_as_editor": {
+    "id": "70772a8b-b0ea-4ede-9af6-9927d86ddf2a",
+    "seller": {
+      "context_type": "ORGANIZATION",
+      "context_id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+      "display_name": "Atelier Test",
+      "photo": null,
+      "org_type": "ENTREPRISE",
+      "verified_claims": [
+        {
+          "code": "RCCM_VERIFIED",
+          "label": "RCCM vérifié",
+          "verified_at": "2026-10-10T17:27:56.016216Z"
+        }
+      ],
+      "verification_summary": {
+        "complete": false,
+        "label": null
+      },
+      "member_since": "2026-10-10T18:27:54.309707+01:00"
+    },
+    "seller_name": "Atelier Test",
+    "category": "0c03ed87-b488-42de-9ffa-4a37ad9b70c2",
+    "category_name": "Mode et couture",
+    "commune": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+    "commune_name": "Gombe",
+    "post_type": "PRODUIT",
+    "title": "Costume sur mesure",
+    "description": "Description suffisamment longue pour valider.",
+    "price": "10.00",
+    "currency": "USD",
+    "condition": null,
+    "stock": 1,
+    "is_price_negotiable": false,
+    "main_image": "http://testserver/media/offers/6c6085bd0fe44c0a82f64e2674987f4c.webp",
+    "images": [],
+    "views_count": 0,
+    "likes_count": 0,
+    "shares_count": 0,
+    "created_at": "2026-10-10T18:27:58.061637+01:00",
+    "status": "ACTIVE",
+    "expires_at": "2026-12-09T18:27:58.061637+01:00",
+    "visibility_score": 0.0,
+    "visibility_rank": "Faible",
+    "offer_rating": {
+      "average": null,
+      "count": 0
+    },
+    "seller_rating": {
+      "average": null,
+      "count": 0
+    },
+    "is_favorited": false,
+    "favorites_count": 0,
+    "is_trending": false,
+    "is_sponsored": false,
+    "is_hidden_by_moderation": false,
+    "allowed_channels": []
+  },
+  "post_detail_organization_as_analyst": {
+    "id": "70772a8b-b0ea-4ede-9af6-9927d86ddf2a",
+    "seller": {
+      "context_type": "ORGANIZATION",
+      "context_id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+      "display_name": "Atelier Test",
+      "photo": null,
+      "org_type": "ENTREPRISE",
+      "verified_claims": [
+        {
+          "code": "RCCM_VERIFIED",
+          "label": "RCCM vérifié",
+          "verified_at": "2026-10-10T17:27:56.016216Z"
+        }
+      ],
+      "verification_summary": {
+        "complete": false,
+        "label": null
+      },
+      "member_since": "2026-10-10T18:27:54.309707+01:00"
+    },
+    "seller_name": "Atelier Test",
+    "category": "0c03ed87-b488-42de-9ffa-4a37ad9b70c2",
+    "category_name": "Mode et couture",
+    "commune": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+    "commune_name": "Gombe",
+    "post_type": "PRODUIT",
+    "title": "Costume sur mesure",
+    "description": "Description suffisamment longue pour valider.",
+    "price": "10.00",
+    "currency": "USD",
+    "condition": null,
+    "stock": 1,
+    "is_price_negotiable": false,
+    "main_image": "http://testserver/media/offers/6c6085bd0fe44c0a82f64e2674987f4c.webp",
+    "images": [],
+    "views_count": 0,
+    "likes_count": 0,
+    "shares_count": 0,
+    "created_at": "2026-10-10T18:27:58.061637+01:00",
+    "status": "ACTIVE",
+    "expires_at": "2026-12-09T18:27:58.061637+01:00",
+    "visibility_score": 0.0,
+    "visibility_rank": "Faible",
+    "offer_rating": {
+      "average": null,
+      "count": 0
+    },
+    "seller_rating": {
+      "average": null,
+      "count": 0
+    },
+    "is_favorited": false,
+    "favorites_count": 0,
+    "is_trending": false,
+    "is_sponsored": false,
+    "is_hidden_by_moderation": false,
+    "allowed_channels": []
+  },
+  "post_detail_organization_as_outsider": {
+    "id": "70772a8b-b0ea-4ede-9af6-9927d86ddf2a",
+    "seller": {
+      "context_type": "ORGANIZATION",
+      "context_id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+      "display_name": "Atelier Test",
+      "photo": null,
+      "org_type": "ENTREPRISE",
+      "verified_claims": [
+        {
+          "code": "RCCM_VERIFIED",
+          "label": "RCCM vérifié",
+          "verified_at": "2026-10-10T17:27:56.016216Z"
+        }
+      ],
+      "verification_summary": {
+        "complete": false,
+        "label": null
+      },
+      "member_since": "2026-10-10T18:27:54.309707+01:00"
+    },
+    "seller_name": "Atelier Test",
+    "category": "0c03ed87-b488-42de-9ffa-4a37ad9b70c2",
+    "category_name": "Mode et couture",
+    "commune": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+    "commune_name": "Gombe",
+    "post_type": "PRODUIT",
+    "title": "Costume sur mesure",
+    "description": "Description suffisamment longue pour valider.",
+    "price": "10.00",
+    "currency": "USD",
+    "condition": null,
+    "stock": 1,
+    "is_price_negotiable": false,
+    "main_image": "http://testserver/media/offers/6c6085bd0fe44c0a82f64e2674987f4c.webp",
+    "images": [],
+    "views_count": 0,
+    "likes_count": 0,
+    "shares_count": 0,
+    "created_at": "2026-10-10T18:27:58.061637+01:00",
+    "status": "ACTIVE",
+    "expires_at": "2026-12-09T18:27:58.061637+01:00",
+    "visibility_score": 0.0,
+    "visibility_rank": "Faible",
+    "offer_rating": {
+      "average": null,
+      "count": 0
+    },
+    "seller_rating": {
+      "average": null,
+      "count": 0
+    },
+    "is_favorited": false,
+    "favorites_count": 0,
+    "is_trending": false,
+    "is_sponsored": false,
+    "allowed_channels": []
+  },
+  "post_list_mixed": [
+    {
+      "id": "70772a8b-b0ea-4ede-9af6-9927d86ddf2a",
+      "seller": {
+        "context_type": "ORGANIZATION",
+        "context_id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+        "display_name": "Atelier Test",
+        "photo": null,
+        "org_type": "ENTREPRISE",
+        "verified_claims": [
+          {
+            "code": "RCCM_VERIFIED",
+            "label": "RCCM vérifié",
+            "verified_at": "2026-10-10T17:27:56.016216Z"
+          }
+        ],
+        "verification_summary": {
+          "complete": false,
+          "label": null
+        },
+        "member_since": "2026-10-10T18:27:54.309707+01:00"
+      },
+      "seller_name": "Atelier Test",
+      "category": "0c03ed87-b488-42de-9ffa-4a37ad9b70c2",
+      "category_name": "Mode et couture",
+      "commune": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+      "commune_name": "Gombe",
+      "post_type": "PRODUIT",
+      "title": "Costume sur mesure",
+      "description": "Description suffisamment longue pour valider.",
+      "price": "10.00",
+      "currency": "USD",
+      "condition": null,
+      "stock": 1,
+      "is_price_negotiable": false,
+      "main_image": "http://testserver/media/offers/6c6085bd0fe44c0a82f64e2674987f4c.webp",
+      "images": [],
+      "views_count": 0,
+      "likes_count": 0,
+      "shares_count": 0,
+      "created_at": "2026-10-10T18:27:58.061637+01:00",
+      "status": "ACTIVE",
+      "expires_at": "2026-12-09T18:27:58.061637+01:00",
+      "visibility_score": 0.0,
+      "visibility_rank": "Faible",
+      "offer_rating": {
+        "average": null,
+        "count": 0
+      },
+      "seller_rating": {
+        "average": null,
+        "count": 0
+      },
+      "is_favorited": false,
+      "favorites_count": 0,
+      "is_trending": false,
+      "is_sponsored": false,
+      "allowed_channels": []
+    },
+    {
+      "id": "dc072084-d249-40a3-9d48-a4ec56f7b760",
+      "seller": {
+        "context_type": "PROVIDER",
+        "context_id": "200c58da-3236-4dd7-91a1-e4ea65e52fa4",
+        "display_name": "Marie couture",
+        "photo": null,
+        "org_type": null,
+        "verified_claims": [],
+        "verification_summary": {
+          "complete": false,
+          "label": null
+        },
+        "member_since": "2026-10-10T18:27:54.909040+01:00"
+      },
+      "seller_name": "Marie couture",
+      "category": "0c03ed87-b488-42de-9ffa-4a37ad9b70c2",
+      "category_name": "Mode et couture",
+      "commune": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+      "commune_name": "Gombe",
+      "post_type": "PRODUIT",
+      "title": "Retouches de vêtements",
+      "description": "Description suffisamment longue pour valider.",
+      "price": "10.00",
+      "currency": "USD",
+      "condition": null,
+      "stock": 1,
+      "is_price_negotiable": false,
+      "main_image": "http://testserver/media/offers/ff318c05f7f747968c8ffcc0aca790da.webp",
+      "images": [],
+      "views_count": 0,
+      "likes_count": 0,
+      "shares_count": 0,
+      "created_at": "2026-10-10T18:27:57.898421+01:00",
+      "status": "ACTIVE",
+      "expires_at": "2026-12-09T18:27:57.898421+01:00",
+      "visibility_score": 0.0,
+      "visibility_rank": "Faible",
+      "offer_rating": {
+        "average": null,
+        "count": 0
+      },
+      "seller_rating": {
+        "average": null,
+        "count": 0
+      },
+      "is_favorited": false,
+      "favorites_count": 0,
+      "is_trending": false,
+      "is_sponsored": false,
+      "allowed_channels": [
+        "MESSAGE"
+      ]
+    },
+    {
+      "id": "77da908a-2d43-4891-ba8c-a372e52cce5b",
+      "seller": {
+        "context_type": "USER",
+        "context_id": "22586ee0-e730-4201-a556-730f1b6ae954",
+        "display_name": "Nom O.",
+        "photo": null,
+        "org_type": null,
+        "verified_claims": [],
+        "verification_summary": {
+          "complete": false,
+          "label": null
+        },
+        "member_since": "2026-10-10T18:27:54.110781+01:00"
+      },
+      "seller_name": "Nom O.",
+      "category": "0c03ed87-b488-42de-9ffa-4a37ad9b70c2",
+      "category_name": "Mode et couture",
+      "commune": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+      "commune_name": "Gombe",
+      "post_type": "PRODUIT",
+      "title": "Robe en pagne wax",
+      "description": "Description suffisamment longue pour valider.",
+      "price": "10.00",
+      "currency": "USD",
+      "condition": null,
+      "stock": 1,
+      "is_price_negotiable": false,
+      "main_image": "http://testserver/media/offers/f85d0915d0b4472b913756a96e96b9f1.webp",
+      "images": [],
+      "views_count": 0,
+      "likes_count": 0,
+      "shares_count": 0,
+      "created_at": "2026-10-10T18:27:57.612812+01:00",
+      "status": "ACTIVE",
+      "expires_at": "2026-12-09T18:27:57.611809+01:00",
+      "visibility_score": 0.0,
+      "visibility_rank": "Faible",
+      "offer_rating": {
+        "average": null,
+        "count": 0
+      },
+      "seller_rating": {
+        "average": null,
+        "count": 0
+      },
+      "is_favorited": false,
+      "favorites_count": 0,
+      "is_trending": false,
+      "is_sponsored": false,
+      "allowed_channels": [
+        "MESSAGE"
+      ]
+    }
+  ],
+  "my_posts_organization": [
+    {
+      "id": "70772a8b-b0ea-4ede-9af6-9927d86ddf2a",
+      "seller": {
+        "context_type": "ORGANIZATION",
+        "context_id": "685a6f00-b311-4e81-aada-771df50dfeb3",
+        "display_name": "Atelier Test",
+        "photo": null,
+        "org_type": "ENTREPRISE",
+        "verified_claims": [
+          {
+            "code": "RCCM_VERIFIED",
+            "label": "RCCM vérifié",
+            "verified_at": "2026-10-10T17:27:56.016216Z"
+          }
+        ],
+        "verification_summary": {
+          "complete": false,
+          "label": null
+        },
+        "member_since": "2026-10-10T18:27:54.309707+01:00"
+      },
+      "seller_name": "Atelier Test",
+      "category": "0c03ed87-b488-42de-9ffa-4a37ad9b70c2",
+      "category_name": "Mode et couture",
+      "commune": "004bcdc8-a60a-4be7-99eb-1683ba79037b",
+      "commune_name": "Gombe",
+      "post_type": "PRODUIT",
+      "title": "Costume sur mesure",
+      "description": "Description suffisamment longue pour valider.",
+      "price": "10.00",
+      "currency": "USD",
+      "condition": null,
+      "stock": 1,
+      "is_price_negotiable": false,
+      "main_image": "http://testserver/media/offers/6c6085bd0fe44c0a82f64e2674987f4c.webp",
+      "images": [],
+      "views_count": 0,
+      "likes_count": 0,
+      "shares_count": 0,
+      "created_at": "2026-10-10T18:27:58.061637+01:00",
+      "status": "ACTIVE",
+      "expires_at": "2026-12-09T18:27:58.061637+01:00",
+      "visibility_score": 0.0,
+      "visibility_rank": "Faible",
+      "offer_rating": {
+        "average": null,
+        "count": 0
+      },
+      "seller_rating": {
+        "average": null,
+        "count": 0
+      },
+      "is_favorited": false,
+      "favorites_count": 0,
+      "is_trending": false,
+      "is_sponsored": false,
+      "is_hidden_by_moderation": false,
+      "allowed_channels": []
+    }
+  ],
+  "post_seller_not_settable_error": {
+    "status": 400,
+    "body": {
+      "seller_context_id": [
+        "Le vendeur de l'annonce est déterminé par le serveur : il ne peut pas être envoyé."
+      ]
+    }
+  },
+  "post_publish_analyst_error": {
+    "status": 403,
+    "body": {
+      "detail": "Votre rôle ne permet pas cette action dans ce contexte.",
+      "code": "DENY_PERMISSION"
+    }
+  },
+  "dashboard_organization": {
+    "history": [
+      {
+        "day": "10/10",
+        "views": 1
+      }
+    ],
+    "summary": {
+      "total_views": 1,
+      "today_views": 1,
+      "active_posts": 1,
+      "contacts_count": 0,
+      "contact_rate": 0.0,
+      "avg_rating": null,
+      "review_count": 0
+    }
+  },
+  "me_owner": {
+    "id": "22586ee0-e730-4201-a556-730f1b6ae954",
+    "email": "owner@example.com",
+    "photo": null,
+    "full_name": "Nom owner",
+    "ville": null,
+    "ville_name": null,
+    "commune": null,
+    "commune_name": null,
+    "phone": null,
+    "phone_verified": true,
+    "date_joined": "2026-10-10T18:27:54.110781+01:00"
+  },
+  "contact_settings_organization": {
+    "phone": null,
+    "login_phone_masked": null,
+    "can_use_login_phone": false,
+    "channels": {
+      "MESSAGE": {
+        "enabled": true
+      },
+      "CALL": {
+        "enabled": false,
+        "granted_at": null,
+        "text_version": ""
+      },
+      "WHATSAPP": {
+        "enabled": false,
+        "granted_at": null,
+        "text_version": ""
+      }
+    },
+    "current_text_version": "2026-10-v1"
+  },
+  "contact_settings_user": {
+    "phone": null,
+    "login_phone_masked": null,
+    "can_use_login_phone": false,
+    "channels": {
+      "MESSAGE": {
+        "enabled": true
+      },
+      "CALL": {
+        "enabled": false,
+        "granted_at": null,
+        "text_version": ""
+      },
+      "WHATSAPP": {
+        "enabled": false,
+        "granted_at": null,
+        "text_version": ""
+      }
+    },
+    "current_text_version": "2026-10-v1"
+  }
+}

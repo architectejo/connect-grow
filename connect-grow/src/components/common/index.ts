@@ -10,3 +10,6 @@ export { AccessDenied } from "./AccessDenied";
 export { EmptyState, ErrorState } from "./StateViews";
 export { StatusBadge, type StatusBadgeKind } from "./StatusBadge";
 export { UserAvatar } from "./UserAvatar";
+export { RoleBadge } from "./RoleBadge";
+export { SellerTypeBadge, sellerTypeLabel } from "./SellerTypeBadge";
+export { VerifiedClaims, claimLabel } from "./VerifiedClaims";

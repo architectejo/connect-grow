@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import apiClient, { unwrapList } from "@/api/client";
-import type { AppNotification, DashboardStats, Favorite, KycDocument, KycDocumentType, Post, Uuid, User } from "@/api/types";
+import type { AppNotification, DashboardStats, Favorite, Post, Uuid, User } from "@/api/types";
 import { ME_QUERY_KEY, useAuth } from "@/contexts/AuthContext";
 import { marketplaceKeys } from "./use-marketplace";
 import { apiErrorMessage } from "@/lib/errors";
@@ -11,7 +11,6 @@ export const accountKeys = {
   trash: ["account", "trash"] as const,
   favorites: ["account", "favorites"] as const,
   notifications: ["account", "notifications"] as const,
-  kyc: ["account", "kyc"] as const,
 };
 
 // --- Tableau de bord ---
@@ -122,46 +121,6 @@ export function useNotificationActions() {
   });
 
   return { markRead, markAllRead };
-}
-
-// --- Vérification Business (KYC, CDC 3.1) ---
-
-export function useKycDocuments(enabled = true) {
-  return useQuery({
-    queryKey: accountKeys.kyc,
-    queryFn: async () => unwrapList<KycDocument>((await apiClient.get("accounts/kyc/documents/")).data),
-    enabled,
-  });
-}
-
-export function useUploadKyc() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ type, file }: { type: KycDocumentType; file: File }) => {
-      const data = new FormData();
-      data.append("document_type", type);
-      data.append("file", file);
-      return (await apiClient.post<KycDocument>("accounts/kyc/documents/", data)).data;
-    },
-    onSuccess: () => {
-      toast.success("Document envoyé. Il sera examiné par notre équipe.");
-      return queryClient.invalidateQueries({ queryKey: accountKeys.kyc });
-    },
-    onError: (error) => toast.error(apiErrorMessage(error, "L'envoi du document a échoué.")),
-  });
-}
-
-/** Suppression d'une pièce non validée (une pièce validée ne peut pas être supprimée). */
-export function useDeleteKyc() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: Uuid) => apiClient.delete(`accounts/kyc/documents/${id}/`),
-    onSuccess: () => {
-      toast.success("Document supprimé.");
-      return queryClient.invalidateQueries({ queryKey: accountKeys.kyc });
-    },
-    onError: (error) => toast.error(apiErrorMessage(error, "La suppression du document a échoué.")),
-  });
 }
 
 // --- Profil ---

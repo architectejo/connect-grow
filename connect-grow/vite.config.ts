@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { VitePWA } from "vite-plugin-pwa";
-import { isCacheableApiContent, isContactRevealRequest, isContextsRequest } from "./src/lib/cache-rules";
+import { isCacheableApiContent, isContactRevealRequest, isContextsRequest, isSensitiveIdentityRequest } from "./src/lib/cache-rules";
 
 // Bibliothèques regroupées en fichiers stables : une mise à jour de l'application
 // ne force pas les utilisateurs à les retélécharger (forfaits de données limités, CDC 2.2).
@@ -91,6 +91,11 @@ export default defineConfig(({ mode }) => ({
           {
             // Liste des profils (rôles, capacités) : jamais de cache hors ligne, le serveur répond no-store
             urlPattern: isContextsRequest,
+            handler: "NetworkOnly",
+          },
+          {
+            // Espace d'une organisation, pièces de vérification, profil prestataire : jamais de cache hors ligne
+            urlPattern: isSensitiveIdentityRequest,
             handler: "NetworkOnly",
           },
           {

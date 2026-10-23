@@ -13,6 +13,9 @@ export interface ConversationItem {
 export interface MessageItem {
   id: Uuid;
   sender: Uuid;
+  /** Nom affiché de l'expéditeur : le nom de l'organisation quand le message vient de son côté, jamais celui du membre (ADR 0006 §9.8). */
+  sender_name?: string;
+  sender_context?: { type: string; id: Uuid };
   content: string;
   created_at: string;
 }

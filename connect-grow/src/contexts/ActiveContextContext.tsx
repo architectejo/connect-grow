@@ -49,6 +49,11 @@ interface ActiveContextValue {
   /** Change de profil (sans appel réseau). Ignoré si le profil n'est pas dans la liste du serveur. */
   setActive: (target: Pick<AvailableContext, "type" | "id">) => void;
   switchToPersonal: () => void;
+  /**
+   * Le compte vient de quitter ou d'archiver ce profil : s'il est actif, retour au profil personnel AVEC l'alerte
+   * persistante (`left` ou `archived`), jamais un repli silencieux. Sans effet si ce n'est pas le profil actif.
+   */
+  leaveActive: (target: Pick<AvailableContext, "type" | "id">, reason: "left" | "archived") => void;
   lost: LostInfo | null;
   dismissLost: () => void;
 }
@@ -205,6 +210,17 @@ export function ActiveContextProvider({ children }: { children: ReactNode }) {
     else if (activeContextStore.get()) leaveSelection();
   }, [contexts, setActive, leaveSelection]);
 
+  const leaveActive = useCallback(
+    (target: Pick<AvailableContext, "type" | "id">, reason: "left" | "archived") => {
+      const current = activeContextStore.get();
+      if (!current || current.type !== target.type || current.id !== target.id) return;
+      const lostName = current.name;
+      leaveSelection();
+      setLost({ reason, lostName });
+    },
+    [leaveSelection],
+  );
+
   const value = useMemo<ActiveContextValue>(
     () => ({
       contexts,
@@ -214,10 +230,11 @@ export function ActiveContextProvider({ children }: { children: ReactNode }) {
       refetch: () => void query.refetch(),
       setActive,
       switchToPersonal,
+      leaveActive,
       lost,
       dismissLost: () => setLost(null),
     }),
-    [contexts, active, userId, query, setActive, switchToPersonal, lost],
+    [contexts, active, userId, query, setActive, switchToPersonal, leaveActive, lost],
   );
 
   return (
@@ -235,6 +252,11 @@ export function useActiveContext(): ActiveContextValue {
   const value = useContext(ActiveContextContext);
   if (!value) throw new Error("useActiveContext doit être utilisé dans un ActiveContextProvider");
   return value;
+}
+
+/** Profil actif si un fournisseur est monté, sinon undefined (composants affichables hors du fournisseur, comme les rappels). */
+export function useOptionalActiveContext(): ActiveContextValue | undefined {
+  return useContext(ActiveContextContext);
 }
 
 /**

@@ -10,12 +10,12 @@ export const contactSettingsKeys = {
 const BASE = "accounts/contact-settings/";
 
 /** Réglages de contact du vendeur (numéro masqué, consentements). Toutes les écritures renvoient le même corps que le GET. */
-export function useContactSettings() {
+export function useContactSettings(enabled = true) {
   const { isAuthenticated } = useAuth();
   return useQuery({
     queryKey: contactSettingsKeys.all,
     queryFn: async () => (await apiClient.get<ContactSettings>(BASE)).data,
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && enabled,
   });
 }
 

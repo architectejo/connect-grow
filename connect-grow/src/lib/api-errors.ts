@@ -17,7 +17,17 @@ const BUSINESS_CODES = [
   "organization_limit_reached",
   "phone_verification_required",
   "name_locked_by_verification",
+  "nif_locked_by_verification",
   "seller_not_settable",
+  "seller_contact_unavailable",
+  "document_already_validated",
+  "document_validated",
+  "document_type_not_required",
+  "document_limit_reached",
+  "too_many_categories",
+  "invalid_name",
+  "invalid_logo",
+  "provider_not_found",
 ] as const;
 export type BusinessCode = (typeof BUSINESS_CODES)[number];
 
@@ -68,4 +78,21 @@ export function describeApiError(error: unknown, options: DescribeOptions = {}):
     return t(code === "last_owner" && options.demote ? "errors.code.last_owner_demote" : `errors.code.${code}`);
   }
   return apiErrorMessage(error, options.fallback);
+}
+
+/** Texte d'un refus d'accès à l'espace d'une organisation (clés `org.denied.*`), ou null si ce n'est pas un refus. */
+export function organizationDeniedKey(error: unknown): string | null {
+  if (httpStatus(error) !== 403) return null;
+  switch (apiErrorCode(error)) {
+    case "DENY_SECURITY":
+      return "org.denied.security";
+    case "DENY_OBJECT_STATE":
+      return "org.denied.archived";
+    case "DENY_RELATION":
+    case "DENY_CONTEXT":
+    case "DENY_PERMISSION":
+      return "org.denied.relation";
+    default:
+      return null;
+  }
 }

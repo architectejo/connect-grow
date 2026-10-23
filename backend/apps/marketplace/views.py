@@ -1,32 +1,33 @@
 import uuid
+from collections import defaultdict
 from urllib.parse import quote
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.core import signing
-from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ErrorDetail, ValidationError
 from rest_framework.response import Response
 
 from apps.catalog import services as catalog_services
-from apps.common.images import validate_image_pixels, validate_image_upload_size
 from apps.common.exception_handler import CodedAPIException, throttled_message
 from apps.common.pagination import OptionalPagination, StandardPagination
 from apps.common.throttles import (
     ActionScopedThrottleMixin, AnonymousOrUserScopedThrottle, AnonymousScopedThrottle, RevealIpThrottle,
     RevealUserThrottle,
 )
+from apps.common.contexts import CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER
+from apps.identity import services as identity_services
+from apps.identity.services import capability_permission
 from apps.moderation.permissions import can_moderate
-from apps.moderation.services import record_audit
 from apps.common.utils import parse_uuid
 from apps.visibility import services as visibility_services
 
 from . import services
-from .models import ContactEvent, ExchangeProposal, Favorite, Offer, OfferImage
-from .permissions import IsOfferOwner
+from .models import ContactEvent, ExchangeProposal, Favorite, Offer
+from .permissions import HasOfferCapability
 from .serializers import (
     ContactEventSerializer, ExchangeProposalSerializer, FavoriteSerializer, OfferImageSerializer,
     OfferSerializer, ReceivedRevealSerializer, RevealRequestSerializer, RevealResponseSerializer,
@@ -62,7 +63,28 @@ def read_anon_id(request):
         return None
 
 
-class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
+# Champs que le corps d'une requête ne peut jamais imposer : le vendeur est posé par le serveur d'après le
+# contexte actif (ADR 0006, 9.6).
+SERVER_OWNED_FIELDS = ('seller', 'seller_context_type', 'seller_context_id', 'created_by', 'seller_is_public')
+
+
+def reject_server_owned_fields(request):
+    """400 `seller_not_settable` si le corps tente de désigner le vendeur ou l'auteur de l'offre."""
+    if any(field in request.data for field in SERVER_OWNED_FIELDS):
+        raise ValidationError({'seller_context_id': [ErrorDetail(
+            "Le vendeur de l'annonce est déterminé par le serveur : il ne peut pas être envoyé.",
+            code='seller_not_settable',
+        )]})
+
+
+class OfferViewSet(identity_services.ActingContextMixin, ActionScopedThrottleMixin, viewsets.ModelViewSet):
+    """Offres de la marketplace.
+
+    Contexte vendeur (ADR 0006, 6.4) : la CRÉATION et les listes « de mon contexte » (`my_posts`, `trash`)
+    lisent l'en-tête `X-Context` ; toute action sur une offre EXISTANTE est autorisée d'après son contexte
+    propriétaire (`HasOfferCapability`), jamais d'après l'en-tête. `share` et `favorite` sont des gestes
+    d'acheteur (toujours personnels, Q-CP8) et `recalculate_all_scores` une action du personnel."""
+
     serializer_class = OfferSerializer
     pagination_class = OptionalPagination
 
@@ -84,15 +106,18 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
         if self.action in ['list', 'retrieve']:
             return [permissions.AllowAny()]
         if self.action in self.OWNER_ACTIONS:
-            return [permissions.IsAuthenticated(), IsOfferOwner()]
+            return [permissions.IsAuthenticated(), HasOfferCapability()]
+        if self.action == 'create':
+            return [permissions.IsAuthenticated(), capability_permission(services.CAP_PUBLISH)()]
         if self.action == 'recalculate_all_scores':
             return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         if self.action in self.OWNER_ACTIONS:
-            # Filtré sur le vendeur : l'offre d'un autre répond 404, comme une offre inconnue.
-            return Offer.objects.filter(seller=self.request.user).select_related('seller').prefetch_related('images')
+            # Pas de filtre par vendeur : l'autorisation se fait par objet (`HasOfferCapability`), d'après le
+            # contexte propriétaire et le rôle réel ; un tiers reçoit 403 `DENY_RELATION`.
+            return Offer.objects.all().prefetch_related('images')
 
         # On trie par le score de visibilité organique (E x R, ADR 0004) par défaut
         ordering = self.request.query_params.get('ordering', '-visibility_score')
@@ -100,8 +125,9 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
             ordering = '-visibility_score'
 
         # Par défaut (Marketplace), on ne montre que ce qui n'est pas supprimé et actif
-        # Les offres d'un vendeur suspendu ou banni (compte inactif) ne sont plus publiques.
-        queryset = Offer.objects.filter(is_active=True, is_deleted=False, seller__is_active=True)
+        # Les offres d'un vendeur non public (compte suspendu ou banni, profil archivé, organisation suspendue
+        # ou archivée) ne sont plus publiques : `seller_is_public`, dénormalisé depuis `identity`.
+        queryset = services.public_offers()
 
         # Filtre pour récupérer les offres de l'utilisateur connecté
         my_offers = self.request.query_params.get('my_posts')
@@ -109,21 +135,34 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
             # Le vendeur retrouve toutes ses offres (pause, vendue, expirée, masquée par la
             # modération, corbeille) ; le public et les tiers restent limités aux offres actives.
             # Même requête SQL : seule la clause WHERE change.
-            visible = Q(is_active=True, is_deleted=False, seller__is_active=True) | Q(seller=self.request.user)
+            visible = Q(is_active=True, is_deleted=False, seller_is_public=True) | self._own_contexts_filter()
             if can_moderate(self.request.user):
                 # La modération consulte aussi les offres d'un vendeur sanctionné.
                 visible |= Q(is_active=True, is_deleted=False)
             queryset = Offer.objects.filter(visible)
         elif my_offers == 'true' and self.request.user.is_authenticated:
-            queryset = Offer.objects.filter(seller=self.request.user, is_deleted=False)
+            # « Mes annonces » : uniquement celles du CONTEXTE ACTIF (en-tête `X-Context`, ADR 0006, 6.4).
+            ctx = self.authorize_capability(services.CAP_VIEW_INTERNAL)
+            queryset = Offer.objects.filter(seller_context_type=ctx.type, seller_context_id=ctx.id, is_deleted=False)
         elif self.action == 'list':
             queryset = self.apply_filters(queryset)
 
-        queryset = queryset.select_related('seller').prefetch_related('images')
+        queryset = queryset.prefetch_related('images')
         if ordering == '-visibility_score':
             # Pertinence : score stocké (E x R) x proximité D, appliquée dans le tri SQL.
             return services.order_by_relevance(queryset, self.get_near_commune())
         return queryset.order_by(ordering, '-created_at', 'id')
+
+    def _own_contexts_filter(self):
+        """Filtre « offres des contextes dans lesquels l'utilisateur peut agir » (personnel, prestataire actif,
+        organisations actives dont il est membre) : deux requêtes, aucun cache."""
+        by_type = defaultdict(list)
+        for context_type, context_id in services.get_request_user_contexts(self.request):
+            by_type[context_type].append(context_id)
+        condition = Q()
+        for context_type, ids in by_type.items():
+            condition |= Q(seller_context_type=context_type, seller_context_id__in=ids)
+        return condition
 
     def get_near_commune(self):
         """Commune de référence de la proximité D : paramètre `near` (un identifiant invalide est
@@ -170,7 +209,8 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(condition=condition)
 
         is_exchangeable = params.get('is_exchangeable')
-        if is_exchangeable is not None:
+        # Troc désactivé : le filtre est ignoré (comme tout paramètre inconnu).
+        if is_exchangeable is not None and services.is_exchange_enabled():
             queryset = queryset.filter(is_exchangeable=is_exchangeable.lower() == 'true')
 
         for param, lookup in (('price_min', 'price__gte'), ('price_max', 'price__lte')):
@@ -178,19 +218,43 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
                 price = parse_price(params[param])
                 queryset = queryset.filter(**{lookup: price}) if price is not None else queryset.none()
 
+        # `seller` désigne un IDENTIFIANT DE CONTEXTE vendeur (plus un compte) ; `seller_type` le précise
+        # (USER, PROVIDER, ORGANIZATION). Sans lui, n'importe quel type ; inconnu : liste vide.
         seller = params.get('seller')
         if seller:
             seller_uuid = parse_uuid(seller)
-            queryset = queryset.filter(seller_id=seller_uuid) if seller_uuid else queryset.none()
+            seller_type = params.get('seller_type')
+            if seller_uuid is None or (
+                seller_type and seller_type not in (CONTEXT_USER, CONTEXT_PROVIDER, CONTEXT_ORGANIZATION)
+            ):
+                return queryset.none()
+            queryset = queryset.filter(seller_context_id=seller_uuid)
+            if seller_type:
+                queryset = queryset.filter(seller_context_type=seller_type)
         return queryset
 
+    def create(self, request, *args, **kwargs):
+        reject_server_owned_fields(request)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        reject_server_owned_fields(request)
+        return super().update(request, *args, **kwargs)
+
     def perform_create(self, serializer):
-        # L'utilisateur connecté est automatiquement le vendeur
-        serializer.save(seller=self.request.user)
+        # Le vendeur est le contexte actif (en-tête `X-Context`, absent = personnel), jamais le corps.
+        ctx = self.acting_context
+        serializer.instance = services.create_offer(
+            actor=self.request.user, context_type=ctx.type, context_id=ctx.id, data=dict(serializer.validated_data),
+        )
+
+    def perform_update(self, serializer):
+        serializer.instance = services.update_offer(
+            serializer.instance, actor=self.request.user, changes=serializer.validated_data,
+        )
 
     def perform_destroy(self, instance):
-        record_audit(self.request.user, 'OFFER_DELETED', target=instance, details=instance.title)
-        services.delete_offers(Offer.objects.filter(pk=instance.pk))
+        services.delete_offer(instance, actor=self.request.user)
 
     @action(detail=False, methods=['post'])
     def recalculate_all_scores(self, request):
@@ -201,9 +265,11 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     # 1. Corbeille de l'utilisateur connecté
     @action(detail=False, methods=['get'])
     def trash(self, request):
+        # Corbeille du CONTEXTE ACTIF (en-tête `X-Context`), capacité `offer.view_internal`.
+        ctx = self.authorize_capability(services.CAP_VIEW_INTERNAL)
         trashed = (
-            Offer.objects.filter(seller=request.user, is_deleted=True)
-            .select_related('seller').prefetch_related('images').order_by('-created_at')
+            Offer.objects.filter(seller_context_type=ctx.type, seller_context_id=ctx.id, is_deleted=True)
+            .prefetch_related('images').order_by('-created_at')
         )
         page = self.paginate_queryset(trashed)
         serializer = self.get_serializer(page if page is not None else trashed, many=True)
@@ -212,35 +278,33 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     # 2. « Supprimer » (envoyer à la corbeille) sans supprimer de la base
     @action(detail=True, methods=['post'])
     def soft_delete(self, request, pk=None):
-        services.move_to_trash(self.get_object())
+        services.move_to_trash(self.get_object(), actor=request.user)
         return Response({"message": "Annonce déplacée dans la corbeille"})
 
     # 3. Restaurer une annonce
     @action(detail=True, methods=['post'])
     def restore(self, request, pk=None):
-        services.restore_from_trash(self.get_object())
+        services.restore_from_trash(self.get_object(), actor=request.user)
         return Response({"message": "Annonce restaurée"})
 
     # 4. Supprimer définitivement une annonce
     @action(detail=True, methods=['delete'])
     def hard_delete(self, request, pk=None):
-        offer = self.get_object()
-        record_audit(request.user, 'OFFER_DELETED', target=offer, details=offer.title)
-        services.delete_offers(Offer.objects.filter(pk=offer.pk))
+        services.delete_offer(self.get_object(), actor=request.user)
         return Response({"message": "Annonce supprimée définitivement"})
 
     # Cycle de vie (CDC 3.2, 3.9) : pause, reprise, vente, renouvellement.
     @action(detail=True, methods=['post'])
     def pause(self, request, pk=None):
         offer = self.get_object()
-        services.pause_offer(offer)
+        services.pause_offer(offer, actor=request.user)
         return Response(self.get_serializer(offer).data)
 
     @action(detail=True, methods=['post'])
     def unpause(self, request, pk=None):
         offer = self.get_object()
         try:
-            resumed = services.unpause_offer(offer)
+            resumed = services.unpause_offer(offer, actor=request.user)
         except services.OfferHiddenError as exc:
             return Response({"error": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         if not resumed:
@@ -253,14 +317,14 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def mark_sold(self, request, pk=None):
         offer = self.get_object()
-        services.mark_offer_sold(offer)
+        services.mark_offer_sold(offer, actor=request.user)
         return Response(self.get_serializer(offer).data)
 
     @action(detail=True, methods=['post'])
     def renew(self, request, pk=None):
         offer = self.get_object()
         try:
-            services.renew_offer(offer)
+            services.renew_offer(offer, actor=request.user)
         except services.OfferHiddenError as exc:
             return Response({"error": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         return Response(self.get_serializer(offer).data)
@@ -268,36 +332,19 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     # 5. Galerie de photos (CDC 3.2 : 1 à 8 photos par annonce, main_image comprise)
     @action(detail=True, methods=['post'])
     def images(self, request, pk=None):
-        offer = self.get_object()
-
-        current_count = offer.images.count() + 1  # + main_image
-        uploaded = request.FILES.getlist('image')
-        if not uploaded:
-            return Response({"error": "Aucune image fournie."}, status=status.HTTP_400_BAD_REQUEST)
-        if current_count + len(uploaded) > OfferImage.MAX_IMAGES_PER_OFFER:
-            return Response(
-                {"error": f"Une annonce ne peut pas dépasser {OfferImage.MAX_IMAGES_PER_OFFER} photos."},
-                status=status.HTTP_400_BAD_REQUEST,
+        try:
+            created = services.add_offer_images(
+                self.get_object(), actor=request.user, files=request.FILES.getlist('image'),
             )
-        # Fichiers contrôlés avant tout enregistrement : un fichier invalide donne un 400, pas un 500.
-        for image in uploaded:
-            try:
-                validate_image_upload_size(image)
-                validate_image_pixels(image)
-            except DjangoValidationError as exc:
-                return Response({"error": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
-
-        created = [OfferImage.objects.create(offer=offer, image=f) for f in uploaded]
+        except services.MarketplaceError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(OfferImageSerializer(created, many=True).data, status=status.HTTP_201_CREATED)
 
     @images.mapping.delete
     def delete_image(self, request, pk=None):
-        offer = self.get_object()
-        image_uuid = parse_uuid(request.query_params.get('image_id'))
-        deleted = 0
-        if image_uuid:
-            deleted, _ = offer.images.filter(pk=image_uuid).delete()
-        if not deleted:
+        if not services.delete_offer_image(
+            self.get_object(), actor=request.user, image_id=request.query_params.get('image_id'),
+        ):
             return Response({"error": "Photo introuvable."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -318,7 +365,11 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
         # si son cookie a été émis ET signé par le serveur (pas de fabrication d'empreintes).
         # Le vendeur qui consulte sa propre offre ne gonfle pas ses statistiques.
         anon_id = None if request.user.is_authenticated else read_anon_id(request)
-        is_owner = request.user.is_authenticated and instance.seller_id == request.user.id
+        # Un membre qui consulte l'offre de son contexte ne gonfle pas les statistiques de ce contexte.
+        is_owner = request.user.is_authenticated and (
+            (instance.seller_context_type, instance.seller_context_id)
+            in services.get_request_user_contexts(request)
+        )
         if (request.user.is_authenticated or anon_id) and not is_owner:
             services.register_view(instance, visibility_services.build_viewer_key(request.user, anon_id))
 
@@ -337,6 +388,8 @@ class OfferViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
 class FavoriteViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     """Liste personnelle des favoris de l'utilisateur connecté (CDC 3.2)."""
 
+    acting_context_exempt = "favoris : geste d'acheteur, toujours personnel (ADR 0006, Q-CP8)"
+
     serializer_class = FavoriteSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = OptionalPagination
@@ -346,12 +399,12 @@ class FavoriteViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = (
             Favorite.objects.filter(user=self.request.user)
-            .select_related('offer', 'offer__seller').prefetch_related('offer__images')
+            .select_related('offer').prefetch_related('offer__images')
         )
         if self.action == 'list':
             # Les offres masquées, en pause, vendues ou en corbeille ne sont plus montrées.
             queryset = queryset.filter(
-                offer__is_active=True, offer__is_deleted=False, offer__seller__is_active=True,
+                offer__is_active=True, offer__is_deleted=False, offer__seller_is_public=True,
             )
         return queryset
 
@@ -387,7 +440,11 @@ class _OfferMessageViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
             raise ValidationError({'post': str(exc)})
 
 
-class ContactEventViewSet(_OfferMessageViewSet):
+class ContactEventViewSet(identity_services.ActingContextMixin, _OfferMessageViewSet):
+    """Contacts. Écrire au vendeur et obtenir son numéro sont des gestes d'acheteur, toujours personnels
+    (Q-CP8, en-tête ignoré). Seule « qui a demandé mon numéro » (`reveals/received/`) est sensible au
+    contexte : en-tête `X-Context` et capacité `contact.view_requesters` (l'analyste est refusé)."""
+
     throttle_scopes = {'create': 'contact', 'reveals_received': 'contact_reveals_list'}
     serializer_class = ContactEventSerializer
     model = ContactEvent
@@ -450,17 +507,30 @@ class ContactEventViewSet(_OfferMessageViewSet):
         channel = request.query_params.get('channel')
         if channel and channel not in services.REVEAL_CHANNELS:
             raise CodedAPIException("Moyen de contact invalide.", 'channel_invalid', status.HTTP_400_BAD_REQUEST)
+        ctx = self.authorize_capability('contact.view_requesters')
         paginator = StandardPagination()
-        page = paginator.paginate_queryset(services.list_reveals_for_seller(request.user, channel), request, view=self)
+        page = paginator.paginate_queryset(
+            services.list_reveals_for_seller(ctx.type, ctx.id, channel), request, view=self,
+        )
         rows = services.to_received_reveals(page)
         response = paginator.get_paginated_response(ReceivedRevealSerializer(rows, many=True).data)
         return self._no_store(response)
 
 
 class ExchangeProposalViewSet(_OfferMessageViewSet):
+    acting_context_exempt = "troc : geste d'acheteur, toujours personnel (ADR 0006, Q-CP8)"
     throttle_scopes = {'create': 'exchange'}
     serializer_class = ExchangeProposalSerializer
     model = ExchangeProposal
+
+    def check_permissions(self, request):
+        """Troc désactivé : 403 `feature_disabled` pour tout appel authentifié, avant validation,
+        limitation de débit et création (aucun effet de bord)."""
+        super().check_permissions(request)
+        if not services.is_exchange_enabled():
+            raise CodedAPIException(
+                services.FEATURE_DISABLED_MESSAGE, 'feature_disabled', status.HTTP_403_FORBIDDEN,
+            )
 
     def create_with_service(self, offer, message):
         return services.create_exchange_proposal(offer=offer, sender=self.request.user, message=message)

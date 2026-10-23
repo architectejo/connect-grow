@@ -12,3 +12,4 @@ SHELL=/bin/sh
 20 2 * * * . /etc/environment; cd /app && python manage.py purge_offer_views >> /proc/1/fd/1 2>> /proc/1/fd/2
 * * * * * . /etc/environment; cd /app && python manage.py dispatch_outbox >> /proc/1/fd/1 2>> /proc/1/fd/2
 30 2 * * * . /etc/environment; cd /app && python manage.py purge_outbox >> /proc/1/fd/1 2>> /proc/1/fd/2
+25 * * * * . /etc/environment; cd /app && python manage.py sync_seller_visibility >> /proc/1/fd/1 2>> /proc/1/fd/2

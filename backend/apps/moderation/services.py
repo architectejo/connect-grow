@@ -104,10 +104,11 @@ def get_settings() -> ModerationSettings:
 AUTOMATIC_TARGET_TYPES = frozenset({'review', 'user'})
 
 
-def record_audit(actor, action, target=None, details=''):
+def record_audit(actor, action, target=None, details='', context=None):
     """Journalise une action sensible (règle 12) dans l'AuditLog. Synchrone, sans outbox :
-    une action sensible ne doit jamais exister sans sa trace (ADR 0002, notes R1)."""
-    return AuditLog.record(actor, action, target=target, details=details)
+    une action sensible ne doit jamais exister sans sa trace (ADR 0002, notes R1).
+    `context` : `(type, id)` ou `ActingContext` du contexte sous lequel l'action s'exécute (ADR 0006, A10)."""
+    return AuditLog.record(actor, action, target=target, details=details, context=context)
 
 
 def count_audit_days(actor_id, action, since) -> int:
@@ -134,6 +135,20 @@ def is_user_restricted(user_id) -> bool:
     return Sanction.objects.filter(
         user_id=user_id, is_active=True, sanction_type__in=Sanction.ACCOUNT_BLOCKING_TYPES,
     ).filter(Q(ends_at__isnull=True) | Q(ends_at__gt=now)).exists()
+
+
+def get_restricted_user_ids(user_ids) -> set:
+    """Parmi `user_ids`, les comptes sous sanction bloquante en cours (une requête) : variante par lot de
+    `is_user_restricted`, pour recalculer la visibilité publique de vendeurs (ADR 0006, A7)."""
+    wanted = list(user_ids)
+    if not wanted:
+        return set()
+    now = timezone.now()
+    return set(
+        Sanction.objects.filter(
+            user_id__in=wanted, is_active=True, sanction_type__in=Sanction.ACCOUNT_BLOCKING_TYPES,
+        ).filter(Q(ends_at__isnull=True) | Q(ends_at__gt=now)).values_list('user_id', flat=True)
+    )
 
 
 def record_settings_change(actor, obj, old_values: dict, new_values: dict):

@@ -22,6 +22,13 @@ def sync_offer_shares(event):
     _sync(event)
 
 
+@subscribe('identity.seller_context_status_changed', name='marketplace.sync_seller_visibility')
+def sync_seller_visibility(event):
+    """Un vendeur devient public ou cesse de l'être (compte, profil prestataire, organisation) : recalcul
+    idempotent de `Offer.seller_is_public` depuis `identity` (ADR 0006, A7). Rejouable sans risque."""
+    services.apply_seller_status_event(event.payload)
+
+
 @subscribe('visibility.ranking_settings_changed', name='marketplace.refresh_scores_after_ranking_change')
 def refresh_scores_after_ranking_change(event):
     """Réglages du classement modifiés : recalcul idempotent des scores depuis les compteurs."""

@@ -1,9 +1,8 @@
 import hashlib
 import logging
 
-from django.db import transaction
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Q
+from django.db import transaction
 from django.http import FileResponse
 from rest_framework import generics, permissions, serializers, status
 from rest_framework.exceptions import AuthenticationFailed, NotFound
@@ -14,25 +13,28 @@ from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+from apps.common.contexts import CONTEXT_ORGANIZATION
 from apps.common.exception_handler import CodedAPIException
-from apps.common.pagination import StandardPagination
 from apps.moderation.services import record_audit
 
 from .identifiers import normalize_identifier
 from .kyc_files import EXTENSION_TO_CONTENT_TYPE
-from .models import BusinessProfile, KycDocument, OtpCode, User, phone_validator
+from .models import KycDocument, OtpCode, User, phone_validator
 from .permissions import CanReviewKyc
 from .serializers import (
-    IdentifierTokenObtainPairSerializer, KycDocumentSerializer, PublicBusinessSerializer, UserSerializer,
+    IdentifierTokenObtainPairSerializer, KycDocumentSerializer, OrganizationKycDocumentSerializer,
+    UserSerializer,
 )
 from .services import (
-    ContactSettingsError, KycError, decide_kyc_document, get_contact_settings, revoke_all_sessions,
-    set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
+    ContactSettingsError, KycError, decide_kyc_document, get_contact_settings, get_contexts_for_user,
+    get_document_for_download,
+    revoke_all_sessions, set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
 )
 from .sms import send_otp_sms
 from .throttles import (
     ContactSettingsThrottle, ProfileWriteIpThrottle, ProfileWriteThrottle, RegisterIpThrottle,
-    ChangePasswordThrottle, FailureLimiter, KycWriteThrottle, LoginIpThrottle, OtpConfirmIpThrottle,
+    ChangePasswordThrottle, ContextsListThrottle, FailureLimiter, KycWriteThrottle, LoginIpThrottle,
+    OtpConfirmIpThrottle,
     LogoutIpThrottle, OtpRequestIpThrottle, OtpRequestPhoneDailyThrottle, OtpRequestPhoneThrottle, RefreshIpThrottle,
 )
 
@@ -114,6 +116,31 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
     def get_object(self):
         return self.request.user
 
+
+class ContextListView(APIView):
+    """GET : contextes que le compte peut activer (ADR 0006, 9.1). Liste bornée, non paginée, servie dans
+    l'enveloppe des autres listes. Ignore `X-Context` : elle décrit tous les contextes. `capabilities` sert
+    à masquer des boutons ; l'autorisation reste côté serveur. Jamais mise en cache (rôles sensibles)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ContextsListThrottle]
+
+    def get(self, request):
+        results = [
+            {
+                'type': item.type, 'id': str(item.id), 'name': item.name, 'role': item.role,
+                'org_type': item.org_type,
+                'photo': request.build_absolute_uri(item.photo) if item.photo else None,
+                'capabilities': list(item.capabilities),
+                'migrated_from_business': item.migrated_from_business,
+            }
+            for item in get_contexts_for_user(request.user)
+        ]
+        response = Response({'count': len(results), 'next': None, 'previous': None, 'results': results})
+        response['Cache-Control'] = 'private, no-store'
+        return response
+
+
 def password_error(exc):
     """Réponse 400 uniforme pour un mot de passe refusé (clé `error` comme ailleurs)."""
     messages = [str(m) for m in exc.detail]
@@ -181,46 +208,6 @@ class LogoutAllView(APIView):
     def post(self, request):
         revoked = revoke_all_sessions(request.user)
         return Response({'message': "Toutes les sessions ont été fermées.", 'revoked': revoked})
-
-class BusinessListView(generics.ListAPIView):
-    """
-    Vue publique : liste paginée des entreprises actives. Ne renvoie que la fiche
-    publique (PublicBusinessSerializer) : aucune donnée de contact ni d'identité.
-    """
-    permission_classes = [permissions.AllowAny]
-    serializer_class = PublicBusinessSerializer
-    pagination_class = StandardPagination
-
-    def get_queryset(self):
-        queryset = (
-            User.objects.filter(
-                user_type='ENTREPRISE', is_active=True, business_profile__isnull=False,
-            )
-            .select_related('business_profile')
-            .prefetch_related('business_profile__category_links')
-            .order_by('business_profile__business_name', 'id')
-        )
-
-        search = self.request.query_params.get('search')
-        if search:
-            # Nom commercial et description seulement : jamais le nom de la personne.
-            queryset = queryset.filter(
-                Q(business_profile__business_name__icontains=search) |
-                Q(business_profile__bio__icontains=search)
-            )
-
-        # Filtre ?is_verified=true|false (strict, insensible à la casse). Toute autre valeur
-        # est refusée en 400 plutôt qu'ignorée : un filtre silencieusement perdu afficherait
-        # des entreprises non vérifiées sous une étiquette « vérifiées ».
-        is_verified = self.request.query_params.get('is_verified')
-        if is_verified is not None:
-            value = is_verified.strip().lower()
-            if value not in ('true', 'false'):
-                raise serializers.ValidationError({'is_verified': "Valeur attendue : true ou false."})
-            queryset = queryset.filter(business_profile__is_verified=(value == 'true'))
-
-        return queryset
-
 
 class OtpRequestView(APIView):
     """CDC 3.1 : envoi d'un code OTP par SMS pour l'inscription, la connexion
@@ -374,7 +361,9 @@ class KycReviewQueueView(generics.ListAPIView):
 
     serializer_class = KycDocumentSerializer
     permission_classes = [CanReviewKyc]
-    queryset = KycDocument.objects.filter(status=KycDocument.STATUS_EN_ATTENTE).select_related('business_profile')
+    queryset = KycDocument.objects.filter(status=KycDocument.STATUS_EN_ATTENTE).select_related(
+        'business_profile', 'organization',
+    )
 
 
 class KycDecisionView(APIView):
@@ -404,9 +393,9 @@ class KycDocumentDownloadView(APIView):
 
     def get(self, request, pk):
         try:
-            doc = KycDocument.objects.get(pk=pk)
-        except KycDocument.DoesNotExist:
-            return Response({'error': "Document introuvable."}, status=status.HTTP_404_NOT_FOUND)
+            doc = get_document_for_download(pk, request.user)
+        except KycError as exc:
+            return Response({'error': exc.message}, status=exc.status_code)
         try:
             handle = doc.file.open('rb')
         except (ValueError, OSError):
@@ -414,6 +403,7 @@ class KycDocumentDownloadView(APIView):
         record_audit(
             request.user, 'KYC_DOWNLOADED', target=doc,
             details=f"Pièce {doc.get_document_type_display()} consultée.",
+            context=(CONTEXT_ORGANIZATION, doc.organization_id) if doc.organization_id else None,
         )
         extension = doc.file.name.rsplit('.', 1)[-1].lower() if '.' in doc.file.name else 'bin'
         response = FileResponse(

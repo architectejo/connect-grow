@@ -20,7 +20,7 @@ from apps.platform_core.testing import dispatch_outbox_now
 from apps.visibility.models import DailyVisibilityCounter, OfferUniqueView, RankingSettings
 
 from . import services
-from .models import ContactEvent, Favorite, Offer, OfferImage
+from .models import ContactEvent, Favorite, MarketplaceSettings, Offer, OfferImage
 
 
 class MarketplaceTestBase(APITestCase):
@@ -30,6 +30,12 @@ class MarketplaceTestBase(APITestCase):
         self.category = Category.objects.create(name='Électronique', slug='electronique')
         self.seller = User.objects.create_user(email='seller@example.com', password='x', full_name='Vendeur')
         self.buyer = User.objects.create_user(email='buyer@example.com', password='x', full_name='Acheteur')
+
+    def enable_exchange(self):
+        """Le troc est éteint par défaut (L0-14) : les tests qui l'exercent l'allument."""
+        MarketplaceSettings.objects.update_or_create(
+            pk=MarketplaceSettings.SINGLETON_ID, defaults={'exchange_enabled': True},
+        )
 
     def make_offer(self, **kwargs):
         defaults = dict(
@@ -133,7 +139,10 @@ class OfferValidationTests(MarketplaceTestBase):
         response = self.client.post(reverse('offer-list'), self.offer_payload(post_type='SERVICE'))
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         offer = Offer.objects.get(pk=response.data['id'])
-        self.assertEqual(offer.seller, self.seller)
+        # Le vendeur est le contexte actif (personnel sans en-tête), l'auteur est l'utilisateur.
+        self.assertEqual((offer.seller_context_type, offer.seller_context_id), ('USER', self.seller.id))
+        self.assertEqual(offer.created_by, self.seller)
+        self.assertTrue(offer.seller_is_public)
         self.assertEqual(offer.offer_type, 'SERVICE')
         self.assertEqual(response.data['post_type'], 'SERVICE')
         self.assertIsNotNone(offer.expires_at)
@@ -158,21 +167,29 @@ class OfferOwnershipTests(MarketplaceTestBase):
         offer = self.make_offer()
         self.client.force_authenticate(self.buyer)
         url = reverse('offer-detail', args=[offer.id])
-        self.assertEqual(self.client.patch(url, {'price': 1}).status_code, status.HTTP_404_NOT_FOUND)
-        self.assertEqual(self.client.put(url, {}).status_code, status.HTTP_404_NOT_FOUND)
-        self.assertEqual(self.client.delete(url).status_code, status.HTTP_404_NOT_FOUND)
+        # Un tiers n'est pas membre du contexte propriétaire : 403 DENY_RELATION (ADR 0006, 9.6).
+        for response in (self.client.patch(url, {'price': 1}), self.client.put(url, {}), self.client.delete(url)):
+            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+            self.assertEqual(response.data['code'], 'DENY_RELATION')
         offer.refresh_from_db()
         self.assertEqual(offer.price, 100)
+        self.assertTrue(Offer.objects.filter(pk=offer.pk).exists())
 
     def test_other_user_cannot_use_owner_actions(self):
         offer = self.make_offer()
         Offer.objects.filter(pk=offer.pk).update(is_deleted=True)
         self.client.force_authenticate(self.buyer)
+        # Offre en corbeille (non publique) : 404 uniforme pour un étranger, aucun oracle d'existence.
         for name in ('restore', 'soft-delete', 'pause', 'unpause', 'mark-sold', 'renew'):
             response = self.client.post(reverse(f'offer-{name}', args=[offer.id]))
             self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND, name)
         response = self.client.delete(reverse('offer-hard-delete', args=[offer.id]))
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        # Offre publique : DENY_RELATION (elle est déjà visible de tous).
+        Offer.objects.filter(pk=offer.pk).update(is_deleted=False)
+        for name in ('restore', 'soft-delete', 'pause', 'unpause', 'mark-sold', 'renew'):
+            response = self.client.post(reverse(f'offer-{name}', args=[offer.id]))
+            self.assertEqual((response.status_code, response.data['code']), (403, 'DENY_RELATION'), name)
         self.assertTrue(Offer.objects.filter(pk=offer.pk).exists())
 
     def test_unknown_offer_gives_404_not_500(self):
@@ -233,7 +250,9 @@ class OfferGalleryTests(MarketplaceTestBase):
         response = self.client.post(
             reverse('offer-images', args=[offer.id]), {'image': make_test_image()}, format='multipart',
         )
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        # Autorisation par objet (ADR 0006, 6.4) : un tiers n'est pas membre du contexte propriétaire.
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data['code'], 'DENY_RELATION')
 
     def test_owner_can_delete_a_gallery_image(self):
         offer = self.make_offer()
@@ -337,6 +356,7 @@ class OfferFilterTests(MarketplaceTestBase):
         self.assertEqual(self.ids(price_max='1' * 60), {str(self.cheap_usd.id), str(self.expensive_cdf.id)})
 
     def test_filter_by_exchangeable(self):
+        self.enable_exchange()
         ids = self.ids(is_exchangeable='false')
         self.assertIn(str(self.expensive_cdf.id), ids)
         self.assertNotIn(str(self.cheap_usd.id), ids)
@@ -462,7 +482,9 @@ class UniqueViewTests(MarketplaceTestBase):
         self.assertEqual(offer.views_count, 1)
         self.assertEqual(OfferUniqueView.objects.filter(offer_id=offer.id).count(), 1)
         counter = DailyVisibilityCounter.objects.get(offer_id=offer.id)
-        self.assertEqual((counter.views, counter.seller_id), (1, self.seller.id))
+        self.assertEqual(
+            (counter.views, counter.seller_context_type, counter.seller_context_id), (1, 'USER', self.seller.id),
+        )
 
     def test_two_different_users_both_count(self):
         offer = self.make_offer()
@@ -556,7 +578,10 @@ class OfferLifecycleActionTests(MarketplaceTestBase):
         offer = self.make_offer()
         self.client.force_authenticate(self.buyer)
         response = self.client.post(reverse('offer-pause', args=[offer.id]))
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data['code'], 'DENY_RELATION')
+        offer.refresh_from_db()
+        self.assertEqual(offer.status, Offer.STATUS_ACTIVE)
 
     def test_mark_sold(self):
         offer = self.make_offer()
@@ -639,7 +664,7 @@ class ScheduledTasksTests(MarketplaceTestBase):
 
         counter = DailyVisibilityCounter.objects.get(offer_id=offer.id)
         self.assertEqual(counter.contacts, 2)
-        self.assertEqual(counter.seller_id, self.seller.id)
+        self.assertEqual((counter.seller_context_type, counter.seller_context_id), ('USER', self.seller.id))
 
 
 class DashboardStatsTests(MarketplaceTestBase):
@@ -674,7 +699,8 @@ class DashboardStatsTests(MarketplaceTestBase):
         self.client.force_authenticate(self.seller)
         self.assertEqual(self.client.get(url).data['history'][0]['views'], 3)
         self.client.force_authenticate(self.buyer)
-        self.assertEqual(self.client.get(url).status_code, status.HTTP_404_NOT_FOUND)
+        denied = self.client.get(url)
+        self.assertEqual((denied.status_code, denied.data['code']), (status.HTTP_403_FORBIDDEN, 'DENY_RELATION'))
         self.client.force_authenticate(None)
         self.assertEqual(self.client.get(url).status_code, status.HTTP_401_UNAUTHORIZED)
 
@@ -746,6 +772,7 @@ class ContactTests(MarketplaceTestBase):
         self.assertEqual(self.client.delete(reverse('contact-detail', args=[event.id])).status_code, 405)
 
     def test_exchange_proposal_flow(self):
+        self.enable_exchange()
         offer = self.make_offer()
         self.client.force_authenticate(self.buyer)
         response = self.client.post(reverse('exchange-list'), {'post': str(offer.id), 'message': 'Je propose un troc.'})
@@ -838,30 +865,33 @@ class ContractTests(MarketplaceTestBase):
         self.assertEqual(set(data), {
             'id', 'seller', 'seller_name', 'category', 'category_name', 'commune', 'commune_name', 'post_type',
             'title', 'description', 'price', 'currency', 'condition', 'stock', 'is_price_negotiable',
-            'is_exchangeable', 'main_image', 'images', 'views_count', 'likes_count',
+            'main_image', 'images', 'views_count', 'likes_count',
             'shares_count', 'created_at', 'status', 'expires_at', 'visibility_score', 'visibility_rank',
             'offer_rating', 'seller_rating', 'is_favorited', 'favorites_count', 'is_trending', 'is_sponsored', 'allowed_channels',
         })
         self.assertEqual(set(data['seller']), {
-            'id', 'full_name', 'photo', 'user_type', 'business_profile', 'date_joined',
+            'context_type', 'context_id', 'display_name', 'photo', 'org_type', 'verified_claims',
+            'verification_summary', 'member_since',
         })
         self.assertNotIn('phone', data['seller'])
         self.assertNotIn('email', data['seller'])
         self.assertEqual(data['id'], str(offer.id))
-        self.assertEqual(data['seller']['id'], str(self.seller.id))
-        self.assertIsNone(data['seller']['business_profile'])
+        self.assertEqual((data['seller']['context_type'], data['seller']['context_id']), ('USER', str(self.seller.id)))
+        self.assertEqual(data['seller']['display_name'], 'Vendeur')
+        self.assertEqual(data['seller_name'], 'Vendeur')
+        self.assertIsNone(data['seller']['org_type'])
+        self.assertEqual(data['seller']['verified_claims'], [])
+        self.assertEqual(data['seller']['verification_summary'], {'complete': False, 'label': None})
         self.assertEqual(data['offer_rating'], {'average': None, 'count': 0})
         self.assertEqual(data['seller_rating'], {'average': None, 'count': 0})
 
-    def test_seller_business_profile_is_embedded(self):
-        from apps.identity.models import BusinessProfile
-
-        BusinessProfile.objects.create(user=self.seller, business_name='Boutique Test', bio='Bio', is_verified=True)
+    def test_a_personal_seller_shows_the_public_name_not_the_full_name(self):
+        self.seller.full_name = 'Marie Kabongo'
+        self.seller.save(update_fields=['full_name'])
         offer = self.make_offer()
-        seller = self.client.get(reverse('offer-detail', args=[offer.id])).data['seller']
-        self.assertEqual(set(seller['business_profile']), {'business_name', 'bio', 'logo', 'is_verified'})
-        self.assertEqual(seller['business_profile']['business_name'], 'Boutique Test')
-        self.assertTrue(seller['business_profile']['is_verified'])
+        data = self.client.get(reverse('offer-detail', args=[offer.id])).data
+        self.assertEqual(data['seller']['display_name'], 'Marie K.')
+        self.assertNotIn('Kabongo', str(data['seller']))
 
     def test_offers_are_not_exposed_through_a_deleted_flag_name(self):
         offer = self.make_offer()
@@ -876,7 +906,9 @@ class ServiceTests(MarketplaceTestBase):
         found = services.get_offers_by_ids([offer.id, 'nope', None, uuid.uuid4()])
         self.assertEqual(set(found), {offer.id})
         info = found[offer.id]
-        self.assertEqual((info.seller_id, info.title), (self.seller.id, offer.title))
+        self.assertEqual(
+            (info.seller_context_type, info.seller_context_id, info.title), ('USER', self.seller.id, offer.title),
+        )
         self.assertTrue(info.main_image_url.endswith('.webp'))
 
     def test_offer_has_no_foreign_key_to_another_domain(self):

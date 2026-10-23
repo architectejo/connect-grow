@@ -78,6 +78,20 @@ class ProfileImagesAreSanitizedTests(TestCase):
         exif, fmt = self.stored_exif(profile.logo)
         self.assertEqual((exif, fmt), ({}, 'WEBP'))
 
+    def test_api_upload_of_organization_logo_strips_gps(self):
+        from apps.identity.models import Organization
+
+        user = User.objects.create_user(email='orglogo@example.com', password='x', full_name='A', phone_verified=True)
+        client = APIClient()
+        client.force_authenticate(user)
+        response = client.post(
+            '/api/accounts/organizations/',
+            {'name': 'Logo Orga', 'org_type': 'ENTREPRISE', 'logo': upload(jpeg_with_exif())}, format='multipart',
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        organization = Organization.objects.get(name='Logo Orga')
+        self.assertEqual(self.stored_exif(organization.logo), ({}, 'WEBP'))
+
     def test_api_upload_of_photo_strips_gps(self):
         user = User.objects.create_user(email='api@example.com', password='x', full_name='A')
         client = APIClient()
@@ -115,21 +129,20 @@ class PixelLimitTests(TestCase):
         return buffer.getvalue()
 
     def test_oversized_png_is_a_400_never_a_500_for_photo_and_logo(self):
-        owner = User.objects.create_user(
-            email='big@example.com', password='x', full_name='B', user_type='ENTREPRISE',
-        )
-        BusinessProfile.objects.create(user=owner, business_name='B')
+        owner = User.objects.create_user(email='big@example.com', password='x', full_name='B', phone_verified=True)
         client = APIClient(raise_request_exception=False)
         client.force_authenticate(owner)
         with self.settings(PROFILE_IMAGE_MAX_PIXELS=1000):
             photo = client.patch('/api/accounts/me/', {'photo': upload(self.png((50, 50)), 'p.png', 'image/png')}, format='multipart')
-            logo = client.patch(
-                '/api/accounts/me/',
-                {'business_profile.logo': upload(self.png((50, 50)), 'l.png', 'image/png')}, format='multipart',
+            logo = client.post(
+                '/api/accounts/organizations/',
+                {'name': 'Grande boîte', 'org_type': 'ENTREPRISE', 'logo': upload(self.png((50, 50)), 'l.png', 'image/png')},
+                format='multipart',
             )
         self.assertEqual(photo.status_code, 400, photo.content)
         self.assertIn('photo', photo.data)
-        self.assertLess(logo.status_code, 500)
+        self.assertEqual(logo.status_code, 400, logo.content)
+        self.assertIn('logo', logo.json())
 
     def test_image_within_limit_is_accepted(self):
         user = User.objects.create_user(email='ok@example.com', password='x', full_name='O')

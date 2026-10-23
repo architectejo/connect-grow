@@ -9,6 +9,7 @@ from datetime import timedelta
 
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
+from corsheaders.defaults import default_headers
 
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
@@ -138,6 +139,11 @@ REST_FRAMEWORK = {
         'logout': '60/hour',        # déconnexion (publique), par IP
         'change_password': '10/hour',  # par utilisateur
         'kyc_write': '20/hour',     # dépôt/suppression de pièces KYC, par utilisateur
+        'provider_write': '20/hour',  # profil prestataire (activation, modification, archivage), par utilisateur
+        'org_create': '5/day',      # création d'organisation, par utilisateur (ADR 0006, 9.2)
+        'org_list': '600/hour',     # liste publique des organisations, par IP
+        'org_write': '30/hour',     # modification, archivage et sortie d'une organisation, par utilisateur
+        'contexts': '600/hour',     # liste des contextes disponibles, par utilisateur
         'contact_settings': '20/hour',  # réglages de contact vendeur (numéro, code, canaux), par utilisateur
         # Écritures du marketplace et des interactions (par utilisateur ; par IP pour la vue anonyme).
         'contact': '20/hour',
@@ -145,6 +151,7 @@ REST_FRAMEWORK = {
         'contact_reveal_user': '60/hour',  # révélation de numéro, filet technique par utilisateur
         'contact_reveals_list': '120/hour',  # liste « qui a demandé mon numéro », par utilisateur
         'exchange': '10/hour',
+        'features': '120/hour',  # configuration publique des fonctionnalités, par IP (anonymes)
         'share': '30/hour',
         'message': '120/hour',
         'review': '10/hour',
@@ -185,6 +192,10 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Le front doit pouvoir lire Retry-After sur les réponses 429 (appels inter-origines).
 CORS_EXPOSE_HEADERS = ['Retry-After']
+
+# En-tête du contexte actif (ADR 0006, 6.1) : en plus des en-têtes par défaut de django-cors-headers,
+# sinon la requête préalable du navigateur le refuse.
+CORS_ALLOW_HEADERS = (*default_headers, 'x-context')
 
 # 3. Assure-toi que ces méthodes sont autorisées
 CORS_ALLOW_METHODS = [

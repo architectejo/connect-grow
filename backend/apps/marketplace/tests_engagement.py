@@ -60,8 +60,8 @@ class ViewEventTests(MarketplaceTestBase):
 
     def test_shares_counted_once_per_user_and_day_and_survive_the_purge_of_unique_views(self):
         actor = f'user:{self.buyer.pk}'
-        self.assertTrue(visibility_services.record_share(offer_id=self.offer.id, seller_id=self.seller.id, actor_key=actor))
-        self.assertFalse(visibility_services.record_share(offer_id=self.offer.id, seller_id=self.seller.id, actor_key=actor))
+        self.assertTrue(visibility_services.record_share(offer_id=self.offer.id, seller_context_type='USER', seller_context_id=self.seller.id, actor_key=actor))
+        self.assertFalse(visibility_services.record_share(offer_id=self.offer.id, seller_context_type='USER', seller_context_id=self.seller.id, actor_key=actor))
         dispatch_outbox_now()
         OfferUniqueView.objects.update(date=timezone.localdate() - timedelta(days=30))
         visibility_services.purge_unique_views()
@@ -140,7 +140,7 @@ class InlineDispatchContractTests(TransactionTestCase):
     def test_repeated_and_replayed_views_are_counted_exactly(self):
         keys = [f'user:{n}' for n in range(8)]
         for key in keys + keys[:3]:  # trois visiteurs reviennent le même jour
-            visibility_services.record_view(offer_id=self.offer.id, seller_id=self.seller.id, viewer_key=key)
+            visibility_services.record_view(offer_id=self.offer.id, seller_context_type='USER', seller_context_id=self.seller.id, viewer_key=key)
         dispatch_outbox_now()
         dispatch_outbox_now()  # rejeu
         self.offer.refresh_from_db()

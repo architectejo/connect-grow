@@ -24,7 +24,7 @@ from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
 from apps.common.factories import make_test_image
-from apps.identity.models import BusinessProfile, KycDocument, OtpCode, User
+from apps.identity.models import BusinessProfile, KycDocument, Membership, Organization, OtpCode, User
 from apps.marketplace import services as marketplace_services
 from apps.marketplace.models import ContactEvent, Offer
 from apps.messaging.models import Conversation, Message
@@ -46,8 +46,8 @@ LOCMEM = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'
 # --- Miroir de connect-grow/src/api/types.ts : {clé: types acceptés} ; `?` = optionnelle côté TS ---
 SPEC_RATING = {'average': 'num|null', 'count': 'num'}
 SPEC_SELLER = {
-    'id': 'uuid', 'full_name': 'str', 'photo?': 'str|null', 'user_type': 'str', 'business_profile?': 'obj|null',
-    'date_joined?': 'date',
+    'context_type': 'str', 'context_id': 'uuid', 'display_name': 'str', 'photo?': 'str|null', 'org_type?': 'str|null',
+    'verified_claims': 'list', 'verification_summary': 'obj', 'member_since': 'date',
 }
 SPEC_POST = {
     'id': 'uuid', 'seller': 'obj', 'seller_name?': 'str', 'category': 'uuid', 'category_name?': 'str|null',
@@ -73,9 +73,11 @@ SPEC_KYC = {
     'id': 'uuid', 'document_type': 'str', 'download_url?': 'str|null', 'status': 'str', 'rejection_reason?': 'str',
     'created_at': 'date', 'reviewed_at?': 'date|null',
 }
-SPEC_BUSINESS = {
-    'id': 'uuid', 'business_name': 'str', 'logo?': 'str|null', 'bio?': 'str', 'categories?': 'list',
-    'ville_name?': 'str|null', 'commune_name?': 'str|null', 'is_verified': 'bool',
+# Liste publique des organisations (ADR 0006, 9.2) : remplace l'ancienne liste `businesses/`.
+SPEC_ORGANIZATION = {
+    'id': 'uuid', 'name': 'str', 'org_type': 'str', 'description': 'str', 'logo': 'str|null',
+    'city_id': 'uuid|null', 'commune_id': 'uuid|null', 'category_ids': 'list', 'verified_claims': 'list',
+    'verification_summary': 'obj', 'member_since': 'date',
 }
 SPEC_PAGE = {'count': 'num', 'next': 'str|null', 'previous': 'str|null', 'results': 'list'}
 SPEC_AUTHOR_RESPONSE = {'id': 'uuid', 'status': 'str', 'author_responded_at': 'date'}
@@ -230,26 +232,32 @@ class ContractTests(RecetteBase):
         body = APIClient().get(f'{POSTS_URL}{self.offer.id}/').json()
         self.assertTrue(DATE_RE.match(body['created_at']), body['created_at'])
         self.assertTrue(body['created_at'].endswith('+01:00'), body['created_at'])
-        self.assertTrue(body['seller']['date_joined'].endswith('+01:00'), body['seller']['date_joined'])
+        self.assertTrue(body['seller']['member_since'].endswith('+01:00'), body['seller']['member_since'])
 
-    def test_businesses_are_paginated_by_20_and_filter_on_is_verified(self):
+    def test_organizations_are_paginated_by_20_and_filter_on_fully_verified(self):
         for i in range(24):
-            user = User.objects.create_user(
-                email=f'ent{i}@example.com', password=PASSWORD, full_name=f'Gérant {i}', user_type='ENTREPRISE',
-            )
-            BusinessProfile.objects.create(user=user, business_name=f'Zbiz {i:02d}', is_verified=i % 3 == 0)
+            organization = Organization.objects.create(name=f'Zbiz {i:02d}', org_type='ENTREPRISE')
+            if i % 3 == 0:  # les trois pièces exigées du type ENTREPRISE, toutes validées
+                holder = User.objects.create_user(email=f'ent{i}@example.com', password=PASSWORD, full_name=f'Gérant {i}')
+                profile = BusinessProfile.objects.create(user=holder, business_name=f'Support {i}')
+                for document_type in ('RCCM', 'ID_NATIONALE', 'PIECE_GERANT'):
+                    KycDocument.objects.create(
+                        business_profile=profile, organization=organization, document_type=document_type,
+                        status=KycDocument.STATUS_VALIDE, reviewed_at=timezone.now(),
+                    )
         client = APIClient()
-        first = client.get('/api/accounts/businesses/', {'search': 'Zbiz'}).json()
-        self.assertShape(first, SPEC_PAGE, 'Paginated<PublicBusiness>')
+        first = client.get('/api/accounts/organizations/', {'search': 'Zbiz'}).json()
+        self.assertShape(first, SPEC_PAGE, 'Paginated<PublicOrganization>')
         self.assertEqual((first['count'], len(first['results'])), (24, 20))
-        self.assertShape(first['results'][0], SPEC_BUSINESS, 'PublicBusiness')
-        second = client.get('/api/accounts/businesses/', {'search': 'Zbiz', 'page': 2}).json()
+        self.assertShape(first['results'][0], SPEC_ORGANIZATION, 'PublicOrganization')
+        second = client.get('/api/accounts/organizations/', {'search': 'Zbiz', 'page': 2}).json()
         self.assertEqual((len(second['results']), second['next']), (4, None))
-        verified = client.get('/api/accounts/businesses/', {'search': 'Zbiz', 'is_verified': 'true'}).json()
+        verified = client.get('/api/accounts/organizations/', {'search': 'Zbiz', 'fully_verified': 'true'}).json()
         self.assertEqual(verified['count'], 8)
-        self.assertTrue(all(b['is_verified'] for b in verified['results']))
-        self.assertEqual(client.get('/api/accounts/businesses/', {'is_verified': 'False'}).json()['count'], 16)
-        self.assertEqual(client.get('/api/accounts/businesses/', {'is_verified': 'peut-etre'}).status_code, 400)
+        self.assertTrue(all(o['verification_summary']['complete'] for o in verified['results']))
+        self.assertEqual(client.get('/api/accounts/organizations/', {'fully_verified': 'False'}).json()['count'], 16)
+        self.assertEqual(client.get('/api/accounts/organizations/', {'fully_verified': 'peut-etre'}).status_code, 400)
+        self.assertEqual(client.get('/api/accounts/businesses/').status_code, 404)  # ancienne liste supprimée
 
     def test_favorite_toggle_and_list_contract(self):
         client = self.as_user(self.buyer)
@@ -274,15 +282,24 @@ class ContractTests(RecetteBase):
         self.assertIsNone(email_user['phone'])
 
     def test_profile_patch_cannot_grant_verification(self):
-        """Règle 3 : la vérification ne s'achète ni ne s'auto-déclare."""
-        owner = User.objects.create_user(email='bizz@example.com', password=PASSWORD, full_name='Gérant', user_type='ENTREPRISE')
-        profile = BusinessProfile.objects.create(user=owner, business_name='Ma boîte')
-        response = self.as_user(owner).patch(
+        """Règle 3 : la vérification ne s'achète ni ne s'auto-déclare. `me/` ne porte plus de profil entreprise
+        et une organisation ne peut pas recevoir de claim par son propre PATCH."""
+        owner = User.objects.create_user(email='bizz@example.com', password=PASSWORD, full_name='Gérant', phone_verified=True)
+        client = self.as_user(owner)
+        response = client.patch(
             '/api/accounts/me/', {'business_profile': {'business_name': 'Ma boîte', 'is_verified': True}}, format='json',
         )
         self.assertEqual(response.status_code, 200)
-        profile.refresh_from_db()
-        self.assertFalse(profile.is_verified)
+        self.assertFalse(BusinessProfile.objects.filter(user=owner).exists())
+        created = client.post('/api/accounts/organizations/', {'name': 'Ma boîte', 'org_type': 'ENTREPRISE'}, format='json')
+        self.assertEqual(created.status_code, 201, created.content)
+        patched = client.patch(
+            f"/api/accounts/organizations/{created.json()['id']}/",
+            {'description': 'Ok', 'is_verified': True, 'verified_claims': [{'code': 'RCCM_VERIFIED'}]}, format='json',
+        )
+        self.assertEqual(patched.status_code, 200, patched.content)
+        self.assertEqual(patched.json()['verification']['verified_claims'], [])
+        self.assertFalse(patched.json()['verification']['summary']['complete'])
 
     def test_otp_throttle_returns_429_with_retry_after_and_code(self):
         with override_settings(CACHES=LOCMEM):
@@ -388,6 +405,11 @@ class JourneyTests(RecetteBase):
         response, code = self.register_by_phone(phone, user_type='ENTREPRISE', business_profile={'business_name': 'Atelier'})
         self.assertEqual(response.status_code, 201, response.content)
         body = response.json()
+        # Compte unique (règle 1) : l'ancien type de compte et le profil entreprise ne sont ni lus ni renvoyés.
+        self.assertNotIn('user_type', body)
+        self.assertNotIn('business_profile', body)
+        self.assertFalse(Organization.objects.exists())
+        self.assertFalse(BusinessProfile.objects.exists())
         self.assertNotIn('password', body)
         self.assertNotIn('otp_code', body)
         self.assertTrue(body['phone_verified'])
@@ -454,9 +476,9 @@ class JourneyTests(RecetteBase):
         gallery = client.post(f'{POSTS_URL}{offer_id}/images/', {'image': make_test_image()}, format='multipart')
         self.assertEqual(gallery.status_code, 201)
         self.assertShape(gallery.json()[0], {'id': 'uuid', 'image': 'str', 'order?': 'num'}, 'PostImage')
-        # Un tiers ne peut pas ajouter de photo : 404, comme une offre inconnue.
+        # Un tiers ne peut pas ajouter de photo : 403 DENY_RELATION (autorisation par objet, ADR 0006).
         intruder = self.as_user(self.buyer).post(f'{POSTS_URL}{offer_id}/images/', {'image': make_test_image()}, format='multipart')
-        self.assertEqual(intruder.status_code, 404)
+        self.assertEqual(intruder.status_code, 403)
         self.assertEqual(client.delete(f'{POSTS_URL}{offer_id}/images/', {}, QUERY_STRING=f"image_id={gallery.json()[0]['id']}").status_code, 204)
 
     def test_contact_review_reply_report_recourse_and_decision(self):
@@ -644,7 +666,7 @@ class RatingsDoNotRankTests(RecetteBase):
             APIClient().get(REVIEWS_URL, {'post': str(self.offer.id)}).content.decode(),
             self.as_user(self.seller).get('/api/accounts/me/').content.decode(),
             self.as_user(self.seller).get('/api/marketplace/stats/dashboard/').content.decode(),
-            APIClient().get('/api/accounts/businesses/').content.decode(),
+            APIClient().get('/api/accounts/organizations/').content.decode(),
         ]
         for text in payloads:
             self.assertNotRegex(text.lower(), r'trust|confiance|reputation')
@@ -661,6 +683,8 @@ class PrivacyThirdPartyTests(RecetteBase):
             email=seller_email, phone=seller_phone, password=PASSWORD, full_name='Gérant Privé', user_type='ENTREPRISE',
         )
         BusinessProfile.objects.create(user=owner, business_name='Boîte Privée', nif=nif)
+        organization = Organization.objects.create(name='Boîte Privée', org_type='ENTREPRISE', nif=nif)
+        Membership.objects.create(organization=organization, user=owner, role='OWNER')
         offer = self.make_offer(owner, title='Offre du gérant privé')
         from django.core.files.uploadedfile import SimpleUploadedFile
         KycDocument.objects.create(
@@ -674,7 +698,7 @@ class PrivacyThirdPartyTests(RecetteBase):
 
         secrets = [seller_phone, '243899998877', '899998877', seller_email, nif, 'secret-kyc']
         urls = [
-            POSTS_URL, f'{POSTS_URL}{offer.id}/', f'{POSTS_URL}?seller={owner.id}', '/api/accounts/businesses/',
+            POSTS_URL, f'{POSTS_URL}{offer.id}/', f'{POSTS_URL}?seller={owner.id}', '/api/accounts/organizations/',
             f'{REVIEWS_URL}?post={offer.id}', f'{REVIEWS_URL}?seller={owner.id}',
             '/api/interactions/conversations/', '/api/interactions/notifications/', '/api/marketplace/favorites/',
             '/api/accounts/kyc/documents/', '/api/accounts/me/', '/api/moderation/dashboard/',
@@ -791,7 +815,7 @@ class AuditTrailTests(RecetteBase):
         self.assertFalse(Offer.objects.filter(pk__in=[first.id, second.id]).exists())
         # Un tiers ne supprime pas l'offre d'autrui et rien n'est journalisé.
         before = AuditLog.objects.count()
-        self.assertEqual(self.as_user(self.buyer).delete(f'{POSTS_URL}{self.offer.id}/').status_code, 404)
+        self.assertEqual(self.as_user(self.buyer).delete(f'{POSTS_URL}{self.offer.id}/').status_code, 403)
         self.assertEqual(AuditLog.objects.count(), before)
 
     def test_rule12_settings_change_through_the_admin_form(self):

@@ -42,10 +42,10 @@ On réinitialise toutes les migrations en une seule opération, en passant à la
 | Actuel | Cible | Remarques |
 | --- | --- | --- |
 | `accounts.User`, `OtpCode`, `KycDocument` | `identity` | `AUTH_USER_MODEL = 'identity.User'`. `ville`/`commune` deviennent `city_id`/`commune_id` (UUID). `KycDocument.business_profile` : FK interne à `identity`, conservée jusqu'à L0-09 (remplacée par `VerificationRequest`). Stockage privé KYC inchangé. |
-| `accounts.BusinessProfile` | `identity` (transitoire) | `categories` M2M → table de liaison interne `category_id` (UUID) ; supprimé par L0-09 au profit d'`Organization`. `user_type` conservé jusqu'à L0-09. |
+| `accounts.BusinessProfile` | `identity` (transitoire) | `categories` M2M → table de liaison interne `category_id` (UUID) ; supprimé par L0-09 au profit d'`Organization`. `user_type` conservé jusqu'à L0-09. **Note (ADR 0006) : plan de remplacement et migration de données.** |
 | `marketplace.City`, `Commune`, `Category` | `catalog` | Référentiels configurables (règle 11). `slug` unique explicite, `max_length` explicites. |
 | `moderation.ForbiddenItem` | `catalog` | `category_id` interne à `catalog` ; `added_by` → utilisateur (FK autorisée). |
-| `marketplace.Post`, `PostImage`, `Favorite`, `MarketplaceSettings` | `marketplace` | `Offer`, `OfferImage`, `Favorite`, `MarketplaceSettings`. `category_id`, `commune_id` en UUID. `Offer.seller` reste FK vers l'utilisateur (devient `organization_id` en L0-09). |
+| `marketplace.Post`, `PostImage`, `Favorite`, `MarketplaceSettings` | `marketplace` | `Offer`, `OfferImage`, `Favorite`, `MarketplaceSettings`. `category_id`, `commune_id` en UUID. `Offer.seller` reste FK vers l'utilisateur (devient `organization_id` en L0-09). **Note (ADR 0006) : remplacé par `seller_context_type/id` + `created_by` ; `organization_id` ne couvrait pas le prestataire ni l'offre personnelle.** |
 | `interactions.ContactRequest`, `ExchangeProposal` | `marketplace` | `ContactRequest` → `ContactEvent` (CDC §11.1). `ExchangeProposal` reste derrière l'interrupteur de L0-14. |
 | `marketplace.PostViewStat`, `PostUniqueView`, `interactions.ContactStat` | `visibility` | `DailyVisibilityCounter` (offer_id, date, vues, contacts). `seller` : FK utilisateur conservée. |
 | `ranking.RankingSettings` | `visibility` | Facteur de confiance retiré en L0-07/L0-08, pas pendant le portage. |

@@ -11,6 +11,45 @@ from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, Ou
 
 from apps.moderation.services import record_audit
 
+# Contexte actif (ADR 0006, section 6) : façade publique.
+from .acting import (  # noqa: F401
+    ActingContextMixin, AvailableContext, authorize, authorize_on, can, capability_permission, get_acting_context,
+    get_contexts_for_user, resolve_acting_context,
+)
+
+# Organisations et équipes (ADR 0006) : façade publique, les autres domaines n'importent jamais le sous-module.
+from .organizations import (  # noqa: F401
+    OrganizationError, SUSPENSION_REASONS, add_member, assert_account_removable, archive_organization, change_member_role,
+    count_active_owners, create_organization, get_active_role, get_identity_settings, get_organization_for_member,
+    leave_organization, reactivate_organization, revoke_member, suspend_organization, transfer_ownership,
+    update_organization,
+)
+
+# Lectures des organisations : état de vérification dérivé, liste publique, limites (ADR 0006, 9.2 et 17.2).
+from .organization_reads import (  # noqa: F401
+    get_category_ids_by_organization, get_internal_verification, get_organization_limits, get_verification_data,
+    public_organizations_queryset,
+)
+
+# Vérification des organisations (ADR 0006, A6, 9.4) : façade publique.
+from .verification import (  # noqa: F401
+    delete_kyb_document, get_organization_verification, get_verification_summaries, get_verified_claims,
+    list_kyb_documents, submit_kyb_document,
+)
+
+# Contextes vendeur : fiches publiques, visibilité, destinataires, canaux, état du compte (ADR 0006, 7.1).
+from .sellers import (  # noqa: F401
+    SellerSummary, context_has_capability, get_contact_accounts, get_context_allowed_channels, get_context_recipients,
+    get_seller_context_public_flags, get_seller_summaries, get_user_context_roles, is_seller_context_public,
+    set_account_active, announce_account_status,
+)
+
+# Prestataire individuel (ADR 0006, 9.3) : façade publique.
+from .providers import (  # noqa: F401
+    ProviderError, activate_provider, archive_provider, get_provider_category_ids, get_provider_profile,
+    update_provider,
+)
+
 
 def revoke_all_sessions(user) -> int:
     """Révoque tous les refresh tokens en cours de `user` (déconnexion de tous les
@@ -74,10 +113,62 @@ def recompute_verification(business_profile):
     return verified
 
 
-def decide_kyc_document(document_id, reviewer, decision, reason=''):
-    """Décision (VALIDE ou REFUSE) sur une pièce KYC, atomique avec son journal d'audit."""
-    from django.db import transaction
+INTEREST_CONFLICT_MESSAGE = (
+    "Vous ne pouvez pas traiter une pièce d'une organisation dont vous êtes ou avez été membre, ni une pièce que "
+    "vous avez déposée."
+)
+
+
+def has_interest_conflict(doc, organization, reviewer) -> bool:
+    """Conflit d'intérêts du personnel sur une pièce d'organisation (ADR 0006, 7.2) : déposant, créateur de
+    l'organisation, ou toute ligne d'appartenance de tout statut (actif ou ancien membre, sans limite de durée)."""
+    from .models import Membership
+
+    return bool(
+        doc.uploaded_by_id == reviewer.pk or organization.created_by_id == reviewer.pk
+        or Membership.objects.filter(organization=organization, user_id=reviewer.pk).exists()
+    )
+
+
+def get_document_for_download(document_id, reviewer):
+    """Pièce que `reviewer` peut télécharger. Même règle de conflit d'intérêts que la décision : le refus est
+    journalisé (`KYC_DOWNLOAD_DENIED`) puis renvoyé en 403. Pièce de l'ancien profil : jamais la sienne."""
+    from apps.common.contexts import CONTEXT_ORGANIZATION
     from .models import KycDocument
+
+    try:
+        doc = KycDocument.objects.select_related('organization', 'business_profile').get(pk=document_id)
+    except KycDocument.DoesNotExist:
+        raise KycError("Document introuvable.", 404)
+    organization = doc.organization
+    if organization is not None:
+        denied = has_interest_conflict(doc, organization, reviewer)
+    else:
+        denied = doc.business_profile is not None and doc.business_profile.user_id == reviewer.pk
+    if denied:
+        record_audit(
+            reviewer, 'KYC_DOWNLOAD_DENIED', target=doc,
+            details=f"organization={organization.pk}; reason=interest_conflict" if organization else "reason=own_document",
+            context=(CONTEXT_ORGANIZATION, organization.pk) if organization else None,
+        )
+        raise KycError(INTEREST_CONFLICT_MESSAGE, 403)
+    return doc
+
+
+def decide_kyc_document(document_id, reviewer, decision, reason=''):
+    """Décision (VALIDE ou REFUSE) sur une pièce KYC ou KYB, atomique avec son journal d'audit.
+
+    Pièce d'organisation (ADR 0006, 7.2) : refus (403) si le décideur a une ligne d'appartenance à
+    l'organisation (actif ou ancien membre, sans limite de durée), s'il a déposé la pièce ou s'il a créé
+    l'organisation. Les claims ne sont jamais écrits : ils sont calculés à la lecture. Un événement
+    `identity.organization_verification_changed` est publié dans la même transaction.
+
+    `reason` (500 caractères au plus) est visible du déposant : il ne doit contenir AUCUNE donnée personnelle
+    (nom, numéro, adresse). Une liste codée de motifs est une dette suivie pour L1-xx (ADR 0006, amendement T4)."""
+    from django.db import transaction
+    from apps.common.contexts import CONTEXT_ORGANIZATION
+    from apps.platform_core.services import publish_event
+    from .models import KycDocument, Organization
 
     if decision not in (KycDocument.STATUS_VALIDE, KycDocument.STATUS_REFUSE):
         raise KycError("decision doit être VALIDE ou REFUSE.")
@@ -90,7 +181,15 @@ def decide_kyc_document(document_id, reviewer, decision, reason=''):
         except KycDocument.DoesNotExist:
             raise KycError("Document introuvable.", 404)
 
-        if doc.business_profile.user_id == reviewer.pk:
+        organization = None
+        if doc.organization_id is not None:
+            # Verrou de l'organisation : deux décisions sur ses pièces se suivent l'une après l'autre.
+            organization = Organization.objects.select_for_update().get(pk=doc.organization_id)
+            if has_interest_conflict(doc, organization, reviewer):
+                raise KycError(INTEREST_CONFLICT_MESSAGE, 403)
+        elif doc.business_profile_id is None:
+            raise KycError("Cette pièce n'est rattachée à aucun profil ni aucune organisation.", 409)
+        elif doc.business_profile.user_id == reviewer.pk:
             raise KycError("Vous ne pouvez pas décider sur votre propre pièce.", 403)
 
         previous = doc.status
@@ -111,60 +210,28 @@ def decide_kyc_document(document_id, reviewer, decision, reason=''):
             raise KycError("Cette pièce a déjà fait l'objet d'une décision.", 409)
         doc.refresh_from_db()
 
-        recompute_verification(doc.business_profile)
-
         action = 'KYC_REVOKED' if revoking else f'KYC_{decision}'
-        record_audit(
-            reviewer, action, target=doc,
-            details=doc.rejection_reason or f"Document {doc.get_document_type_display()} validé.",
-        )
-    return doc
-
-
-@dataclass(frozen=True)
-class SellerBusiness:
-    business_name: str
-    bio: str
-    logo: Optional[str]  # URL relative du média, ou None
-    is_verified: bool
-
-
-@dataclass(frozen=True)
-class SellerSummary:
-    """Fiche publique d'un vendeur affichée sur ses offres. Ni téléphone ni e-mail
-    (règle 10) : le numéro ne sort que par l'action de contact (L0-10a-c)."""
-
-    id: uuid.UUID
-    full_name: str
-    photo: Optional[str]
-    user_type: str
-    business: Optional[SellerBusiness]
-    date_joined: object
-
-
-def get_seller_summaries(ids: Iterable) -> dict:
-    """Fiches vendeur indexées par UUID, en une requête (profil business compris)."""
-    from apps.common.utils import parse_uuid
-
-    from .models import User
-
-    wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
-    if not wanted:
-        return {}
-    summaries = {}
-    for user in User.objects.filter(id__in=wanted).select_related('business_profile'):
-        profile = getattr(user, 'business_profile', None)
-        business = None
-        if profile is not None:
-            business = SellerBusiness(
-                business_name=profile.business_name, bio=profile.bio,
-                logo=profile.logo.url if profile.logo else None, is_verified=profile.is_verified,
+        if organization is not None:
+            record_audit(
+                reviewer, action, target=doc,
+                details=f"organization={organization.pk}; document_type={doc.document_type}; decision={decision}",
+                context=(CONTEXT_ORGANIZATION, organization.pk),
             )
-        summaries[user.id] = SellerSummary(
-            id=user.id, full_name=user.full_name, photo=user.photo.url if user.photo else None,
-            user_type=user.user_type, business=business, date_joined=user.date_joined,
-        )
-    return summaries
+            publish_event(
+                'identity.organization_verification_changed', aggregate_type='organization',
+                aggregate_id=organization.pk,
+                payload={
+                    'organization_id': str(organization.pk), 'document_type': doc.document_type,
+                    'decision': 'REVOKED' if revoking else decision,
+                },
+            )
+        else:
+            recompute_verification(doc.business_profile)
+            record_audit(
+                reviewer, action, target=doc,
+                details=doc.rejection_reason or f"Document {doc.get_document_type_display()} validé.",
+            )
+    return doc
 
 
 def get_full_names(ids: Iterable) -> dict:
@@ -178,15 +245,31 @@ def get_full_names(ids: Iterable) -> dict:
 
 
 def acts_for_context(user_id, context_type, context_id) -> bool:
-    """Vrai si ce compte agit pour le contexte désigné (couture L0-09). Aujourd'hui, seul le
-    contexte personnel existe : le compte agit pour lui-même. L0-09 étendra la règle aux membres
-    d'une organisation sans changer les appelants."""
-    from apps.common.contexts import CONTEXT_USER
+    """Vrai si ce compte agit pour le contexte désigné (ADR 0006, 7.1) : `USER` = soi-même ; `PROVIDER` =
+    titulaire du profil (même archivé) ; `ORGANIZATION` = membre ACTIF, de tout rôle, d'une organisation non
+    suspendue. Faux sinon (dont membre révoqué). Sert au refus « je ne note pas et ne contacte pas ma
+    propre offre ». Aucun cache : relu en base à chaque appel.
 
-    return (
-        context_type == CONTEXT_USER and user_id is not None and context_id is not None
-        and str(user_id) == str(context_id)
-    )
+    NE PAS L'UTILISER POUR AUTORISER UNE ÉCRITURE : elle ignore le rôle, l'état du compte et, contrairement
+    à la résolution du contexte actif, tolère une organisation archivée et un profil prestataire archivé.
+    Pour autoriser, utiliser `can` / `authorize_on` (capacité du rôle réel)."""
+    from apps.common.contexts import CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER
+    from apps.common.utils import parse_uuid
+
+    from .models import Membership, Organization, ProviderProfile
+
+    user_uuid, context_uuid = parse_uuid(user_id), parse_uuid(context_id)
+    if user_uuid is None or context_uuid is None or user_id is None or context_id is None:
+        return False
+    if context_type == CONTEXT_USER:
+        return user_uuid == context_uuid
+    if context_type == CONTEXT_PROVIDER:
+        return ProviderProfile.objects.filter(pk=context_uuid, user_id=user_uuid).exists()
+    if context_type == CONTEXT_ORGANIZATION:
+        return Membership.objects.filter(
+            user_id=user_uuid, organization_id=context_uuid, status=Membership.STATUS_ACTIVE,
+        ).exclude(organization__status=Organization.STATUS_SUSPENDED).exists()
+    return False
 
 
 def public_display_name(full_name) -> str:
@@ -545,7 +628,7 @@ def set_channel_consent(user, channel, *, enabled, text_version=None) -> None:
         ])
         record_audit(
             user, 'contact.consent_granted', target=user,
-            details=f"Canal {channel} activé ; texte {text_version} ; numéro se terminant par {last4}.",
+            details=f"Canal {channel} activé ; texte {text_version}.",
         )
 
 

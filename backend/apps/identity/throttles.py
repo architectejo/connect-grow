@@ -168,6 +168,41 @@ class ContactSettingsThrottle(UserWriteThrottle):
     scope = 'contact_settings'
 
 
+class ProviderWriteThrottle(UserWriteThrottle):
+    """Activation, modification et archivage du profil prestataire : par utilisateur."""
+
+    scope = 'provider_write'
+
+
+class OrganizationCreateThrottle(UserWriteThrottle):
+    """Création d'organisation : 5/jour par compte (anti-abus, ADR 0006, 9.2)."""
+
+    scope = 'org_create'
+
+
+class OrganizationListThrottle(IpThrottle):
+    """Liste publique des organisations (recherche, filtres) : par adresse IP, anonymes compris."""
+
+    scope = 'org_list'
+
+
+class OrganizationWriteThrottle(UserWriteThrottle):
+    """Modification, archivage et sortie d'une organisation : 30/h par compte (ADR 0006, 9.2)."""
+
+    scope = 'org_write'
+
+
+class ContextsListThrottle(SimpleRateThrottle):
+    """Lecture de la liste des contextes (appelée à chaque chargement du front) : par utilisateur."""
+
+    scope = 'contexts'
+
+    def get_cache_key(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return None
+        return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
+
+
 class FailureLimiter:
     """Compteur d'ÉCHECS par clé (couple identifiant+IP), avec délai croissant.
 

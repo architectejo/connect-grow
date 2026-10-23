@@ -28,10 +28,11 @@ EXPECTED_PUBLIC = {
     ('get', 'api/moderation/forbidden-items/<pk>/'),
     ('get', 'api/interactions/reviews/'),
     ('get', 'api/interactions/reviews/<pk>/'),
-    ('get', 'api/accounts/businesses/'),
+    ('get', 'api/accounts/organizations/'),  # liste publique minimale des organisations (L0-09g)
     ('post', 'api/accounts/register/'),
     ('post', 'api/accounts/login/'),
     ('post', 'api/accounts/token/refresh/'),
+    ('get', 'api/config/features/'),  # fonctionnalités activables, sans donnée personnelle (L0-14)
     ('post', 'api/accounts/logout/'),  # public : le refresh du corps prouve la session (L0-19)
     ('post', 'api/accounts/otp/request/'),
     ('post', 'api/accounts/password-reset/confirm/'),
@@ -42,6 +43,12 @@ MUST_BE_WALKED = {
     'api/accounts/kyc/documents/<pk>/',
     'api/accounts/kyc/documents/<pk>/decision/',
     'api/accounts/kyc/documents/<pk>/download/',
+    'api/accounts/organizations/',
+    'api/accounts/organizations/limits/',
+    'api/accounts/organizations/<pk>/',
+    'api/accounts/organizations/<pk>/internal/',
+    'api/accounts/organizations/<pk>/archive/',
+    'api/accounts/organizations/<pk>/leave/',
     'api/marketplace/posts/<pk>/pause/',
     'api/marketplace/posts/<pk>/soft_delete/',
     'api/marketplace/posts/<pk>/favorite/',
@@ -361,6 +368,7 @@ class TestStorageCleanupTests(SimpleTestCase):
 SCHEDULED_COMMANDS = {
     'purge_offer_trash', 'expire_offers', 'lift_expired_sanctions',
     'purge_otp_codes', 'refresh_daily_contacts', 'refresh_visibility_scores', 'purge_offer_views', 'dispatch_outbox', 'purge_outbox',
+    'sync_seller_visibility',
 }
 
 

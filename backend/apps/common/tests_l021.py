@@ -100,10 +100,15 @@ class EmailCaseTests(RecetteBase):
 
 
 class AccountTypeReadOnlyTests(RecetteBase):
-    def test_user_type_cannot_be_changed_through_me(self):
-        response = self.as_user(self.buyer).patch('/api/accounts/me/', {'user_type': 'ENTREPRISE'}, format='json')
+    """ADR 0006, règle 1 : le compte est unique ; il n'a plus de type. `user_type` n'est ni exposé ni accepté
+    (compatibilité transitoire : un ancien client qui l'envoie encore n'a aucun effet)."""
+
+    def test_user_type_is_neither_exposed_nor_changed_through_me(self):
+        client = self.as_user(self.buyer)
+        self.assertNotIn('user_type', client.get('/api/accounts/me/').json())
+        response = client.patch('/api/accounts/me/', {'user_type': 'ENTREPRISE'}, format='json')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['user_type'], 'PARTICULIER')
+        self.assertNotIn('user_type', response.json())
         self.buyer.refresh_from_db()
         self.assertEqual(self.buyer.user_type, 'PARTICULIER')
 
@@ -148,8 +153,11 @@ class SanctionLiftTests(RecetteBase):
 
 class SuspendedSellerVisibilityTests(RecetteBase):
     def suspend_seller(self):
-        self.seller.is_active = False
-        self.seller.save(update_fields=['is_active'])
+        # Point unique de changement d'état du compte ; la visibilité des offres suit par l'événement (A7).
+        from apps.identity import services as identity_services
+
+        identity_services.set_account_active(self.seller.pk, False)
+        dispatch_outbox_now()
 
     def ids(self, response):
         return [row['id'] for row in self.rows(response)]
@@ -174,13 +182,16 @@ class SuspendedSellerVisibilityTests(RecetteBase):
         self.assertEqual(self.as_user(self.moderator).get(f'{POSTS_URL}{self.offer.id}/').status_code, 200)
         # L'auteur suspendu ne peut plus s'authentifier : on simule l'accès avec une session forcée.
         self.assertEqual(self.as_user(self.seller).get(f'{POSTS_URL}{self.offer.id}/').status_code, 200)
+        # Les listes « de mon contexte » exigent un compte utilisable (garde du contexte actif, ADR 0006 6.2).
         mine = self.as_user(self.seller).get(POSTS_URL, {'my_posts': 'true'})
-        self.assertIn(str(self.offer.id), self.ids(mine))
+        self.assertEqual((mine.status_code, mine.json()['code']), (403, 'DENY_SECURITY'))
 
     def test_offer_is_public_again_once_the_account_is_reactivated(self):
         self.suspend_seller()
-        self.seller.is_active = True
-        self.seller.save(update_fields=['is_active'])
+        from apps.identity import services as identity_services
+
+        identity_services.set_account_active(self.seller.pk, True)
+        dispatch_outbox_now()
         self.assertEqual(APIClient().get(f'{POSTS_URL}{self.offer.id}/').status_code, 200)
 
 

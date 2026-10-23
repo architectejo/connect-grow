@@ -109,11 +109,12 @@ class SellerDashboardRating:
     review_count: int
 
 
-def get_seller_dashboard_rating(seller_id) -> SellerDashboardRating:
-    """Pour le tableau de bord du vendeur lui-même : moyenne de ses notes vendeur visibles, sans
-    seuil d'affichage (None s'il n'a aucun avis), et nombre d'avis visibles reçus."""
+def get_seller_dashboard_rating(context_type, seller_id) -> SellerDashboardRating:
+    """Pour le tableau de bord d'un contexte vendeur : moyenne de ses notes vendeur visibles, sans
+    seuil d'affichage (None s'il n'a aucun avis), et nombre d'avis visibles reçus. `seller_id` est l'identifiant
+    du contexte (compte, profil prestataire ou organisation) de type `context_type`."""
     visible = Review.objects.filter(
-        seller_context_type=CONTEXT_USER, seller_context_id=seller_id, is_hidden=False,
+        seller_context_type=context_type, seller_context_id=seller_id, is_hidden=False,
     )
     counted = visible.filter(counts_for_seller=True).aggregate(total=Sum('seller_rating'), n=Count('id'))
     return SellerDashboardRating(
@@ -444,8 +445,9 @@ def _offer_title(offer):
 
 
 def can_reply(review: Review, user) -> bool:
-    """Le vendeur concerné (et lui seul) répond à l'avis, via `identity.acts_for_context`."""
-    return identity_services.acts_for_context(user.pk, review.seller_context_type, review.seller_context_id)
+    """Le vendeur concerné répond à l'avis. Contexte personnel : le titulaire ; organisation : la capacité
+    `review.reply` (propriétaire, administrateur, éditeur ; jamais l'analyste), relue en base."""
+    return identity_services.can(user.pk, review.seller_context_type, review.seller_context_id, 'review.reply')
 
 
 def reply_to_review(review: Review, replier, content: str) -> Review:

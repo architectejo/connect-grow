@@ -1,19 +1,25 @@
+import logging
 import secrets
 from datetime import timedelta
 
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.core.files.storage import FileSystemStorage
-from django.core.validators import RegexValidator
-from django.db import models
+from django.core.validators import MaxLengthValidator, MaxValueValidator, MinValueValidator, RegexValidator
+from django.db import models, transaction
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.db.models import F
 from django.conf import settings
 from django.utils import timezone
 
 from apps.common.images import sanitize_uploaded_field, validate_image_pixels, validate_image_upload_size
-from apps.common.models import BaseModel
+from apps.common.models import BaseModel, SingletonSettingsModel
 
+from .capabilities import ROLE_CHOICES
 from .kyc_files import kyc_upload_to
+
+logger = logging.getLogger(__name__)
 
 # CDC 2.3 : numéros togolais... congolais au format +243 suivi de 9 chiffres.
 phone_validator = RegexValidator(
@@ -260,10 +266,12 @@ class KycDocument(BaseModel):
     DOC_RCCM = 'RCCM'
     DOC_ID_NATIONALE = 'ID_NATIONALE'
     DOC_PIECE_GERANT = 'PIECE_GERANT'
+    DOC_ARRETE_ONG = 'ARRETE_ONG'
     DOC_TYPE_CHOICES = (
         (DOC_RCCM, "RCCM"),
         (DOC_ID_NATIONALE, "Identification nationale"),
         (DOC_PIECE_GERANT, "Pièce d'identité du gérant"),
+        (DOC_ARRETE_ONG, "Arrêté d'enregistrement de l'ONG"),
     )
 
     # Types de pièces dont la validation conjointe vaut « entreprise vérifiée » (CDC 3.1).
@@ -280,7 +288,15 @@ class KycDocument(BaseModel):
     )
 
     business_profile = models.ForeignKey(
-        BusinessProfile, on_delete=models.CASCADE, related_name='kyc_documents',
+        BusinessProfile, on_delete=models.CASCADE, related_name='kyc_documents', null=True, blank=True,
+    )
+    # ADR 0006, section 4.4 : pièce rattachée à une organisation (nul pendant l'étape « étendre » ;
+    # NOT NULL à la contraction, T9). `uploaded_by` : trace de l'auteur du dépôt.
+    organization = models.ForeignKey(
+        'Organization', on_delete=models.CASCADE, null=True, blank=True, related_name='kyc_documents',
+    )
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='kyc_uploads',
     )
     document_type = models.CharField(max_length=20, choices=DOC_TYPE_CHOICES)
     file = models.FileField(upload_to=kyc_upload_to, storage=kyc_storage)
@@ -297,7 +313,25 @@ class KycDocument(BaseModel):
         permissions = [('review_kycdocument', "Peut examiner, décider et télécharger les pièces KYC")]
 
     def __str__(self):
-        return f"{self.get_document_type_display()} — {self.business_profile.business_name} ({self.status})"
+        owner = self.business_profile.business_name if self.business_profile_id else f"organisation {self.organization_id}"
+        return f"{self.get_document_type_display()} — {owner} ({self.status})"
+
+
+@receiver(post_delete, sender=KycDocument)
+def delete_kyc_file_with_row(sender, instance, **kwargs):
+    """Le fichier privé disparaît avec sa ligne (suppression directe ou en cascade), une fois la transaction
+    validée : un retour arrière ne perd jamais de fichier. Un échec disque est journalisé, jamais remonté."""
+    stored_file = instance.file
+    if not stored_file or not stored_file.name:
+        return
+
+    def remove():
+        try:
+            stored_file.delete(save=False)
+        except OSError:
+            logger.exception("Suppression du fichier de la pièce %s impossible.", instance.pk)
+
+    transaction.on_commit(remove)
 
 
 # Version courante du texte de consentement au contact (ADR 0005, C4). Provisoire (LEG-PRV-03).
@@ -311,14 +345,31 @@ class ContactPoint(BaseModel):
     `identity.services.get_contact_endpoint` le lit, pour un canal consenti. Pas d'unicité sur le
     numéro (un numéro d'entreprise peut être partagé entre comptes)."""
 
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='contact_point')
+    # Exactement un des deux est renseigné (garanti par le service, ADR 0006 §4.4) : un numéro
+    # d'organisation n'est jamais le numéro d'un membre.
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='contact_point', null=True, blank=True,
+    )
+    organization = models.OneToOneField(
+        'Organization', on_delete=models.CASCADE, related_name='contact_point', null=True, blank=True,
+    )
     phone = models.CharField(max_length=20, validators=[phone_validator])
     is_verified = models.BooleanField(default=False)
     verified_at = models.DateTimeField(null=True, blank=True)
 
+    class Meta:
+        constraints = [
+            # Exactement un propriétaire : un compte ou une organisation (ADR 0006 §4.4).
+            models.CheckConstraint(
+                check=(models.Q(user__isnull=False, organization__isnull=True)
+                       | models.Q(user__isnull=True, organization__isnull=False)),
+                name='contact_point_exactly_one_owner',
+            ),
+        ]
+
     def __str__(self):
         # Jamais le numéro dans les représentations (logs, admin).
-        return f"Numéro de contact de {self.user_id}"
+        return f"Numéro de contact de {self.user_id or self.organization_id}"
 
 
 class ContactConsent(BaseModel):
@@ -343,7 +394,16 @@ class ContactConsent(BaseModel):
         (REVOKED_MODERATION, "Modération"),
     )
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='contact_consents')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='contact_consents', null=True, blank=True,
+    )
+    organization = models.ForeignKey(
+        'Organization', on_delete=models.CASCADE, related_name='contact_consents', null=True, blank=True,
+    )
+    # Pour une organisation : le propriétaire ou l'administrateur qui a consenti (ADR 0006 §4.4).
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+    )
     channel = models.CharField(max_length=10, choices=CHANNEL_CHOICES)
     is_granted = models.BooleanField(default=False)
     text_version = models.CharField(max_length=20, blank=True, default='')
@@ -354,7 +414,221 @@ class ContactConsent(BaseModel):
     revoked_reason = models.CharField(max_length=20, blank=True, default='', choices=REVOKED_REASON_CHOICES)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=['user', 'channel'], name='contact_consent_user_channel_uniq')]
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'channel'], name='contact_consent_user_channel_uniq'),
+            # Les valeurs nulles ne se comparent pas : portable SQLite et MySQL, inconditionnelle.
+            models.UniqueConstraint(fields=['organization', 'channel'], name='contact_consent_org_channel_uniq'),
+            models.CheckConstraint(
+                check=(models.Q(user__isnull=False, organization__isnull=True)
+                       | models.Q(user__isnull=True, organization__isnull=False)),
+                name='contact_consent_exactly_one_owner',
+            ),
+        ]
 
     def __str__(self):
-        return f"Consentement {self.channel} de {self.user_id}"
+        return f"Consentement {self.channel} de {self.user_id or self.organization_id}"
+
+
+# --- Organisations, appartenances, prestataire, réglages (ADR 0006, sections 4.2 et 4.3) -------------
+
+ORG_TYPE_ENTREPRISE = 'ENTREPRISE'
+ORG_TYPE_BOUTIQUE = 'BOUTIQUE'
+ORG_TYPE_ONG = 'ONG'
+ORG_TYPE_EVENEMENTS = 'ORGANISATEUR_EVENEMENTS'
+ORG_TYPE_CHOICES = (
+    (ORG_TYPE_ENTREPRISE, "Entreprise"),
+    (ORG_TYPE_BOUTIQUE, "Boutique"),
+    (ORG_TYPE_ONG, "ONG"),
+    (ORG_TYPE_EVENEMENTS, "Organisateur d'événements"),
+)
+ORG_TYPES = tuple(value for value, _ in ORG_TYPE_CHOICES)
+
+
+class IdentitySettings(SingletonSettingsModel):
+    """Réglages d'identité modifiables dans le back-office (règle 11). Ligne unique."""
+
+    max_organizations_per_account = models.PositiveIntegerField(
+        default=10, validators=[MinValueValidator(1), MaxValueValidator(100)],
+        help_text="Nombre maximal d'appartenances actives à une organisation par compte (1 à 100).",
+    )
+    max_categories_per_context = models.PositiveSmallIntegerField(
+        default=5, validators=[MinValueValidator(1), MaxValueValidator(20)],
+        help_text="Nombre maximal de catégories d'une organisation ou d'un prestataire (1 à 20).",
+    )
+    org_phone_channels_enabled = models.BooleanField(
+        default=False,
+        help_text="Autorise les canaux Appel et WhatsApp pour une organisation (fermé tant que le client n'a pas "
+                  "validé le consentement des organisations).",
+    )
+
+    kyb_file_retention_days = models.PositiveIntegerField(
+        default=0, validators=[MaxValueValidator(3650)],
+        help_text="Jours de conservation du FICHIER d'une pièce d'organisation après sa décision ; 0 = illimité "
+                  "(durée à fixer par le client, LEG-PRV). La ligne et le résultat de la décision sont conservés.",
+    )
+
+    class Meta:
+        verbose_name = "Paramètres d'identité"
+        verbose_name_plural = "Paramètres d'identité"
+
+    def __str__(self):
+        return "Paramètres d'identité"
+
+
+class Organization(BaseModel):
+    """Entreprise, boutique, ONG ou organisateur d'événements (ADR 0006, 4.2). Le nom n'est pas
+    unique (A12). Aucune logique métier ici : elle vit dans les services."""
+
+    STATUS_ACTIVE = 'ACTIVE'
+    STATUS_SUSPENDED = 'SUSPENDED'
+    STATUS_ARCHIVED = 'ARCHIVED'
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_SUSPENDED, "Suspendue"),
+        (STATUS_ARCHIVED, "Archivée"),
+    )
+
+    name = models.CharField(max_length=255)
+    org_type = models.CharField(max_length=30, choices=ORG_TYPE_CHOICES)
+    description = models.TextField(blank=True, validators=[MaxLengthValidator(2000)])
+    logo = models.ImageField(
+        upload_to='organization_logos/', null=True, blank=True,
+        validators=[validate_image_upload_size, validate_image_pixels],
+    )
+    # Non public (règle 10).
+    nif = models.CharField(max_length=50, blank=True)
+    # Adresse générale seulement : références par UUID vers `catalog`.
+    city_id = models.UUIDField(null=True, blank=True, db_index=True)
+    commune_id = models.UUIDField(null=True, blank=True, db_index=True)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    # Motif normalisé, jamais de texte libre.
+    suspension_reason = models.CharField(max_length=30, blank=True, default='')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+    )
+    # Idempotence de la migration de données (T9) ; retiré avec la table de correspondance.
+    legacy_business_profile_id = models.UUIDField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['status', 'org_type'], name='org_status_type'),
+            models.Index(fields=['name'], name='org_name'),
+        ]
+        permissions = [('suspend_organization', "Peut suspendre et réactiver une organisation")]
+
+    def save(self, *args, **kwargs):
+        # Logo ré-encodé (sans EXIF/GPS, taille plafonnée) avant stockage.
+        self.logo = sanitize_uploaded_field(self.logo)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+class OrganizationCategory(BaseModel):
+    """Table de liaison interne : catégories d'une organisation, par UUID (domaine `catalog`)."""
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='category_links')
+    category_id = models.UUIDField(db_index=True)
+
+    class Meta:
+        unique_together = ('organization', 'category_id')
+
+
+class Membership(BaseModel):
+    """Appartenance d'un compte à une organisation, avec un rôle. Une seule ligne par couple
+    (organisation, compte) : un retour réactive la même ligne (R12). La règle « au moins un
+    propriétaire » n'est pas en base : elle est garantie par le service, sous verrou."""
+
+    STATUS_ACTIVE = 'ACTIVE'
+    STATUS_REVOKED = 'REVOKED'
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Actif"),
+        (STATUS_REVOKED, "Révoqué"),
+    )
+    END_REMOVED = 'removed'
+    END_LEFT = 'left'
+    END_REASON_CHOICES = (
+        (END_REMOVED, "Retiré"),
+        (END_LEFT, "Parti"),
+    )
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='memberships')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='memberships')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    end_reason = models.CharField(max_length=12, choices=END_REASON_CHOICES, blank=True, default='')
+    joined_at = models.DateTimeField(default=timezone.now)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+    )
+    ended_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+    )
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['organization', 'user'], name='membership_org_user_uniq')]
+        indexes = [
+            models.Index(fields=['user', 'status'], name='membership_user_status'),
+            models.Index(fields=['organization', 'role', 'status'], name='membership_org_role_status'),
+        ]
+
+    def __str__(self):
+        return f"Appartenance {self.role} ({self.status})"
+
+
+class ProviderProfile(BaseModel):
+    """Contexte prestataire individuel : un seul par compte (ADR 0006, 4.3). Photo publique : celle du compte."""
+
+    STATUS_ACTIVE = 'ACTIVE'
+    STATUS_ARCHIVED = 'ARCHIVED'
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Actif"),
+        (STATUS_ARCHIVED, "Archivé"),
+    )
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='provider_profile')
+    display_name = models.CharField(max_length=255)
+    bio = models.TextField(blank=True, validators=[MaxLengthValidator(2000)])
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    archived_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return self.display_name
+
+
+class ProviderProfileCategory(BaseModel):
+    """Table de liaison interne : catégories d'un prestataire, par UUID (domaine `catalog`)."""
+
+    provider = models.ForeignKey(ProviderProfile, on_delete=models.CASCADE, related_name='category_links')
+    category_id = models.UUIDField(db_index=True)
+
+    class Meta:
+        unique_together = ('provider', 'category_id')
+
+
+class OrganizationDocumentRequirement(BaseModel):
+    """Pièces exigées par type d'organisation (règle 11, éditées dans l'admin). Valeurs initiales
+    provisoires posées par la migration 0007 (Q-CLI2)."""
+
+    org_type = models.CharField(max_length=30, choices=ORG_TYPE_CHOICES)
+    document_type = models.CharField(max_length=20, choices=KycDocument.DOC_TYPE_CHOICES)
+    position = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ['org_type', 'position']
+        constraints = [
+            models.UniqueConstraint(fields=['org_type', 'document_type'], name='org_doc_requirement_uniq'),
+        ]
+
+    def __str__(self):
+        return f"{self.org_type} : {self.document_type}"
+
+
+class LegacyAccountMapping(BaseModel):
+    """Table de correspondance ancien compte -> organisation (migration T9, ADR 0006 A11). Deux UUID,
+    aucune donnée personnelle. À retirer après la mise à jour des bases de développement."""
+
+    user_id = models.UUIDField(unique=True)
+    organization_id = models.UUIDField()

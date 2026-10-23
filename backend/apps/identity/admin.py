@@ -8,11 +8,22 @@ Principes (règles 2, 3, 10, 12) :
   elles ne naissent que de `decide_kyc_document` (journalisée) ;
 - les pièces d'identité ne sont ni affichées ni téléchargeables depuis l'admin.
 """
-from django.contrib import admin
+from django import forms
+from django.contrib import admin, messages
+from django.contrib.admin.utils import unquote
+from django.shortcuts import redirect
+from django.template.response import TemplateResponse
 
+from apps.common.admin_mixins import SingletonSettingsAdminMixin
+from apps.common.contexts import CONTEXT_ORGANIZATION, ContextDenied
 from apps.moderation.services import record_audit
 
-from .models import BusinessProfile, BusinessProfileCategory, ContactConsent, KycDocument, OtpCode, User
+from . import services
+from .permissions import REVIEW_KYC_PERMISSION
+from .models import (
+    BusinessProfile, BusinessProfileCategory, ContactConsent, IdentitySettings, KycDocument, Membership, OtpCode,
+    Organization, OrganizationDocumentRequirement, ProviderProfile, User,
+)
 
 
 @admin.register(User)
@@ -38,22 +49,56 @@ class UserAdmin(admin.ModelAdmin):
         return False
 
     def save_model(self, request, obj, form, change):
-        super().save_model(request, obj, form, change)
+        from django.db import transaction
+
+        from . import services
+
+        with transaction.atomic():
+            super().save_model(request, obj, form, change)
+            if change and 'is_active' in form.changed_data:
+                # Modification directe de `is_active` : la visibilité des offres suit (ADR 0006, A7/A9).
+                services.announce_account_status(obj.pk, obj.is_active, request.user)
         if change and form.changed_data:
             record_audit(
                 request.user, 'USER_ADMIN_CHANGED', target=obj,
                 details="Champs modifiés : " + ', '.join(sorted(form.changed_data)),
             )
 
+    def delete_view(self, request, object_id, extra_context=None):
+        # Un compte seul propriétaire d'une organisation active n'est pas supprimable (dette ADR 0006 §15).
+        if request.method == 'POST':
+            obj = self.get_object(request, unquote(object_id))
+            if obj is not None:
+                try:
+                    services.assert_account_removable(obj)
+                except services.OrganizationError as exc:
+                    self.message_user(request, exc.detail, messages.ERROR)
+                    return redirect('admin:identity_user_change', obj.pk)
+        return super().delete_view(request, object_id, extra_context)
+
     def delete_model(self, request, obj):
+        services.assert_account_removable(obj)
         record_audit(request.user, 'USER_ADMIN_DELETED', target=obj, details=f"Compte supprimé ({obj.pk}).")
         super().delete_model(request, obj)
 
     def delete_queryset(self, request, queryset):
-        # Suppression en masse (action « supprimer la sélection ») : une trace par compte.
+        # Suppression en masse (action « supprimer la sélection ») : une trace par compte ; les comptes
+        # seuls propriétaires d'une organisation active sont ignorés et signalés.
+        removable, blocked = [], 0
         for obj in queryset:
+            try:
+                services.assert_account_removable(obj)
+            except services.OrganizationError:
+                blocked += 1
+                continue
+            removable.append(obj.pk)
             record_audit(request.user, 'USER_ADMIN_DELETED', target=obj, details=f"Compte supprimé ({obj.pk}).")
-        super().delete_queryset(request, queryset)
+        if blocked:
+            self.message_user(
+                request, f"{blocked} compte(s) non supprimé(s) : seul propriétaire d'une organisation active.",
+                messages.WARNING,
+            )
+        super().delete_queryset(request, queryset.filter(pk__in=removable))
 
 
 class BusinessProfileCategoryInline(admin.TabularInline):
@@ -72,16 +117,48 @@ class BusinessProfileAdmin(admin.ModelAdmin):
 
 @admin.register(KycDocument)
 class KycDocumentAdmin(admin.ModelAdmin):
-    """Consultation seule : ni fichier, ni saisie des décisions (voir KycDecisionView)."""
+    """Consultation seule : ni fichier, ni saisie des décisions (voir KycDecisionView).
 
-    list_display = ('business_profile', 'document_type', 'status', 'reviewed_by', 'created_at')
+    Pièces d'organisation (KYB) : visibles seulement par le personnel qui détient `review_kycdocument`
+    (liste et fiche), et chaque consultation d'une fiche est journalisée (règle 12). Aucun contact de membre
+    n'est affiché."""
+
+    list_display = ('business_profile', 'organization', 'document_type', 'status', 'reviewed_by', 'created_at')
     list_filter = ('status', 'document_type')
-    search_fields = ('business_profile__business_name',)
-    exclude = ('file',)
+    search_fields = ('business_profile__business_name', 'organization__name')
+    exclude = ('file', 'uploaded_by')
+    list_select_related = ('business_profile', 'organization', 'reviewed_by')
     readonly_fields = (
-        'business_profile', 'document_type', 'status', 'rejection_reason', 'reviewed_by', 'reviewed_at',
-        'created_at', 'updated_at',
+        'business_profile', 'organization', 'document_type', 'status', 'rejection_reason',
+        'reviewed_by', 'reviewed_at', 'created_at', 'updated_at',
     )
+
+    @staticmethod
+    def _may_see_organization_documents(request):
+        return request.user.has_perm(REVIEW_KYC_PERMISSION)
+
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request)
+        if not self._may_see_organization_documents(request):
+            queryset = queryset.filter(organization__isnull=True)
+        return queryset
+
+    def has_view_permission(self, request, obj=None):
+        if obj is not None and obj.organization_id is not None and not self._may_see_organization_documents(request):
+            return False
+        return super().has_view_permission(request, obj)
+
+    def change_view(self, request, object_id, form_url='', extra_context=None):
+        response = super().change_view(request, object_id, form_url, extra_context)
+        if request.method == 'GET' and response.status_code == 200:
+            document = KycDocument.objects.filter(pk=object_id, organization__isnull=False).first()
+            if document is not None:
+                record_audit(
+                    request.user, 'KYC_ADMIN_VIEWED', target=document,
+                    details=f"organization={document.organization_id}; document_type={document.document_type}",
+                    context=(CONTEXT_ORGANIZATION, document.organization_id),
+                )
+        return response
 
     def has_add_permission(self, request):
         return False
@@ -116,10 +193,11 @@ class ContactConsentAdmin(admin.ModelAdmin):
     """Consultation seule (ADR 0005, C12) : jamais le numéro, seulement les 4 derniers chiffres de preuve.
     `ContactPoint` n'est volontairement pas enregistré dans l'admin (LEG-PRV-12)."""
 
-    list_display = ('user', 'channel', 'is_granted', 'text_version', 'granted_at', 'revoked_at', 'revoked_reason')
+    list_display = ('user', 'organization', 'channel', 'is_granted', 'text_version', 'granted_at', 'revoked_at', 'revoked_reason')
     list_filter = ('channel', 'is_granted', 'revoked_reason')
     readonly_fields = (
-        'user', 'channel', 'is_granted', 'text_version', 'granted_at', 'revoked_at', 'phone_last4',
+        'user', 'organization', 'granted_by', 'channel', 'is_granted', 'text_version', 'granted_at', 'revoked_at',
+        'phone_last4',
         'revoked_reason', 'created_at', 'updated_at',
     )
 
@@ -131,3 +209,127 @@ class ContactConsentAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+class ReadOnlyAdmin(admin.ModelAdmin):
+    """Consultation seule : ni ajout, ni modification, ni suppression."""
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class SuspensionReasonForm(forms.Form):
+    reason = forms.ChoiceField(
+        label="Motif", choices=[
+            ('moderation', "Modération"), ('verification', "Vérification"), ('legal', "Obligation légale"),
+            ('other', "Autre"),
+        ],
+    )
+
+
+@admin.register(Organization)
+class OrganizationAdmin(ReadOnlyAdmin):
+    """Lecture seule (ADR 0006, 11.4). Le personnel suspend et réactive par les actions ci-dessous, qui
+    passent par les services (journal d'audit et événement de statut), réservées à la permission
+    `identity.suspend_organization`. Le nom et les coordonnées des membres ne sont pas affichés."""
+
+    list_display = ('name', 'org_type', 'status', 'created_at')
+    list_filter = ('status', 'org_type')
+    search_fields = ('name',)
+    exclude = ('logo', 'nif', 'created_by', 'legacy_business_profile_id')
+    actions = ['suspend_selected', 'reactivate_selected']
+
+    def has_suspend_permission(self, request):
+        return request.user.has_perm('identity.suspend_organization')
+
+    @admin.action(description="Suspendre les organisations sélectionnées", permissions=['suspend'])
+    def suspend_selected(self, request, queryset):
+        """Étape 1 : formulaire du motif normalisé ; étape 2 (`apply`) : suspension par le service."""
+        form = SuspensionReasonForm(request.POST if 'apply' in request.POST else None)
+        if 'apply' in request.POST and form.is_valid():
+            reason = form.cleaned_data['reason']
+            self._run(request, queryset, lambda org: services.suspend_organization(request.user, org.pk, reason))
+            return None
+        return TemplateResponse(request, 'admin/identity/suspend_reason.html', {
+            **self.admin_site.each_context(request), 'title': "Suspendre des organisations", 'form': form,
+            'organizations': queryset, 'opts': self.model._meta,
+            'selected': request.POST.getlist('_selected_action'),
+        })
+
+    @admin.action(description="Réactiver les organisations sélectionnées", permissions=['suspend'])
+    def reactivate_selected(self, request, queryset):
+        self._run(request, queryset, lambda org: services.reactivate_organization(request.user, org.pk))
+
+    def _run(self, request, queryset, func):
+        done = failed = 0
+        for organization in queryset:
+            try:
+                func(organization)
+                done += 1
+            except (ContextDenied, services.OrganizationError):
+                failed += 1
+        if done:
+            self.message_user(request, f"{done} organisation(s) modifiée(s).", messages.SUCCESS)
+        if failed:
+            self.message_user(request, f"{failed} organisation(s) non modifiée(s) (état incompatible ou droit manquant).", messages.WARNING)
+
+
+@admin.register(Membership)
+class MembershipAdmin(ReadOnlyAdmin):
+    """Lecture seule : le personnel n'attribue aucun rôle et ne voit ni téléphone ni e-mail de membre."""
+
+    list_display = ('organization', 'role', 'status', 'end_reason', 'joined_at', 'ended_at')
+    list_filter = ('role', 'status')
+    exclude = ('user', 'added_by', 'ended_by')
+
+
+@admin.register(ProviderProfile)
+class ProviderProfileAdmin(ReadOnlyAdmin):
+    list_display = ('display_name', 'status', 'created_at')
+    list_filter = ('status',)
+    exclude = ('user',)
+
+
+@admin.register(OrganizationDocumentRequirement)
+class OrganizationDocumentRequirementAdmin(admin.ModelAdmin):
+    """Pièces exigées par type d'organisation (règle 11) ; chaque modification est journalisée (règle 12)."""
+
+    list_display = ('org_type', 'document_type', 'position')
+    list_filter = ('org_type',)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        record_audit(
+            request.user, 'DOC_REQUIREMENT_CHANGED', target=obj,
+            details=f"org_type={obj.org_type}; document_type={obj.document_type}; position={obj.position}",
+        )
+
+    def delete_model(self, request, obj):
+        record_audit(
+            request.user, 'DOC_REQUIREMENT_DELETED', target=obj,
+            details=f"org_type={obj.org_type}; document_type={obj.document_type}",
+        )
+        super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        # Suppression en masse : une trace par ligne (règle 12).
+        for obj in queryset:
+            record_audit(
+                request.user, 'DOC_REQUIREMENT_DELETED', target=obj,
+                details=f"org_type={obj.org_type}; document_type={obj.document_type}",
+            )
+        super().delete_queryset(request, queryset)
+
+
+@admin.register(IdentitySettings)
+class IdentitySettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
+    list_display = (
+        'max_organizations_per_account', 'max_categories_per_context', 'org_phone_channels_enabled',
+        'kyb_file_retention_days',
+    )

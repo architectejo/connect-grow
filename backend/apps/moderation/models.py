@@ -171,8 +171,11 @@ class Sanction(BaseModel):
         if self.sanction_type == self.TYPE_MASQUAGE_ANNONCE and self.related_offer_id:
             marketplace_services.hide_by_moderation(self.related_offer_id)
         elif self.sanction_type in self.ACCOUNT_BLOCKING_TYPES:
+            from apps.identity import services as identity_services
+
+            # Point unique de changement de `User.is_active` : publie le changement de visibilité des offres.
+            identity_services.set_account_active(self.user_id, False, actor=self.issued_by)
             self.user.is_active = False
-            self.user.save(update_fields=['is_active'])
 
     def lift(self):
         from apps.marketplace import services as marketplace_services
@@ -187,8 +190,10 @@ class Sanction(BaseModel):
                 user_id=self.user_id, is_active=True, sanction_type__in=self.ACCOUNT_BLOCKING_TYPES,
             ).exclude(pk=self.pk).exists()
             if not still_blocked:
+                from apps.identity import services as identity_services
+
+                identity_services.set_account_active(self.user_id, True)
                 self.user.is_active = True
-                self.user.save(update_fields=['is_active'])
 
     def __str__(self):
         return f"{self.get_sanction_type_display()} — {self.user}"
@@ -203,15 +208,24 @@ class AuditLog(BaseModel):
     target_type = models.CharField(max_length=50, blank=True, default='')
     target_id = models.UUIDField(null=True, blank=True)
     details = models.TextField(blank=True)
+    # Contexte sous lequel l'action a été exécutée (ADR 0006, A10) : retrouve tout ce qui s'est fait
+    # sous une organisation. Nul = action hors contexte (personnel, système, personnel du site).
+    context_type = models.CharField(max_length=20, null=True, blank=True)
+    context_id = models.UUIDField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ['-created_at']
         indexes = [models.Index(fields=['target_type', 'target_id'], name='audit_target')]
 
     @classmethod
-    def record(cls, actor, action, target=None, details=''):
-        """`target` : instance d'un modèle à clé UUID (son nom de modèle devient `target_type`)."""
+    def record(cls, actor, action, target=None, details='', context=None):
+        """`target` : instance d'un modèle à clé UUID (son nom de modèle devient `target_type`).
+        `context` : couple facultatif `(type, id)` ou objet portant `.type` et `.id` (`ActingContext`)."""
         entry = cls(actor=actor, action=action, details=details)
+        if context is not None:
+            if hasattr(context, 'type'):
+                context = (context.type, context.id)
+            entry.context_type, entry.context_id = context
         if target is not None:
             entry.target_type = target._meta.model_name
             entry.target_id = target.pk

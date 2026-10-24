@@ -199,12 +199,13 @@ def get_context_recipients(context_type, context_id, capability) -> list:
     return []
 
 
-# --- Contact par contexte vendeur (interim T5a, étendu par T7) -------------------------------------------------
+# --- Contact par contexte vendeur (ADR 0006, 4.4 et 11.2) ---------------------------------------------------
 
 def get_contact_accounts(contexts: Iterable) -> dict:
     """Compte dont les réglages de contact valent pour chaque contexte : `USER` = lui-même, `PROVIDER` = son
-    titulaire (mêmes `ContactPoint`/`ContactConsent`, ADR 0006 11.2), `ORGANIZATION` = None (le numéro d'une
-    organisation n'est jamais celui d'un membre ; la prise en charge arrive avec T7). `{(type, id): user_id|None}`."""
+    titulaire (mêmes `ContactPoint`/`ContactConsent`, ADR 0006 11.2), `ORGANIZATION` = None : le numéro d'une
+    organisation lui appartient et n'est jamais celui d'un membre ; ses contacts sont reçus par l'équipe
+    (`get_context_recipients`), pas par un compte. `{(type, id): user_id|None}`."""
     grouped = _pairs(contexts)
     accounts = {(CONTEXT_USER, user_id): user_id for user_id in grouped[CONTEXT_USER]}
     owners = {}
@@ -221,23 +222,124 @@ def get_contact_accounts(contexts: Iterable) -> dict:
     return accounts
 
 
+def _organizations_with_team(org_ids) -> set:
+    """Organisations ACTIVE dont l'équipe a au moins un destinataire de messages (propriétaire ou administrateur
+    actif, compte actif). Une requête, quel que soit le nombre d'organisations."""
+    if not org_ids:
+        return set()
+    roles = [role for role in capabilities.ROLES if capabilities.role_has_capability(role, 'message.reply')]
+    return set(
+        Membership.objects.filter(
+            organization_id__in=org_ids, status=Membership.STATUS_ACTIVE, role__in=roles,
+            organization__status=Organization.STATUS_ACTIVE, user__is_active=True,
+        ).values_list('organization_id', flat=True)
+    )
+
+
+def _valid_organization_phone_channels(org_ids) -> dict:
+    """`{organisation: {'CALL', 'WHATSAPP'}}` : canaux numéro dont l'organisation peut user maintenant (l'interrupteur
+    est vérifié par l'appelant) : numéro de contact VÉRIFIÉ de l'organisation, consentement actif, version courante
+    du texte et preuve d'accord (4 derniers chiffres) conforme au numéro actuel. Deux requêtes, jamais de numéro."""
+    from .models import CONTACT_CONSENT_TEXT_VERSION, ContactConsent, ContactPoint
+
+    if not org_ids:
+        return {}
+    points = dict(
+        ContactPoint.objects.filter(organization_id__in=org_ids, is_verified=True).values_list('organization_id', 'phone')
+    )
+    result = {}
+    for org_id, channel, last4 in ContactConsent.objects.filter(
+        organization_id__in=list(points), channel__in=('CALL', 'WHATSAPP'), is_granted=True,
+        text_version=CONTACT_CONSENT_TEXT_VERSION,
+    ).values_list('organization_id', 'channel', 'phone_last4'):
+        if last4 and points[org_id][-4:] == last4:
+            result.setdefault(org_id, set()).add(channel)
+    return result
+
+
 def get_context_allowed_channels(contexts: Iterable) -> dict:
-    """Canaux ouverts par contexte vendeur, `{(type, id): ['MESSAGE', ...]}` (ordre fixe, aucun numéro).
-    `USER`/`PROVIDER` : ceux du compte titulaire ; `ORGANIZATION` : aucun tant que le contact d'équipe
-    (T7, intérim D6) n'est pas livré. Tout contexte demandé figure dans le résultat."""
-    from .services import get_allowed_channels
+    """Canaux ouverts par contexte vendeur, `{(type, id): ['MESSAGE', ...]}` (ordre fixe, aucun numéro). Tout
+    contexte demandé figure dans le résultat ; le nombre de requêtes ne dépend pas du nombre de contextes.
+
+    - `USER`/`PROVIDER` : ceux du compte titulaire (inchangé).
+    - `ORGANIZATION` : `MESSAGE` (routé vers l'équipe) tant que l'organisation est active et a au moins un
+      destinataire ; `CALL`/`WHATSAPP` seulement si `org_phone_channels_enabled` est vrai ET l'organisation a son
+      propre numéro vérifié ET un consentement valide. Le téléphone d'un membre n'entre jamais ici."""
+    from .services import CHANNEL_ORDER, get_allowed_channels, get_available_channels
 
     contexts = list(contexts)
     accounts = get_contact_accounts(contexts)
     by_account = get_allowed_channels([account for account in accounts.values() if account is not None])
+    org_ids = {parse_uuid(cid) for ctype, cid in contexts if ctype == CONTEXT_ORGANIZATION} - {None}
+    team = _organizations_with_team(org_ids)
+    phone = {}
+    if team and 'CALL' in get_available_channels(CONTEXT_ORGANIZATION):
+        phone = _valid_organization_phone_channels(team)
     result = {}
     for context_type, context_id in contexts:
         parsed = parse_uuid(context_id)
+        key = (context_type, parsed if parsed is not None else context_id)
+        if context_type == CONTEXT_ORGANIZATION:
+            if parsed in team:
+                opened = {'MESSAGE'} | phone.get(parsed, set())
+                result[key] = [channel for channel in CHANNEL_ORDER if channel in opened]
+            else:
+                result[key] = []
+            continue
         account = accounts.get((context_type, parsed))
-        result[(context_type, parsed if parsed is not None else context_id)] = (
-            list(by_account.get(account, [])) if account is not None else []
-        )
+        result[key] = list(by_account.get(account, [])) if account is not None else []
     return result
+
+
+def get_context_contact_endpoint(context_type, context_id, channel):
+    """Numéro à remettre pour un canal numéro (`CALL`/`WHATSAPP`) du contexte vendeur. `USER`/`PROVIDER` : numéro du
+    compte titulaire. `ORGANIZATION` : numéro de CONTACT de l'organisation, jamais le téléphone d'un membre, et
+    seulement si l'interrupteur est ouvert, l'organisation active, le numéro vérifié et le consentement valide.
+    Lève `ChannelNotConsented` sinon. À appeler uniquement par la révélation de `marketplace` ; le résultat
+    ne se journalise ni ne se publie."""
+    from .models import ContactPoint
+    from .services import ChannelNotConsented, ContactEndpoint, get_available_channels, get_contact_endpoint
+
+    parsed = parse_uuid(context_id)
+    if parsed is None or channel not in ('CALL', 'WHATSAPP'):
+        raise ChannelNotConsented()
+    if context_type != CONTEXT_ORGANIZATION:
+        account = get_contact_accounts([(context_type, parsed)]).get((context_type, parsed))
+        if account is None:
+            raise ChannelNotConsented()
+        return get_contact_endpoint(account, channel)
+    if channel not in get_available_channels(CONTEXT_ORGANIZATION):
+        raise ChannelNotConsented()
+    if channel not in _valid_organization_phone_channels(_organizations_with_team({parsed})).get(parsed, ()):
+        raise ChannelNotConsented()
+    point = ContactPoint.objects.filter(organization_id=parsed, is_verified=True).first()
+    if point is None:
+        raise ChannelNotConsented()
+    return ContactEndpoint(phone_e164=point.phone)
+
+
+def get_accessible_organization_ids(user_id, capability) -> set:
+    """Organisations ACTIVE dont le compte est membre actif avec cette capacité, pour un compte utilisable (actif,
+    sans sanction bloquante). Sert à l'accès par capacité des autres domaines (messagerie) sans N+1 : deux à trois
+    requêtes. Aucun cache : une révocation est effective à l'appel suivant (ADR 0006, 6.2)."""
+    from apps.common.contexts import ContextDenied
+
+    from .acting import _ensure_actor_usable
+
+    parsed = parse_uuid(user_id)
+    if parsed is None:
+        return set()
+    try:
+        _ensure_actor_usable(User(pk=parsed))
+    except ContextDenied:
+        return set()
+    roles = [role for role in capabilities.ROLES if capabilities.role_has_capability(role, capability)]
+    return set(
+        Membership.objects.filter(
+            user_id=parsed, status=Membership.STATUS_ACTIVE, role__in=roles,
+            organization__status=Organization.STATUS_ACTIVE,
+        ).values_list('organization_id', flat=True)
+    )
 
 
 # --- État du compte (A9) ------------------------------------------------------------------------------------

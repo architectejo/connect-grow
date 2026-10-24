@@ -20,9 +20,6 @@ WRITE_METHODS = ('post', 'put', 'patch', 'delete')
 # Chemin normalisé -> raison. Vues d'écriture existantes sans garde de contexte à la date de T2.
 LEGACY_WRITE_ROUTES = {
     'api/accounts/change-password/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/accounts/contact-settings/channels/<str:channel>/': 'compte : authentification et réglages toujours personnels',  # PUT
-    'api/accounts/contact-settings/phone/': 'compte : authentification et réglages toujours personnels',  # PUT
-    'api/accounts/contact-settings/phone/verify/': 'compte : authentification et réglages toujours personnels',  # POST
     'api/accounts/kyc/documents/': 'compte : authentification et réglages toujours personnels',  # POST
     'api/accounts/kyc/documents/<uuid:pk>/': 'compte : authentification et réglages toujours personnels',  # DELETE
     'api/accounts/kyc/documents/<uuid:pk>/decision/': 'compte : authentification et réglages toujours personnels',  # POST
@@ -34,8 +31,6 @@ LEGACY_WRITE_ROUTES = {
     'api/accounts/password-reset/confirm/': 'compte : authentification et réglages toujours personnels',  # POST
     'api/accounts/register/': 'compte : authentification et réglages toujours personnels',  # POST
     'api/accounts/token/refresh/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/interactions/^messages/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # POST
-    'api/interactions/^messages/(?P<pk>[^/.]+)/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # DELETE/PATCH/PUT
     'api/interactions/^notifications/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # POST
     'api/interactions/^notifications/(?P<pk>[^/.]+)/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # DELETE/PATCH/PUT
     'api/interactions/^notifications/mark_all_as_read/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # POST

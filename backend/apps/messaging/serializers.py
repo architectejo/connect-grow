@@ -2,9 +2,12 @@ import uuid
 
 from rest_framework import serializers
 
+from apps.common.contexts import CONTEXT_ORGANIZATION
 from apps.common.serializers import PreloadingListSerializer
+from apps.identity import services as identity_services
 from apps.marketplace import services as marketplace_services
 
+from . import services
 from .models import Conversation, Message
 
 MESSAGE_MAX_LENGTH = 2000
@@ -22,28 +25,88 @@ def _api_uuid(value):
     return str(uuid.UUID(str(value))) if value is not None else None
 
 
+class MessageListSerializer(PreloadingListSerializer):
+    pass
+
+
 class MessageSerializer(serializers.ModelSerializer):
-    sender_name = serializers.ReadOnlyField(source='sender.full_name')
+    """Message d'une conversation. Un message écrit « en tant que » l'organisation (`sender_context`) expose le nom
+    de l'organisation et son identifiant à la place de ceux du membre : jamais le nom, l'identifiant de compte,
+    le numéro ni l'e-mail du membre qui a écrit (ADR 0006, 9.8 ; règle 10)."""
+
+    sender = serializers.SerializerMethodField()
+    sender_name = serializers.SerializerMethodField()
+    sender_context = serializers.SerializerMethodField()
     is_me = serializers.SerializerMethodField()
     content = serializers.CharField(max_length=MESSAGE_MAX_LENGTH)
 
+    NAMES_KEY = 'messaging_context_names'
+    REPLY_ORGS_KEY = 'messaging_reply_organizations'
+
     class Meta:
         model = Message
-        fields = ['id', 'conversation', 'sender', 'sender_name', 'content', 'is_read', 'created_at', 'is_me']
-        read_only_fields = ['sender', 'is_read']
+        fields = [
+            'id', 'conversation', 'sender', 'sender_name', 'sender_context', 'content', 'is_read', 'created_at', 'is_me',
+        ]
+        read_only_fields = ['is_read']
+        list_serializer_class = MessageListSerializer
+
+    @classmethod
+    def preload(cls, messages, context):
+        """Noms des organisations expéditrices (une requête) et organisations où le lecteur répond (pour `is_me`)."""
+        names = context.setdefault(cls.NAMES_KEY, {})
+        wanted = {
+            (m.sender_context_type, m.sender_context_id) for m in messages if m.sender_context_type
+        } - names.keys()
+        if wanted:
+            names.update(services.get_context_names(wanted))
+            for key in wanted:
+                names.setdefault(key, None)
+        if cls.REPLY_ORGS_KEY not in context:
+            request = context.get('request')
+            user = getattr(request, 'user', None)
+            context[cls.REPLY_ORGS_KEY] = (
+                identity_services.get_accessible_organization_ids(user.pk, services.REPLY_CAPABILITY)
+                if user is not None and user.is_authenticated and any(m.sender_context_type for m in messages)
+                else set()
+            )
+
+    def _ready(self, obj):
+        key = (obj.sender_context_type, obj.sender_context_id)
+        if self.NAMES_KEY not in self.context or key not in self.context[self.NAMES_KEY]:
+            self.preload([obj], self.context)
 
     def validate_conversation(self, conversation):
-        # Seul un participant écrit dans une conversation.
+        # Seul un participant, ou un membre habilité de l'organisation de la conversation, écrit dedans.
         request = self.context['request']
-        if not conversation.participants.filter(pk=request.user.pk).exists():
+        if not services.can_write(conversation, request.user):
             raise serializers.ValidationError("Conversation introuvable.")
         return conversation
 
+    def get_sender(self, obj):
+        # Côté organisation : l'identifiant de l'organisation, jamais celui du compte du membre.
+        return obj.sender_context_id if obj.sender_context_type else obj.sender_id
+
+    def get_sender_name(self, obj):
+        if obj.sender_context_type:
+            self._ready(obj)
+            return self.context[self.NAMES_KEY].get((obj.sender_context_type, obj.sender_context_id)) or "Organisation"
+        return obj.sender.full_name
+
+    def get_sender_context(self, obj):
+        if not obj.sender_context_type:
+            return None
+        return {'type': obj.sender_context_type, 'id': obj.sender_context_id}
+
     def get_is_me(self, obj):
         request = self.context.get('request')
-        if request and request.user:
-            return obj.sender_id == request.user.id
-        return False
+        if not (request and request.user and request.user.is_authenticated):
+            return False
+        if obj.sender_context_type == CONTEXT_ORGANIZATION:
+            # « de mon côté » : tout membre habilité de l'organisation expéditrice, pas seulement l'auteur.
+            self._ready(obj)
+            return obj.sender_context_id in self.context[self.REPLY_ORGS_KEY]
+        return obj.sender_id == request.user.id
 
 
 class ConversationListSerializer(PreloadingListSerializer):
@@ -57,12 +120,17 @@ class ConversationSerializer(serializers.ModelSerializer):
     post_image = serializers.SerializerMethodField()
     other_participant = serializers.SerializerMethodField()
     last_message = serializers.SerializerMethodField()
+    seller_context = serializers.SerializerMethodField()
 
     OFFERS_KEY = 'messaging_offers'
+    SELLERS_KEY = 'messaging_sellers'
 
     class Meta:
         model = Conversation
-        fields = ['id', 'post', 'post_title', 'post_image', 'other_participant', 'last_message', 'updated_at']
+        fields = [
+            'id', 'post', 'post_title', 'post_image', 'other_participant', 'last_message', 'seller_context',
+            'updated_at',
+        ]
         list_serializer_class = ConversationListSerializer
 
     @classmethod
@@ -73,6 +141,16 @@ class ConversationSerializer(serializers.ModelSerializer):
         cache.update(marketplace_services.get_offers_by_ids(missing))
         for offer_id in missing:
             cache.setdefault(offer_id, None)
+        # Organisations vendeuses (une requête) : l'acheteur voit l'organisation en face de lui, pas un membre.
+        sellers = context.setdefault(cls.SELLERS_KEY, {})
+        wanted = {
+            (c.seller_context_type, c.seller_context_id) for c in conversations
+            if c.seller_context_type == CONTEXT_ORGANIZATION
+        } - sellers.keys()
+        if wanted:
+            sellers.update(identity_services.get_seller_summaries(wanted))
+            for key in wanted:
+                sellers.setdefault(key, None)
 
     def _offer(self, obj):
         if not obj.offer_id:
@@ -99,11 +177,13 @@ class ConversationSerializer(serializers.ModelSerializer):
         if hasattr(obj, 'last_message_at'):
             if obj.last_message_at is None:
                 return None
+            # Message écrit côté organisation : l'identifiant de l'organisation, jamais celui du membre.
+            sender = getattr(obj, 'last_message_sender_context_id', None) or obj.last_message_sender_id
             return {
                 'content': obj.last_message_content,
                 'created_at': _api_datetime(obj.last_message_at),
                 'is_read': obj.last_message_is_read,
-                'sender_id': _api_uuid(obj.last_message_sender_id),
+                'sender_id': _api_uuid(sender),
             }
         last_msg = obj.messages.order_by('-created_at').first()
         if last_msg:
@@ -111,9 +191,14 @@ class ConversationSerializer(serializers.ModelSerializer):
                 'content': last_msg.content,
                 'created_at': _api_datetime(last_msg.created_at),
                 'is_read': last_msg.is_read,
-                'sender_id': _api_uuid(last_msg.sender_id),
+                'sender_id': _api_uuid(last_msg.sender_context_id or last_msg.sender_id),
             }
         return None
+
+    def get_seller_context(self, obj):
+        if not obj.seller_context_type:
+            return None
+        return {'type': obj.seller_context_type, 'id': obj.seller_context_id}
 
     def get_other_participant(self, obj):
         request = self.context.get('request')
@@ -126,4 +211,12 @@ class ConversationSerializer(serializers.ModelSerializer):
                     'full_name': other.full_name,
                     'photo': other.photo.url if other.photo else None,
                 }
+            if obj.seller_context_type == CONTEXT_ORGANIZATION:
+                # L'acheteur d'une conversation d'organisation : l'interlocuteur est l'organisation.
+                key = (obj.seller_context_type, obj.seller_context_id)
+                if key not in self.context.get(self.SELLERS_KEY, {}):
+                    self.preload([obj], self.context)
+                summary = self.context[self.SELLERS_KEY].get(key)
+                if summary is not None:
+                    return {'id': summary.context_id, 'full_name': summary.display_name, 'photo': summary.photo}
         return None

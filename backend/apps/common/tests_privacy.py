@@ -432,3 +432,240 @@ class NoPersonalContactLeakTests(APITestCase):
             self.assertEqual(response.status_code, 200)
             self.assert_clean(response, '/api/accounts/contact-settings/ (écriture)', 'buyer')
             self.assertNotIn('893333333', response.content.decode())
+
+
+class OrganizationContactPrivacyTests(APITestCase):
+    """Contact d'une organisation (ADR 0006, T7) : ni le téléphone, ni l'e-mail, ni le numéro de contact personnel
+    d'un membre ne sortent, quel que soit le lecteur ; le numéro DE L'ORGANISATION ne sort que par la révélation
+    (et masqué dans ses propres réglages). Témoins positifs : le parcours atteint bien les données de l'organisation."""
+
+    ORG_NUMBER = '+243891111111'
+    MEMBER_CONTACT = '+243893333333'
+    MEMBERS = {
+        'owner': ('+243970000001', 'owner-secret@example.com'),
+        'admin': ('+243970000002', 'admin-secret@example.com'),
+        'editor': ('+243970000003', 'editor-secret@example.com'),
+    }
+
+    def setUp(self):
+        from django.utils import timezone
+
+        from apps.identity.models import IdentitySettings
+
+        city = City.objects.create(name='Kinshasa')
+        commune = Commune.objects.create(city=city, name='Gombe')
+        category = Category.objects.create(name='Électronique', slug='electronique')
+        self.org = Organization.objects.create(name='Atelier X', org_type='ENTREPRISE')
+        self.users = {}
+        for name, (phone, email) in self.MEMBERS.items():
+            user = User.objects.create_user(
+                email=email, phone=phone, password='x', full_name=f'Membre {name.title()}', phone_verified=True,
+            )
+            Membership.objects.create(organization=self.org, user=user, role=name.upper())
+            self.users[name] = user
+        for name in ('owner', 'admin'):  # numéro de contact personnel vérifié, canaux numéro consentis
+            ContactPoint.objects.create(user=self.users[name], phone=self.MEMBER_CONTACT, is_verified=True)
+            for channel in ('CALL', 'WHATSAPP'):
+                ContactConsent.objects.create(
+                    user=self.users[name], channel=channel, is_granted=True, text_version=CONTACT_CONSENT_TEXT_VERSION,
+                    phone_last4=self.MEMBER_CONTACT[-4:],
+                )
+        self.users['buyer'] = User.objects.create_user(
+            email='buyer-secret@example.com', phone='+243970000009', password='x', full_name='Acheteur',
+            phone_verified=True,
+        )
+        self.users['third'] = User.objects.create_user(
+            email='third-secret@example.com', phone='+243970000008', password='x', full_name='Tiers',
+        )
+        IdentitySettings.objects.update_or_create(
+            pk=IdentitySettings.SINGLETON_ID, defaults={'org_phone_channels_enabled': True},
+        )
+        ContactPoint.objects.create(
+            organization=self.org, phone=self.ORG_NUMBER, is_verified=True, verified_at=timezone.now(),
+        )
+        for channel in ('CALL', 'WHATSAPP'):
+            ContactConsent.objects.create(
+                organization=self.org, channel=channel, is_granted=True, text_version=CONTACT_CONSENT_TEXT_VERSION,
+                granted_at=timezone.now(), phone_last4=self.ORG_NUMBER[-4:], granted_by=self.users['owner'],
+            )
+        self.offer = Offer.objects.create(
+            seller=None, seller_context_type='ORGANIZATION', seller_context_id=self.org.pk,
+            created_by=self.users['editor'], category_id=category.id, commune_id=commune.id,
+            title='Un joli canapé à vendre', description='Description suffisamment longue pour le CDC.', price=100,
+            main_image=make_test_image(),
+        )
+        buyer = self.users['buyer']
+        contact = ContactEvent.objects.create(offer=self.offer, sender=buyer, message='Bonjour')
+        self.conversation = Conversation.objects.create(
+            offer_id=self.offer.id, seller_context_type='ORGANIZATION', seller_context_id=self.org.pk,
+        )
+        self.conversation.participants.add(buyer)
+        Message.objects.create(conversation=self.conversation, sender=buyer, content='Salut')
+        Message.objects.create(
+            conversation=self.conversation, sender=self.users['admin'], content='Bonjour à vous',
+            sender_context_type='ORGANIZATION', sender_context_id=self.org.pk,
+        )
+        self.pool = [
+            *(str(u.id) for u in self.users.values()), str(self.org.id), str(self.offer.id),
+            str(self.conversation.id), str(contact.id), *(str(m.id) for m in Message.objects.all()),
+        ]
+
+    # --- utilitaires -------------------------------------------------------------------
+
+    def client_for(self, viewer, as_organization=False):
+        client = self.client_class()
+        if viewer:
+            client.force_authenticate(self.users[viewer])
+        if as_organization:
+            client.defaults['HTTP_X_CONTEXT'] = f'ORGANIZATION:{self.org.pk}'
+        return client
+
+    PEOPLE = {
+        **MEMBERS,
+        'buyer': ('+243970000009', 'buyer-secret@example.com'),
+        'third': ('+243970000008', 'third-secret@example.com'),
+    }
+
+    def own_values(self, viewer):
+        pair = self.PEOPLE.get(viewer)
+        return [pair[0], pair[0][4:], pair[1], f'+243 {pair[0][4:6]} *** ** {pair[0][-2:]}'] if pair else []
+
+    def member_values(self, except_viewer=None):
+        """Téléphones, e-mails et numéro de contact personnel de tous, sauf les coordonnées du lecteur lui-même
+        (qui voit les siennes dans son espace personnel `me/`)."""
+        number = self.MEMBER_CONTACT
+        values = [number, number[4:], f'+243 {number[4:6]} *** ** {number[-2:]}']
+        for name, (phone, email) in self.PEOPLE.items():
+            if name != except_viewer:
+                values += [phone, phone[4:], email, f'+243 {phone[4:6]} *** ** {phone[-2:]}']
+        return values
+
+    def org_number_values(self):
+        return [self.ORG_NUMBER, self.ORG_NUMBER[4:]]
+
+    def expand(self, route):
+        if not PARAM_RE.search(route):
+            return [route]
+        return [PARAM_RE.sub(identifier, route) for identifier in self.pool]
+
+    def crawl(self, viewer, forbidden, as_organization=False):
+        client = self.client_for(viewer, as_organization)
+        ok = 0
+        for route in iter_routes():
+            for path in self.expand(route):
+                url = '/' + path
+                response = client.get(url, {'page_size': 100})
+                if response.status_code >= 500:
+                    self.fail(f'{url} : {response.status_code}')
+                ok += response.status_code == 200
+                body = response.content.decode('utf-8', errors='ignore')
+                for value in forbidden:
+                    self.assertNotIn(value, body, f'{viewer or "anonyme"} voit {value} sur {url}')
+                if url.lstrip('/').startswith(OWN_DATA_ROUTES):
+                    continue
+                try:
+                    payload = json.loads(body)
+                except ValueError:
+                    continue
+                leaked = {k for k in keys_of(payload) if LEAKY_KEY_RE.search(k)}
+                self.assertFalse(leaked, f'clé {leaked} dans la réponse de {url}')
+        return ok
+
+    # --- parcours des routes GET -------------------------------------------------------
+
+    def test_nobody_outside_the_team_sees_a_member_or_the_organization_number_on_any_get_route(self):
+        for viewer in (None, 'third', 'buyer'):
+            with self.subTest(viewer=viewer):
+                forbidden = self.member_values(except_viewer=viewer) + self.org_number_values()
+                self.assertGreaterEqual(self.crawl(viewer, forbidden), 8)
+
+    def test_a_team_member_never_sees_another_member_data_nor_the_full_organization_number(self):
+        for viewer in ('owner', 'admin'):
+            with self.subTest(viewer=viewer):
+                forbidden = self.member_values(except_viewer=viewer) + self.org_number_values()
+                self.assertGreaterEqual(self.crawl(viewer, forbidden, as_organization=True), 12)
+
+    def test_positive_witnesses_reach_the_organization_data(self):
+        witnesses = [
+            (None, False, reverse('offer-detail', args=[self.offer.id]), 'Atelier X'),
+            ('owner', True, reverse('conversation-list'), 'Acheteur'),
+            ('buyer', False, reverse('conversation-list'), 'Atelier X'),
+            ('buyer', False, reverse('message-list') + f'?conversation={self.conversation.id}', 'Atelier X'),
+            ('owner', True, '/api/accounts/contact-settings/', '+243 89 *** ** 11'),
+        ]
+        for viewer, as_org, url, expected in witnesses:
+            response = self.client_for(viewer, as_org).get(url)
+            self.assertEqual(response.status_code, 200, url)
+            self.assertIn(expected, response.content.decode(), f'témoin vide : {url}')
+
+    # --- réglages de contact de l'organisation ----------------------------------------
+
+    def test_organization_contact_settings_show_only_the_masked_organization_number(self):
+        for viewer in ('owner', 'admin'):
+            response = self.client_for(viewer, as_organization=True).get('/api/accounts/contact-settings/')
+            self.assertEqual(response.status_code, 200)
+            text = response.content.decode()
+            body = response.json()
+            for value in (*self.org_number_values(), *self.member_values(), *self.own_values(viewer)):
+                self.assertNotIn(value, text, viewer)  # pas même le numéro de connexion de l'acteur
+            self.assertEqual(body['phone']['masked'], '+243 89 *** ** 11')
+            self.assertIsNone(body['login_phone_masked'])
+            self.assertFalse(body['can_use_login_phone'])
+            self.assertIn('no-store', response['Cache-Control'])
+
+    def test_organization_contact_writes_do_not_leak_member_numbers(self):
+        from unittest import mock
+
+        sms = mock.patch('apps.identity.sms.send_otp_sms')
+        sms.start()
+        self.addCleanup(sms.stop)
+        client = self.client_for('owner', as_organization=True)
+        responses = [
+            client.put('/api/accounts/contact-settings/phone/', {'phone': '+243894444444'}, format='json'),
+            client.put('/api/accounts/contact-settings/channels/CALL/', {'enabled': False}, format='json'),
+        ]
+        for response in responses:
+            self.assertEqual(response.status_code, 200)
+            text = response.content.decode()
+            for value in (*self.member_values(except_viewer='owner'), '894444444', *self.org_number_values()):
+                self.assertNotIn(value, text)
+
+    # --- révélation ----------------------------------------------------------------------
+
+    def test_the_reveal_gives_the_organization_number_and_never_a_member_number(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.moderation.models import AuditLog
+        from apps.notifications.models import Notification
+        from apps.platform_core.models import OutboxEvent
+        from apps.platform_core.testing import dispatch_outbox_now
+
+        User.objects.filter(pk=self.users['buyer'].pk).update(date_joined=timezone.now() - timedelta(days=30))
+        client = self.client_for('buyer')
+        for channel in ('CALL', 'WHATSAPP'):
+            response = client.post(
+                reverse('contact-reveal'), {'offer': str(self.offer.id), 'channel': channel}, format='json',
+            )
+            self.assertEqual(response.status_code, 201, response.content)
+            self.assertEqual(response.json()['phone'], self.ORG_NUMBER)
+            text = response.content.decode()
+            for value in self.member_values(except_viewer='buyer'):
+                self.assertNotIn(value, text)
+        # Après la révélation, le numéro n'est toujours dans aucune route GET ni dans aucune trace stockée.
+        self.assertGreaterEqual(
+            self.crawl('buyer', self.member_values(except_viewer='buyer') + self.org_number_values()), 8,
+        )
+        dispatch_outbox_now()
+        stored = [
+            *(f'{a.action} {a.details}' for a in AuditLog.objects.all()),
+            *(str(e.payload) for e in OutboxEvent.objects.all()),
+            *(f'{n.title} {n.content} {n.link}' for n in Notification.objects.all()),
+            *(m.content for m in Message.objects.all()),
+        ]
+        self.assertTrue(any('contact.number_revealed' in text for text in stored))  # témoin positif
+        self.assertTrue(any('demandé votre numéro' in text for text in stored))
+        for text in stored:
+            for value in (*self.member_values(), *self.org_number_values()):
+                self.assertNotIn(value, text)  # y compris le téléphone de l'acheteur : jamais copié dans une trace

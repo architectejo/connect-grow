@@ -9,7 +9,7 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 
 | ID | Tâche | Agents | Statut | Réf. CDC |
 |---|---|---|---|---|
-| L0-01 | Dépôt Git unique à la racine (historique des deux dépôts conservé), puis CI GitHub Actions (tests backend SQLite, lint/test/build front), `.gitignore` vérifié | devops | Fait sauf `npm run test` du front (aucun test / config Vitest : à corriger par dev-frontend) ; branches `main`, `backend`, `frontend` créées, rien poussé (remote à désigner) | §5.11 |
+| L0-01 | Dépôt Git unique à la racine (historique des deux dépôts conservé), puis CI GitHub Actions (tests backend SQLite, lint/test/build front), `.gitignore` vérifié | devops | Fait (CI, tests front en place) ; une seule branche `main` depuis le 24/10/2026 ; rien poussé (remote à désigner) | §5.11 |
 | L0-02 | SQLite seul : sortir `mysqlclient` de `requirements.txt` vers `requirements-mysql.txt`, retirer les dépendances système MySQL du Dockerfile, archiver `docker-compose.mysql.yml` | devops | Fait (relu, fusionné dans `backend`, branche `chore/L0-02-sqlite-seul`) | §2.5, ADR 0001 |
 | L0-03 | Supprimer Redis : `CHANNEL_LAYERS` en `InMemoryChannelLayer`, retirer `channels_redis`, le service Redis des compose et les variables `REDIS_*` | dev-temps-reel, devops | Fait (code et compose ; 98 tests verts, relu) | §5.5 |
 | L0-04 | Supprimer le code mort : apps non installées `users`, `offers`, `exchanges`, `chat`, `notifications`, dossier `backend/scratch/`, ancien front `connecte-plus-hub/` (après vérification qu'aucun import n'y renvoie) | architecte-technique (vérif), dev-backend | Fait (apps mortes absentes, `scratch/` supprimé le 09/10/2026) | — |
@@ -22,7 +22,7 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 | L0-07 | Retirer le Trust Score : `User.trust_score`, `TrustScoreSettings`, facteur de confiance de `ranking`, `TrustScore.tsx` et `lib/trust.ts` ; remplacer par note d'offre et note vendeur affichées (moyenne, nombre, ancienneté) ; retirer aussi le badge « Vendeur fiable » et `avg_rating` issu du Trust Score. Stories : `docs/specs/avis-classement-contact.md` | analyste-fonctionnel, architecte-technique, dev-backend, dev-frontend | Fait (backend + front ; relu, audité ; 678 tests backend, 155 front) | §3.4, règle 4 |
 | L0-08 | Remplacer le classement par le score organique P × E × R × D, sans note ; pondérations en base | dev-backend | Fait (score E×R stocké, proximité à la lecture, recalcul horaire) | §3.5 |
 | L0-09 | Compte unique et contextes : remplacer `user_type` PARTICULIER/BUSINESS et `BusinessProfile` par `Organization`, `Membership`, rôles d'organisation et contexte actif | analyste-fonctionnel, architecte-technique, dev-backend, dev-frontend | En cours (T1 à T5b, T8, F1, F2 faits et fusionnés dans main ; restent T6, T7, T9, T10) | §3.1, règle 1 |
-| L0-10 | Avis : ouvrir le droit d'avis après prise de contact enregistrée (au lieu de l'« affaire conclue »), double note offre + vendeur, libellé « Avis après contact » ; supprimer `Deal` (D1). Stories : `docs/specs/avis-classement-contact.md` | dev-backend, dev-frontend | Fait côté backend et front (avis après contact, éligibilité, recours de l'auteur) ; reste le recours côté front (en cours) ; `Deal` supprimé | §3.4 |
+| L0-10 | Avis : ouvrir le droit d'avis après prise de contact enregistrée (au lieu de l'« affaire conclue »), double note offre + vendeur, libellé « Avis après contact » ; supprimer `Deal` (D1). Stories : `docs/specs/avis-classement-contact.md` | dev-backend, dev-frontend | Fait (avis après contact, éligibilité, recours de l'auteur, backend et front) ; `Deal` supprimé | §3.4 |
 | L0-10a | **Prérequis de toute recette ouverte (fuite règle 10) — étape -a faite (retrait de `phone`, test de non-fuite, oracle d'inscription du téléphone corrigé, 539 tests backend / 85 front) ; restent -b à -e (consentement par canal, action de contact avec révélation, limites, journalisation) :** retirer `phone` du `SellerSerializer` public ; action de contact authentifiée, throttlée et journalisée (appel / WhatsApp / message) qui enregistre la prise de contact et révèle le contact avec le consentement du vendeur ; adapter les boutons du front. À traiter avec L0-10 ; question LEG-PRV associée | dev-backend, dev-frontend, auditeur-securite | Fait (backend 972 tests, front 283 ; recette QA acceptée ; reste dette LEG-PRV et déploiement) | §3.15, règle 10 |
 | L0-11 | Versionner l'API sous `/api/v1/` (backend + `VITE_API_URL` et client front) | dev-backend, dev-frontend | À faire | §5.9 |
 | L0-12 | Renommer `is_delete` en `is_deleted` ; renommer `Post` en `Offer` si validé par l'ADR L0-05 | dev-backend | Fait côté backend (R2) ; noms d'API conservés jusqu'à L0-11 | §3.16 |
@@ -31,9 +31,17 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 | L0-15 | Fusionner les doublons `Conversation`/`Message` dans un futur module `messaging` (préparation du lot 2) | architecte-technique | Fait (R2, module `messaging`) | §3.15 |
 | L0-16 | Table outbox et commande de diffusion des événements de domaine (app `platform_core`, ADR 0003) | architecte-technique, dev-backend | Fait (relu, audité, 504 tests ; fusionné dans `backend`) | §5.4 |
 | L0-17 | Rattrapage du front (phases 0 à 4, livrées hors circuit) : lint à 0 erreur, audit sécurité, relecture | dev-frontend, auditeur-securite, relecteur-code | Fait (lint 0 erreur, 15 tests, build vert, audit corrigé, relu ; reste : test du cache PWA en navigateur en recette ; react-router 7 et Tailwind 4 à valider) | §2.4 (DoD) |
-| L0-19 | (Fait, fusionné dans `backend`) Correctifs backend issus de F1 : `logout/` sans access valide (refresh seul, `authentication_classes=[]`, throttlé), `CORS_EXPOSE_HEADERS=["Retry-After"]`, retrieve des offres non actives pour leur propriétaire (`my_posts`), filtre `is_verified` de `businesses/` | dev-backend | En cours (branche `fix/L0-19-correctifs-f1`) | §5.9 |
+| L0-19 | (Fait, fusionné dans `backend`) Correctifs backend issus de F1 : `logout/` sans access valide (refresh seul, `authentication_classes=[]`, throttlé), `CORS_EXPOSE_HEADERS=["Retry-After"]`, retrieve des offres non actives pour leur propriétaire (`my_posts`), filtre `is_verified` de `businesses/` | dev-backend | Fait | §5.9 |
 | L0-20 | Mineurs de l'audit du recours : scope de throttle `report_response` distinct de `report` ; `ReportAdmin` sans suppression et `decision_notes` en lecture seule sur un signalement clos ; vérifier l'audit des changements de `ModerationSettings` et `ReviewSettings` ; documenter la non-atomicité du plafond quotidien | dev-backend | Fait (688 tests ; champs `contest_report_id`, `contest_responded`, `can_delete` ; fusionné dans `backend`) | §3.17 |
 | L0-18 | Passe finale i18n : sortir les textes en dur des pages du front (à faire après L0-07, L0-09 et L0-14, qui réécrivent plusieurs écrans) | dev-frontend | À faire | §4.6 |
+| L0-21 | Corrections recette QA backend (R0-01/03/04/05/06/07/08/12) | dev-backend | Fait | recette QA |
+| L0-22 | Corrections recette QA front (R0-02/10/11) | dev-frontend | Fait | recette QA |
+| L0-23 | Tests au jour local Africa/Kinshasa (4 échecs entre 00 h et 01 h) | dev-backend | Fait | recette QA |
+| L0-24 | Corrections audit et relecture du contact vendeur T1/T2 (course de vérification, ContactPoint concurrent, garde SMS, admin OTP) | dev-backend | Fait (836 tests) | ADR 0005 |
+| L0-25 | Corrections T4 (délai depuis la remise, nom visiteur nettoyé) | dev-backend | Fait | ADR 0005 |
+| L0-26 | Corrections T6 (fixture et contrat, regex, textes) | dev-frontend | Fait | ADR 0005 |
+| L0-27 | Corrections recette contact (notification, audit sans chiffres) | dev-backend | Fait | recette QA |
+| L0-28 | Cosmétiques recette contact front | dev-frontend | Fait | recette QA |
 
 ## Lot 1 — Visibilité
 
@@ -78,11 +86,3 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 |---|---|---|---|
 | F-01 | Passage à MySQL : `requirements-mysql.txt`, CI sur MySQL, tests de portabilité (casse, unicité, emojis), migration des données | devops, dev-backend, qa-testeur | À faire |
 | F-02 | Déploiement AWS Lightsail (Nginx, Daphne, base managée, stockage objet, CDN, sauvegardes) | devops | À faire |
-| L0-21 | Corrections recette QA backend (R0-01/03/04/05/06/07/08/12) | 0 | dev-backend | Fait | recette QA |
-| L0-22 | Corrections recette QA front (R0-02/10/11) | 0 | dev-frontend | Fait | recette QA |
-| L0-25 | Corrections T4 (délai depuis la remise, nom visiteur nettoyé) | 0 | dev-backend | Fait | ADR 0005 |
-| L0-26 | Corrections T6 (fixture et contrat, regex, textes) | 0 | dev-frontend | Fait | ADR 0005 |
-| L0-27 | Corrections recette contact (notification, audit sans chiffres) | 0 | dev-backend | Fait | recette QA |
-| L0-28 | Cosmétiques recette contact front | 0 | dev-frontend | Fait | recette QA |
-| L0-23 | Tests au jour local Africa/Kinshasa (4 échecs entre 00 h et 01 h) | 0 | dev-backend | Fait | recette QA |
-| L0-24 | Corrections audit et relecture du contact vendeur T1/T2 (course de vérification, ContactPoint concurrent, garde SMS, admin OTP) | 0 | dev-backend | Fait (836 tests) | ADR 0005 |

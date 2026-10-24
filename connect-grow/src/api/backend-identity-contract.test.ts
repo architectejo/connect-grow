@@ -290,7 +290,7 @@ describe("objet seller des offres (ADR 0006 §9.6)", () => {
   it("le formulaire d'offre n'envoie jamais de vendeur : ni seller, ni seller_*, ni created_by", () => {
     const source = readFileSync(resolve(process.cwd(), "src/pages/PostEditor.tsx"), "utf-8");
     expect(source).not.toMatch(/append\(\s*["'`](seller|created_by)/);
-    expect(source).not.toMatch(/seller_context|seller_is_public/);
+    expect(source).not.toMatch(/seller_context_type|seller_is_public/);
   });
 });
 

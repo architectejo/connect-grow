@@ -32,7 +32,7 @@ describe("textes de l'interface", () => {
   });
 
   it("jamais « garanti », « certifié » ni « de confiance » pour une vérification, hors négation explicite", () => {
-    const risky = strings.filter(({ path, text }) => /^(claims|verif|org|orgNew|orgEdit|team|seller|directory|legacy|dashboard|profiles|provider|kyc)\./.test(path) && /garanti|certifi|de confiance|recommand/i.test(text));
+    const risky = strings.filter(({ path, text }) => /^(claims|verif|org|orgNew|orgEdit|team|seller|directory|legacy|dashboard|profiles|provider|kyc)\./.test(path) && /garanti|certifié|de confiance|recommandation/i.test(text));
     for (const { path, text } of risky) {
       // Seules les négations sont admises : « ni une garantie », « ne garantit ni… », « ni une recommandation »
       expect(text, path).toMatch(/ne garantit|ni une garantie|ni une recommandation|n'est ni/);

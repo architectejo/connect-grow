@@ -29,7 +29,7 @@ describe("checkKycFile", () => {
 describe("uploadErrorMessage", () => {
   const t = i18n.t.bind(i18n);
   it("réseau coupé : message d'échec, le fichier devra être re-sélectionné", () => {
-    expect(uploadErrorMessage(t, { message: "Network Error" })).toBe("L'envoi a échoué. Vérifiez votre connexion puis réessayez.");
+    expect(uploadErrorMessage(t, Object.assign(new Error("Network Error"), { isAxiosError: true }))).toBe("L'envoi a échoué. Vérifiez votre connexion puis réessayez.");
   });
   it("type non exigé (400 sur document_type) : texte dédié", () => {
     expect(uploadErrorMessage(t, fail(400, { document_type: ["Cette pièce n'est pas exigée pour ce type d'organisation."] }))).toBe(

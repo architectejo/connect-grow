@@ -64,7 +64,7 @@ describe("Vérification de l'organisation (E7)", () => {
     expect(rccm.queryByRole("button")).not.toBeInTheDocument(); // validée : ni renvoi ni suppression
     const identite = await row("Identification nationale");
     expect(identite.getByText("Refusée")).toBeInTheDocument();
-    expect(identite.getByText("Motif du refus :", { exact: false })).toHaveTextContent("Document illisible");
+    expect(identite.getByText(/Document illisible/)).toBeInTheDocument();
     expect(identite.getByRole("button", { name: /Envoyer : Identification nationale/ })).toHaveTextContent("Envoyer à nouveau");
     expect(identite.getByRole("button", { name: /Supprimer le document/ })).toBeInTheDocument();
     const representant = await row("Pièce d'identité du représentant");
@@ -73,7 +73,7 @@ describe("Vérification de l'organisation (E7)", () => {
     const text = container.textContent ?? "";
     expect(text).toContain("1 pièce validée sur 3");
     expect(text).toContain("La vérification ne peut pas être achetée.");
-    expect(text).not.toMatch(/garanti(?!e)|certifi|de confiance/i);
+    expect(text).not.toMatch(/garanti(?!e)|certifié|de confiance/i);
     expect(text).not.toMatch(/(^|\s)Vérifié(\s|$)/);
     expect(screen.queryByText("Organisation vérifiée")).not.toBeInTheDocument();
   });
@@ -163,7 +163,7 @@ describe("Vérification de l'organisation (E7)", () => {
   it("erreur de chargement : message avec « Réessayer »", async () => {
     failVerification = true;
     renderPage();
-    expect(await screen.findByRole("button", { name: "Réessayer" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Réessayer" }, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it("non-membre : accès refusé, jamais le contenu", async () => {

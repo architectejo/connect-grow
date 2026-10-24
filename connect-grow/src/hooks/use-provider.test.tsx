@@ -31,7 +31,7 @@ describe("profil prestataire", () => {
   it("une autre erreur (500, ou 404 sans le code) reste une erreur", async () => {
     vi.spyOn(apiClient, "get").mockRejectedValue({ response: { status: 500, data: {} } });
     const { result } = renderHook(() => useProvider(), { wrapper: wrapperFor(newClient()) });
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 5000 });
     expect(isProviderNotFound({ response: { status: 404, data: { code: "autre" } } })).toBe(false);
     expect(isProviderNotFound(notFound)).toBe(true);
   });

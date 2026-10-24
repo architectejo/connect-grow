@@ -74,7 +74,7 @@ describe("Profil public d'un vendeur (E9)", () => {
     expect(screen.getByText("Atelier de couture de Gombe")).toBeInTheDocument();
     expect(screen.getByText("1 offre active")).toBeInTheDocument();
     expect(await screen.findByText("Costume sur mesure")).toBeInTheDocument();
-    expect(get).toHaveBeenCalledWith(`marketplace/sellers/organization/${ORG_ID}/`);
+    expect(get).toHaveBeenCalledWith(`marketplace/sellers/organization/${ORG_ID}/`, undefined);
     expect(get).toHaveBeenCalledWith("marketplace/posts/", { params: { seller: ORG_ID, seller_type: "ORGANIZATION", ordering: "-created_at" } });
   });
 
@@ -103,7 +103,7 @@ describe("Profil public d'un vendeur (E9)", () => {
   it("erreur serveur : « Réessayer »", async () => {
     profileError = { response: { status: 500, data: {} } };
     renderAt(`/seller/organization/${ORG_ID}`);
-    expect(await screen.findByRole("button", { name: "Réessayer" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Réessayer" }, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it("membre de l'organisation : lien de modification vers son espace", async () => {

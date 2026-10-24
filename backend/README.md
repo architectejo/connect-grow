@@ -97,12 +97,15 @@ Un domaine ne modifie pas un autre domaine : il écrit son changement **et** un 
 |---|---|---|---|
 | `marketplace.contact_recorded` | marketplace | `messaging.open_contact_conversation`, `notifications.notify_contact` | identifiants (contact, offre, vendeur, expéditeur), `channel` (`MESSAGE`, `CALL`, `WHATSAPP`) et titre public de l'offre ; ni message ni nom |
 | `marketplace.exchange_proposed` | marketplace | `messaging.open_exchange_conversation`, `notifications.notify_exchange` | idem (`proposal_id`) |
-| `marketplace.offer_expiring_soon` | marketplace | `notifications.notify_offer_expiration` | offre, titre, vendeur, échéance |
+| `marketplace.offer_expiring_soon` (v2) | marketplace | `notifications.notify_offer_expiration` | offre, titre, contexte vendeur (`seller_context_type/id`), échéance ; destinataires (`offer.edit`) résolus à la livraison |
 | `visibility.offer_viewed` | visibility | `marketplace.sync_offer_views` | offre, date |
 | `visibility.offer_shared` | visibility | `marketplace.sync_offer_shares` | offre, date |
 | `visibility.ranking_settings_changed` | visibility (admin) | `marketplace.refresh_scores_after_ranking_change` | liste des champs modifiés ; recalcul idempotent des scores |
-| `reviews.review_posted` (v2) | reviews | `notifications.notify_review_posted` | `recipient_id` (utilisateur à notifier), auteur, contexte vendeur, identifiants et titre public de l'offre ; nom de l'auteur et extrait relus à la diffusion |
-| `reviews.review_replied` | reviews | `notifications.notify_review_reply` | identifiants et titre public de l'offre ; nom du répondant relu à la diffusion |
+| `reviews.review_posted` (v3) | reviews | `notifications.notify_review_posted` | auteur, contexte vendeur (`seller_context_type/id`), identifiants et titre public de l'offre ; plus de `recipient_id` : destinataires (`review.reply`) résolus à la livraison ; nom de l'auteur et extrait relus à la diffusion |
+| `reviews.review_replied` | reviews | `notifications.notify_review_reply` | identifiants, contexte vendeur et titre public de l'offre ; l'auteur de l'avis voit le nom du vendeur (organisation, prestataire, personne), jamais celui du membre |
+| `identity.membership_changed` | identity | `notifications.notify_membership_change`, `notifications.purge_context_notifications` | organisation, compte concerné, type de changement, rôles, auteur ; ni nom ni coordonnée ; la révocation supprime les notifications de l'organisation du membre |
+| `identity.seller_context_status_changed` | identity | `marketplace.sync_seller_visibility`, `notifications.notify_organization_status` | contexte, motif normalisé, auteur ; propriétaires et administrateurs prévenus (organisation seulement) |
+| `identity.organization_verification_changed` | identity | `notifications.notify_kyb_decision` | organisation, type de pièce, décision ; ni motif ni décideur |
 | `reviews.crossed_reviews_detected` (v2) | reviews | `moderation.file_crossed_reviews_report` | avis, deux comptes, `reviews_count` (couples auteur-offre), fenêtre en jours |
 
 Ajouter un événement : déclarer le type dans `platform_core/catalog.py`, publier avec `publish_event('<domaine>.<fait>', ...)` (type littéral), écrire l'abonné idempotent dans `events.py` du domaine récepteur (il n'appelle que des `services.py`). Un contrôle Django (`platform_core.E001`/`E002`) et des tests de frontières vérifient le catalogue, les émetteurs et les abonnés. Le `name` d'un abonné est stocké en base : ne jamais le renommer sans migration.

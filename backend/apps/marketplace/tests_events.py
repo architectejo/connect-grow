@@ -129,7 +129,8 @@ class ExpirationEventTests(MarketplaceTestBase):
         self.assertEqual(Notification.objects.count(), 0)
         event = OutboxEvent.objects.get(event_type='marketplace.offer_expiring_soon')
         self.assertEqual(event.payload, {
-            'offer_id': str(offer.id), 'offer_title': offer.title, 'seller_id': str(self.seller.pk),
+            'offer_id': str(offer.id), 'offer_title': offer.title,
+            'seller_context_type': 'USER', 'seller_context_id': str(self.seller.pk),
             'expires_at': offer.expires_at.isoformat(),
         })
         dispatch_outbox_now()
@@ -145,7 +146,7 @@ class ExpirationEventTests(MarketplaceTestBase):
     def test_a_failing_notification_does_not_prevent_the_offer_from_being_marked(self):
         offer = self.expiring_offer()
         original = registry.get_subscriber('notifications.notify_offer_expiration')
-        failing = registry.Subscriber(original.event_type, original.name, mock.Mock(side_effect=ValueError('x')), (1,))
+        failing = registry.Subscriber(original.event_type, original.name, mock.Mock(side_effect=ValueError('x')), (2,))
         with mock.patch.dict(registry._BY_NAME, {original.name: failing}):
             services.expire_offers()
             dispatch_outbox_now()

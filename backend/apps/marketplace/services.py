@@ -567,18 +567,16 @@ def expire_offers() -> tuple:
             )
             if not marked:
                 continue
-            # Un événement par destinataire (capacité `offer.edit` du contexte) : l'abonné de `notifications`
-            # reste inchangé jusqu'à son passage au contexte (v2, T6).
-            for recipient_id in identity_services.get_context_recipients(
-                offer.seller_context_type, offer.seller_context_id, CAP_EDIT,
-            ):
-                publish_event(
-                    'marketplace.offer_expiring_soon', aggregate_type='offer', aggregate_id=offer.id,
-                    payload={
-                        'offer_id': str(offer.id), 'offer_title': offer.title, 'seller_id': str(recipient_id),
-                        'expires_at': offer.expires_at.isoformat(),
-                    },
-                )
+            # Un événement par offre (v2) : l'abonné de `notifications` résout à la livraison les destinataires
+            # (capacité `offer.edit` du contexte vendeur) ; aucun nom ni compte n'est copié dans la charge utile.
+            publish_event(
+                'marketplace.offer_expiring_soon', aggregate_type='offer', aggregate_id=offer.id,
+                payload={
+                    'offer_id': str(offer.id), 'offer_title': offer.title,
+                    'seller_context_type': offer.seller_context_type, 'seller_context_id': str(offer.seller_context_id),
+                    'expires_at': offer.expires_at.isoformat(),
+                },
+            )
         notified += 1
     return expired_count, notified
 
@@ -1074,17 +1072,13 @@ def _parsed(ids: Iterable) -> set:
 
 
 def get_report_authors(ids: Iterable) -> dict:
-    """Compte auteur de chaque offre, `{offre: compte}` : refuse l'auto-signalement. Contexte personnel : le
-    compte ; prestataire : son titulaire (une requête de plus pour tout le lot) ; organisation : aucun compte
-    n'est « l'auteur » (dette : l'appartenance à l'organisation n'empêche pas encore le signalement)."""
+    """Comptes qui agissent pour le vendeur de chaque offre, `{offre: frozenset(comptes)}` (ADR 0006, 19.3 n°7) :
+    refuse l'auto-signalement. Contexte personnel : le compte ; prestataire : son titulaire ; organisation : tous
+    ses membres actifs (même définition qu'`identity.acts_for_context`, par lot : 2 requêtes au plus en plus
+    de celle des offres). Aucun nom, e-mail ni téléphone n'est renvoyé."""
     rows = list(Offer.objects.filter(id__in=_parsed(ids)).values_list('id', 'seller_context_type', 'seller_context_id'))
-    accounts = identity_services.get_contact_accounts([(kind, ctx) for _, kind, ctx in rows if kind != CONTEXT_USER])
-    result = {}
-    for offer_id, kind, ctx in rows:
-        account = ctx if kind == CONTEXT_USER else accounts.get((kind, ctx))
-        if account is not None:
-            result[offer_id] = account
-    return result
+    accounts = identity_services.get_context_member_accounts([(kind, ctx) for _, kind, ctx in rows])
+    return {offer_id: accounts[(kind, ctx)] for offer_id, kind, ctx in rows if accounts.get((kind, ctx))}
 
 
 def seller_owns_offer(offer_id, user_id) -> bool:

@@ -61,7 +61,7 @@ class ContextBase(MarketplaceTestBase):
     def org_offer(self, org=None, creator=None, **kwargs):
         org = org or self.org
         return self.make_offer(
-            seller=None, seller_context_type='ORGANIZATION', seller_context_id=org.pk,
+            seller_context_type='ORGANIZATION', seller_context_id=org.pk,
             created_by=creator or self.member, **kwargs,
         )
 
@@ -332,10 +332,10 @@ class ListsByContextTests(ContextBase):
     def setUp(self):
         super().setUp()
         self.join(self.member, role=EDITOR)
-        self.personal = self.make_offer(seller=self.member, title='Offre personnelle du membre')
+        self.personal = self.make_offer(owner=self.member, title='Offre personnelle du membre')
         self.org_active = self.org_offer(title='Offre active de l organisation')
         self.org_trashed = self.org_offer(title='Offre en corbeille de l orga', is_deleted=True)
-        self.personal_trashed = self.make_offer(seller=self.member, title='Corbeille personnelle', is_deleted=True)
+        self.personal_trashed = self.make_offer(owner=self.member, title='Corbeille personnelle', is_deleted=True)
         self.other_org_offer = self.org_offer(self.other_org, title='Offre d une autre organisation')
         self.client.force_authenticate(self.member)
 
@@ -454,7 +454,7 @@ class SellerVisibilityTests(ContextBase):
         self.join(self.seller, role=OWNER)
         personal = self.make_offer(title='Offre personnelle du vendeur')
         provider_offer = self.make_offer(
-            seller=None, seller_context_type='PROVIDER', seller_context_id=profile.pk, created_by=self.seller,
+            seller_context_type='PROVIDER', seller_context_id=profile.pk, created_by=self.seller,
             title='Offre du prestataire',
         )
         org_offer = self.org_offer(creator=self.seller, title='Offre de l organisation du vendeur')
@@ -481,7 +481,7 @@ class SellerVisibilityTests(ContextBase):
     def test_archiving_a_provider_hides_its_offers(self):
         profile = self.provider()
         offer = self.make_offer(
-            seller=None, seller_context_type='PROVIDER', seller_context_id=profile.pk, created_by=self.seller,
+            seller_context_type='PROVIDER', seller_context_id=profile.pk, created_by=self.seller,
         )
         identity_services.archive_provider(self.seller)
         dispatch_outbox_now()
@@ -511,7 +511,7 @@ class SellerVisibilityTests(ContextBase):
         User.objects.filter(pk=self.seller.pk).update(is_active=False)
         wrongly_hidden = self.org_offer(self.other_org, creator=self.member, seller_is_public=False, title='Cachée à tort')
         provider_offer = self.make_offer(
-            seller=None, seller_context_type='PROVIDER', seller_context_id=profile.pk, created_by=self.seller,
+            seller_context_type='PROVIDER', seller_context_id=profile.pk, created_by=self.seller,
             title='Offre du prestataire désactivé',
         )
 
@@ -562,7 +562,7 @@ class SellerObjectTests(ContextBase):
         profile = self.provider()
         offers = {
             'USER': self.make_offer(),
-            'PROVIDER': self.make_offer(seller=None, seller_context_type='PROVIDER', seller_context_id=profile.pk,
+            'PROVIDER': self.make_offer(seller_context_type='PROVIDER', seller_context_id=profile.pk,
                                         created_by=self.seller),
             'ORGANIZATION': self.org_offer(),
         }
@@ -598,7 +598,7 @@ class SellerObjectTests(ContextBase):
         profile = self.provider()
         self.join(self.member, role=OWNER)
         self.org_offer(creator=self.member, title='Offre publiée par le membre')
-        self.make_offer(seller=None, seller_context_type='PROVIDER', seller_context_id=profile.pk,
+        self.make_offer(seller_context_type='PROVIDER', seller_context_id=profile.pk,
                         created_by=self.seller, title='Offre du prestataire Marie')
         self.make_offer(title='Offre personnelle du vendeur')
         self.client.force_authenticate(None)
@@ -648,7 +648,7 @@ class SellerObjectTests(ContextBase):
 
     def test_provider_contact_goes_through_the_account_of_its_owner(self):
         profile = self.provider()
-        offer = self.make_offer(seller=None, seller_context_type='PROVIDER', seller_context_id=profile.pk,
+        offer = self.make_offer(seller_context_type='PROVIDER', seller_context_id=profile.pk,
                                 created_by=self.seller)
         self.assertEqual(self.get_offer(offer)['allowed_channels'], ['MESSAGE'])
         self.client.force_authenticate(self.buyer)
@@ -686,7 +686,7 @@ class SellerObjectTests(ContextBase):
         def build(count):
             for index in range(count):
                 self.org_offer(title=f'Offre d organisation numéro {index}')
-                self.make_offer(seller=None, seller_context_type='PROVIDER', seller_context_id=profile.pk,
+                self.make_offer(seller_context_type='PROVIDER', seller_context_id=profile.pk,
                                 created_by=self.seller, title=f'Offre de prestataire numéro {index}')
                 self.make_offer(title=f'Offre personnelle numéro {index}')
 
@@ -842,7 +842,7 @@ class SynchronousVisibilityTests(ContextBase):
         self.assertFalse(org_offer.seller_is_public)
         profile = self.provider()
         provider_offer = self.make_offer(
-            seller=None, seller_context_type='PROVIDER', seller_context_id=profile.pk, created_by=self.seller,
+            seller_context_type='PROVIDER', seller_context_id=profile.pk, created_by=self.seller,
         )
         identity_services.archive_provider(self.seller)
         provider_offer.refresh_from_db()

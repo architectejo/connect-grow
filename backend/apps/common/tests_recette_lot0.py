@@ -69,6 +69,10 @@ SPEC_NOTIFICATION = {
     'id': 'uuid', 'notification_type': 'str', 'title': 'str', 'content': 'str', 'link?': 'str|null', 'is_read': 'bool',
     'created_at': 'date',
 }
+SPEC_ORG_KYC = {
+    'id': 'uuid', 'document_type': 'str', 'document_type_label': 'str', 'status': 'str', 'rejection_reason': 'str',
+    'uploaded_at': 'date', 'reviewed_at': 'date|null',
+}
 SPEC_KYC = {
     'id': 'uuid', 'document_type': 'str', 'download_url?': 'str|null', 'status': 'str', 'rejection_reason?': 'str',
     'created_at': 'date', 'reviewed_at?': 'date|null',
@@ -238,11 +242,9 @@ class ContractTests(RecetteBase):
         for i in range(24):
             organization = Organization.objects.create(name=f'Zbiz {i:02d}', org_type='ENTREPRISE')
             if i % 3 == 0:  # les trois pièces exigées du type ENTREPRISE, toutes validées
-                holder = User.objects.create_user(email=f'ent{i}@example.com', password=PASSWORD, full_name=f'Gérant {i}')
-                profile = BusinessProfile.objects.create(user=holder, business_name=f'Support {i}')
                 for document_type in ('RCCM', 'ID_NATIONALE', 'PIECE_GERANT'):
                     KycDocument.objects.create(
-                        business_profile=profile, organization=organization, document_type=document_type,
+                        organization=organization, document_type=document_type,
                         status=KycDocument.STATUS_VALIDE, reviewed_at=timezone.now(),
                     )
         client = APIClient()
@@ -564,25 +566,35 @@ class JourneyTests(RecetteBase):
         self.assertTrue(Notification.objects.filter(user=self.buyer2, title='Votre avis a été masqué').exists())
 
     def test_kyc_upload_delete_decision_and_verification(self):
-        owner = User.objects.create_user(email='kyc@example.com', password=PASSWORD, full_name='Gérant', user_type='ENTREPRISE')
-        BusinessProfile.objects.create(user=owner, business_name='Boîte KYC')
+        """Dépôt, remplacement, suppression, décision et vérification d'une organisation (routes d'organisation)."""
+        owner = User.objects.create_user(
+            email='kyc@example.com', password=PASSWORD, full_name='Gérant', phone_verified=True,
+        )
         client = self.as_user(owner)
+        created = client.post('/api/accounts/organizations/', {'name': 'Boîte KYC', 'org_type': 'ENTREPRISE'}, format='json')
+        self.assertEqual(created.status_code, 201, created.content)
+        org_id = created.json()['id']
+        docs_url = f'/api/accounts/organizations/{org_id}/kyc/documents/'
         pdf = lambda: io.BytesIO(b'%PDF-1.4\n% test\n')  # noqa: E731
 
         def upload(kind):
             from django.core.files.uploadedfile import SimpleUploadedFile
-            return client.post('/api/accounts/kyc/documents/', {
+            return client.post(docs_url, {
                 'document_type': kind, 'file': SimpleUploadedFile('p.pdf', pdf().read(), content_type='application/pdf'),
             }, format='multipart')
 
         first = upload('RCCM')
         self.assertEqual(first.status_code, 201, first.content)
-        self.assertShape(first.json(), SPEC_KYC, 'KycDocument')
-        self.assertIsNone(first.json()['download_url'])
+        self.assertShape(first.json(), SPEC_ORG_KYC, 'OrganizationKycDocument')
+        self.assertNotIn('download_url', first.json())
         self.assertNotIn('file', first.json())
-        self.assertEqual(upload('RCCM').status_code, 400)  # une pièce par type en attente
-        self.assertEqual(self.as_user(self.buyer).delete(f"/api/accounts/kyc/documents/{first.json()['id']}/").status_code, 404)
-        self.assertEqual(client.delete(f"/api/accounts/kyc/documents/{first.json()['id']}/").status_code, 204)
+        second = upload('RCCM')  # une pièce par type : le dépôt en attente est remplacé
+        self.assertEqual(second.status_code, 201, second.content)
+        self.assertEqual(KycDocument.objects.filter(organization_id=org_id, document_type='RCCM').count(), 1)
+        self.assertIn(
+            self.as_user(self.buyer).delete(f"{docs_url}{second.json()['id']}/").status_code, (403, 404),
+        )  # un non-membre ne supprime rien
+        self.assertEqual(client.delete(f"{docs_url}{second.json()['id']}/").status_code, 204)
         self.assertTrue(AuditLog.objects.filter(action='KYC_DELETED').exists())
 
         moderator = self.as_user(self.moderator)
@@ -593,13 +605,15 @@ class JourneyTests(RecetteBase):
         queue = self.rows(moderator.get('/api/accounts/kyc/review-queue/'))
         self.assertEqual(len(queue), 3)
         self.assertTrue(queue[0]['download_url'])
-        profile = owner.business_profile
+        self.assertShape(queue[0], SPEC_KYC, 'KycDocument')
+        list_url = '/api/accounts/organizations/'
         for kind, doc_id in ids.items():
-            self.assertFalse(BusinessProfile.objects.get(pk=profile.pk).is_verified)  # pas vérifié avant les trois pièces
+            complete = client.get(f'{list_url}{org_id}/verification/')
+            self.assertFalse(complete.json()['summary']['complete'])  # pas vérifiée avant les trois pièces
             decision = moderator.post(f'/api/accounts/kyc/documents/{doc_id}/decision/', {'decision': 'VALIDE'}, format='json')
             self.assertEqual(decision.status_code, 200)
-        self.assertTrue(BusinessProfile.objects.get(pk=profile.pk).is_verified)
-        self.assertEqual(client.delete(f"/api/accounts/kyc/documents/{ids['RCCM']}/").status_code, 400)
+        self.assertTrue(client.get(f'{list_url}{org_id}/verification/').json()['summary']['complete'])
+        self.assertEqual(client.delete(f"{docs_url}{ids['RCCM']}/").status_code, 409)
         self.assertEqual(AuditLog.objects.filter(action='KYC_VALIDE').count(), 3)
         seller_card = APIClient().get(POSTS_URL, {'seller': str(owner.id)})
         self.assertEqual(self.rows(seller_card), [])  # aucune offre : liste vide, pas d'erreur
@@ -680,15 +694,14 @@ class PrivacyThirdPartyTests(RecetteBase):
     def test_rule10_no_private_data_leaks_to_third_parties(self):
         seller_phone, seller_email, nif = '+243899998877', 'prive.vendeur@example.com', 'NIF-SECRET-4242'
         owner = User.objects.create_user(
-            email=seller_email, phone=seller_phone, password=PASSWORD, full_name='Gérant Privé', user_type='ENTREPRISE',
+            email=seller_email, phone=seller_phone, password=PASSWORD, full_name='Gérant Privé',
         )
-        BusinessProfile.objects.create(user=owner, business_name='Boîte Privée', nif=nif)
         organization = Organization.objects.create(name='Boîte Privée', org_type='ENTREPRISE', nif=nif)
         Membership.objects.create(organization=organization, user=owner, role='OWNER')
         offer = self.make_offer(owner, title='Offre du gérant privé')
         from django.core.files.uploadedfile import SimpleUploadedFile
         KycDocument.objects.create(
-            business_profile=owner.business_profile, document_type='RCCM',
+            organization=organization, uploaded_by=owner, document_type='RCCM',
             file=SimpleUploadedFile('x.pdf', b'%PDF-1.4 secret-kyc', content_type='application/pdf'),
         )
         self.contact_via_api(self.buyer, offer)
@@ -701,7 +714,7 @@ class PrivacyThirdPartyTests(RecetteBase):
             POSTS_URL, f'{POSTS_URL}{offer.id}/', f'{POSTS_URL}?seller={owner.id}', '/api/accounts/organizations/',
             f'{REVIEWS_URL}?post={offer.id}', f'{REVIEWS_URL}?seller={owner.id}',
             '/api/interactions/conversations/', '/api/interactions/notifications/', '/api/marketplace/favorites/',
-            '/api/accounts/kyc/documents/', '/api/accounts/me/', '/api/moderation/dashboard/',
+            f'/api/accounts/organizations/{organization.pk}/kyc/documents/', '/api/accounts/me/', '/api/moderation/dashboard/',
         ]
         for viewer in (None, self.buyer, self.other, self.buyer2):
             client = APIClient() if viewer is None else self.as_user(viewer)
@@ -717,11 +730,12 @@ class PrivacyThirdPartyTests(RecetteBase):
         self.assertEqual((own['email'], own['phone']), (seller_email, seller_phone))
 
     def test_rule10_download_url_is_reserved_to_reviewers(self):
-        owner = User.objects.create_user(email='own@example.com', password=PASSWORD, full_name='Gérant', user_type='ENTREPRISE')
-        profile = BusinessProfile.objects.create(user=owner, business_name='B')
+        owner = User.objects.create_user(email='own@example.com', password=PASSWORD, full_name='Gérant')
+        organization = Organization.objects.create(name='B', org_type='ENTREPRISE')
+        Membership.objects.create(organization=organization, user=owner, role='OWNER')
         from django.core.files.uploadedfile import SimpleUploadedFile
         doc = KycDocument.objects.create(
-            business_profile=profile, document_type='RCCM',
+            organization=organization, uploaded_by=owner, document_type='RCCM',
             file=SimpleUploadedFile('x.pdf', b'%PDF-1.4 a', content_type='application/pdf'),
         )
         for viewer in (self.buyer, owner):
@@ -788,11 +802,12 @@ class AuditTrailTests(RecetteBase):
         )
 
     def test_rule12_kyc_decisions_and_refusal_reason(self):
-        owner = User.objects.create_user(email='k@example.com', password=PASSWORD, full_name='K', user_type='ENTREPRISE')
-        profile = BusinessProfile.objects.create(user=owner, business_name='K')
+        owner = User.objects.create_user(email='k@example.com', password=PASSWORD, full_name='K')
+        organization = Organization.objects.create(name='K', org_type='ENTREPRISE')
+        Membership.objects.create(organization=organization, user=owner, role='OWNER')
         from django.core.files.uploadedfile import SimpleUploadedFile
         doc = KycDocument.objects.create(
-            business_profile=profile, document_type='RCCM',
+            organization=organization, uploaded_by=owner, document_type='RCCM',
             file=SimpleUploadedFile('x.pdf', b'%PDF-1.4 a', content_type='application/pdf'),
         )
         moderator = self.as_user(self.moderator)
@@ -800,7 +815,10 @@ class AuditTrailTests(RecetteBase):
         self.assertEqual(moderator.post(url, {'decision': 'REFUSE'}, format='json').status_code, 400)  # motif requis
         self.assertEqual(moderator.post(url, {'decision': 'REFUSE', 'reason': 'Illisible'}, format='json').status_code, 200)
         entry = AuditLog.objects.get(action='KYC_REFUSE')
-        self.assertEqual((entry.actor, entry.target_id, entry.details), (self.moderator, doc.pk, 'Illisible'))
+        self.assertEqual((entry.actor, entry.target_id), (self.moderator, doc.pk))
+        self.assertEqual((entry.context_type, entry.context_id), ('ORGANIZATION', organization.pk))
+        doc.refresh_from_db()
+        self.assertEqual(doc.rejection_reason, 'Illisible')
         self.assertEqual(moderator.post(url, {'decision': 'VALIDE'}, format='json').status_code, 409)  # refus définitif
         self.assertEqual(self.as_user(self.buyer).post(url, {'decision': 'VALIDE'}, format='json').status_code, 403)
 

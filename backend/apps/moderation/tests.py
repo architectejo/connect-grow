@@ -3,6 +3,7 @@ from django.core.management import call_command
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from apps.common.factories import owner_kwargs
 from apps.identity.models import User
 from apps.catalog.models import Category, City, Commune, ForbiddenItem
 from apps.marketplace.models import Offer
@@ -30,7 +31,7 @@ class ModerationTestBase(APITestCase):
         self.admin.groups.add(Group.objects.get(name='Administrateur'))
 
         self.post = Offer.objects.create(
-            seller=self.seller, category_id=self.category.id, commune_id=self.commune.id,
+            **owner_kwargs(self.seller), category_id=self.category.id, commune_id=self.commune.id,
             title='Un joli canapé à vendre', description='Description suffisamment longue pour le CDC.',
             price=100, main_image=make_test_image(),
         )

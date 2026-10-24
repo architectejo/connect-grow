@@ -16,7 +16,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.catalog.models import Category, City, Commune
 
-from .models import BusinessProfile, KycDocument, Organization, OrganizationCategory, OtpCode, User
+from .models import KycDocument, Membership, Organization, OrganizationCategory, OtpCode, User
 
 
 class OtpCodeModelTests(TestCase):
@@ -191,23 +191,28 @@ def make_kyc_reviewer(email, staff=True):
 class KycDocumentApiTests(APITestCase):
     def setUp(self):
         self.business_user = User.objects.create_user(
-            email='biz@example.com', password='x', full_name='Boutique', user_type='ENTREPRISE',
+            email='biz@example.com', password='x', full_name='Boutique', phone_verified=True,
         )
-        self.business_profile = BusinessProfile.objects.create(
-            user=self.business_user, business_name='Ma Boutique',
-        )
+        self.organization = Organization.objects.create(name='Ma Boutique', org_type='ENTREPRISE')
+        Membership.objects.create(organization=self.organization, user=self.business_user, role='OWNER')
         self.admin = make_kyc_reviewer('admin@example.com')
 
-    def test_non_business_user_cannot_submit_kyc(self):
+    def make_document(self, document_type=KycDocument.DOC_RCCM):
+        return KycDocument.objects.create(
+            organization=self.organization, uploaded_by=self.business_user, document_type=document_type,
+        )
+
+    def test_non_member_cannot_submit_kyc(self):
         user = User.objects.create_user(email='particulier@example.com', password='x', full_name='Particulier')
         self.client.force_authenticate(user)
-        response = self.client.post(reverse('kyc_documents'), {'document_type': KycDocument.DOC_RCCM})
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.client.post(
+            reverse('organization_kyc_documents', args=[self.organization.pk]), {'document_type': KycDocument.DOC_RCCM},
+        )
+        self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
+        self.assertFalse(KycDocument.objects.exists())
 
     def test_admin_can_validate_kyc_document(self):
-        doc = KycDocument.objects.create(
-            business_profile=self.business_profile, document_type=KycDocument.DOC_RCCM,
-        )
+        doc = self.make_document()
         self.client.force_authenticate(self.admin)
         response = self.client.post(
             reverse('kyc_decision', args=[doc.pk]), {'decision': KycDocument.STATUS_VALIDE},
@@ -219,9 +224,7 @@ class KycDocumentApiTests(APITestCase):
     def test_kyc_decision_writes_an_audit_log(self):
         from apps.moderation.models import AuditLog
 
-        doc = KycDocument.objects.create(
-            business_profile=self.business_profile, document_type=KycDocument.DOC_RCCM,
-        )
+        doc = self.make_document()
         self.client.force_authenticate(self.admin)
         self.client.post(reverse('kyc_decision', args=[doc.pk]), {'decision': KycDocument.STATUS_VALIDE})
         self.assertTrue(AuditLog.objects.filter(action='KYC_VALIDE', actor=self.admin).exists())
@@ -231,22 +234,26 @@ class KycDocumentApiTests(APITestCase):
         response = self.client.get(reverse('kyc_review_queue'))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def verification_summary(self):
+        self.client.force_authenticate(self.business_user)
+        response = self.client.get(reverse('organization_verification', args=[self.organization.pk]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        return response.json()['summary']
+
     def test_user_cannot_self_declare_business_verified(self):
         self.client.force_authenticate(self.business_user)
-        response = self.client.patch(reverse('user_me'), {
-            'business_profile': {'business_name': 'Ma Boutique', 'is_verified': True},
+        response = self.client.patch(reverse('organization_detail', args=[self.organization.pk]), {
+            'description': 'Ma boutique', 'is_verified': True,
         }, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
-        self.business_profile.refresh_from_db()
-        self.assertFalse(self.business_profile.is_verified)
+        self.assertFalse(self.verification_summary()['complete'])
 
     def test_business_verified_once_all_required_documents_validated(self):
         for doc_type in (KycDocument.DOC_RCCM, KycDocument.DOC_ID_NATIONALE, KycDocument.DOC_PIECE_GERANT):
-            doc = KycDocument.objects.create(business_profile=self.business_profile, document_type=doc_type)
+            doc = self.make_document(doc_type)
             self.client.force_authenticate(self.admin)
             self.client.post(reverse('kyc_decision', args=[doc.pk]), {'decision': KycDocument.STATUS_VALIDE})
-        self.business_profile.refresh_from_db()
-        self.assertTrue(self.business_profile.is_verified)
+        self.assertTrue(self.verification_summary()['complete'])
 
 
 class OtpCleanupCommandTests(TestCase):

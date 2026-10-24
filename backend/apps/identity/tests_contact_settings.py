@@ -10,7 +10,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.catalog.models import Category, City, Commune
-from apps.common.factories import make_test_image
+from apps.common.factories import make_test_image, owner_kwargs
 from apps.marketplace.models import Offer
 from apps.moderation.models import AuditLog
 
@@ -402,7 +402,7 @@ class OfferAllowedChannelsTests(Base):
 
     def offer_for(self, seller):
         return Offer.objects.create(
-            seller=seller, category_id=self.category.id, commune_id=self.commune.id, title='Un joli canapé',
+            **owner_kwargs(seller), category_id=self.category.id, commune_id=self.commune.id, title='Un joli canapé',
             description='Description suffisamment longue pour le CDC.', price=100, main_image=make_test_image(),
         )
 

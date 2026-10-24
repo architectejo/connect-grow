@@ -10,6 +10,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from apps.common.factories import owner_kwargs
 from apps.catalog.models import Category, City, Commune
 from apps.identity.models import Membership, Organization, User
 from apps.marketplace.models import ContactEvent, Offer
@@ -41,8 +42,9 @@ class ReviewsTestBase(APITestCase):
         self.offer = self.make_offer(self.seller)
 
     def make_offer(self, seller, title='Un joli canapé à vendre', **extra):
+        owner = {} if 'seller_context_type' in extra else owner_kwargs(seller)
         return Offer.objects.create(
-            seller=seller, category_id=self.category.id, commune_id=self.commune.id,
+            **owner, category_id=self.category.id, commune_id=self.commune.id,
             title=title, description='Description suffisamment longue pour le CDC.',
             price=100, main_image=make_test_image(), **extra,
         )
@@ -64,7 +66,7 @@ class ReviewsTestBase(APITestCase):
         contact = ContactEvent.objects.filter(offer=offer, sender=user).order_by('created_at').first() \
             or self.make_contact(offer, user)
         defaults = dict(
-            offer_id=offer.id, user=user, seller_context_type='USER', seller_context_id=offer.seller_id,
+            offer_id=offer.id, user=user, seller_context_type=offer.seller_context_type, seller_context_id=offer.seller_context_id,
             contact_event_id=contact.id, contact_channel=contact.channel, contact_recorded_at=contact.created_at,
             offer_rating=4, seller_rating=5, content='Avis suffisamment long pour être valide.',
         )

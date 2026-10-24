@@ -16,3 +16,22 @@ def make_test_image(name='photo.jpg', color=(255, 0, 0), fmt='JPEG', size=(20, 2
     buffer.seek(0)
     content_type = 'image/jpeg' if fmt == 'JPEG' else f'image/{fmt.lower()}'
     return SimpleUploadedFile(name, buffer.read(), content_type=content_type)
+
+
+def owner_kwargs(owner, context_type='USER', created_by=None):
+    """Arguments de propriétaire d'une offre ou d'un compteur de visibilité (sans import de modèle).
+
+    - `owner_kwargs(user)` : contexte personnel, l'auteur est le compte ;
+    - `owner_kwargs(profile, 'PROVIDER', created_by=user)` : profil prestataire ;
+    - `owner_kwargs(organization, 'ORGANIZATION', created_by=user)` : organisation.
+
+    Pour un compteur de visibilité, `created_by` n'existe pas : utiliser `counter_owner_kwargs`.
+    """
+    if context_type == 'USER':
+        return {'seller_context_type': 'USER', 'seller_context_id': owner.pk, 'created_by': created_by or owner}
+    return {'seller_context_type': context_type, 'seller_context_id': owner.pk, 'created_by': created_by}
+
+
+def counter_owner_kwargs(owner, context_type='USER'):
+    """Arguments de propriétaire d'un `DailyVisibilityCounter` (contexte seul, pas d'auteur)."""
+    return {'seller_context_type': context_type, 'seller_context_id': owner.pk}

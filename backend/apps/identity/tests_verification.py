@@ -17,7 +17,7 @@ from apps.platform_core import catalog
 from apps.platform_core.models import OutboxEvent
 
 from . import services
-from .models import BusinessProfile, KycDocument, Membership, Organization, OrganizationDocumentRequirement, User
+from .models import KycDocument, Membership, Organization, OrganizationDocumentRequirement, User
 from .tests_organizations import ADMIN, ANALYST, TeamTestBase, make_user
 
 from .tests import PDF_BYTES, PNG_BYTES
@@ -470,20 +470,18 @@ class DecisionTests(VerificationBase):
         audit = AuditLog.objects.get(action='KYC_DOWNLOADED', target_id=doc.pk)
         self.assertEqual((audit.context_type, audit.context_id, audit.actor_id), ('ORGANIZATION', self.org.pk, who.pk))
 
-    def test_legacy_business_profile_documents_still_work(self):
-        owner = make_user('legacy', user_type='ENTREPRISE')
-        profile = BusinessProfile.objects.create(user=owner, business_name='Ancienne')
-        docs = [KycDocument.objects.create(business_profile=profile, document_type=t, file=upload())
-                for t in KycDocument.REQUIRED_TYPES]
+    def test_required_documents_validated_by_reviewers_complete_the_summary_and_the_owner_cannot_decide(self):
+        required = list(OrganizationDocumentRequirement.objects.filter(
+            org_type=self.org.org_type,
+        ).order_by('position').values_list('document_type', flat=True))
+        docs = [self.make_doc(document_type) for document_type in required]
         for number, doc in enumerate(docs):
-            self.addCleanup(self._remove_file, doc.pk)
             self.decide(doc, reviewer(f'legacy{number}'))
-        profile.refresh_from_db()
-        self.assertTrue(profile.is_verified)
+        self.assertEqual(len(self.claims()), len(required))
         with self.assertRaises(services.KycError) as caught:
-            self.decide(docs[0], owner, 'REFUSE', 'x')
+            self.decide(docs[0], self.owner, 'REFUSE', 'x')
         self.assertEqual(caught.exception.status_code, 403)
-        self.assertEqual(self.events().count(), 0)
+        self.assertEqual(self.events().count(), len(required))
 
 
 class AdminTests(VerificationBase):

@@ -8,7 +8,7 @@ from rest_framework.test import APIClient, APIRequestFactory
 from rest_framework.throttling import SimpleRateThrottle
 
 from . import views
-from .models import BusinessProfile, KycDocument, OtpCode, User
+from .models import KycDocument, Membership, Organization, OtpCode, User
 from .throttles import LoginIpThrottle
 
 LOCMEM_CACHE = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'throttle-tests'}}
@@ -254,16 +254,18 @@ class KycWriteThrottleTests(TestCase):
     def test_deposit_and_delete_are_throttled_per_user(self):
         from .tests import PNG_BYTES, kyc_upload
 
-        user = User.objects.create_user(email='k@example.com', password='x', full_name='K', user_type='ENTREPRISE')
-        BusinessProfile.objects.create(user=user, business_name='B')
+        user = User.objects.create_user(email='k@example.com', password='x', full_name='K', phone_verified=True)
+        organization = Organization.objects.create(name='B', org_type='ENTREPRISE')
+        Membership.objects.create(organization=organization, user=user, role='OWNER')
+        documents_url = f'/api/accounts/organizations/{organization.pk}/kyc/documents/'
         client = APIClient()
         client.force_authenticate(user)
         with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'kyc_write': '2/hour'}):
-            first = client.post('/api/accounts/kyc/documents/', {'document_type': 'RCCM', 'file': kyc_upload(PNG_BYTES)}, format='multipart')
+            first = client.post(documents_url, {'document_type': 'RCCM', 'file': kyc_upload(PNG_BYTES)}, format='multipart')
             doc = KycDocument.objects.get(pk=first.data['id'])
-            deleted = client.delete(f'/api/accounts/kyc/documents/{doc.pk}/')
-            blocked = client.post('/api/accounts/kyc/documents/', {'document_type': 'RCCM', 'file': kyc_upload(PNG_BYTES)}, format='multipart')
-            listing = client.get('/api/accounts/kyc/documents/')
+            deleted = client.delete(f'{documents_url}{doc.pk}/')
+            blocked = client.post(documents_url, {'document_type': 'RCCM', 'file': kyc_upload(PNG_BYTES)}, format='multipart')
+            listing = client.get(documents_url)
         self.assertEqual((first.status_code, deleted.status_code, blocked.status_code), (201, 204, 429))
         self.assertEqual(listing.status_code, 200)  # la lecture n'est pas limitée
 

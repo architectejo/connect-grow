@@ -78,12 +78,9 @@ def truncated_images():
 
 
 def add_document(org, document_type, status=KycDocument.STATUS_VALIDE, reviewed_at=None):
-    """Pièce de l'organisation. `business_profile` est encore obligatoire en base (contraction en T9) : un
-    profil support est créé pour chaque pièce."""
-    holder = User.objects.create_user(email=f'doc{uuid.uuid4().hex[:10]}@example.com', password='x', full_name='Support')
-    profile = BusinessProfile.objects.create(user=holder, business_name='Support')
+    """Pièce de l'organisation (rattachée à l'organisation seule, sans profil d'entreprise historique)."""
     return KycDocument.objects.create(
-        business_profile=profile, organization=org, document_type=document_type, status=status, reviewed_at=reviewed_at,
+        organization=org, document_type=document_type, status=status, reviewed_at=reviewed_at,
     )
 
 

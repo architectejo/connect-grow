@@ -7,7 +7,7 @@ from django.urls import reverse
 from apps.moderation.models import AuditLog
 
 from .admin import BusinessProfileAdmin, KycDocumentAdmin, UserAdmin
-from .models import BusinessProfile, KycDocument, User
+from .models import BusinessProfile, KycDocument, Membership, Organization, User
 
 
 def make_admin_user(email, *, superuser=False, perms=()):
@@ -92,12 +92,13 @@ class UserAdminHardeningTests(TestCase):
 
 class KycAdminHardeningTests(TestCase):
     def setUp(self):
-        owner = User.objects.create_user(email='biz@example.com', password='x', full_name='B', user_type='ENTREPRISE')
-        self.profile = BusinessProfile.objects.create(user=owner, business_name='Ma Boutique')
-        self.doc = KycDocument.objects.create(business_profile=self.profile, document_type='RCCM')
+        owner = User.objects.create_user(email='biz@example.com', password='x', full_name='B')
+        self.organization = Organization.objects.create(name='Ma Boutique', org_type='ENTREPRISE')
+        Membership.objects.create(organization=self.organization, user=owner, role='OWNER')
+        self.doc = KycDocument.objects.create(organization=self.organization, uploaded_by=owner, document_type='RCCM')
         self.staff = make_admin_user(
             'adm@example.com', perms=['view_kycdocument', 'change_kycdocument', 'delete_kycdocument',
-                                      'add_kycdocument', 'view_businessprofile', 'change_businessprofile'],
+                                      'add_kycdocument', 'review_kycdocument', 'view_businessprofile', 'change_businessprofile'],
         )
 
     def request(self):
@@ -127,6 +128,10 @@ class KycAdminHardeningTests(TestCase):
         self.assertEqual(self.doc.status, KycDocument.STATUS_EN_ATTENTE)
 
     def test_is_verified_cannot_be_set_by_hand(self):
+        # Passerelle : teste l'admin de l'ancien profil d'entreprise (retiré à la contraction, T9-2).
+        self.profile = BusinessProfile.objects.create(
+            user=User.objects.get(email='biz@example.com'), business_name='Ma Boutique',
+        )
         self.assertIn('is_verified', BusinessProfileAdmin(BusinessProfile, admin.site).readonly_fields)
         self.client.force_login(self.staff)
         self.client.post(reverse('admin:identity_businessprofile_change', args=[self.profile.pk]), {

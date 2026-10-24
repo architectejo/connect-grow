@@ -5,6 +5,7 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.common.factories import owner_kwargs, counter_owner_kwargs
 from apps.identity.models import User
 
 from . import services
@@ -19,7 +20,7 @@ class VisibilityTestBase(TestCase):
 
     def counter(self, days_ago, views, offer_id=None, contacts=0):
         return DailyVisibilityCounter.objects.create(
-            offer_id=offer_id or self.offer_id, seller=self.seller, views=views, contacts=contacts,
+            offer_id=offer_id or self.offer_id, **counter_owner_kwargs(self.seller), views=views, contacts=contacts,
             date=self.today - timedelta(days=days_ago),
         )
 
@@ -189,7 +190,7 @@ class RankingSettingsAdminTests(VisibilityTestBase):
         category = Category.objects.create(name='Électronique', slug='electronique')
         seller = User.objects.create_user(email='ranking-seller@example.com', password='x', full_name='V')
         offer = Offer.objects.create(
-            seller=seller, category_id=category.id, commune_id=commune.id, title='Un joli canapé à vendre',
+            **owner_kwargs(seller), category_id=category.id, commune_id=commune.id, title='Un joli canapé à vendre',
             description='Description suffisamment longue pour le CDC.', price=100, main_image=make_test_image(),
         )
         for index in range(2):
@@ -243,7 +244,7 @@ class SellerStatsTests(VisibilityTestBase):
         self.counter(2, 6)
         self.counter(40, 100)  # hors fenêtre de 30 jours : compté au total, pas dans l'historique
         stranger = User.objects.create_user(email='x@example.com', password='x', full_name='X')
-        DailyVisibilityCounter.objects.create(offer_id=uuid.uuid4(), seller=stranger, date=self.today, views=77)
+        DailyVisibilityCounter.objects.create(offer_id=uuid.uuid4(), **counter_owner_kwargs(stranger), date=self.today, views=77)
 
         stats = services.get_seller_stats('USER', self.seller.id)
         self.assertEqual((stats.total_views, stats.today_views, stats.contacts_count), (110, 4, 2))
@@ -276,10 +277,10 @@ class DayBoundaryTests(TestCase):
         offer_id = uuid.uuid4()
         with frozen:
             today = timezone.localdate()
-            DailyVisibilityCounter.objects.create(offer_id=offer_id, seller=seller, date=today, views=10)
+            DailyVisibilityCounter.objects.create(offer_id=offer_id, **counter_owner_kwargs(seller), date=today, views=10)
             for days in range(1, 6):
                 DailyVisibilityCounter.objects.create(
-                    offer_id=offer_id, seller=seller, date=today - timedelta(days=days), views=1,
+                    offer_id=offer_id, **counter_owner_kwargs(seller), date=today - timedelta(days=days), views=1,
                 )
             stats = services.get_seller_stats('USER', seller.id)
             self.assertEqual(stats.today_views, 10)

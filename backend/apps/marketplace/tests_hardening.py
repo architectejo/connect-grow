@@ -13,6 +13,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.throttling import ScopedRateThrottle
 
+from apps.common.factories import counter_owner_kwargs
 from apps.identity.models import User
 from apps.moderation.models import AuditLog, Sanction
 from apps.platform_core.testing import dispatch_outbox_now
@@ -261,7 +262,7 @@ class AuditTests(MarketplaceTestBase):
         model_admin = OfferAdmin(Offer, admin_site)
         offer, other = self.make_offer(), self.make_offer(title='Une autre annonce à retirer')
         for item in (offer, other):
-            DailyVisibilityCounter.objects.create(offer_id=item.id, seller=self.seller, date=timezone.localdate(), views=1)
+            DailyVisibilityCounter.objects.create(offer_id=item.id, **counter_owner_kwargs(self.seller), date=timezone.localdate(), views=1)
 
         form = mock.Mock(changed_data=['price'])
         model_admin.save_model(request, offer, form, True)
@@ -294,12 +295,12 @@ class QueryCountTests(MarketplaceTestBase):
     def test_favorites(self):
         def grow(i):
             seller = User.objects.create_user(email=f's{i}@example.com', password='x', full_name=f'S{i}')
-            Favorite.objects.create(user=self.buyer, offer=self.make_offer(seller=seller, title=f'Annonce favorite {i} ici'))
+            Favorite.objects.create(user=self.buyer, offer=self.make_offer(owner=seller, title=f'Annonce favorite {i} ici'))
         self.assert_constant('favorite-list', grow)
 
     def test_trash(self):
         def grow(i):
-            self.make_offer(seller=self.buyer, title=f'Annonce supprimée numéro {i}', is_deleted=True)
+            self.make_offer(owner=self.buyer, title=f'Annonce supprimée numéro {i}', is_deleted=True)
         self.assert_constant('offer-trash', grow)
 
     def test_contacts_and_exchanges(self):

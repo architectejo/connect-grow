@@ -12,7 +12,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.catalog.models import Category, City, Commune
-from apps.common.factories import make_test_image  # noqa: F401  (réexporté pour les tests des autres domaines)
+from apps.common.factories import counter_owner_kwargs, make_test_image, owner_kwargs  # noqa: F401  (make_test_image réexporté pour les tests des autres domaines)
 from apps.identity.models import User
 from apps.messaging.models import Conversation, Message
 from apps.notifications.models import Notification
@@ -37,9 +37,8 @@ class MarketplaceTestBase(APITestCase):
             pk=MarketplaceSettings.SINGLETON_ID, defaults={'exchange_enabled': True},
         )
 
-    def make_offer(self, **kwargs):
+    def make_offer(self, owner=None, **kwargs):
         defaults = dict(
-            seller=self.seller,
             category_id=self.category.id,
             commune_id=self.commune.id,
             title='Un joli canapé à vendre',
@@ -47,6 +46,8 @@ class MarketplaceTestBase(APITestCase):
             price=100,
             main_image=make_test_image(),
         )
+        if 'seller_context_type' not in kwargs:
+            defaults.update(owner_kwargs(owner or self.seller))
         defaults.update(kwargs)
         return Offer.objects.create(**defaults)
 
@@ -406,7 +407,7 @@ class OfferTrashTests(MarketplaceTestBase):
 
     def test_trash_lists_only_own_deleted_offers(self):
         mine = self.make_offer(title='Mon annonce supprimée ici')
-        other = self.make_offer(title='Annonce supprimée d un autre', seller=self.buyer)
+        other = self.make_offer(title='Annonce supprimée d un autre', owner=self.buyer)
         Offer.objects.filter(pk__in=[mine.pk, other.pk]).update(is_deleted=True)
         self.make_offer(title='Une annonce encore en ligne')
         self.client.force_authenticate(self.seller)
@@ -451,7 +452,7 @@ class VisibilityScoreFormulaTests(MarketplaceTestBase):
     def test_refresh_all_scores_only_touches_active_offers(self):
         mine = self.make_offer()
         hidden = self.make_offer(title='Une annonce masquée ici', is_active=False)
-        other = self.make_offer(title='Annonce d un autre vendeur', seller=self.buyer)
+        other = self.make_offer(title='Annonce d un autre vendeur', owner=self.buyer)
         self.assertEqual(services.refresh_all_scores(), 2)
         for offer in (mine, hidden, other):
             offer.refresh_from_db()
@@ -525,7 +526,7 @@ class UniqueViewTests(MarketplaceTestBase):
 class TrendingBadgeTests(MarketplaceTestBase):
     def counter(self, offer, days_ago, views):
         return DailyVisibilityCounter.objects.create(
-            offer_id=offer.id, seller=self.seller, views=views, date=timezone.localdate() - timedelta(days=days_ago),
+            offer_id=offer.id, **counter_owner_kwargs(self.seller), views=views, date=timezone.localdate() - timedelta(days=days_ago),
         )
 
     def test_not_trending_without_history(self):
@@ -629,7 +630,7 @@ class ScheduledTasksTests(MarketplaceTestBase):
 
     def test_purge_offer_trash_also_clears_visibility_data(self):
         offer = self.make_offer()
-        DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=timezone.localdate(), views=3)
+        DailyVisibilityCounter.objects.create(offer_id=offer.id, **counter_owner_kwargs(self.seller), date=timezone.localdate(), views=3)
         Offer.objects.filter(pk=offer.pk).update(is_deleted=True, deleted_at=timezone.now() - timedelta(days=31))
         call_command('purge_offer_trash', verbosity=0)
         self.assertFalse(DailyVisibilityCounter.objects.filter(offer_id=offer.id).exists())
@@ -671,12 +672,12 @@ class DashboardStatsTests(MarketplaceTestBase):
     def test_dashboard_summary_and_history(self):
         offer = self.make_offer()
         today = timezone.localdate()
-        DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=today, views=4, contacts=2)
+        DailyVisibilityCounter.objects.create(offer_id=offer.id, **counter_owner_kwargs(self.seller), date=today, views=4, contacts=2)
         DailyVisibilityCounter.objects.create(
-            offer_id=offer.id, seller=self.seller, date=today - timedelta(days=2), views=6,
+            offer_id=offer.id, **counter_owner_kwargs(self.seller), date=today - timedelta(days=2), views=6,
         )
         # Le compteur d'un autre vendeur n'est jamais compté.
-        DailyVisibilityCounter.objects.create(offer_id=uuid.uuid4(), seller=self.buyer, date=today, views=99)
+        DailyVisibilityCounter.objects.create(offer_id=uuid.uuid4(), **counter_owner_kwargs(self.buyer), date=today, views=99)
 
         self.client.force_authenticate(self.seller)
         response = self.client.get(reverse('dashboard_stats'))
@@ -694,7 +695,7 @@ class DashboardStatsTests(MarketplaceTestBase):
 
     def test_offer_stats_only_for_the_seller(self):
         offer = self.make_offer()
-        DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=timezone.localdate(), views=3)
+        DailyVisibilityCounter.objects.create(offer_id=offer.id, **counter_owner_kwargs(self.seller), date=timezone.localdate(), views=3)
         url = reverse('offer_stats', args=[offer.id])
         self.client.force_authenticate(self.seller)
         self.assertEqual(self.client.get(url).data['history'][0]['views'], 3)
@@ -1055,9 +1056,9 @@ class DayBoundaryDashboardTests(MarketplaceTestBase):
         offer = self.make_offer()
         with mock.patch('django.utils.timezone.now', return_value=datetime(*args, tzinfo=dt_timezone.utc)):
             today = timezone.localdate()
-            DailyVisibilityCounter.objects.create(offer_id=offer.id, seller=self.seller, date=today, views=4)
+            DailyVisibilityCounter.objects.create(offer_id=offer.id, **counter_owner_kwargs(self.seller), date=today, views=4)
             DailyVisibilityCounter.objects.create(
-                offer_id=offer.id, seller=self.seller, date=today - timedelta(days=2), views=6,
+                offer_id=offer.id, **counter_owner_kwargs(self.seller), date=today - timedelta(days=2), views=6,
             )
             self.client.force_authenticate(self.seller)
             response = self.client.get(reverse('dashboard_stats'))

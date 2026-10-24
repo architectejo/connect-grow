@@ -6,6 +6,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from apps.common.factories import owner_kwargs
 from apps.platform_core.models import OutboxEvent
 from apps.platform_core.testing import dispatch_outbox_now
 from apps.visibility import services as visibility_services
@@ -116,7 +117,7 @@ class InlineDispatchContractTests(TransactionTestCase):
         self.seller = User.objects.create_user(email='seller@example.com', password='x', full_name='Vendeur')
         self.buyer = User.objects.create_user(email='buyer@example.com', password='x', full_name='Acheteur')
         self.offer = Offer.objects.create(
-            seller=self.seller, category_id=category.id, commune_id=commune.id, title='Un joli canapé à vendre',
+            **owner_kwargs(self.seller), category_id=category.id, commune_id=commune.id, title='Un joli canapé à vendre',
             description='Description suffisamment longue pour le CDC.', price=100, main_image=make_test_image(),
         )
 

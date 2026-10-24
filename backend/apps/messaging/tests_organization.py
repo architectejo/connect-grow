@@ -42,7 +42,7 @@ class OrgMessagingBase(TestCase):
         Membership.objects.create(organization=self.other_org, user=self.stranger, role='OWNER')
         self.buyer = User.objects.create_user(email='buyer@example.com', password='x', full_name='Acheteur')
         self.offer = Offer.objects.create(
-            seller=None, seller_context_type='ORGANIZATION', seller_context_id=self.org.pk,
+            seller_context_type='ORGANIZATION', seller_context_id=self.org.pk,
             created_by=self.team['EDITOR'], category_id=category.id, commune_id=commune.id,
             title='Un joli canapé à vendre', description='Description suffisamment longue pour le CDC.',
             price=100, main_image=make_test_image(),
@@ -324,7 +324,7 @@ class QueryCountTests(OrgMessagingBase):
         client = self.client_for(self.buyer)
         few = self.count(client, CONVERSATIONS)
         other_offer = Offer.objects.create(
-            seller=None, seller_context_type='ORGANIZATION', seller_context_id=self.other_org.pk,
+            seller_context_type='ORGANIZATION', seller_context_id=self.other_org.pk,
             created_by=self.stranger, category_id=self.category.id, commune_id=self.commune.id,
             title='Une autre offre', description='Description suffisamment longue pour le CDC.', price=10,
             main_image=make_test_image(),

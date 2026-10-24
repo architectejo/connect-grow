@@ -6,7 +6,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.catalog.models import Category, City, Commune
-from apps.common.factories import make_test_image
+from apps.common.factories import make_test_image, owner_kwargs
 from apps.identity.models import User
 from apps.marketplace.models import Offer
 from apps.notifications.models import Notification
@@ -24,7 +24,7 @@ class MessagingTestBase(APITestCase):
         self.buyer = User.objects.create_user(email='buyer@example.com', password='x', full_name='Acheteur')
         self.other = User.objects.create_user(email='other@example.com', password='x', full_name='Tiers')
         self.offer = Offer.objects.create(
-            seller=self.seller, category_id=category.id, commune_id=commune.id,
+            **owner_kwargs(self.seller), category_id=category.id, commune_id=commune.id,
             title='Un joli canapé à vendre', description='Description suffisamment longue pour le CDC.',
             price=100, main_image=make_test_image(),
         )

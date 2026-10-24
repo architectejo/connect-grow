@@ -14,9 +14,9 @@ from django.urls import URLPattern, URLResolver, get_resolver, reverse
 from rest_framework.test import APITestCase
 
 from apps.catalog.models import Category, City, Commune
-from apps.common.factories import make_test_image
+from apps.common.factories import make_test_image, owner_kwargs
 from apps.identity.models import (
-    BusinessProfile, ContactConsent, ContactPoint, KycDocument, Membership, Organization, User,
+    ContactConsent, ContactPoint, KycDocument, Membership, Organization, User,
     CONTACT_CONSENT_TEXT_VERSION,
 )
 from apps.marketplace.models import ContactEvent, ExchangeProposal, Favorite, Offer
@@ -103,15 +103,12 @@ class NoPersonalContactLeakTests(APITestCase):
                     text_version=CONTACT_CONSENT_TEXT_VERSION, phone_last4=number[-4:],
                 )
         seller, buyer = self.users['seller'], self.users['buyer']
-        seller.user_type = 'ENTREPRISE'
-        seller.save()
-        profile = BusinessProfile.objects.create(user=seller, business_name='Boutique', bio='Bio', is_verified=True)
-        KycDocument.objects.create(business_profile=profile, document_type=KycDocument.DOC_RCCM)
         # Organisation du vendeur (L0-09g) : alimente la liste publique et le détail interne parcourus par le test.
         organization = Organization.objects.create(name='Boutique', org_type='ENTREPRISE', description='Bio', nif='NIF-1')
         Membership.objects.create(organization=organization, user=seller, role='OWNER')
+        KycDocument.objects.create(organization=organization, uploaded_by=seller, document_type=KycDocument.DOC_RCCM)
         self.offer = Offer.objects.create(
-            seller=seller, category_id=category.id, commune_id=commune.id, title='Un joli canapé à vendre',
+            **owner_kwargs(seller), category_id=category.id, commune_id=commune.id, title='Un joli canapé à vendre',
             description='Description suffisamment longue pour le CDC.', price=100, main_image=make_test_image(),
         )
         Favorite.objects.create(user=buyer, offer=self.offer)
@@ -489,7 +486,7 @@ class OrganizationContactPrivacyTests(APITestCase):
                 granted_at=timezone.now(), phone_last4=self.ORG_NUMBER[-4:], granted_by=self.users['owner'],
             )
         self.offer = Offer.objects.create(
-            seller=None, seller_context_type='ORGANIZATION', seller_context_id=self.org.pk,
+            seller_context_type='ORGANIZATION', seller_context_id=self.org.pk,
             created_by=self.users['editor'], category_id=category.id, commune_id=commune.id,
             title='Un joli canapé à vendre', description='Description suffisamment longue pour le CDC.', price=100,
             main_image=make_test_image(),

@@ -31,7 +31,7 @@ class OrganizationReportTests(ModerationTestBase):
 
     def offer_of(self, context_type, context_id):
         return Offer.objects.create(
-            seller=None, seller_context_type=context_type, seller_context_id=context_id,
+            seller_context_type=context_type, seller_context_id=context_id,
             created_by=self.seller, category_id=self.category.id, commune_id=self.commune.id,
             title='Offre de test', description='Description suffisamment longue pour le CDC.',
             price=100, main_image=make_test_image(),

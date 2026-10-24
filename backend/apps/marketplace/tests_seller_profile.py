@@ -61,7 +61,7 @@ class ProfileBase(ContextBase):
 
     def provider_offer(self, **kwargs):
         return self.make_offer(
-            seller=None, seller_context_type='PROVIDER', seller_context_id=self.profile.pk,
+            seller_context_type='PROVIDER', seller_context_id=self.profile.pk,
             created_by=self.seller, **kwargs,
         )
 
@@ -141,7 +141,7 @@ class PublicProfileTests(ProfileBase):
         self.org_offer(creator=self.member, is_active=False)
         self.org_offer(creator=self.member, is_deleted=True)
         self.org_offer(self.other_org, creator=self.member)
-        self.make_offer(seller=self.member)
+        self.make_offer(owner=self.member)
         self.assertEqual(self.get('organization', self.org.pk).json()['active_offers_count'], 1)
 
     def test_ratings_are_per_context_and_never_universal(self):
@@ -258,7 +258,7 @@ class UniformNotFoundTests(ProfileBase):
         unknown = self.client.get(profile_url('user', uuid.uuid4())).content
         response = self.get('user', buyer.pk)
         self.assertEqual((response.status_code, response.content), (404, unknown))
-        offer = self.make_offer(seller=buyer, title='Offre de l acheteur devenu vendeur')
+        offer = self.make_offer(owner=buyer, title='Offre de l acheteur devenu vendeur')
         self.assertEqual(self.get('user', buyer.pk).status_code, 200)
         Offer.objects.filter(pk=offer.pk).update(is_active=False)
         response = self.get('user', buyer.pk)
@@ -409,7 +409,7 @@ class DashboardByContextTests(ProfileBase):
         for rating in (5, 4, 4):
             self.review('ORGANIZATION', self.org.pk, rating=rating)
         self.org_offer(creator=self.member)
-        self.make_offer(seller=self.member)
+        self.make_offer(owner=self.member)
 
     def dashboard(self, user, headers=None):
         self.client.force_authenticate(user)

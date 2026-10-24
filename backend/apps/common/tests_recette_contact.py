@@ -26,7 +26,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
 from apps.catalog.models import Category, City, Commune
-from apps.common.factories import make_test_image
+from apps.common.factories import make_test_image, owner_kwargs
 from apps.common.tests_privacy import PARAM_RE, iter_routes
 from apps.identity.models import CONTACT_CONSENT_TEXT_VERSION as VERSION
 from apps.identity.models import ContactConsent, ContactPoint, OtpCode, User
@@ -108,9 +108,9 @@ class RecetteContactBase(APITestCase):
             user.refresh_from_db()
         return user
 
-    def make_offer(self, seller=None, title='Un joli canapé à vendre'):
+    def make_offer(self, owner=None, title='Un joli canapé à vendre'):
         return Offer.objects.create(
-            seller=seller or self.seller, category_id=self.category.id, commune_id=self.commune.id, title=title,
+            **owner_kwargs(owner or self.seller), category_id=self.category.id, commune_id=self.commune.id, title=title,
             description='Description suffisamment longue pour le CDC.', price=100, main_image=make_test_image(),
         )
 

@@ -7,7 +7,7 @@ from PIL import Image
 from rest_framework.test import APIClient
 
 from apps.common.images import reencode_image
-from apps.identity.models import BusinessProfile, User
+from apps.identity.models import User
 
 
 def jpeg_with_exif(size=(2400, 1200), orientation=None):
@@ -73,9 +73,10 @@ class ProfileImagesAreSanitizedTests(TestCase):
         self.assertNotIn('photo.jpg', user.photo.name)
 
     def test_business_logo_is_stored_without_exif(self):
-        owner = User.objects.create_user(email='b@example.com', password='x', full_name='B')
-        profile = BusinessProfile.objects.create(user=owner, business_name='B', logo=upload(jpeg_with_exif()))
-        exif, fmt = self.stored_exif(profile.logo)
+        from apps.identity.models import Organization
+
+        organization = Organization.objects.create(name='B', org_type='ENTREPRISE', logo=upload(jpeg_with_exif()))
+        exif, fmt = self.stored_exif(organization.logo)
         self.assertEqual((exif, fmt), ({}, 'WEBP'))
 
     def test_api_upload_of_organization_logo_strips_gps(self):

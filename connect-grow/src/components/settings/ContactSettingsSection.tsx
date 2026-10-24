@@ -12,9 +12,15 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { useActiveContext } from "@/contexts/ActiveContextContext";
-import { useAuth } from "@/contexts/AuthContext";
 import { useContactSettings, useSetContactChannel, useSetContactPhone, useVerifyContactPhone } from "@/hooks/use-contact-settings";
-import { availableChannels, CONSENT_CHANNELS, CONSENT_TEXT_VERSION, contactSettingsErrorMessage, maskPhone } from "@/lib/contact-settings";
+import {
+  availableChannels,
+  CONSENT_CHANNELS,
+  CONSENT_TEXT_VERSION,
+  contactSettingsErrorMessage,
+  isChannelNotAvailable,
+} from "@/lib/contact-settings";
+import { httpStatus } from "@/lib/errors";
 import { localPhoneSchema, toE164 } from "@/lib/validation";
 
 const OTP_LENGTH = 6;
@@ -72,6 +78,7 @@ function ConsentDialog({
 // --- Numéro de contact ---
 
 function PhoneBlock({ settings, allowLoginPhone = true }: { settings: ContactSettings; allowLoginPhone?: boolean }) {
+  const inOrganization = !allowLoginPhone;
   const { t } = useTranslation();
   const setPhone = useSetContactPhone();
   const verify = useVerifyContactPhone();
@@ -79,16 +86,9 @@ function PhoneBlock({ settings, allowLoginPhone = true }: { settings: ContactSet
   const [local, setLocal] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string>();
-  const { user } = useAuth();
   const phone = settings.phone;
-  // Le serveur fournit le masque du numéro de connexion à la racine (ADR 0005 §5.1). Sans ce champ (ancienne réponse),
-  // repli : le masque du bloc `phone`, ou à défaut celui du compte calculé ici (4 derniers chiffres).
-  const login =
-    settings.can_use_login_phone !== undefined || settings.login_phone_masked !== undefined
-      ? { masked: settings.login_phone_masked ?? "", available: settings.can_use_login_phone ?? false }
-      : phone
-        ? { masked: phone.login_phone_masked, available: phone.can_use_login_phone }
-        : { masked: maskPhone(user?.phone), available: !!user?.phone && !!user.phone_verified };
+  // Le serveur fournit le masque du numéro de connexion à la racine (ADR 0005 §5.1) ; null pour une organisation.
+  const login = { masked: settings.login_phone_masked ?? "", available: settings.can_use_login_phone };
   const awaitingCode = !!phone && !phone.is_verified && !editing;
   const choosing = !phone || editing;
 
@@ -101,7 +101,7 @@ function PhoneBlock({ settings, allowLoginPhone = true }: { settings: ContactSet
       setCode("");
       toast.success(t(next.phone?.is_verified ? "contactSettings.phone.verifiedToast" : "contactSettings.phone.saved"));
     } catch (err) {
-      setError(contactSettingsErrorMessage(err));
+      setError(contactSettingsErrorMessage(err, { inOrganization }));
     }
   };
 
@@ -122,7 +122,7 @@ function PhoneBlock({ settings, allowLoginPhone = true }: { settings: ContactSet
       toast.success(t("contactSettings.phone.verifiedToast"));
     } catch (err) {
       setCode("");
-      setError(contactSettingsErrorMessage(err));
+      setError(contactSettingsErrorMessage(err, { inOrganization }));
     }
   };
 
@@ -290,7 +290,15 @@ export function ContactSettingsSection() {
     );
   }
   if (query.isError || !settings) {
-    return <ErrorState description={t("contactSettings.loadError")} onRetry={() => void query.refetch()} isRetrying={query.isFetching} />;
+    // Refus du serveur (organisation suspendue ou archivée, rôle retiré) : le texte du refus, pas un échec réseau
+    const denied403 = httpStatus(query.error) === 403;
+    return (
+      <ErrorState
+        description={denied403 ? contactSettingsErrorMessage(query.error, { inOrganization: isOrganization }) : t("contactSettings.loadError")}
+        onRetry={() => void query.refetch()}
+        isRetrying={query.isFetching}
+      />
+    );
   }
 
   const toggle = async (channel: ContactChannel, enabled: boolean) => {
@@ -304,7 +312,8 @@ export function ContactSettingsSection() {
       await setChannel.mutateAsync({ channel, enabled });
       toast.success(t(enabled ? "contactSettings.channels.enabledToast" : "contactSettings.channels.disabledToast"));
     } catch (err) {
-      setSwitchError(contactSettingsErrorMessage(err));
+      setSwitchError(contactSettingsErrorMessage(err, { inOrganization: isOrganization }));
+      if (isChannelNotAvailable(err)) void query.refetch(); // l'interrupteur serveur a changé : réaligner les canaux affichés
     }
   };
 
@@ -316,11 +325,16 @@ export function ContactSettingsSection() {
       setPendingChannel(null);
       toast.success(t("contactSettings.channels.enabledToast"));
     } catch (err) {
-      setConsentError(contactSettingsErrorMessage(err));
+      setConsentError(contactSettingsErrorMessage(err, { inOrganization: isOrganization }));
+      if (isChannelNotAvailable(err)) {
+        setPendingChannel(null);
+        setSwitchError(contactSettingsErrorMessage(err));
+        void query.refetch();
+      }
     }
   };
 
-  const channels = availableChannels(settings, active.type);
+  const channels = availableChannels(settings);
   const phoneChannels = channels.some((channel) => needsConsent(channel));
 
   return (

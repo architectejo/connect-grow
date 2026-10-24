@@ -16,6 +16,10 @@ const wrapperFor = (client: QueryClient) =>
   };
 
 const settingsFixture = (): ContactSettings => ({
+  context: { type: "USER", id: "u1" },
+  available_channels: ["MESSAGE", "CALL", "WHATSAPP"],
+  login_phone_masked: "+243 81 *** ** 45",
+  can_use_login_phone: true,
   phone: { masked: "+243 81 *** ** 45", is_verified: true, login_phone_masked: "+243 81 *** ** 45", can_use_login_phone: true },
   channels: { MESSAGE: { enabled: true }, CALL: { enabled: false }, WHATSAPP: { enabled: false } },
   current_text_version: "2026-10-v1",

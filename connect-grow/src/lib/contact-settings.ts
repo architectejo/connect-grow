@@ -1,6 +1,7 @@
-import type { ContactChannel, ContactSettings, ContextType } from "@/api/types";
+import type { ContactChannel, ContactSettings } from "@/api/types";
 import i18n from "@/i18n";
-import { apiErrorCode, apiErrorMessage } from "@/lib/errors";
+import { describeApiError, isDenyCode } from "@/lib/api-errors";
+import { apiErrorCode, apiErrorMessage, httpStatus } from "@/lib/errors";
 
 /** Version du texte de consentement affichée par ce client (clé i18n `contactSettings.consent.<version>`). Provisoire (LEG-PRV). */
 export const CONSENT_TEXT_VERSION = "2026-10-v1";
@@ -19,12 +20,18 @@ const KNOWN_CODES = [
   "contact_phone_missing",
   "channel_unknown",
   "account_too_new",
+  "channel_not_available",
+  "login_phone_not_allowed",
 ] as const;
 
-/** Message français d'une erreur `{detail, code}` des réglages de contact ; le code machine prime sur le `detail` du serveur. */
-export function contactSettingsErrorMessage(error: unknown): string {
+/**
+ * Message français d'une erreur des réglages de contact. Le code machine prime sur le `detail` du serveur ; un refus
+ * `DENY_*` (organisation suspendue, archivée, rôle insuffisant) passe par les textes communs des refus.
+ */
+export function contactSettingsErrorMessage(error: unknown, options: { inOrganization?: boolean } = {}): string {
   const code = apiErrorCode(error);
   if (code && (KNOWN_CODES as readonly string[]).includes(code)) return i18n.t(`contactSettings.errors.${code}`);
+  if (httpStatus(error) === 403 && isDenyCode(code)) return describeApiError(error, options);
   return apiErrorMessage(error, i18n.t("contactSettings.errors.generic"));
 }
 
@@ -39,10 +46,13 @@ const ALL_CHANNELS: ContactChannel[] = ["MESSAGE", "CALL", "WHATSAPP"];
 
 /**
  * Canaux que le profil actif peut configurer (`available_channels`, ADR 0006 §17.1). Le client ne code pas l'état
- * de l'interrupteur des canaux téléphoniques des organisations : il suit la réponse du serveur. Clé absente :
- * profil personnel ou prestataire, les trois canaux ; organisation, le message seul (repli prudent).
+ * de l'interrupteur des canaux téléphoniques des organisations : il suit la réponse du serveur. Clé absente
+ * (réponse inattendue) : le message seul, seul canal toujours ouvert.
  */
-export function availableChannels(settings: Pick<ContactSettings, "available_channels"> | undefined, contextType: ContextType): ContactChannel[] {
-  if (settings?.available_channels) return ALL_CHANNELS.filter((channel) => settings.available_channels?.includes(channel));
-  return contextType === "ORGANIZATION" ? ["MESSAGE"] : ALL_CHANNELS;
+export function availableChannels(settings: Pick<ContactSettings, "available_channels"> | undefined): ContactChannel[] {
+  const offered = settings?.available_channels;
+  return offered ? ALL_CHANNELS.filter((channel) => offered.includes(channel)) : ["MESSAGE"];
 }
+
+/** Vrai quand le serveur répond que le canal demandé n'est pas proposable : les réglages affichés sont à recharger. */
+export const isChannelNotAvailable = (error: unknown) => apiErrorCode(error) === "channel_not_available";

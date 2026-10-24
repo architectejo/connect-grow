@@ -35,8 +35,8 @@ export interface OfferAccess {
 
 /**
  * Droits du demandeur sur une offre, déduits de la liste `contexts/` du serveur (identifiant du profil vendeur de
- * l'offre et capacités de ce profil). `is_owner` de la réponse prime s'il est fourni ; l'API d'intégration
- * ne le renvoie pas encore (ADR 0006 §9.6). Le serveur reste le juge : ceci ne fait que masquer des boutons.
+ * l'offre et capacités de ce profil). `is_owner` de la réponse prime s'il est fourni ; le backend (vérifié le 24/10/2026,
+ * fixtures `backend-identity.json`) ne le renvoie toujours pas : ce repli reste donc nécessaire (ADR 0006 §9.6). Le serveur reste le juge : ceci ne fait que masquer des boutons.
  */
 export function offerAccess(post: Pick<Post, "seller" | "is_owner">, contexts: Pick<AvailableContext, "type" | "id" | "capabilities">[]): OfferAccess {
   const seller = post.seller;

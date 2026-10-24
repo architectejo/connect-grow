@@ -35,18 +35,20 @@ const orgProfile: SellerProfileData = {
 };
 
 let profileError: unknown;
+let profileData: SellerProfileData = orgProfile;
 const get = vi.fn();
 
 beforeEach(() => {
   auth.user = { id: "u1" };
   ctx.contexts = [];
   profileError = undefined;
+  profileData = orgProfile;
   get.mockReset();
   vi.spyOn(apiClient, "get").mockImplementation((async (url: string, config?: unknown) => {
     get(url, config);
     if (url.startsWith("marketplace/sellers/")) {
       if (profileError) throw profileError;
-      return { data: orgProfile };
+      return { data: profileData };
     }
     if (url === "marketplace/posts/") return { data: [orgPost] };
     return { data: [] };
@@ -76,6 +78,15 @@ describe("Profil public d'un vendeur (E9)", () => {
     expect(await screen.findByText("Costume sur mesure")).toBeInTheDocument();
     expect(get).toHaveBeenCalledWith(`marketplace/sellers/organization/${ORG_ID}/`, undefined);
     expect(get).toHaveBeenCalledWith("marketplace/posts/", { params: { seller: ORG_ID, seller_type: "ORGANIZATION", ordering: "-created_at" } });
+  });
+
+  it("réponse réelle enregistrée du backend (T5b) : affichée sans coordonnée ni mention inventée", async () => {
+    const real = identity.seller_profile_organization as unknown as SellerProfileData;
+    profileData = real;
+    const { container } = renderAt(`/seller/organization/${real.context_id}`);
+    expect(await screen.findByRole("heading", { level: 1, name: real.display_name })).toBeInTheDocument();
+    expect(screen.getByText("1 offre active")).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/\+243|@|score de confiance/i);
   });
 
   it("aucune coordonnée, aucun bouton de contact, aucun score de confiance", async () => {

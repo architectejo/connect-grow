@@ -304,9 +304,11 @@ describe("compte et réglages de contact", () => {
     }
   });
 
-  it("canaux proposables : le client suit available_channels du serveur ; clé absente, repli prudent (organisation = message seul)", () => {
-    expect(availableChannels(f.contact_settings_organization as never, "ORGANIZATION")).toEqual(["MESSAGE"]);
-    expect(availableChannels(f.contact_settings_user as never, "USER")).toEqual(["MESSAGE", "CALL", "WHATSAPP"]);
-    expect(availableChannels({ available_channels: ["MESSAGE", "CALL"] }, "ORGANIZATION")).toEqual(["MESSAGE", "CALL"]);
+  it("canaux proposables : le client suit available_channels du serveur ; clé absente, message seul", () => {
+    expect(availableChannels(f.contact_settings_organization as never)).toEqual(["MESSAGE"]);
+    expect(availableChannels(f.contact_settings_organization_open as never)).toEqual(["MESSAGE", "CALL", "WHATSAPP"]);
+    expect(availableChannels(f.contact_settings_user as never)).toEqual(["MESSAGE", "CALL", "WHATSAPP"]);
+    expect(availableChannels({ available_channels: ["MESSAGE", "CALL"] })).toEqual(["MESSAGE", "CALL"]);
+    expect(availableChannels(undefined)).toEqual(["MESSAGE"]);
   });
 });

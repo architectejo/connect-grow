@@ -1,23 +1,39 @@
 import { useQuery } from "@tanstack/react-query";
 import apiClient, { unwrapList } from "@/api/client";
-import type { Uuid } from "@/api/types";
+import type { ContextType, Uuid } from "@/api/types";
 import { httpStatus, isRateLimited, retryAfterSeconds, shouldRetryQuery } from "@/lib/errors";
+
+/** Profil vendeur d'une conversation (ADR 0006 §9.8). `name` n'est pas renvoyé par la liste : le nom affiché est `other_participant`. */
+export interface ConversationSellerContext {
+  type: ContextType;
+  id: Uuid;
+  name?: string;
+}
 
 export interface ConversationItem {
   id: Uuid;
-  other_participant?: { photo?: string | null; full_name?: string } | null;
+  /** Côté acheteur d'une conversation d'organisation : l'organisation (nom, jamais un membre) ; côté équipe : l'acheteur, nom abrégé. */
+  other_participant?: { id?: Uuid; photo?: string | null; full_name?: string } | null;
   post_title?: string | null;
-  last_message?: { content: string; created_at: string | Date } | null;
+  /** null : conversation personnelle ou ancienne conversation sans profil vendeur. */
+  seller_context?: ConversationSellerContext | null;
+  /** `sender_id` : l'organisation quand le message vient de son équipe, jamais un membre. */
+  last_message?: { content: string; created_at: string | Date; is_read?: boolean; sender_id?: Uuid } | null;
 }
 
 export interface MessageItem {
   id: Uuid;
-  sender: Uuid;
-  /** Nom affiché de l'expéditeur : le nom de l'organisation quand le message vient de son côté, jamais celui du membre (ADR 0006 §9.8). */
+  conversation?: Uuid;
+  /** Identifiant de l'organisation quand le message vient de son équipe, sinon celui du compte (null si supprimé). */
+  sender: Uuid | null;
+  /** Nom affiché de l'expéditeur : le nom de l'organisation quand le message vient de son côté, jamais celui du membre (ADR 0006 §9.8) ; « Utilisateur supprimé » sans auteur. */
   sender_name?: string;
-  sender_context?: { type: string; id: Uuid };
+  sender_context?: { type: ContextType; id: Uuid } | null;
   content: string;
+  is_read?: boolean;
   created_at: string;
+  /** Fourni par le serveur : le message est « de mon côté » (moi, ou mon organisation). */
+  is_me: boolean;
 }
 
 export const messageKeys = {

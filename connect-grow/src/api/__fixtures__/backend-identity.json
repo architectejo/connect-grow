@@ -1,5 +1,5 @@
 {
-  "_note": "Réponses réelles du backend d'intégration integ/L0-09 (apps/identity, apps/marketplace), enregistrées par un script jetable hors dépôt dans une base de test en mémoire. Données fictives, aucun secret. Absents car non livrés à la date d'enregistrement : marketplace/sellers/<type>/<id>/ (T5b) ainsi que `context` et `available_channels` de contact-settings (T7) ; le front les consomme d'après l'ADR 0006.",
+  "_note": "Réponses réelles du backend (main, après T5b, T6 et T7 de L0-09), enregistrées le 24/10/2026 par un script jetable hors dépôt dans une base de test en mémoire (client API de test, données fictives, aucun secret). Contact : `context` et `available_channels` (organisation avec l'interrupteur des canaux téléphoniques fermé puis ouvert), erreurs `channel_not_available` et `login_phone_not_allowed`. Messagerie : `seller_context`, `sender_context`, `sender_name`, `is_me`, vues acheteur et équipe, organisation suspendue. Notifications : `context`. Profil public vendeur : `marketplace/sellers/organization/<id>/`. Le backend ne renvoie pas encore `is_owner` sur les offres ni `name` dans `seller_context` des conversations.",
   "provider_not_found_error": {
     "status": 404,
     "body": {
@@ -1511,9 +1511,46 @@
         "text_version": ""
       }
     },
-    "current_text_version": "2026-10-v1"
+    "current_text_version": "2026-10-v1",
+    "context": {
+      "type": "ORGANIZATION",
+      "id": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766"
+    },
+    "available_channels": [
+      "MESSAGE"
+    ]
   },
   "contact_settings_user": {
+    "phone": null,
+    "login_phone_masked": "+243 97 *** ** 01",
+    "can_use_login_phone": true,
+    "channels": {
+      "MESSAGE": {
+        "enabled": true
+      },
+      "CALL": {
+        "enabled": false,
+        "granted_at": null,
+        "text_version": ""
+      },
+      "WHATSAPP": {
+        "enabled": false,
+        "granted_at": null,
+        "text_version": ""
+      }
+    },
+    "current_text_version": "2026-10-v1",
+    "context": {
+      "type": "USER",
+      "id": "f663a42a-30a0-4d20-99f4-34ef4f5263fd"
+    },
+    "available_channels": [
+      "MESSAGE",
+      "CALL",
+      "WHATSAPP"
+    ]
+  },
+  "contact_settings_organization_open": {
     "phone": null,
     "login_phone_masked": null,
     "can_use_login_phone": false,
@@ -1532,6 +1569,246 @@
         "text_version": ""
       }
     },
-    "current_text_version": "2026-10-v1"
+    "current_text_version": "2026-10-v1",
+    "context": {
+      "type": "ORGANIZATION",
+      "id": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766"
+    },
+    "available_channels": [
+      "MESSAGE",
+      "CALL",
+      "WHATSAPP"
+    ]
+  },
+  "contact_channel_not_available_error": {
+    "status": 400,
+    "body": {
+      "channel": [
+        "Ce moyen de contact n'est pas disponible pour ce contexte."
+      ],
+      "detail": "Ce moyen de contact n'est pas disponible pour ce contexte.",
+      "code": "channel_not_available"
+    }
+  },
+  "contact_login_phone_not_allowed_error": {
+    "status": 400,
+    "body": {
+      "detail": "Le numéro de connexion d'un membre ne peut pas servir de numéro d'organisation.",
+      "code": "login_phone_not_allowed"
+    }
+  },
+  "conversations_buyer": [
+    {
+      "id": "aad64d84-2920-463a-a32a-bebdd4b2b1c1",
+      "post": "89b49421-9378-4da4-abae-53c11ec4d4d4",
+      "post_title": "Un joli canapé à vendre",
+      "post_image": "/media/offers/38962598eae444a690c26bd296b06b44.webp",
+      "other_participant": {
+        "id": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766",
+        "full_name": "Atelier X",
+        "photo": null
+      },
+      "last_message": {
+        "content": "Bonjour",
+        "created_at": "2026-10-24T03:41:11.986826+01:00",
+        "is_read": false,
+        "sender_id": "556e5fe4-0ddc-4a0f-9c1d-228198c2f8e8"
+      },
+      "seller_context": {
+        "type": "ORGANIZATION",
+        "id": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766"
+      },
+      "updated_at": "2026-10-24T03:41:11.986826+01:00"
+    }
+  ],
+  "conversations_organization": [
+    {
+      "id": "aad64d84-2920-463a-a32a-bebdd4b2b1c1",
+      "post": "89b49421-9378-4da4-abae-53c11ec4d4d4",
+      "post_title": "Un joli canapé à vendre",
+      "post_image": "/media/offers/38962598eae444a690c26bd296b06b44.webp",
+      "other_participant": {
+        "id": "556e5fe4-0ddc-4a0f-9c1d-228198c2f8e8",
+        "full_name": "Marie K.",
+        "photo": null
+      },
+      "last_message": {
+        "content": "Bonjour",
+        "created_at": "2026-10-24T03:41:11.986826+01:00",
+        "is_read": false,
+        "sender_id": "556e5fe4-0ddc-4a0f-9c1d-228198c2f8e8"
+      },
+      "seller_context": {
+        "type": "ORGANIZATION",
+        "id": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766"
+      },
+      "updated_at": "2026-10-24T03:41:11.986826+01:00"
+    }
+  ],
+  "message_post_as_organization": {
+    "id": "82275da2-7565-4075-b903-bff9851677f4",
+    "conversation": "aad64d84-2920-463a-a32a-bebdd4b2b1c1",
+    "sender": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766",
+    "sender_name": "Atelier X",
+    "sender_context": {
+      "type": "ORGANIZATION",
+      "id": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766"
+    },
+    "content": "Bien reçu",
+    "is_read": false,
+    "created_at": "2026-10-24T03:41:12.076750+01:00",
+    "is_me": true
+  },
+  "messages_buyer": [
+    {
+      "id": "2055daad-d8ba-42e9-8c8a-76a1f58bc337",
+      "conversation": "aad64d84-2920-463a-a32a-bebdd4b2b1c1",
+      "sender": "556e5fe4-0ddc-4a0f-9c1d-228198c2f8e8",
+      "sender_name": "Marie Kabongo",
+      "sender_context": null,
+      "content": "Bonjour",
+      "is_read": false,
+      "created_at": "2026-10-24T03:41:11.986826+01:00",
+      "is_me": true
+    },
+    {
+      "id": "82275da2-7565-4075-b903-bff9851677f4",
+      "conversation": "aad64d84-2920-463a-a32a-bebdd4b2b1c1",
+      "sender": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766",
+      "sender_name": "Atelier X",
+      "sender_context": {
+        "type": "ORGANIZATION",
+        "id": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766"
+      },
+      "content": "Bien reçu",
+      "is_read": false,
+      "created_at": "2026-10-24T03:41:12.076750+01:00",
+      "is_me": false
+    }
+  ],
+  "messages_organization": [
+    {
+      "id": "2055daad-d8ba-42e9-8c8a-76a1f58bc337",
+      "conversation": "aad64d84-2920-463a-a32a-bebdd4b2b1c1",
+      "sender": "556e5fe4-0ddc-4a0f-9c1d-228198c2f8e8",
+      "sender_name": "Marie K.",
+      "sender_context": null,
+      "content": "Bonjour",
+      "is_read": false,
+      "created_at": "2026-10-24T03:41:11.986826+01:00",
+      "is_me": false
+    },
+    {
+      "id": "82275da2-7565-4075-b903-bff9851677f4",
+      "conversation": "aad64d84-2920-463a-a32a-bebdd4b2b1c1",
+      "sender": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766",
+      "sender_name": "Atelier X",
+      "sender_context": {
+        "type": "ORGANIZATION",
+        "id": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766"
+      },
+      "content": "Bien reçu",
+      "is_read": false,
+      "created_at": "2026-10-24T03:41:12.076750+01:00",
+      "is_me": true
+    }
+  ],
+  "message_post_unknown_conversation_error": {
+    "status": 400,
+    "body": {
+      "conversation": [
+        "Conversation introuvable."
+      ]
+    }
+  },
+  "conversations_organization_forbidden_editor": {
+    "status": 403,
+    "body": {
+      "detail": "Votre rôle ne permet pas cette action dans ce contexte.",
+      "code": "DENY_PERMISSION"
+    }
+  },
+  "notifications_list": [
+    {
+      "id": "32c2bb6d-5825-4e61-9a86-079abca6da4a",
+      "user": "f663a42a-30a0-4d20-99f4-34ef4f5263fd",
+      "notification_type": "SYSTEM",
+      "title": "Bienvenue",
+      "content": "Bienvenue sur Connecte+.",
+      "link": "",
+      "is_read": false,
+      "created_at": "2026-10-24T03:41:12.150016+01:00",
+      "context": null
+    },
+    {
+      "id": "261525b9-cb54-4acb-b4d5-594d65db120b",
+      "user": "f663a42a-30a0-4d20-99f4-34ef4f5263fd",
+      "notification_type": "MESSAGE",
+      "title": "Nouveau message",
+      "content": "Un acheteur vous a écrit.",
+      "link": "/messages",
+      "is_read": false,
+      "created_at": "2026-10-24T03:41:12.149494+01:00",
+      "context": {
+        "type": "ORGANIZATION",
+        "id": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766",
+        "name": "Atelier X"
+      }
+    }
+  ],
+  "seller_profile_organization": {
+    "context_type": "ORGANIZATION",
+    "context_id": "0efb4250-ea4c-41a4-9147-b6c9dc3fa766",
+    "display_name": "Atelier X",
+    "photo": null,
+    "description": "",
+    "org_type": "ENTREPRISE",
+    "verified_claims": [],
+    "verification_summary": {
+      "complete": false,
+      "label": null
+    },
+    "member_since": "2026-10-24T03:41:08.399384+01:00",
+    "seller_rating": {
+      "average": null,
+      "count": 0
+    },
+    "active_offers_count": 1
+  },
+  "seller_profile_not_found_error": {
+    "status": 404,
+    "body": {
+      "detail": "Vendeur introuvable.",
+      "code": "not_found"
+    }
+  },
+  "message_post_suspended_organization_error": {
+    "status": 400,
+    "body": {
+      "conversation": [
+        "Conversation introuvable."
+      ]
+    }
+  },
+  "message_post_buyer_to_suspended_organization_error": {
+    "status": 403,
+    "body": {
+      "detail": "Cette organisation est suspendue.",
+      "code": "DENY_SECURITY"
+    }
+  },
+  "conversations_suspended_organization_error": {
+    "status": 403,
+    "body": {
+      "detail": "Cette organisation est suspendue.",
+      "code": "DENY_SECURITY"
+    }
+  },
+  "contact_settings_organization_forbidden_editor": {
+    "status": 403,
+    "body": {
+      "detail": "Votre rôle ne permet pas cette action dans ce contexte.",
+      "code": "DENY_PERMISSION"
+    }
   }
 }

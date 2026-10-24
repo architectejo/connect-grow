@@ -1,18 +1,20 @@
 import { Bell, MessageSquare, Repeat, ShieldCheck, Star, UserRoundSearch, type LucideIcon } from "lucide-react";
 import type { AppNotification, NotificationType } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
+import { useTranslation } from "react-i18next";
 import { formatRelativeDate } from "@/lib/format";
+import { notificationContextLabel } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 
-const TYPE_STYLE: Record<NotificationType, { icon: LucideIcon; tone: string; label: string }> = {
-  CONTACT: { icon: UserRoundSearch, tone: "bg-primary/10 text-primary", label: "Contact" },
-  MESSAGE: { icon: MessageSquare, tone: "bg-info/10 text-info", label: "Message" },
-  COMMENT: { icon: Star, tone: "bg-sun/15 text-sun", label: "Avis" },
-  EXCHANGE: { icon: Repeat, tone: "bg-success/10 text-success", label: "Troc" },
-  SYSTEM: { icon: ShieldCheck, tone: "bg-muted text-muted-foreground", label: "Connecte+" },
+const TYPE_STYLE: Record<NotificationType, { icon: LucideIcon; tone: string }> = {
+  CONTACT: { icon: UserRoundSearch, tone: "bg-primary/10 text-primary" },
+  MESSAGE: { icon: MessageSquare, tone: "bg-info/10 text-info" },
+  COMMENT: { icon: Star, tone: "bg-sun/15 text-sun" },
+  EXCHANGE: { icon: Repeat, tone: "bg-success/10 text-success" },
+  SYSTEM: { icon: ShieldCheck, tone: "bg-muted text-muted-foreground" },
 };
 
-export const notificationStyle = (type: NotificationType) => TYPE_STYLE[type] ?? { icon: Bell, tone: "bg-muted text-muted-foreground", label: "" };
+export const notificationStyle = (type: NotificationType) => TYPE_STYLE[type] ?? { icon: Bell, tone: "bg-muted text-muted-foreground" };
 
 interface NotificationItemProps {
   notification: AppNotification;
@@ -22,7 +24,11 @@ interface NotificationItemProps {
 
 /** Une notification : icône par type, titre, extrait, date, pastille « non lue ». */
 export function NotificationItem({ notification, onOpen, compact }: NotificationItemProps) {
-  const { icon: Icon, tone, label } = notificationStyle(notification.notification_type);
+  const { t } = useTranslation();
+  const { icon: Icon, tone } = notificationStyle(notification.notification_type);
+  const label = TYPE_STYLE[notification.notification_type] ? t(`notifications.type.${notification.notification_type}`) : "";
+  // Notification d'équipe : le nom du profil concerné ; personnelle (context nul) : aucun badge
+  const context = notification.context && notification.context.type !== "USER" ? notification.context : null;
 
   return (
     <button
@@ -43,10 +49,10 @@ export function NotificationItem({ notification, onOpen, compact }: Notification
           {notification.title}
         </span>
         <span className={cn("block text-sm text-muted-foreground", compact ? "line-clamp-1" : "line-clamp-2")}>{notification.content}</span>
-        {notification.context?.name && (
+        {context && (
           // Étiquette du profil concerné : le clic ouvre la cible sans changer le profil actif
-          <Badge variant="outline" className="mt-1 max-w-full">
-            <span className="truncate">{notification.context.name}</span>
+          <Badge variant="outline" className="mt-1 max-w-full" data-testid="notification-context">
+            <span className="truncate">{notificationContextLabel(context)}</span>
           </Badge>
         )}
         <time dateTime={notification.created_at} className="mt-1 block text-xs text-muted-foreground">
@@ -54,7 +60,7 @@ export function NotificationItem({ notification, onOpen, compact }: Notification
         </time>
       </span>
       {!notification.is_read && (
-        <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" aria-label="Non lue" />
+        <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" aria-label={t("notifications.unreadMark")} />
       )}
     </button>
   );

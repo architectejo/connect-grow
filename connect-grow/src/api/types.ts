@@ -313,20 +313,19 @@ export interface ContactChannelState {
 }
 
 export interface ContactSettings {
-    /** Profil auquel s'appliquent ces réglages (ADR 0006 §9.8). Absent des anciennes réponses. */
-    context?: { type: ContextType; id: Uuid };
+    /** Profil auquel s'appliquent ces réglages (ADR 0006 §9.8, §17.1). */
+    context: { type: ContextType; id: Uuid };
     /**
      * Canaux que ce profil a le droit de configurer (ADR 0006 §17.1, Q-F3) : une organisation n'a que `MESSAGE`
      * tant que l'appel et WhatsApp lui sont fermés. Différent de `allowed_channels` d'une offre (canal effectif).
-     * Absent : profil personnel ou prestataire, les trois canaux.
      */
-    available_channels?: ContactChannel[];
+    available_channels: ContactChannel[];
     /** null tant qu'aucun numéro de contact n'existe. */
     phone: ContactPhoneState | null;
-    /** Masque du numéro de connexion fourni par le serveur à la racine (null sans numéro). Absent des anciennes réponses. */
-    login_phone_masked?: string | null;
-    /** Numéro de connexion présent et vérifié, donc utilisable comme numéro de contact. */
-    can_use_login_phone?: boolean;
+    /** Masque du numéro de connexion ; null sans numéro, et toujours null pour une organisation (`login_phone_not_allowed`). */
+    login_phone_masked: string | null;
+    /** Numéro de connexion présent et vérifié, donc utilisable comme numéro de contact (jamais vrai pour une organisation). */
+    can_use_login_phone: boolean;
     channels: Record<ContactChannel, ContactChannelState>;
     current_text_version: string;
 }

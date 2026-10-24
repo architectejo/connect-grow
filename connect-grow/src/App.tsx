@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index.tsx";
@@ -94,10 +95,17 @@ function usePrefetchLikelyRoutes() {
   }, []);
 }
 
+/** Une page qui plante n'emporte pas le reste ; changer de page efface l'erreur. */
+const RouteBoundary = ({ children }: { children: ReactNode }) => {
+  const { pathname } = useLocation();
+  return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>;
+};
+
 const App = () => {
   usePrefetchLikelyRoutes();
 
   return (
+    <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <ActiveContextProvider>
@@ -115,6 +123,7 @@ const App = () => {
                 Aller au contenu
               </a>
               <ScrollManager />
+              <RouteBoundary>
               <Suspense fallback={<RouteFallback />}>
                 <Routes>
                   <Route path="/" element={<Index />} />
@@ -146,6 +155,7 @@ const App = () => {
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
+              </RouteBoundary>
               <BottomNav />
             </BrowserRouter>
           </TooltipProvider>
@@ -153,6 +163,7 @@ const App = () => {
         </ActiveContextProvider>
       </AuthProvider>
     </QueryClientProvider>
+    </ErrorBoundary>
   );
 };
 

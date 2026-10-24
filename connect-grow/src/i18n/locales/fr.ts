@@ -579,6 +579,13 @@ const fr = {
     deleteConfirmDescription: "« {{title}} » sera retiré de votre dossier. Vous pourrez en envoyer un nouveau.",
     deleteLabel: "Supprimer le document : {{title}}",
   },
+  crash: {
+    title: "Un problème est survenu à l'affichage",
+    description: "La page n'a pas pu s'afficher. Vos données ne sont pas perdues : rechargez la page pour réessayer.",
+    reload: "Recharger la page",
+    home: "Retour à l'accueil",
+    details: "Détail technique",
+  },
   states: {
     errorTitle: "Une erreur est survenue",
     errorDescription: "Vérifiez votre connexion internet puis réessayez.",

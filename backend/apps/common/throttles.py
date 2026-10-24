@@ -81,3 +81,12 @@ class RevealUserThrottle(_RevealThrottle):
         if not (request.user and request.user.is_authenticated):
             return None
         return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
+
+
+class PublicIpThrottle(SimpleRateThrottle):
+    """Lecture publique : limite PAR ADRESSE IP (lue selon NUM_PROXIES, IPv6 réduite à son /64), que la requête
+    soit authentifiée ou non, pour qu'un compte jetable ne contourne pas la limite. Le taux est celui de la
+    portée `scope` déclarée par la sous-classe."""
+
+    def get_cache_key(self, request, view):
+        return self.cache_format % {'scope': self.scope, 'ident': normalize_ip(self.get_ident(request))}

@@ -24,6 +24,7 @@ EXPECTED_PUBLIC = {
     ('get', 'api/marketplace/categories/<pk>/'),
     ('get', 'api/marketplace/posts/'),
     ('get', 'api/marketplace/posts/<pk>/'),
+    ('get', 'api/marketplace/sellers/<context_type>/<context_id>/'),  # profil public d'un vendeur (ADR 0006, 9.7)
     ('get', 'api/moderation/forbidden-items/'),
     ('get', 'api/moderation/forbidden-items/<pk>/'),
     ('get', 'api/interactions/reviews/'),

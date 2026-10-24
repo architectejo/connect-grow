@@ -116,6 +116,37 @@ def count_active_offers(context_type=None, context_id=None) -> int:
     return queryset.count()
 
 
+@dataclass(frozen=True)
+class PublicSellerProfile:
+    """Profil public minimal d'un contexte vendeur (ADR 0006, 9.7). Aucune donnée privée : ni téléphone, ni e-mail,
+    ni NIF, ni membres, ni adresse exacte, ni nom complet. La note est PAR CONTEXTE (règle 4) et n'entre dans aucun
+    classement ; les claims sont précis et dérivés des pièces validées (règle 3). La note est ajoutée par la vue
+    (`reviews` importe déjà ce module : pas de cycle)."""
+
+    summary: object  # identity.services.SellerSummary
+    active_offers_count: int
+
+
+def get_public_seller_profile(context_type, context_id) -> Optional[PublicSellerProfile]:
+    """Profil public d'un vendeur, ou None si le contexte est inconnu, mal formé, non public (compte désactivé ou
+    sanctionné, profil archivé, organisation suspendue ou archivée) : l'appelant répond alors un 404 UNIFORME, sans
+    oracle d'existence. Nombre de requêtes constant (indépendant du nombre d'offres et d'avis)."""
+    parsed = parse_uuid(context_id)
+    if context_type not in (CONTEXT_USER, CONTEXT_PROVIDER, CONTEXT_ORGANIZATION) or parsed is None:
+        return None
+    if not identity_services.is_seller_context_public(context_type, parsed):
+        return None
+    active = public_offers().filter(seller_context_type=context_type, seller_context_id=parsed).count()
+    if active == 0 and context_type != CONTEXT_ORGANIZATION:
+        # Règle 10 : une personne ou un prestataire sans offre publique n'a pas de page publique (même 404 que
+        # l'inconnu). Une organisation active reste publique (annuaire).
+        return None
+    summary = identity_services.get_seller_summaries([(context_type, parsed)]).get((context_type, parsed))
+    if summary is None:
+        return None
+    return PublicSellerProfile(summary=summary, active_offers_count=active)
+
+
 def public_offers():
     """Offres publiques : actives, hors corbeille, vendeur public (`seller_is_public`, ADR 0006, A7)."""
     return Offer.objects.filter(is_active=True, is_deleted=False, seller_is_public=True)

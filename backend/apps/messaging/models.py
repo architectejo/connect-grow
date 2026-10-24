@@ -31,7 +31,11 @@ class Conversation(BaseModel):
 
 class Message(BaseModel):
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
-    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sent_messages')
+    # SET_NULL : la suppression d'un compte ne supprime pas ses messages (la conversation de l'organisation et de
+    # l'acheteur reste lisible) ; un message sans expéditeur s'affiche « Utilisateur supprimé » (ADR 0006, 19.6).
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='sent_messages',
+    )
     content = models.TextField()
     is_read = models.BooleanField(default=False)
     # Identité affichée de l'expéditeur (personne ou organisation), ADR 0006, 4.5. Schéma seulement (T7 les

@@ -1,5 +1,7 @@
 import uuid
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+
 from rest_framework import serializers
 
 from apps.common.contexts import CONTEXT_ORGANIZATION
@@ -11,6 +13,8 @@ from . import services
 from .models import Conversation, Message
 
 MESSAGE_MAX_LENGTH = 2000
+CONVERSATION_NOT_FOUND = "Conversation introuvable."
+DELETED_SENDER_NAME = "Utilisateur supprimé"
 
 _DATETIME_FIELD = serializers.DateTimeField()
 
@@ -25,6 +29,16 @@ def _api_uuid(value):
     return str(uuid.UUID(str(value))) if value is not None else None
 
 
+class ConversationField(serializers.PrimaryKeyRelatedField):
+    """Identifiant de conversation : un UUID mal formé donne la même réponse qu'une conversation inconnue."""
+
+    def to_internal_value(self, data):
+        try:
+            return super().to_internal_value(data)
+        except DjangoValidationError:
+            self.fail('does_not_exist', pk_value=data)
+
+
 class MessageListSerializer(PreloadingListSerializer):
     pass
 
@@ -34,6 +48,14 @@ class MessageSerializer(serializers.ModelSerializer):
     de l'organisation et son identifiant à la place de ceux du membre : jamais le nom, l'identifiant de compte,
     le numéro ni l'e-mail du membre qui a écrit (ADR 0006, 9.8 ; règle 10)."""
 
+    # Message d'erreur identique pour une conversation inexistante, mal formée ou interdite : aucun oracle d'existence.
+    conversation = ConversationField(
+        queryset=Conversation.objects.all(),
+        error_messages={
+            'does_not_exist': CONVERSATION_NOT_FOUND, 'incorrect_type': CONVERSATION_NOT_FOUND,
+            'required': "Ce champ est obligatoire.", 'null': "Ce champ est obligatoire.",
+        },
+    )
     sender = serializers.SerializerMethodField()
     sender_name = serializers.SerializerMethodField()
     sender_context = serializers.SerializerMethodField()
@@ -80,7 +102,7 @@ class MessageSerializer(serializers.ModelSerializer):
         # Seul un participant, ou un membre habilité de l'organisation de la conversation, écrit dedans.
         request = self.context['request']
         if not services.can_write(conversation, request.user):
-            raise serializers.ValidationError("Conversation introuvable.")
+            raise serializers.ValidationError(CONVERSATION_NOT_FOUND)
         return conversation
 
     def get_sender(self, obj):
@@ -91,6 +113,13 @@ class MessageSerializer(serializers.ModelSerializer):
         if obj.sender_context_type:
             self._ready(obj)
             return self.context[self.NAMES_KEY].get((obj.sender_context_type, obj.sender_context_id)) or "Organisation"
+        if obj.sender is None:
+            return DELETED_SENDER_NAME
+        request = self.context.get('request')
+        viewer = getattr(request, 'user', None)
+        if obj.conversation.seller_context_type == CONTEXT_ORGANIZATION and viewer is not None and obj.sender_id != viewer.pk:
+            # L'équipe d'une organisation voit l'acheteur sous une forme abrégée (« Marie K. », règle 10).
+            return identity_services.requester_display_name(obj.sender.full_name)
         return obj.sender.full_name
 
     def get_sender_context(self, obj):
@@ -206,6 +235,12 @@ class ConversationSerializer(serializers.ModelSerializer):
             # `participants` est préchargé par la vue : pas de requête par conversation.
             other = next((p for p in obj.participants.all() if p.pk != request.user.pk), None)
             if other:
+                if obj.seller_context_type == CONTEXT_ORGANIZATION:
+                    # L'équipe d'une organisation voit l'acheteur sous une forme abrégée, sans photo (règle 10).
+                    return {
+                        'id': other.id, 'full_name': identity_services.requester_display_name(other.full_name),
+                        'photo': None,
+                    }
                 return {
                     'id': other.id,
                     'full_name': other.full_name,

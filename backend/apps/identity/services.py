@@ -39,7 +39,8 @@ from .verification import (  # noqa: F401
 
 # Contextes vendeur : fiches publiques, visibilité, destinataires, canaux, état du compte (ADR 0006, 7.1).
 from .sellers import (  # noqa: F401
-    SellerSummary, context_has_capability, get_accessible_organization_ids, get_contact_accounts,
+    SellerSummary, context_has_capability, ensure_seller_context_accepts_contact, get_accessible_organization_ids,
+    get_contact_accounts,
     get_context_allowed_channels, get_context_contact_endpoint, get_context_recipients,
     get_seller_context_public_flags, get_seller_summaries, get_user_context_roles, is_seller_context_public,
     set_account_active, announce_account_status,
@@ -415,13 +416,17 @@ class _Owner:
     def lookup(self) -> dict:
         return {'organization_id': self.organization_id} if self.is_organization else {'user': self.actor}
 
-    def authorize_write(self) -> None:
+    def authorize_write(self, allow_restricted=False) -> None:
         """Écriture sur le contact d'une organisation : capacité revérifiée en base, sous la transaction,
-        juste avant d'écrire (révocation ou suspension survenue entre-temps, ADR 0006, 6.4)."""
+        juste avant d'écrire (révocation ou suspension survenue entre-temps, ADR 0006, 6.4). `allow_restricted` :
+        le retrait d'un consentement reste permis à un compte restreint (ADR 0005, C4)."""
         if self.is_organization:
             from apps.common.contexts import CONTEXT_ORGANIZATION
 
-            authorize_on(self.actor, CONTEXT_ORGANIZATION, self.organization_id, CAP_MANAGE_CHANNELS)
+            authorize_on(
+                self.actor, CONTEXT_ORGANIZATION, self.organization_id, CAP_MANAGE_CHANNELS,
+                allow_restricted=allow_restricted,
+            )
 
     def lock_organization(self) -> None:
         if self.is_organization:
@@ -597,8 +602,8 @@ def set_contact_phone(user, *, phone=None, use_login_phone=False, context=None) 
 
     send_code = False
     with transaction.atomic():
-        owner.authorize_write()
         owner.lock_organization()
+        owner.authorize_write()
         now = timezone.now()
         point, created = _lock_or_create_point(owner, number, verified_at_once, now)
         if not created and point.phone == number:
@@ -659,8 +664,8 @@ def verify_contact_phone(user, code, context=None) -> None:
     if not isinstance(code, str) or not otp.verify(code.strip()):
         raise ContactSettingsError("Code invalide.", 'otp_invalid')
     with transaction.atomic():
-        owner.authorize_write()
         owner.lock_organization()
+        owner.authorize_write()
         # Mise à jour conditionnelle : le code ne vaut que pour le numéro auquel il a été envoyé.
         # Si le numéro a changé entre la lecture et l'écriture, rien n'est marqué vérifié.
         updated = ContactPoint.objects.filter(
@@ -696,8 +701,8 @@ def set_channel_consent(user, channel, *, enabled, text_version=None, context=No
         return
     now = timezone.now()
     with transaction.atomic():
-        owner.authorize_write()
         owner.lock_organization()
+        owner.authorize_write(allow_restricted=not enabled)
         consent, created = ContactConsent.objects.get_or_create(
             **owner.lookup, channel=channel, defaults={'is_granted': channel == 'MESSAGE'},
         )
@@ -748,6 +753,33 @@ def set_channel_consent(user, channel, *, enabled, text_version=None, context=No
         owner.audit(
             'contact.consent_granted', 'CONTACT_CHANNEL_CHANGED', f"Canal {channel} activé ; texte {text_version}.",
         )
+
+
+def revoke_organization_phone_consents() -> int:
+    """Retire les consentements CALL et WHATSAPP de toutes les organisations (motif `moderation`), un audit par
+    consentement avec le contexte, sans numéro. Appelée quand `org_phone_channels_enabled` se ferme : un
+    consentement donné sous l'ancien régime ne se réactive pas tout seul à la réouverture. Renvoie le nombre retiré."""
+    from apps.common.contexts import CONTEXT_ORGANIZATION
+
+    from .models import ContactConsent, Organization
+
+    now = timezone.now()
+    count = 0
+    with transaction.atomic():
+        for consent in ContactConsent.objects.filter(
+            organization__isnull=False, channel__in=NUMBER_CHANNELS, is_granted=True,
+        ):
+            consent.is_granted = False
+            consent.revoked_at = now
+            consent.revoked_reason = ContactConsent.REVOKED_MODERATION
+            consent.save(update_fields=['is_granted', 'revoked_at', 'revoked_reason', 'updated_at'])
+            record_audit(
+                None, 'CONTACT_CHANNEL_CHANGED', target=Organization(pk=consent.organization_id),
+                details=f"Canal {consent.channel} retiré (motif : moderation ; canaux numéro fermés).",
+                context=(CONTEXT_ORGANIZATION, consent.organization_id),
+            )
+            count += 1
+    return count
 
 
 def get_allowed_channels(seller_ids: Iterable) -> dict:

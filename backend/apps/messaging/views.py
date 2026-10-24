@@ -69,7 +69,7 @@ class MessageViewSet(ActingContextMixin, ActionScopedThrottleMixin, viewsets.Mod
     def get_queryset(self):
         queryset = Message.objects.filter(
             services.accessible_conversations_filter(self.request.user, 'conversation__'),
-        ).select_related('sender')
+        ).select_related('sender', 'conversation')
         conversation_id = self.request.query_params.get('conversation')
         if conversation_id:
             conversation_uuid = parse_uuid(conversation_id)

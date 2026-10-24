@@ -14,7 +14,9 @@ from typing import Iterable, Optional
 
 from django.db import transaction
 
-from apps.common.contexts import CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER
+from apps.common.contexts import (
+    CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER, DENY_OBJECT_STATE, DENY_SECURITY, ContextDenied,
+)
 from apps.common.utils import parse_uuid
 from apps.moderation.services import get_restricted_user_ids
 from apps.platform_core.services import publish_event
@@ -316,6 +318,20 @@ def get_context_contact_endpoint(context_type, context_id, channel):
     if point is None:
         raise ChannelNotConsented()
     return ContactEndpoint(phone_e164=point.phone)
+
+
+def ensure_seller_context_accepts_contact(context_type, context_id) -> None:
+    """Refuse les écritures d'un acheteur vers une organisation suspendue (`DENY_SECURITY`) ou archivée
+    (`DENY_OBJECT_STATE`) : contact, échange, révélation, message. Sans effet pour un compte ou un prestataire (leur
+    visibilité passe par `seller_is_public`). Une requête."""
+    parsed = parse_uuid(context_id)
+    if context_type != CONTEXT_ORGANIZATION or parsed is None:
+        return
+    state = Organization.objects.filter(pk=parsed).values_list('status', flat=True).first()
+    if state == Organization.STATUS_SUSPENDED:
+        raise ContextDenied(DENY_SECURITY, "Cette organisation est suspendue.")
+    if state == Organization.STATUS_ARCHIVED:
+        raise ContextDenied(DENY_OBJECT_STATE, "Cette organisation est archivée.")
 
 
 def get_accessible_organization_ids(user_id, capability) -> set:

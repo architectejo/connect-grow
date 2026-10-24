@@ -344,3 +344,53 @@ class QueryCountTests(OrgMessagingBase):
             self.write(self.team['ADMIN'], f'Réponse {index}')
             self.write(self.buyer, f'Question {index}')
         self.assertEqual(self.count(client, MESSAGES, params), few)
+
+
+class HardeningTests(OrgMessagingBase):
+    def test_deleting_an_account_keeps_its_messages(self):
+        admin = self.team['ADMIN']
+        self.write(admin, 'Réponse de l équipe')
+        admin.delete()
+        message = Message.objects.get(content='Réponse de l équipe')
+        self.assertIsNone(message.sender_id)
+        listed = self.messages_of(self.buyer)
+        reply = next(m for m in listed if m['content'] == 'Réponse de l équipe')
+        self.assertEqual((reply['sender_name'], reply['sender']), ('Atelier X', str(self.org.pk)))
+
+    def test_a_message_without_sender_and_context_shows_a_neutral_name(self):
+        Message.objects.create(conversation=self.conversation, sender=None, content='Orphelin')
+        listed = self.messages_of(self.team['OWNER'])
+        orphan = next(m for m in listed if m['content'] == 'Orphelin')
+        self.assertEqual((orphan['sender_name'], orphan['is_me']), ('Utilisateur supprimé', False))
+
+    def test_the_buyer_cannot_write_to_a_suspended_or_archived_organization(self):
+        for state, code in ((Organization.STATUS_SUSPENDED, 'DENY_SECURITY'), (Organization.STATUS_ARCHIVED, 'DENY_OBJECT_STATE')):
+            with self.subTest(state=state):
+                Organization.objects.filter(pk=self.org.pk).update(status=state)
+                response = self.write(self.buyer, 'Allô ?')
+                self.assertEqual((response.status_code, response.json()['code']), (403, code))
+        self.assertEqual(Message.objects.count(), 1)
+
+    def test_unknown_and_forbidden_conversations_give_the_same_answer(self):
+        import uuid
+
+        forbidden = self.client_for(self.stranger).post(
+            MESSAGES, {'conversation': str(self.conversation.id), 'content': 'x'},
+        )
+        unknown = self.client_for(self.stranger).post(MESSAGES, {'conversation': str(uuid.uuid4()), 'content': 'x'})
+        malformed = self.client_for(self.stranger).post(MESSAGES, {'conversation': 'pas-un-uuid', 'content': 'x'})
+        self.assertEqual(forbidden.status_code, 400)
+        self.assertEqual(forbidden.json(), unknown.json())
+        self.assertEqual(forbidden.json(), malformed.json())
+        self.assertEqual(forbidden.json(), {'conversation': ['Conversation introuvable.']})
+
+    def test_the_team_sees_the_buyer_abbreviated_and_without_photo(self):
+        User.objects.filter(pk=self.buyer.pk).update(full_name='Marie Kabongo')
+        item = self.client_for(self.team['OWNER'], self.org).get(CONVERSATIONS).json()[0]
+        self.assertEqual((item['other_participant']['full_name'], item['other_participant']['photo']), ('Marie K.', None))
+        first = self.messages_of(self.team['OWNER'])[0]
+        self.assertEqual(first['sender_name'], 'Marie K.')
+        # L'acheteur, lui, voit son propre nom.
+        self.assertEqual(self.messages_of(self.buyer)[0]['sender_name'], 'Marie Kabongo')
+        self.assertNotIn('Kabongo', Notification.objects.filter(user=self.team['OWNER']).first().content
+                         if Notification.objects.filter(user=self.team['OWNER']).exists() else '')

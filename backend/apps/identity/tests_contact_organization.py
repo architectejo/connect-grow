@@ -382,3 +382,72 @@ class AllowedChannelsTests(OrgContactBase):
     def test_unknown_or_malformed_context_has_no_channel(self):
         result = services.get_context_allowed_channels([('ORGANIZATION', 'pas-un-uuid')])
         self.assertEqual(list(result.values()), [[]])
+
+
+class RestrictedAccountAndSwitchTests(OrgContactBase):
+    def sanction(self, user):
+        Sanction.objects.create(
+            user=user, sanction_type=Sanction.TYPE_BANNISSEMENT, reason='Test', issued_by=self.people['ADMIN'],
+        )
+
+    def test_a_restricted_personal_account_can_still_withdraw_a_channel_but_not_enable_one(self):
+        user = self.people['EDITOR']
+        ContactPoint.objects.create(user=user, phone=ORG_NUMBER, is_verified=True)
+        ContactConsent.objects.create(
+            user=user, channel='CALL', is_granted=True, text_version=VERSION, phone_last4=ORG_NUMBER[-4:],
+        )
+        self.sanction(user)
+        client = self.client_for(user)
+        response = client.put(f'{BASE}channels/CALL/', {'enabled': False}, format='json')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(ContactConsent.objects.get(user=user, channel='CALL').is_granted)
+        self.assert_code(
+            client.put(f'{BASE}channels/CALL/', {'enabled': True, 'text_version': VERSION}, format='json'),
+            403, 'DENY_SECURITY',
+        )
+        self.assert_code(client.get(BASE), 403, 'DENY_SECURITY')
+
+    def test_a_restricted_provider_context_can_withdraw_a_channel(self):
+        user = self.people['EDITOR']
+        profile = ProviderProfile.objects.create(user=user, display_name='Marie couture')
+        ContactPoint.objects.create(user=user, phone=ORG_NUMBER, is_verified=True)
+        ContactConsent.objects.create(
+            user=user, channel='WHATSAPP', is_granted=True, text_version=VERSION, phone_last4=ORG_NUMBER[-4:],
+        )
+        self.sanction(user)
+        response = self.client_for(user).put(
+            f'{BASE}channels/WHATSAPP/', {'enabled': False}, format='json', HTTP_X_CONTEXT=f'PROVIDER:{profile.pk}',
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(ContactConsent.objects.get(user=user, channel='WHATSAPP').is_granted)
+
+    def test_a_restricted_organization_owner_can_withdraw_but_not_enable(self):
+        open_switch()
+        self.db_consent('CALL')
+        owner = self.people['OWNER']
+        self.sanction(owner)
+        self.assertEqual(self.channel(owner, 'CALL', enabled=False).status_code, 200)
+        self.assertFalse(ContactConsent.objects.get(organization=self.org, channel='CALL').is_granted)
+        self.assert_code(self.channel(owner, 'CALL', enabled=True, text_version=VERSION), 403, 'DENY_SECURITY')
+
+    def test_closing_the_switch_revokes_the_organization_phone_consents_with_audit(self):
+        open_switch()
+        self.db_consent('CALL')
+        self.db_consent('WHATSAPP')
+        key = ('ORGANIZATION', self.org.pk)
+        self.assertEqual(services.get_context_allowed_channels([key])[key], ['MESSAGE', 'CALL', 'WHATSAPP'])
+        open_switch(False)
+        for consent in ContactConsent.objects.filter(organization=self.org):
+            self.assertEqual((consent.is_granted, consent.revoked_reason), (False, 'moderation'))
+        open_switch(True)  # la réouverture ne réactive rien
+        self.assertEqual(services.get_context_allowed_channels([key])[key], ['MESSAGE'])
+        entries = AuditLog.objects.filter(action='CONTACT_CHANNEL_CHANGED', context_id=self.org.pk)
+        self.assertEqual(entries.count(), 2)
+        for entry in entries:
+            self.assertNotIn(ORG_NUMBER, entry.details)
+
+    def test_saving_settings_with_the_switch_still_open_revokes_nothing(self):
+        open_switch()
+        self.db_consent('CALL')
+        open_switch(True)
+        self.assertTrue(ContactConsent.objects.get(organization=self.org, channel='CALL').is_granted)

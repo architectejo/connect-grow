@@ -26,7 +26,7 @@ from .serializers import (
     UserSerializer,
 )
 from .services import (
-    ActingContextMixin, ContactSettingsError, KycError, decide_kyc_document, get_contact_settings, get_contexts_for_user,
+    ActingContextMixin, ContactSettingsError, get_acting_context, KycError, decide_kyc_document, get_contact_settings, get_contexts_for_user,
     get_document_for_download,
     revoke_all_sessions, set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
 )
@@ -425,9 +425,13 @@ class _ContactSettingsBase(ActingContextMixin, APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    allow_restricted = False  # vrai pour un retrait de consentement (ADR 0005, C4)
+
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
         # Contexte résolu et capacité contrôlée avant toute lecture ou écriture (refus : 403 `DENY_*`).
+        if self.allow_restricted:
+            get_acting_context(request, allow_restricted=True)  # mémorisé : `acting_context` le réutilise
         self.authorize_capability(CONTACT_CAPABILITY)
 
     def finalize_response(self, request, response, *args, **kwargs):
@@ -493,6 +497,12 @@ class ContactPhoneVerifyView(_ContactSettingsBase):
 
 class ContactChannelView(_ContactSettingsBase):
     throttle_classes = [ContactSettingsThrottle]
+
+    @property
+    def allow_restricted(self):
+        """Retirer un canal reste permis même à un compte sanctionné (comme `org.leave`) ; l'activer ne l'est pas."""
+        data = getattr(self.request, 'data', None)
+        return hasattr(data, 'get') and data.get('enabled') is False
 
     def put(self, request, channel):
         data = self.body(request)

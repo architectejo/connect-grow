@@ -111,6 +111,11 @@ def send_message(*, conversation: Conversation, sender, content: str, notify: bo
     survenue entre la validation et l'écriture). Lève `ConversationAccessDenied`."""
     with transaction.atomic():
         reply_context = get_reply_context(conversation, sender)
+        if reply_context is None:
+            # Un acheteur n'écrit pas à une organisation suspendue ou archivée (DENY_SECURITY / DENY_OBJECT_STATE).
+            identity_services.ensure_seller_context_accepts_contact(
+                conversation.seller_context_type, conversation.seller_context_id,
+            )
         context_type, context_id = reply_context if reply_context is not None else (None, None)
         message = Message.objects.create(
             conversation=conversation, sender=sender, content=content,
@@ -140,8 +145,8 @@ def _notify_other_side(conversation, sender, content, reply_context) -> None:
         ):
             notification_services.notify(
                 user_id=recipient_id, notification_type=notification_services.MESSAGE,
-                title=f"Nouveau message de {sender.full_name}", content=preview, link='/messages',
-                context=(CONTEXT_ORGANIZATION, conversation.seller_context_id),
+                title=f"Nouveau message de {identity_services.requester_display_name(sender.full_name)}",
+                content=preview, link='/messages', context=(CONTEXT_ORGANIZATION, conversation.seller_context_id),
             )
         return
     for other in conversation.participants.exclude(pk=sender.pk)[:1]:
@@ -182,10 +187,6 @@ def open_conversation_with_message(
     return message
 
 
-def is_participant(conversation_id, user_id) -> bool:
-    return Conversation.objects.filter(pk=conversation_id, participants=user_id).exists()
-
-
 def get_report_labels(ids) -> dict:
     """Libellés de messages signalables, indexés par UUID (une requête) : sert à la modération.
     Un message absent n'apparaît pas dans le résultat."""
@@ -200,4 +201,7 @@ def get_report_authors(ids) -> dict:
     from apps.common.utils import parse_uuid
 
     wanted = {parsed for parsed in (parse_uuid(i) for i in ids) if parsed is not None}
-    return dict(Message.objects.filter(id__in=wanted).values_list('id', 'sender_id'))
+    return {
+        message_id: sender_id for message_id, sender_id in Message.objects.filter(id__in=wanted).values_list('id', 'sender_id')
+        if sender_id is not None  # auteur supprimé : plus d'auteur à contrôler
+    }

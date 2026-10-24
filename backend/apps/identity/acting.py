@@ -102,11 +102,13 @@ def _ensure_actor_usable(user, capability=None):
         raise ContextDenied(DENY_SECURITY, MSG_ACCOUNT_UNUSABLE)
 
 
-def resolve_acting_context(user, raw_header=None) -> ActingContext:
+def resolve_acting_context(user, raw_header=None, allow_restricted=False) -> ActingContext:
     """Contexte sous lequel `user` agit. `raw_header` : valeur brute de `X-Context`, ou None si l'en-tête
     est absent (contexte personnel). Un compte désactivé ou restreint est refusé (`DENY_SECURITY`) pour tout
-    contexte. Coût : 2 requêtes pour la garde du compte + au plus 1 pour le contexte (ADR 0006, 6.2)."""
-    _ensure_actor_usable(user)
+    contexte. Coût : 2 requêtes pour la garde du compte + au plus 1 pour le contexte (ADR 0006, 6.2).
+    `allow_restricted` : saute la garde du compte, réservé aux gestes de retrait (retirer un consentement)."""
+    if not allow_restricted:
+        _ensure_actor_usable(user)
     if raw_header is None:
         return ActingContext(user.pk, CONTEXT_USER, user.pk)
     context_type, context_id = _parse_header(raw_header)
@@ -132,7 +134,7 @@ def resolve_acting_context(user, raw_header=None) -> ActingContext:
     return ActingContext(user.pk, CONTEXT_ORGANIZATION, context_id, role)
 
 
-def get_acting_context(request) -> ActingContext:
+def get_acting_context(request, allow_restricted=False) -> ActingContext:
     """Contexte actif de la requête DRF, résolu une seule fois (mémorisation sur `request` seulement).
     Lève `ContextDenied`. Utilisateur non authentifié : `DENY_CONTEXT` (les vues exigent aussi
     `IsAuthenticated`, ce qui donne le 401 natif avant d'arriver ici)."""
@@ -143,7 +145,7 @@ def get_acting_context(request) -> ActingContext:
     if user is None or not user.is_authenticated:
         raise ContextDenied(DENY_CONTEXT, MSG_MALFORMED)
     raw = request._request.META.get(CONTEXT_HEADER_META_KEY)
-    ctx = resolve_acting_context(user, raw)
+    ctx = resolve_acting_context(user, raw, allow_restricted=allow_restricted)
     setattr(request, _REQUEST_CACHE_ATTR, ctx)
     return ctx
 
@@ -156,7 +158,7 @@ def authorize(ctx: ActingContext, capability) -> ActingContext:
     return ctx
 
 
-def authorize_on(user, context_type, context_id, capability) -> ActingContext:
+def authorize_on(user, context_type, context_id, capability, allow_restricted=False) -> ActingContext:
     """Autorisation PAR OBJET : d'après le contexte propriétaire de l'objet et le rôle réel de `user`,
     jamais d'après l'en-tête (ADR 0006, 6.4). Codes : DENY_RELATION, DENY_SECURITY, DENY_OBJECT_STATE,
     DENY_PERMISSION.
@@ -184,7 +186,8 @@ def authorize_on(user, context_type, context_id, capability) -> ActingContext:
         ctx = ActingContext(user.pk, CONTEXT_ORGANIZATION, parsed, state[0])
     else:
         raise ContextDenied(DENY_CONTEXT, MSG_MALFORMED)
-    _ensure_actor_usable(user, capability)
+    if not allow_restricted:
+        _ensure_actor_usable(user, capability)
     return authorize(ctx, capability)
 
 

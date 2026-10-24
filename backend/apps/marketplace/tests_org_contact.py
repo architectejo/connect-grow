@@ -163,11 +163,11 @@ class ContactRoutingTests(OrgContactBase):
         dispatch_outbox_now()
         self.assert_no_secret()
 
-    def test_subscribers_only_accept_version_2(self):
+    def test_subscribers_accept_versions_1_and_2_only(self):
         for name in ('messaging.open_contact_conversation', 'messaging.open_exchange_conversation',
                      'notifications.notify_contact', 'notifications.notify_contact_revealed',
                      'notifications.notify_exchange'):
-            self.assertEqual(registry.get_subscriber(name).versions, (2,), name)
+            self.assertEqual(registry.get_subscriber(name).versions, (1, 2), name)  # v1 encore en file : lue en USER
 
     def test_no_secret_in_audit_outbox_notifications_or_conversation_after_a_contact(self):
         self.give_members_personal_contact()
@@ -303,3 +303,45 @@ class RevealTests(OrgContactBase):
         Organization.objects.filter(pk=self.org.pk).update(status=Organization.STATUS_SUSPENDED)
         type(self.offer).objects.filter(pk=self.offer.pk).update(seller_is_public=False)
         self.assertEqual(self.reveal('CALL').status_code, 404)
+
+
+class SuspendedOrganizationAndEventTests(OrgContactBase):
+    def test_buyer_writes_to_a_suspended_or_archived_organization_are_refused(self):
+        self.enable_exchange()
+        for state, code in ((Organization.STATUS_SUSPENDED, 'DENY_SECURITY'), (Organization.STATUS_ARCHIVED, 'DENY_OBJECT_STATE')):
+            with self.subTest(state=state):
+                Organization.objects.filter(pk=self.org.pk).update(status=state)  # le drapeau de l'offre reste vrai
+                contact = self.contact()
+                self.assertEqual((contact.status_code, contact.data['code']), (403, code))
+                exchange = self.client.post(reverse('exchange-list'), {'post': str(self.offer.id), 'message': 'Troc ?'})
+                self.assertEqual((exchange.status_code, exchange.data['code']), (403, code))
+                reveal = self.reveal('CALL')
+                self.assertEqual((reveal.status_code, reveal.data['code']), (403, code))
+        self.assertEqual(ContactEvent.objects.count(), 0)
+
+    def test_the_team_sees_the_buyer_under_an_abbreviated_name(self):
+        User.objects.filter(pk=self.buyer.pk).update(full_name='Marie Kabongo')
+        self.contact()
+        dispatch_outbox_now()
+        notification = Notification.objects.filter(user=self.team['OWNER']).get()
+        self.assertIn('Marie K.', notification.content)
+        self.assertNotIn('Kabongo', notification.content)
+
+    def test_version_1_events_still_in_the_queue_are_read_as_a_user_context(self):
+        from apps.notifications import events as notification_events
+        from apps.platform_core.registry import EventData, PermanentEventError
+        import uuid
+
+        payload = {
+            'offer_id': str(self.offer.id), 'offer_title': 'Un titre', 'seller_id': str(self.team['EDITOR'].pk),
+            'sender_id': str(self.buyer.pk),
+        }
+        event = EventData(uuid.uuid4(), 'marketplace.contact_recorded', 1, payload, timezone.now())
+        notification_events.notify_contact(event)
+        self.assertEqual(Notification.objects.get().user_id, self.team['EDITOR'].pk)
+        bad = EventData(
+            uuid.uuid4(), 'marketplace.contact_recorded', 2,
+            {**payload, 'seller_context_type': 'NOPE', 'seller_context_id': str(self.org.pk)}, timezone.now(),
+        )
+        with self.assertRaises(PermanentEventError):
+            notification_events.notify_contact(bad)

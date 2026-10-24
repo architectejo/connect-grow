@@ -18,8 +18,11 @@ def _open(event, text, contact_event_id=None):
     payload = event.payload
     try:
         offer_id, sender_id = (uuid.UUID(payload[key]) for key in ('offer_id', 'sender_id'))
-        context_type = payload['seller_context_type']
-        context_id = uuid.UUID(payload['seller_context_id'])
+        if event.version == 1:  # encore en file : le vendeur était un compte, lu comme son contexte USER
+            context_type, context_id = CONTEXT_USER, uuid.UUID(payload['seller_id'])
+        else:
+            context_type = payload['seller_context_type']
+            context_id = uuid.UUID(payload['seller_context_id'])
     except (KeyError, ValueError, TypeError) as exc:
         raise PermanentEventError("charge utile invalide") from exc
     if context_type not in (CONTEXT_USER, CONTEXT_PROVIDER, CONTEXT_ORGANIZATION):
@@ -38,12 +41,12 @@ def _open(event, text, contact_event_id=None):
     )
 
 
-@subscribe('marketplace.contact_recorded', name='messaging.open_contact_conversation', versions=(2,))
+@subscribe('marketplace.contact_recorded', name='messaging.open_contact_conversation', versions=(1, 2))
 def open_contact_conversation(event):
     contact_event_id = event.payload.get('contact_event_id')
     _open(event, marketplace_services.get_contact_message(contact_event_id), contact_event_id=contact_event_id)
 
 
-@subscribe('marketplace.exchange_proposed', name='messaging.open_exchange_conversation', versions=(2,))
+@subscribe('marketplace.exchange_proposed', name='messaging.open_exchange_conversation', versions=(1, 2))
 def open_exchange_conversation(event):
     _open(event, marketplace_services.get_exchange_message(event.payload.get('proposal_id')))

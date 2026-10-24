@@ -692,6 +692,8 @@ def _ensure_seller_reachable(offer: Offer) -> None:
 def _check_can_contact(offer: Offer, sender) -> None:
     if identity_services.acts_for_context(sender.pk, offer.seller_context_type, offer.seller_context_id):
         raise MarketplaceError("Vous ne pouvez pas contacter votre propre annonce.")
+    # Organisation suspendue ou archivée : refus DENY_* (même si le drapeau de visibilité n'est pas encore à jour).
+    identity_services.ensure_seller_context_accepts_contact(offer.seller_context_type, offer.seller_context_id)
     ensure_available(offer)
     _ensure_seller_reachable(offer)
 
@@ -928,6 +930,7 @@ def reveal_contact(*, offer_id, sender, channel: str) -> RevealResult:
     offer = _revealable_offer(offer_id)
     if identity_services.acts_for_context(sender.pk, offer.seller_context_type, offer.seller_context_id):
         raise RevealError("Vous ne pouvez pas contacter votre propre annonce.", 'own_offer', 403)
+    identity_services.ensure_seller_context_accepts_contact(offer.seller_context_type, offer.seller_context_id)
     if not _is_seller_reachable(offer):
         raise RevealError(SELLER_CONTACT_UNAVAILABLE, 'seller_contact_unavailable', 403)
     if moderation_services.is_user_restricted(sender.pk):

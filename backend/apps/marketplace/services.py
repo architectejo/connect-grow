@@ -669,16 +669,29 @@ def ensure_available(offer: Offer) -> None:
 SELLER_CONTACT_UNAVAILABLE = "Ce vendeur ne peut pas être contacté par ce moyen pour le moment."
 
 
+def _is_seller_reachable(offer: Offer) -> bool:
+    """Le contexte vendeur a-t-il quelqu'un pour recevoir un contact ? `USER` : le compte ; `PROVIDER` : le titulaire
+    du profil actif ; `ORGANIZATION` : au moins un destinataire dans l'équipe (propriétaire ou administrateur actif,
+    ADR 0006, D6), ce que dit `get_context_allowed_channels` (MESSAGE n'est jamais désactivable pour une
+    organisation). Sinon le contexte n'a ni canal ni destinataire."""
+    if offer.seller_context_type == CONTEXT_ORGANIZATION:
+        key = (offer.seller_context_type, offer.seller_context_id)
+        return bool(identity_services.get_context_allowed_channels([key]).get(key))
+    return _seller_account_id(offer) is not None
+
+
 def _ensure_seller_reachable(offer: Offer) -> None:
-    """Un vendeur sans compte de contact (organisation, avant le contact d'équipe de T7) n'est joignable par aucun
-    moyen : refus dédié `seller_contact_unavailable` (403), sans repli vers un autre canal."""
-    if _seller_account_id(offer) is None:
+    """Contexte sans canal ni destinataire (équipe sans membre joignable, prestataire archivé) : refus dédié
+    `seller_contact_unavailable` (403), sans repli vers un autre canal."""
+    if not _is_seller_reachable(offer):
         raise MarketplaceError(SELLER_CONTACT_UNAVAILABLE, 'seller_contact_unavailable', 403)
 
 
 def _check_can_contact(offer: Offer, sender) -> None:
     if identity_services.acts_for_context(sender.pk, offer.seller_context_type, offer.seller_context_id):
         raise MarketplaceError("Vous ne pouvez pas contacter votre propre annonce.")
+    # Organisation suspendue ou archivée : refus DENY_* (même si le drapeau de visibilité n'est pas encore à jour).
+    identity_services.ensure_seller_context_accepts_contact(offer.seller_context_type, offer.seller_context_id)
     ensure_available(offer)
     _ensure_seller_reachable(offer)
 
@@ -706,7 +719,8 @@ def get_exchange_message(proposal_id) -> Optional[str]:
 
 def _seller_account_id(offer: Offer):
     """Compte qui reçoit les contacts de cette offre : le compte lui-même (`USER`) ou le titulaire du profil
-    prestataire (`PROVIDER`). Une organisation n'a pas de compte de contact avant T7 : None."""
+    prestataire (`PROVIDER`). Une organisation n'a pas de compte de contact : ses contacts vont à l'équipe,
+    résolue par `identity` au moment de la livraison (None ici)."""
     if offer.seller_context_type == CONTEXT_USER:
         return offer.seller_context_id
     key = (offer.seller_context_type, offer.seller_context_id)
@@ -714,16 +728,18 @@ def _seller_account_id(offer: Offer):
 
 
 def _interaction_payload(offer: Offer, sender, **ids) -> dict:
-    """Charge utile d'un contact ou d'un échange : identifiants et titre public de l'annonce
-    seulement. Ni le texte du message ni le nom de l'expéditeur (données personnelles) ne
-    sont copiés dans l'outbox : les abonnés les relisent par `services.py`."""
-    seller_account = _seller_account_id(offer)
-    if seller_account is None:  # garde : aucun événement de contact ne doit partir sans destinataire
+    """Charge utile (version 2) d'un contact ou d'un échange : identifiants et titre public de l'annonce
+    seulement. Ni le texte du message, ni le nom de l'expéditeur, ni aucun numéro (données personnelles) ne
+    sont copiés dans l'outbox : les abonnés les relisent par `services.py`. Le vendeur est un CONTEXTE
+    (`seller_context_type`, `seller_context_id`), pas un compte : les destinataires sont résolus par les abonnés à
+    la livraison, selon l'équipe du moment (une révocation entre-temps est respectée)."""
+    if not _is_seller_reachable(offer):  # garde : aucun événement de contact ne doit partir sans destinataire
         raise MarketplaceError(SELLER_CONTACT_UNAVAILABLE, 'seller_contact_unavailable', 403)
     return {
         **{key: str(value) for key, value in ids.items()},
         'offer_id': str(offer.id), 'offer_title': offer.title,
-        'seller_id': str(seller_account), 'sender_id': str(sender.pk),
+        'seller_context_type': offer.seller_context_type, 'seller_context_id': str(offer.seller_context_id),
+        'sender_id': str(sender.pk),
     }
 
 
@@ -912,7 +928,8 @@ def reveal_contact(*, offer_id, sender, channel: str) -> RevealResult:
     offer = _revealable_offer(offer_id)
     if identity_services.acts_for_context(sender.pk, offer.seller_context_type, offer.seller_context_id):
         raise RevealError("Vous ne pouvez pas contacter votre propre annonce.", 'own_offer', 403)
-    if _seller_account_id(offer) is None:
+    identity_services.ensure_seller_context_accepts_contact(offer.seller_context_type, offer.seller_context_id)
+    if not _is_seller_reachable(offer):
         raise RevealError(SELLER_CONTACT_UNAVAILABLE, 'seller_contact_unavailable', 403)
     if moderation_services.is_user_restricted(sender.pk):
         raise RevealError("Votre compte ne peut pas contacter de vendeur pour le moment.", 'contact_restricted', 403)
@@ -927,7 +944,11 @@ def reveal_contact(*, offer_id, sender, channel: str) -> RevealResult:
         _refuse_quota(sender, offer, row, exceeded, now)
 
     try:
-        endpoint = identity_services.get_contact_endpoint(_seller_account_id(offer), channel)
+        # Numéro du contexte vendeur : numéro de contact de l'organisation pour une organisation, jamais le
+        # téléphone d'un membre (ADR 0006, 11.2).
+        endpoint = identity_services.get_context_contact_endpoint(
+            offer.seller_context_type, offer.seller_context_id, channel,
+        )
     except identity_services.ChannelNotConsented:
         # Une trace par visiteur, offre et jour : un visiteur qui insiste ne remplit pas le journal.
         if not moderation_services.has_audit_since(

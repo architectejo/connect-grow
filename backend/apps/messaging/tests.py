@@ -69,8 +69,12 @@ class ConversationApiTests(MessagingTestBase):
         self.assertEqual(len(data), 1)
         item = data[0]
         self.assertEqual(
-            set(item), {'id', 'post', 'post_title', 'post_image', 'other_participant', 'last_message', 'updated_at'},
+            set(item), {
+                'id', 'post', 'post_title', 'post_image', 'other_participant', 'last_message', 'seller_context',
+                'updated_at',
+            },
         )
+        self.assertIsNone(item['seller_context'])
         self.assertEqual(item['post'], str(self.offer.id))
         self.assertEqual(item['post_title'], self.offer.title)
         self.assertTrue(item['post_image'].endswith('.webp'))

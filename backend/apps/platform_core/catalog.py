@@ -32,10 +32,12 @@ _TYPES = (
     EventType('identity.organization_updated', no_subscriber=True),
     # Émetteur : `decide_kyc_document` (T4) ; abonné `notifications.notify_kyb_decision` (T6).
     EventType('identity.organization_verification_changed'),
-    EventType('marketplace.contact_recorded'),
+    # Version 2 (ADR 0006, section 8) : `seller_id` (compte) remplacé par `seller_context_type`/`seller_context_id` ;
+    # les destinataires sont résolus à la livraison par `identity`.
+    EventType('marketplace.contact_recorded', version=2),
     # ADR 0005 : sans aucun numéro dans la charge utile ; abonné : notifications (prévient le vendeur).
-    EventType('marketplace.contact_revealed'),
-    EventType('marketplace.exchange_proposed'),
+    EventType('marketplace.contact_revealed', version=2),
+    EventType('marketplace.exchange_proposed', version=2),
     # Version 2 (ADR 0006, section 8) : `seller_context_type/id` à la place de `seller_id` ; un événement par offre,
     # destinataires (capacité `offer.edit`) résolus par l'abonné à la livraison.
     EventType('marketplace.offer_expiring_soon', version=2),

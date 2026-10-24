@@ -623,19 +623,18 @@ class SellerObjectTests(ContextBase):
             )
         self.join(self.member, role=OWNER)
         offer = self.org_offer(creator=self.member)
-        self.assertEqual(self.get_offer(offer)['allowed_channels'], [])
+        # T7 : une organisation offre MESSAGE (routé vers l'équipe), jamais le numéro d'un membre.
+        self.assertEqual(self.get_offer(offer)['allowed_channels'], ['MESSAGE'])
         self.client.force_authenticate(self.buyer)
         for channel in ('CALL', 'WHATSAPP'):
             response = self.client.post(reverse('contact-reveal'), {'offer': str(offer.id), 'channel': channel})
-            self.assertEqual((response.status_code, response.data['code']), (403, 'seller_contact_unavailable'))
+            self.assertEqual((response.status_code, response.data['code']), (403, 'channel_not_allowed'))
             self.assertNotIn(SENTINEL_PHONE, json.dumps(response.data, default=str))
-            self.assertNotIn('écrire', response.data['detail'])  # aucun repli vers un autre canal
-        contact = self.client.post(reverse('contact-list'), {'post': str(offer.id), 'message': 'Bonjour'})
-        self.assertEqual((contact.status_code, contact.data['code']), (403, 'seller_contact_unavailable'))
+            self.assertEqual(response.data['detail'], "Ce vendeur n'accepte pas ce moyen de contact.")
         self.assertEqual(ContactEvent.objects.count(), 0)
-        self.enable_exchange()
-        exchange = self.client.post(reverse('exchange-list'), {'post': str(offer.id), 'message': 'Echange ?'})
-        self.assertEqual((exchange.status_code, exchange.data['code']), (403, 'seller_contact_unavailable'))
+        contact = self.client.post(reverse('contact-list'), {'post': str(offer.id), 'message': 'Bonjour'})
+        self.assertEqual(contact.status_code, status.HTTP_201_CREATED, contact.data)
+        self.assertEqual(ContactEvent.objects.count(), 1)
 
     def test_a_member_cannot_contact_or_review_the_offer_of_his_own_organization(self):
         self.join(self.member, role=EDITOR)

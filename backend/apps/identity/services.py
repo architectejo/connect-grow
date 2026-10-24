@@ -39,7 +39,9 @@ from .verification import (  # noqa: F401
 
 # Contextes vendeur : fiches publiques, visibilité, destinataires, canaux, état du compte (ADR 0006, 7.1).
 from .sellers import (  # noqa: F401
-    SellerSummary, context_has_capability, get_contact_accounts, get_context_allowed_channels, get_context_recipients,
+    SellerSummary, context_has_capability, ensure_seller_context_accepts_contact, get_accessible_organization_ids,
+    get_contact_accounts,
+    get_context_allowed_channels, get_context_contact_endpoint, get_context_recipients,
     get_seller_context_public_flags, get_seller_summaries, get_user_context_roles, is_seller_context_public,
     set_account_active, announce_account_status,
 )
@@ -345,10 +347,12 @@ def get_report_authors(ids: Iterable) -> dict:
     return {user_id: user_id for user_id in get_report_labels(ids)}
 
 
-# --- Contact vendeur : numéro de contact et consentement par canal (ADR 0005) ---------------------
+# --- Contact vendeur : numéro de contact et consentement par canal (ADR 0005, ADR 0006 4.4 et 11.2) --------
 
 CHANNEL_ORDER = ('MESSAGE', 'CALL', 'WHATSAPP')
 NUMBER_CHANNELS = ('CALL', 'WHATSAPP')  # canaux qui révèlent le numéro
+
+CAP_MANAGE_CHANNELS = 'contact.manage_channels'
 
 
 class ContactSettingsError(Exception):
@@ -384,6 +388,77 @@ def mask_phone(phone) -> Optional[str]:
     return f"+243 {digits[:2]} *** ** {digits[-2:]}"
 
 
+def get_available_channels(context_type) -> list:
+    """Canaux que ce type de contexte a le droit de configurer (ADR 0006, Q-F3), indépendamment de l'état actuel
+    (numéro, consentement). `USER` et `PROVIDER` : les trois. `ORGANIZATION` : `MESSAGE` seulement tant que
+    `IdentitySettings.org_phone_channels_enabled` est faux (Q-CLI5), les trois sinon. Source unique, partagée avec
+    `get_context_allowed_channels`."""
+    from apps.common.contexts import CONTEXT_ORGANIZATION
+
+    if context_type == CONTEXT_ORGANIZATION and not get_identity_settings().org_phone_channels_enabled:
+        return ['MESSAGE']
+    return list(CHANNEL_ORDER)
+
+
+class _Owner:
+    """Titulaire des réglages de contact pour une opération : le compte de l'acteur (contexte personnel ou
+    prestataire, mêmes `ContactPoint`/`ContactConsent`) ou l'organisation du contexte actif. Le numéro d'une
+    organisation n'est JAMAIS celui d'un membre (règle 10)."""
+
+    def __init__(self, actor, context=None):
+        from apps.common.contexts import CONTEXT_ORGANIZATION, CONTEXT_USER
+
+        self.actor = actor
+        self.context = context
+        self.organization_id = context.id if context is not None and context.type == CONTEXT_ORGANIZATION else None
+        self.context_type = context.type if context is not None else CONTEXT_USER
+        self.context_id = context.id if context is not None else actor.pk
+
+    @property
+    def is_organization(self) -> bool:
+        return self.organization_id is not None
+
+    @property
+    def lookup(self) -> dict:
+        return {'organization_id': self.organization_id} if self.is_organization else {'user': self.actor}
+
+    def authorize_write(self, allow_restricted=False) -> None:
+        """Écriture sur le contact d'une organisation : capacité revérifiée en base, sous la transaction,
+        juste avant d'écrire (révocation ou suspension survenue entre-temps, ADR 0006, 6.4). `allow_restricted` :
+        le retrait d'un consentement reste permis à un compte restreint (ADR 0005, C4)."""
+        if self.is_organization:
+            from apps.common.contexts import CONTEXT_ORGANIZATION
+
+            authorize_on(
+                self.actor, CONTEXT_ORGANIZATION, self.organization_id, CAP_MANAGE_CHANNELS,
+                allow_restricted=allow_restricted,
+            )
+
+    def lock_organization(self) -> None:
+        if self.is_organization:
+            from .models import Organization
+
+            Organization.objects.select_for_update().filter(pk=self.organization_id).first()
+
+    def audit(self, user_action, organization_action, details) -> None:
+        """Compte : actions `contact.*` historiques, cible = le compte. Organisation : `CONTACT_*`, cible = l'organisation,
+        avec le contexte (ADR 0006, A10). Jamais de numéro ni de nom dans `details`."""
+        if self.is_organization:
+            from apps.common.contexts import CONTEXT_ORGANIZATION
+
+            from .models import Organization
+
+            record_audit(
+                self.actor, organization_action, target=Organization(pk=self.organization_id), details=details,
+                context=(CONTEXT_ORGANIZATION, self.organization_id),
+            )
+        else:
+            record_audit(self.actor, user_action, target=self.actor, details=details)
+
+    def describe(self) -> dict:
+        return {'type': self.context_type, 'id': str(self.context_id)}
+
+
 def _channel_state(consent, channel):
     if channel == 'MESSAGE':
         return {'enabled': True if consent is None else consent.is_granted}
@@ -396,43 +471,54 @@ def _channel_state(consent, channel):
     }
 
 
-def get_contact_settings(user) -> dict:
-    """État complet de l'écran « Contact » (ADR 0005, 5.1). Numéros toujours masqués."""
+def get_contact_settings(user, context=None) -> dict:
+    """État complet de l'écran « Contact » (ADR 0005, 5.1) du contexte actif (`context` : `ActingContext`, ou
+    None pour le compte). Numéros toujours masqués. Ajoute `context` et `available_channels` (ADR 0006, 17.1).
+    Organisation : jamais le numéro de connexion de l'acteur (`login_phone_masked` nul), et `MESSAGE` toujours actif."""
     from .models import CONTACT_CONSENT_TEXT_VERSION, ContactConsent, ContactPoint
 
-    point = ContactPoint.objects.filter(user=user).first()
-    consents = {c.channel: c for c in ContactConsent.objects.filter(user=user)}
-    login_masked = mask_phone(user.phone)
-    can_use_login = bool(user.phone) and user.phone_verified
+    owner = _Owner(user, context)
+    point = ContactPoint.objects.filter(**owner.lookup).first()
+    consents = {c.channel: c for c in ContactConsent.objects.filter(**owner.lookup)}
+    if owner.is_organization:
+        login_masked, can_use_login = None, False
+    else:
+        login_masked = mask_phone(user.phone)
+        can_use_login = bool(user.phone) and user.phone_verified
     phone = None
     if point is not None:
         phone = {
             'masked': mask_phone(point.phone), 'is_verified': point.is_verified,
             'login_phone_masked': login_masked, 'can_use_login_phone': can_use_login,
         }
+    channels = {ch: _channel_state(consents.get(ch), ch) for ch in CHANNEL_ORDER}
+    if owner.is_organization:
+        channels['MESSAGE'] = {'enabled': True}
     return {
         'phone': phone,
         # Au niveau racine aussi : `phone` vaut null tant qu'aucun numéro de contact n'existe.
         'login_phone_masked': login_masked,
         'can_use_login_phone': can_use_login,
-        'channels': {ch: _channel_state(consents.get(ch), ch) for ch in CHANNEL_ORDER},
+        'channels': channels,
         'current_text_version': CONTACT_CONSENT_TEXT_VERSION,
+        'context': owner.describe(),
+        'available_channels': get_available_channels(owner.context_type),
     }
 
 
-def _revoke_number_channels(user, reason) -> list:
+def _revoke_number_channels(owner, reason) -> list:
     from .models import ContactConsent
 
     revoked = []
     now = timezone.now()
-    for consent in ContactConsent.objects.filter(user=user, channel__in=NUMBER_CHANNELS, is_granted=True):
+    for consent in ContactConsent.objects.filter(**owner.lookup, channel__in=NUMBER_CHANNELS, is_granted=True):
         consent.is_granted = False
         consent.revoked_at = now
         consent.revoked_reason = reason
         consent.save(update_fields=['is_granted', 'revoked_at', 'revoked_reason', 'updated_at'])
-        record_audit(
-            user, 'contact.consent_revoked', target=user,
-            details=f"Canal {consent.channel} retiré (motif : {reason}).",
+        owner.audit(
+            'contact.consent_revoked', 'CONTACT_CHANNEL_CHANGED',
+            f"Canal {consent.channel} retiré (motif : {reason}).",
         )
         revoked.append(consent.channel)
     return revoked
@@ -460,37 +546,44 @@ def _can_send_contact_sms(user) -> bool:
     return timezone.now() - user.date_joined >= min_age
 
 
-def _lock_or_create_point(user, number, verified, now):
+def _lock_or_create_point(owner, number, verified, now):
     """Renvoie `(point, created)`. Verrouille la ligne existante ; une création concurrente
-    (unicité du compte) est rattrapée par une relecture au lieu d'une erreur 500."""
+    (unicité du titulaire) est rattrapée par une relecture au lieu d'une erreur 500."""
     from .models import ContactPoint
 
-    point = ContactPoint.objects.select_for_update().filter(user=user).first()
+    point = ContactPoint.objects.select_for_update().filter(**owner.lookup).first()
     if point is not None:
         return point, False
     try:
         with transaction.atomic():
             point = ContactPoint.objects.create(
-                user=user, phone=number, is_verified=verified, verified_at=now if verified else None,
+                **owner.lookup, phone=number, is_verified=verified, verified_at=now if verified else None,
             )
         return point, True
     except IntegrityError:
-        return ContactPoint.objects.select_for_update().get(user=user), False
+        return ContactPoint.objects.select_for_update().get(**owner.lookup), False
 
 
-def set_contact_phone(user, *, phone=None, use_login_phone=False) -> None:
-    """Crée ou remplace le numéro de contact. Seul un geste explicite copie le numéro de connexion.
-    Changer de numéro révoque CALL et WHATSAPP ; un numéro non vérifié reçoit un code SMS."""
+def set_contact_phone(user, *, phone=None, use_login_phone=False, context=None) -> None:
+    """Crée ou remplace le numéro de contact du contexte actif. Seul un geste explicite copie le numéro de
+    connexion (jamais pour une organisation : le numéro d'un membre n'est pas celui de l'organisation). Changer
+    de numéro révoque CALL et WHATSAPP ; un numéro non vérifié reçoit un code SMS."""
     from django.core.exceptions import ValidationError as DjangoValidationError
 
     from .models import phone_validator
 
+    owner = _Owner(user, context)
     if bool(use_login_phone) == bool(phone):
         raise ContactSettingsError(
             "Indiquez un numéro, ou demandez à utiliser votre numéro de connexion.", 'phone_invalid',
         )
     verified_at_once = False
     if use_login_phone:
+        if owner.is_organization:
+            raise ContactSettingsError(
+                "Le numéro de connexion d'un membre ne peut pas servir de numéro d'organisation.",
+                'login_phone_not_allowed',
+            )
         if not user.phone or not user.phone_verified:
             raise ContactSettingsError(
                 "Vérifiez d'abord votre numéro de connexion.", 'login_phone_unverified', 409,
@@ -515,15 +608,20 @@ def set_contact_phone(user, *, phone=None, use_login_phone=False) -> None:
 
     send_code = False
     with transaction.atomic():
+        owner.lock_organization()
+        owner.authorize_write()
         now = timezone.now()
-        point, created = _lock_or_create_point(user, number, verified_at_once, now)
+        point, created = _lock_or_create_point(owner, number, verified_at_once, now)
         if not created and point.phone == number:
             # Même numéro : aucun canal n'est révoqué ; un numéro non vérifié reçoit un nouveau code.
             if not point.is_verified:
                 if verified_at_once:
                     point.is_verified, point.verified_at = True, now
                     point.save(update_fields=['is_verified', 'verified_at', 'updated_at'])
-                    record_audit(user, 'contact.phone_verified', target=user, details="Numéro de contact vérifié (numéro de connexion déjà vérifié).")
+                    owner.audit(
+                        'contact.phone_verified', 'CONTACT_PHONE_VERIFIED',
+                        "Numéro de contact vérifié (numéro de connexion déjà vérifié).",
+                    )
                 else:
                     send_code = True
         else:
@@ -532,24 +630,27 @@ def set_contact_phone(user, *, phone=None, use_login_phone=False) -> None:
                 point.is_verified = verified_at_once
                 point.verified_at = now if verified_at_once else None
                 point.save(update_fields=['phone', 'is_verified', 'verified_at', 'updated_at'])
-            _revoke_number_channels(user, 'phone_changed')
-            record_audit(
-                user, 'contact.phone_changed', target=user,
-                details="Numéro de contact modifié ; CALL et WHATSAPP désactivés.",
+            _revoke_number_channels(owner, 'phone_changed')
+            owner.audit(
+                'contact.phone_changed', 'CONTACT_PHONE_CHANGED', "Numéro de contact modifié ; CALL et WHATSAPP désactivés.",
             )
             if verified_at_once:
-                record_audit(user, 'contact.phone_verified', target=user, details="Numéro de contact vérifié (numéro de connexion déjà vérifié).")
+                owner.audit(
+                    'contact.phone_verified', 'CONTACT_PHONE_VERIFIED',
+                    "Numéro de contact vérifié (numéro de connexion déjà vérifié).",
+                )
             else:
                 send_code = True
     if send_code:
         _send_contact_code(number)
 
 
-def verify_contact_phone(user, code) -> None:
+def verify_contact_phone(user, code, context=None) -> None:
     """Valide le numéro de contact par le code SMS. Ne réactive aucun canal."""
     from .models import ContactPoint, OtpCode
 
-    point = ContactPoint.objects.filter(user=user).first()
+    owner = _Owner(user, context)
+    point = ContactPoint.objects.filter(**owner.lookup).first()
     if point is None:
         raise ContactSettingsError("Aucun numéro de contact à vérifier.", 'contact_phone_missing', 404)
     if point.is_verified:
@@ -569,6 +670,8 @@ def verify_contact_phone(user, code) -> None:
     if not isinstance(code, str) or not otp.verify(code.strip()):
         raise ContactSettingsError("Code invalide.", 'otp_invalid')
     with transaction.atomic():
+        owner.lock_organization()
+        owner.authorize_write()
         # Mise à jour conditionnelle : le code ne vaut que pour le numéro auquel il a été envoyé.
         # Si le numéro a changé entre la lecture et l'écriture, rien n'est marqué vérifié.
         updated = ContactPoint.objects.filter(
@@ -578,19 +681,36 @@ def verify_contact_phone(user, code) -> None:
             raise ContactSettingsError("Code invalide. Demandez un nouveau code.", 'otp_invalid')
         # Le code a servi : on ne garde pas de trace du numéro dans la table des OTP (LEG-PRV-12).
         OtpCode.objects.filter(phone=otp.phone, purpose=OtpCode.PURPOSE_CONTACT_VERIFY).delete()
-        record_audit(user, 'contact.phone_verified', target=user, details="Numéro de contact vérifié par code SMS.")
+        owner.audit('contact.phone_verified', 'CONTACT_PHONE_VERIFIED', "Numéro de contact vérifié par code SMS.")
 
 
-def set_channel_consent(user, channel, *, enabled, text_version=None) -> None:
-    """Active ou retire un canal (ADR 0005, C2 et C4). Retirer est toujours permis et idempotent."""
+def set_channel_consent(user, channel, *, enabled, text_version=None, context=None) -> None:
+    """Active ou retire un canal (ADR 0005, C2 et C4). Retirer est toujours permis et idempotent.
+
+    Organisation (ADR 0006, 11.2) : réservé à qui a `contact.manage_channels` (propriétaire, administrateur),
+    `granted_by` conserve l'auteur du consentement ; un canal absent de `get_available_channels` est refusé
+    (`channel_not_available`) ; `MESSAGE` est toujours proposé et ne se désactive pas."""
     from .models import CONTACT_CONSENT_TEXT_VERSION, ContactConsent, ContactPoint
 
     if channel not in CHANNEL_ORDER:
         raise ContactSettingsError("Canal inconnu.", 'channel_unknown', 404)
+    owner = _Owner(user, context)
+    if enabled and channel not in get_available_channels(owner.context_type):
+        raise ContactSettingsError(
+            "Ce moyen de contact n'est pas disponible pour ce contexte.", 'channel_not_available',
+        )
+    if owner.is_organization and channel == 'MESSAGE':
+        if not enabled:
+            raise ContactSettingsError(
+                "Le message à l'équipe reste toujours proposé pour une organisation.", 'message_channel_required',
+            )
+        return
     now = timezone.now()
     with transaction.atomic():
+        owner.lock_organization()
+        owner.authorize_write(allow_restricted=not enabled)
         consent, created = ContactConsent.objects.get_or_create(
-            user=user, channel=channel, defaults={'is_granted': channel == 'MESSAGE'},
+            **owner.lookup, channel=channel, defaults={'is_granted': channel == 'MESSAGE'},
         )
         if not enabled:
             if consent.is_granted:
@@ -598,14 +718,14 @@ def set_channel_consent(user, channel, *, enabled, text_version=None) -> None:
                 consent.revoked_at = now
                 consent.revoked_reason = ContactConsent.REVOKED_USER
                 consent.save(update_fields=['is_granted', 'revoked_at', 'revoked_reason', 'updated_at'])
-                record_audit(user, 'contact.consent_revoked', target=user, details=f"Canal {channel} retiré (motif : user).")
+                owner.audit('contact.consent_revoked', 'CONTACT_CHANNEL_CHANGED', f"Canal {channel} retiré (motif : user).")
             return
         if channel == 'MESSAGE':
             if not consent.is_granted:
                 consent.is_granted, consent.granted_at = True, now
                 consent.revoked_at, consent.revoked_reason = None, ''
                 consent.save(update_fields=['is_granted', 'granted_at', 'revoked_at', 'revoked_reason', 'updated_at'])
-                record_audit(user, 'contact.consent_granted', target=user, details="Canal MESSAGE activé.")
+                owner.audit('contact.consent_granted', 'CONTACT_CHANNEL_CHANGED', "Canal MESSAGE activé.")
             return
         if not text_version:
             raise ContactSettingsError("Acceptez le texte de consentement pour activer ce moyen.", 'consent_text_required')
@@ -613,7 +733,7 @@ def set_channel_consent(user, channel, *, enabled, text_version=None) -> None:
             raise ContactSettingsError(
                 "Le texte a changé, relisez-le avant d'accepter.", 'consent_version_mismatch',
             )
-        point = ContactPoint.objects.select_for_update().filter(user=user).first()
+        point = ContactPoint.objects.select_for_update().filter(**owner.lookup).first()
         if point is None or not point.is_verified:
             raise ContactSettingsError("Vérifiez d'abord votre numéro.", 'contact_phone_unverified', 409)
         last4 = point.phone[-4:]
@@ -629,13 +749,43 @@ def set_channel_consent(user, channel, *, enabled, text_version=None) -> None:
         consent.revoked_at = None
         consent.revoked_reason = ''
         consent.phone_last4 = last4
-        consent.save(update_fields=[
+        fields = [
             'is_granted', 'text_version', 'granted_at', 'revoked_at', 'revoked_reason', 'phone_last4', 'updated_at',
-        ])
-        record_audit(
-            user, 'contact.consent_granted', target=user,
-            details=f"Canal {channel} activé ; texte {text_version}.",
+        ]
+        if owner.is_organization:
+            consent.granted_by = user  # qui a consenti pour l'organisation (ADR 0006, 4.4)
+            fields.append('granted_by')
+        consent.save(update_fields=fields)
+        owner.audit(
+            'contact.consent_granted', 'CONTACT_CHANNEL_CHANGED', f"Canal {channel} activé ; texte {text_version}.",
         )
+
+
+def revoke_organization_phone_consents() -> int:
+    """Retire les consentements CALL et WHATSAPP de toutes les organisations (motif `moderation`), un audit par
+    consentement avec le contexte, sans numéro. Appelée quand `org_phone_channels_enabled` se ferme : un
+    consentement donné sous l'ancien régime ne se réactive pas tout seul à la réouverture. Renvoie le nombre retiré."""
+    from apps.common.contexts import CONTEXT_ORGANIZATION
+
+    from .models import ContactConsent, Organization
+
+    now = timezone.now()
+    count = 0
+    with transaction.atomic():
+        for consent in ContactConsent.objects.filter(
+            organization__isnull=False, channel__in=NUMBER_CHANNELS, is_granted=True,
+        ):
+            consent.is_granted = False
+            consent.revoked_at = now
+            consent.revoked_reason = ContactConsent.REVOKED_MODERATION
+            consent.save(update_fields=['is_granted', 'revoked_at', 'revoked_reason', 'updated_at'])
+            record_audit(
+                None, 'CONTACT_CHANNEL_CHANGED', target=Organization(pk=consent.organization_id),
+                details=f"Canal {consent.channel} retiré (motif : moderation ; canaux numéro fermés).",
+                context=(CONTEXT_ORGANIZATION, consent.organization_id),
+            )
+            count += 1
+    return count
 
 
 def get_allowed_channels(seller_ids: Iterable) -> dict:

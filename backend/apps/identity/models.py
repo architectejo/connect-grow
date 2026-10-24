@@ -471,6 +471,16 @@ class IdentitySettings(SingletonSettingsModel):
         verbose_name = "Paramètres d'identité"
         verbose_name_plural = "Paramètres d'identité"
 
+    def save(self, *args, **kwargs):
+        # Fermer l'interrupteur des canaux numéro des organisations retire leurs consentements (ADR 0006, 19.6).
+        with transaction.atomic():
+            was_open = type(self).objects.filter(pk=self.pk, org_phone_channels_enabled=True).exists()
+            super().save(*args, **kwargs)
+            if was_open and not self.org_phone_channels_enabled:
+                from .services import revoke_organization_phone_consents
+
+                revoke_organization_phone_consents()
+
     def __str__(self):
         return "Paramètres d'identité"
 

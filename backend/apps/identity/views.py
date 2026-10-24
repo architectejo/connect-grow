@@ -26,7 +26,7 @@ from .serializers import (
     UserSerializer,
 )
 from .services import (
-    ContactSettingsError, KycError, decide_kyc_document, get_contact_settings, get_contexts_for_user,
+    ActingContextMixin, ContactSettingsError, get_acting_context, KycError, decide_kyc_document, get_contact_settings, get_contexts_for_user,
     get_document_for_download,
     revoke_all_sessions, set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
 )
@@ -39,6 +39,10 @@ from .throttles import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Capacité exigée pour les réglages de contact : contexte personnel ou prestataire (toujours), organisation
+# (propriétaire ou administrateur seulement), ADR 0006, section 5.
+CONTACT_CAPABILITY = 'contact.manage_channels'
 
 # Échecs de connexion / de confirmation de reset : délai croissant par couple identifiant+IP.
 LOGIN_FAILURES = FailureLimiter('login')
@@ -414,11 +418,21 @@ class KycDocumentDownloadView(APIView):
         return response
 
 
-class _ContactSettingsBase(APIView):
-    """Réglages de contact du vendeur connecté (ADR 0005, 5.1). Le compte ne lit et n'écrit que les
-    siens (aucun identifiant dans l'URL). Numéros masqués ; jamais mis en cache."""
+class _ContactSettingsBase(ActingContextMixin, APIView):
+    """Réglages de contact du contexte actif (ADR 0005, 5.1 ; ADR 0006, 9.8). L'en-tête `X-Context` désigne le
+    contexte : compte (personnel ou prestataire) ou organisation (capacité `contact.manage_channels`, propriétaire
+    ou administrateur). Aucun identifiant dans l'URL. Numéros masqués ; jamais mis en cache."""
 
     permission_classes = [permissions.IsAuthenticated]
+
+    allow_restricted = False  # vrai pour un retrait de consentement (ADR 0005, C4)
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        # Contexte résolu et capacité contrôlée avant toute lecture ou écriture (refus : 403 `DENY_*`).
+        if self.allow_restricted:
+            get_acting_context(request, allow_restricted=True)  # mémorisé : `acting_context` le réutilise
+        self.authorize_capability(CONTACT_CAPABILITY)
 
     def finalize_response(self, request, response, *args, **kwargs):
         response = super().finalize_response(request, response, *args, **kwargs)
@@ -426,9 +440,8 @@ class _ContactSettingsBase(APIView):
         response['Pragma'] = 'no-cache'
         return response
 
-    @staticmethod
-    def current(user):
-        return Response(get_contact_settings(user))
+    def current(self, request):
+        return Response(get_contact_settings(request.user, self.acting_context))
 
     @staticmethod
     def body(request):
@@ -436,19 +449,31 @@ class _ContactSettingsBase(APIView):
 
     def run(self, action, *args, **kwargs):
         try:
-            return action(*args, **kwargs)
+            return action(*args, context=self.acting_context, **kwargs)
         except ContactSettingsError as exc:
+            if exc.code == 'channel_not_available':
+                # Contrat ADR 0006, 17.1 (Q-F3) : erreur de champ `channel` + code machine.
+                raise ChannelNotAvailable(exc.message)
             raise CodedAPIException(exc.message, exc.code, status_code=exc.status_code)
+
+
+class ChannelNotAvailable(serializers.ValidationError):
+    """400 `{"channel": ["..."], "code": "channel_not_available"}` : le canal demandé n'est pas proposable."""
+
+    def __init__(self, message):
+        super().__init__({'channel': [message]})
+        self.detail['detail'] = message
+        self.detail['code'] = 'channel_not_available'
 
 
 class ContactSettingsView(_ContactSettingsBase):
     def get(self, request):
-        return self.current(request.user)
+        return self.current(request)
 
 
 class ContactPhoneView(_ContactSettingsBase):
-    """PUT : définit le numéro de contact (saisi, ou numéro de connexion sur geste explicite) et
-    envoie un code SMS s'il n'est pas vérifié d'emblée. Limites des OTP + réglages."""
+    """PUT : définit le numéro de contact (saisi, ou numéro de connexion sur geste explicite, jamais pour une
+    organisation) et envoie un code SMS s'il n'est pas vérifié d'emblée. Limites des OTP + réglages."""
 
     throttle_classes = [ContactSettingsThrottle, OtpRequestIpThrottle, OtpRequestPhoneThrottle, OtpRequestPhoneDailyThrottle]
 
@@ -459,7 +484,7 @@ class ContactPhoneView(_ContactSettingsBase):
         if not isinstance(use_login, bool) or (phone is not None and not isinstance(phone, str)):
             raise CodedAPIException("Numéro invalide. Format attendu : +243XXXXXXXXX.", 'phone_invalid')
         self.run(set_contact_phone, request.user, phone=phone, use_login_phone=use_login)
-        return self.current(request.user)
+        return self.current(request)
 
 
 class ContactPhoneVerifyView(_ContactSettingsBase):
@@ -467,11 +492,17 @@ class ContactPhoneVerifyView(_ContactSettingsBase):
 
     def post(self, request):
         self.run(verify_contact_phone, request.user, self.body(request).get('code'))
-        return self.current(request.user)
+        return self.current(request)
 
 
 class ContactChannelView(_ContactSettingsBase):
     throttle_classes = [ContactSettingsThrottle]
+
+    @property
+    def allow_restricted(self):
+        """Retirer un canal reste permis même à un compte sanctionné (comme `org.leave`) ; l'activer ne l'est pas."""
+        data = getattr(self.request, 'data', None)
+        return hasattr(data, 'get') and data.get('enabled') is False
 
     def put(self, request, channel):
         data = self.body(request)
@@ -484,4 +515,4 @@ class ContactChannelView(_ContactSettingsBase):
         if text_version is not None and not isinstance(text_version, str):
             raise serializers.ValidationError({'text_version': ["Un texte est attendu."]})
         self.run(set_channel_consent, request.user, channel, enabled=enabled, text_version=text_version)
-        return self.current(request.user)
+        return self.current(request)

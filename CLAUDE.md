@@ -226,7 +226,7 @@ Ne jamais afficher, copier ni committer le contenu de `backend/.env`, `db.sqlite
 ## 9. Conventions
 
 - **Langue :** identifiants de code en anglais pour le nouveau code ; textes d'interface en français via i18n ; documentation, commentaires et messages de commit en français.
-- **Git :** une branche par tâche (`feat/L1-04-promotions`, `fix/…`, `chore/…`) ; commits au format `type(module): description` ; jamais de commit de secrets, de base ou de médias.
+- **Git :** une seule branche durable, `main`. On travaille directement dessus ; une branche temporaire (`feat/L1-04-promotions`, `fix/…`) n'est créée qu'en cas de vrai besoin, fusionnée dans `main` puis supprimée avec son dossier de travail dès la validation. Pas de branches `backend`, `frontend` ni d'intégration durables. Commits au format `type(module): description` ; jamais de commit de secrets, de base ou de médias.
 - **Migrations :** une migration par changement logique ; jamais de modification d'une migration déjà partagée sans accord (tant que le projet n'est pas en production, une réinitialisation peut être décidée par ADR).
 - **Tests :** chaque story livre ses tests ; chaque bug corrigé livre un test qui le reproduit.
 - **Traçabilité :** chaque story porte un ID du backlog et, si possible, l'ID du dossier client (`MKT-001`, `EVT-005`…).

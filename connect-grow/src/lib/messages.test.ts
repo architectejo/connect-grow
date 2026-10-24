@@ -65,6 +65,8 @@ describe("conversationBadge", () => {
 
   it("prestataire : badge Prestataire ; conversation personnelle ou ancienne : aucun badge", () => {
     expect(conversationBadge({ seller_context: { type: "PROVIDER", id: "p1" } }, personal)).toEqual({ kind: "PROVIDER" });
+    expect(conversationBadge({ seller_context: { type: "PROVIDER", id: "p1" } }, { type: "PROVIDER", id: "p1", name: "Marie" })).toBeNull();
+    expect(conversationBadge({ seller_context: { type: "PROVIDER", id: "p1" } }, { type: "PROVIDER", id: "p2", name: "Autre" })).toEqual({ kind: "PROVIDER" });
     expect(conversationBadge({ seller_context: { type: "USER", id: "u2" } }, personal)).toBeNull();
     expect(conversationBadge({ seller_context: null }, personal)).toBeNull();
     expect(conversationBadge({}, personal)).toBeNull();

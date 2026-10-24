@@ -33,6 +33,8 @@ export function conversationBadge(conversation: Pick<ConversationItem, "seller_c
   const seller = conversation.seller_context;
   if (!seller || seller.type === "USER") return null;
   if (seller.type === "ORGANIZATION" && active.type === "ORGANIZATION" && active.id === seller.id) return { kind: "team", name: active.name };
+  // Le prestataire lui-même n'a pas besoin d'être informé qu'il parle à un prestataire
+  if (seller.type === "PROVIDER" && active.type === "PROVIDER" && active.id === seller.id) return null;
   return { kind: seller.type };
 }
 

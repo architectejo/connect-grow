@@ -27,10 +27,11 @@ const Notifications = () => {
   const [filter, setFilter] = useState<"all" | "unread">("all");
   const [contextFilter, setContextFilter] = useState<NotificationContextFilter>("all");
 
-  const unread = notifications.filter((n) => !n.is_read).length;
   const contextOptions = contextFilterOptions(notifications);
   // Le profil filtré peut disparaître de la liste (notifications purgées) : retour à « tous les profils »
   const activeContextFilter = contextOptions.some((option) => option.value === contextFilter) ? contextFilter : "all";
+  // Compteur « non lues » du profil filtré, cohérent avec la liste affichée
+  const unread = filterNotifications(notifications, { unreadOnly: true, context: activeContextFilter }).length;
   const visible = filterNotifications(notifications, { unreadOnly: filter === "unread", context: activeContextFilter });
   const groups = visible.reduce<{ label: string; items: AppNotification[] }[]>((acc, notification) => {
     const label = t(`notifications.group.${groupKey(new Date(notification.created_at))}`);

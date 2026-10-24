@@ -41,6 +41,16 @@ describe("Notifications : profils concernés (T6)", () => {
     expect(screen.getByText("Bienvenue")).toBeInTheDocument();
   });
 
+  it("le compteur « non lues » suit le filtre de profil", async () => {
+    vi.spyOn(apiClient, "get").mockResolvedValue({ data: identity.notifications_list });
+    renderPage();
+    await screen.findByText("Nouveau message");
+    expect(screen.getByText("2 non lues")).toBeInTheDocument();
+    const filter = screen.getByLabelText("Filtrer par profil");
+    fireEvent.change(filter, { target: { value: "personal" } });
+    expect(screen.getByText("1 non lue")).toBeInTheDocument();
+  });
+
   it("sans notification d'équipe, le filtre par profil n'est pas proposé", async () => {
     vi.spyOn(apiClient, "get").mockResolvedValue({ data: [identity.notifications_list.find((n) => !n.context)] });
     renderPage();

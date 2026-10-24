@@ -74,7 +74,7 @@ const Messages = () => {
             queryClient.setQueryData<ConversationItem[]>(messageKeys.conversations, (previous) =>
                 previous?.map((c) =>
                     c.id === activeConv.id
-                        ? { ...c, last_message: { content: newMessage, created_at: new Date(), is_read: false, sender_id: res.data.sender ?? undefined } }
+                        ? { ...c, last_message: { content: newMessage, created_at: res.data.created_at, is_read: false, sender_id: res.data.sender ?? undefined } }
                         : c,
                 ),
             );
@@ -112,7 +112,7 @@ const Messages = () => {
     if (isLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center">
-                <Loader2 className="animate-spin text-primary h-10 w-10" />
+                <Loader2 role="status" aria-label={t("states.loading")} className="animate-spin text-primary h-10 w-10" />
             </div>
         );
     }
@@ -286,7 +286,7 @@ const Messages = () => {
                                                             {msg.content}
                                                         </div>
                                                         <span className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
-                                                            <Clock size={10} /> {formatClockTime(msg.created_at)}
+                                                            <Clock size={10} aria-hidden /> {formatClockTime(msg.created_at)}
                                                         </span>
                                                     </div>
                                                 </div>

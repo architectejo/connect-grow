@@ -3,11 +3,10 @@ import apiClient, { unwrapList } from "@/api/client";
 import type { ContextType, Uuid } from "@/api/types";
 import { httpStatus, isRateLimited, retryAfterSeconds, shouldRetryQuery } from "@/lib/errors";
 
-/** Profil vendeur d'une conversation (ADR 0006 §9.8). `name` n'est pas renvoyé par la liste : le nom affiché est `other_participant`. */
+/** Profil vendeur d'une conversation (ADR 0006 §9.8). Le nom affiché est celui de `other_participant`. */
 export interface ConversationSellerContext {
   type: ContextType;
   id: Uuid;
-  name?: string;
 }
 
 export interface ConversationItem {

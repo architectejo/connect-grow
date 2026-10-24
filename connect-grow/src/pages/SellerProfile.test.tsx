@@ -105,6 +105,13 @@ describe("Profil public d'un vendeur (E9)", () => {
     expect(screen.getByRole("link", { name: "Voir le marketplace" })).toHaveAttribute("href", "/marketplace");
   });
 
+  it("404 de sellers/user/<id>/ (utilisateur sans offre active) : état « introuvable », pas une erreur réseau", async () => {
+    profileError = { response: { status: 404, data: identity.seller_profile_not_found_error.body } };
+    renderAt(`/seller/user/${ORG_ID}`);
+    expect(await screen.findByText("Ce vendeur n'existe pas ou n'est plus visible.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Réessayer" })).not.toBeInTheDocument();
+  });
+
   it("type inconnu dans l'adresse : même message, aucune requête", () => {
     renderAt(`/seller/inconnu/${ORG_ID}`);
     expect(screen.getByText("Ce vendeur n'existe pas ou n'est plus visible.")).toBeInTheDocument();

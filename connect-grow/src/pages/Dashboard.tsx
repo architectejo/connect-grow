@@ -1,15 +1,19 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, BadgeCheck, CalendarDays, Eye, Package, Plus, Star, type LucideIcon } from "lucide-react";
+import { ArrowRight, CalendarDays, Eye, Info, Package, Plus, ShieldCheck, Star, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AccountShell } from "@/components/layout/AccountShell";
+import { LegacyOrgNotice } from "@/components/profiles/LegacyOrgNotice";
+import { ScopeLine } from "@/components/profiles/ScopeLine";
 import { MyPostsList } from "@/components/dashboard/MyPostsList";
 import { ReceivedRevealsSection } from "@/components/dashboard/ReceivedRevealsSection";
 import { ViewsChart } from "@/components/dashboard/ViewsChart";
+import { useActiveContext, useCan } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { useDashboardStats, useKycDocuments } from "@/hooks/use-account";
+import { useDashboardStats } from "@/hooks/use-account";
 import { useMyPosts } from "@/hooks/use-marketplace";
+import { useOrganization } from "@/hooks/use-organizations";
 import { formatCount, formatRating } from "@/lib/format";
 
 interface StatTileProps {
@@ -39,27 +43,29 @@ function StatTile({ icon: Icon, label, value, hint, isLoading }: StatTileProps) 
   );
 }
 
-/** Bandeau d'invitation à la vérification pour les comptes entreprise pas encore vérifiés. */
-function VerificationBanner() {
-  const { data: documents = [] } = useKycDocuments();
-  const pending = documents.some((doc) => doc.status === "EN_ATTENTE");
+/**
+ * Rappel de la vérification d'une organisation (profil actif). Le texte décrit des pièces à envoyer, jamais un
+ * « badge » à obtenir : la vérification dit ce qui a été examiné, elle ne s'achète pas et ne garantit rien (règle 3).
+ */
+function VerificationBanner({ organizationId }: { organizationId: string }) {
+  const { t } = useTranslation();
+  const canSubmit = useCan("org.verification_submit");
+  const { data: org } = useOrganization(organizationId);
+  if (!org || !canSubmit || org.verification.summary.complete || org.verification.required.length === 0) return null;
+  const pending = org.verification.required.some((doc) => doc.state === "EN_ATTENTE");
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-success/30 bg-success/5 p-5 sm:flex-row sm:items-center">
-      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-success/15 text-success">
-        <BadgeCheck className="h-6 w-6" aria-hidden />
+    <div className="flex flex-col gap-4 rounded-2xl border bg-card p-5 shadow-soft sm:flex-row sm:items-center">
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+        <ShieldCheck className="h-6 w-6" aria-hidden />
       </span>
       <div className="flex-1">
-        <p className="font-bold">{pending ? "Vérification en cours" : "Obtenez le badge Vérifié"}</p>
-        <p className="text-sm text-muted-foreground">
-          {pending
-            ? "Nos modérateurs examinent vos documents. Vous serez notifié de leur décision."
-            : "Les acheteurs font davantage confiance aux boutiques vérifiées. Envoyez votre RCCM et la pièce d'identité du gérant."}
-        </p>
+        <p className="font-bold">{t(pending ? "dashboard.verificationPendingTitle" : "dashboard.verificationTodoTitle")}</p>
+        <p className="text-sm text-muted-foreground">{t(pending ? "dashboard.verificationPendingBody" : "dashboard.verificationTodoBody")}</p>
       </div>
       <Button asChild variant="outline" className="shrink-0">
-        <Link to="/verification">
-          {pending ? "Suivre ma demande" : "Commencer"} <ArrowRight aria-hidden />
+        <Link to={`/organizations/${organizationId}/verification`}>
+          {t(pending ? "dashboard.verificationFollow" : "dashboard.verificationStart")} <ArrowRight aria-hidden />
         </Link>
       </Button>
     </div>
@@ -69,12 +75,14 @@ function VerificationBanner() {
 const Dashboard = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const { active } = useActiveContext();
+  const canPublish = useCan("offer.publish");
+  const canViewRequesters = useCan("contact.view_requesters");
   const stats = useDashboardStats();
   const myPosts = useMyPosts();
   const summary = stats.data?.summary;
 
   const firstName = user?.full_name?.split(" ")[0];
-  const needsVerification = user?.user_type === "ENTREPRISE" && !user.business_profile?.is_verified;
   const reviewCount = summary?.review_count ?? 0;
   // Moyenne des notes vendeur visibles ; privée au vendeur, donc sans seuil d'affichage (null sans avis)
   const avgRating = summary?.avg_rating ?? null;
@@ -85,15 +93,19 @@ const Dashboard = () => {
         <div>
           <p className="text-sm font-medium text-muted-foreground">Tableau de bord</p>
           <h1 className="mt-1 text-2xl font-extrabold md:text-3xl">Bonjour{firstName ? `, ${firstName}` : ""} 👋</h1>
+          <ScopeLine />
         </div>
-        <Button asChild className="shadow-glow">
-          <Link to="/create-post">
-            <Plus aria-hidden /> Nouvelle annonce
-          </Link>
-        </Button>
+        {canPublish && (
+          <Button asChild className="shadow-glow">
+            <Link to="/create-post">
+              <Plus aria-hidden /> Nouvelle annonce
+            </Link>
+          </Button>
+        )}
       </header>
 
-      {needsVerification && <VerificationBanner />}
+      {active.type === "USER" && <LegacyOrgNotice />}
+      {active.type === "ORGANIZATION" && <VerificationBanner organizationId={active.id} />}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
         <StatTile icon={Eye} label="Vues totales" value={formatCount(summary?.total_views)} isLoading={stats.isLoading} />
@@ -117,7 +129,14 @@ const Dashboard = () => {
         onRetry={() => myPosts.refetch()}
       />
 
-      <ReceivedRevealsSection />
+      {canViewRequesters ? (
+        <ReceivedRevealsSection />
+      ) : (
+        // Analyste : les compteurs du tableau de bord suffisent, la liste nominative lui est refusée par le serveur
+        <p className="flex items-start gap-2 rounded-xl bg-muted/60 p-4 text-sm text-muted-foreground">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {t("scope.requestersHidden")}
+        </p>
+      )}
     </AccountShell>
   );
 };

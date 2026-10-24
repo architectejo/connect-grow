@@ -1,17 +1,19 @@
 import { lazy, Suspense, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index.tsx";
 import { ThemeProvider } from "./components/theme-provider";
 import { AuthProvider } from "./contexts/AuthContext";
+import { ActiveContextProvider, useActiveContext } from "./contexts/ActiveContextContext";
 import { BottomNav } from "./components/layout/BottomNav";
 import { OfflineBanner } from "./components/common/OfflineBanner";
 import { PwaUpdater } from "./components/layout/PwaUpdater";
 import { RouteFallback } from "./components/layout/RouteFallback";
 import { ScrollManager } from "./components/layout/ScrollManager";
 import { shouldRetryQuery } from "./lib/errors";
+import { sellerPath } from "./lib/post";
 
 // Chaque page est un fichier JavaScript séparé, téléchargé à la première visite (réseau 3G, CDC 4.1).
 // Seule l'accueil, première page vue, reste dans le paquet initial.
@@ -29,13 +31,30 @@ const Trash = lazy(() => import("./pages/Trash.tsx"));
 const Favorites = lazy(() => import("./pages/Favorites.tsx"));
 const Notifications = lazy(() => import("./pages/Notifications.tsx"));
 const Settings = lazy(() => import("./pages/Settings.tsx"));
-const Verification = lazy(() => import("./pages/Verification.tsx"));
+const Profiles = lazy(() => import("./pages/Profiles.tsx"));
+const OrganizationNew = lazy(() => import("./pages/OrganizationNew.tsx"));
+const OrganizationHome = lazy(() => import("./pages/OrganizationHome.tsx"));
+const OrganizationEdit = lazy(() => import("./pages/OrganizationEdit.tsx"));
+const OrganizationTeam = lazy(() => import("./pages/OrganizationTeam.tsx"));
+const OrganizationVerification = lazy(() => import("./pages/OrganizationVerification.tsx"));
 const Messages = lazy(() => import("./pages/Messages.tsx"));
 const Businesses = lazy(() => import("./pages/Businesses.tsx"));
 const SellerProfile = lazy(() => import("./pages/SellerProfile.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 // Galerie des composants, disponible uniquement en développement
 const DesignSystem = import.meta.env.DEV ? lazy(() => import("./pages/DesignSystem.tsx")) : null;
+
+/** Ancien lien `/u/:id` : un identifiant de compte, donc un profil personnel. */
+const LegacySellerRedirect = () => {
+  const { id } = useParams();
+  return <Navigate to={sellerPath("USER", id ?? "")} replace />;
+};
+
+/** Ancienne page `/verification` : la vérification appartient désormais à une organisation. */
+const VerificationRedirect = () => {
+  const { active } = useActiveContext();
+  return <Navigate to={active.type === "ORGANIZATION" ? `/organizations/${active.id}/verification` : "/profiles"} replace />;
+};
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -81,6 +100,7 @@ const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <ActiveContextProvider>
         <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
           <TooltipProvider>
             <Toaster />
@@ -105,14 +125,21 @@ const App = () => {
                   <Route path="/marketplace" element={<Marketplace />} />
                   <Route path="/businesses" element={<Businesses />} />
                   <Route path="/post/:id" element={<PostDetail />} />
-                  <Route path="/u/:id" element={<SellerProfile />} />
+                  <Route path="/seller/:contextType/:id" element={<SellerProfile />} />
+                  <Route path="/u/:id" element={<LegacySellerRedirect />} />
                   <Route path="/create-post" element={<PostEditor />} />
                   <Route path="/edit-post/:id" element={<PostEditor />} />
                   <Route path="/trash" element={<Trash />} />
                   <Route path="/favorites" element={<Favorites />} />
                   <Route path="/notifications" element={<Notifications />} />
                   <Route path="/settings" element={<Settings />} />
-                  <Route path="/verification" element={<Verification />} />
+                  <Route path="/verification" element={<VerificationRedirect />} />
+                  <Route path="/profiles" element={<Profiles />} />
+                  <Route path="/organizations/new" element={<OrganizationNew />} />
+                  <Route path="/organizations/:id" element={<OrganizationHome />} />
+                  <Route path="/organizations/:id/edit" element={<OrganizationEdit />} />
+                  <Route path="/organizations/:id/team" element={<OrganizationTeam />} />
+                  <Route path="/organizations/:id/verification" element={<OrganizationVerification />} />
                   <Route path="/profile" element={<Navigate to="/settings" replace />} />
                   <Route path="/messages" element={<Messages />} />
                   {DesignSystem && <Route path="/design" element={<DesignSystem />} />}
@@ -123,6 +150,7 @@ const App = () => {
             </BrowserRouter>
           </TooltipProvider>
         </ThemeProvider>
+        </ActiveContextProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

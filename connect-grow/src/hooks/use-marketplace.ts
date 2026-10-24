@@ -2,7 +2,19 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import apiClient, { unwrapList } from "@/api/client";
-import type { Category, City, Paginated, Post, PostFilters, PublicBusiness, Uuid, ViewStatPoint } from "@/api/types";
+import type {
+  Category,
+  City,
+  OrganizationFilters,
+  Paginated,
+  Post,
+  PostFilters,
+  PublicOrganization,
+  SellerContextType,
+  SellerProfileData,
+  Uuid,
+  ViewStatPoint,
+} from "@/api/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { loginPath } from "@/lib/auth-paths";
 import { apiErrorMessage, shouldRetryQuery } from "@/lib/errors";
@@ -16,7 +28,8 @@ export const marketplaceKeys = {
   post: (id: Uuid) => [...marketplaceKeys.all, "post", id] as const,
   myPosts: () => [...marketplaceKeys.all, "my-posts"] as const,
   postStats: (id: Uuid) => [...marketplaceKeys.all, "post-stats", id] as const,
-  businesses: (search: string, verifiedOnly = false) => [...marketplaceKeys.all, "businesses", search, verifiedOnly] as const,
+  organizations: (filters: OrganizationFilters) => [...marketplaceKeys.all, "organizations", filters] as const,
+  seller: (type: SellerContextType, id: Uuid) => [...marketplaceKeys.all, "seller", type, id] as const,
 };
 
 // Les référentiels changent rarement : on les garde longtemps en cache (sobriété en données)
@@ -81,24 +94,40 @@ export function usePostStats(id: Uuid | undefined, enabled: boolean) {
 }
 
 /**
- * Paramètres de GET accounts/businesses/. `is_verified=true` est un filtre SERVEUR (pas de filtrage local
- * des pages chargées). NB : tant que le backend n'a pas livré ce filtre (L0-19), il ignore ce paramètre
- * et renvoie toutes les entreprises ; le front n'a rien à changer quand il sera pris en compte.
+ * Paramètres de GET accounts/organizations/ (ADR 0006 §9.2). Tous les filtres sont des filtres SERVEUR ; le tri
+ * est alphabétique et ne dépend d'aucune mention de vérification, ni d'une promotion (règles 3 et 5).
  */
-export function businessesRequestParams(search: string, verifiedOnly: boolean, page: number) {
-  return cleanParams({ search, is_verified: verifiedOnly ? "true" : undefined, page });
+export function organizationsRequestParams(filters: OrganizationFilters, page: number) {
+  return cleanParams({
+    search: filters.search,
+    org_type: filters.org_type,
+    claim: filters.claim,
+    fully_verified: filters.fully_verified ? "true" : undefined,
+    page,
+  });
 }
 
-/** Entreprises (fiche publique restreinte), paginées par pages de 20 : « Voir plus » charge la suivante. */
-export function useBusinesses(search: string, verifiedOnly = false) {
+/** Annuaire public des organisations, paginé : « Voir plus » charge la page suivante. */
+export function useOrganizationDirectory(filters: OrganizationFilters) {
   return useInfiniteQuery({
-    queryKey: marketplaceKeys.businesses(search, verifiedOnly),
+    queryKey: marketplaceKeys.organizations(filters),
     queryFn: async ({ pageParam }) =>
-      (await apiClient.get<Paginated<PublicBusiness>>("accounts/businesses/", { params: businessesRequestParams(search, verifiedOnly, pageParam) })).data,
+      (await apiClient.get<Paginated<PublicOrganization>>("accounts/organizations/", { params: organizationsRequestParams(filters, pageParam) })).data,
     initialPageParam: 1,
     getNextPageParam: (last, _pages, lastPage) => (last.next ? lastPage + 1 : undefined),
-    select: (data) => ({ businesses: data.pages.flatMap((page) => page.results), count: data.pages[0]?.count ?? 0 }),
+    select: (data) => ({ organizations: data.pages.flatMap((page) => page.results), count: data.pages[0]?.count ?? 0 }),
     placeholderData: keepPreviousData,
+    retry: shouldRetryQuery,
+  });
+}
+
+/** Profil public minimal d'un vendeur (ADR 0006 §9.7). 404 : vendeur inconnu ou non public. */
+export function useSellerProfile(type: SellerContextType | undefined, id: Uuid | undefined) {
+  return useQuery({
+    queryKey: marketplaceKeys.seller(type ?? "USER", id ?? ""),
+    queryFn: async () => (await apiClient.get<SellerProfileData>(`marketplace/sellers/${type?.toLowerCase()}/${id}/`)).data,
+    enabled: !!type && !!id,
+    retry: shouldRetryQuery,
   });
 }
 

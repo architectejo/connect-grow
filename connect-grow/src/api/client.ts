@@ -2,6 +2,9 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { API_URL } from "@/config/env";
 import { httpStatus, retryAfterSeconds } from "@/lib/errors";
 import { AUTH_EXPIRED_EVENT, tokenStorage } from "@/lib/tokens";
+import { CONTEXT_DENIED_EVENT, activeContextHeader, type ContextDeniedDetail } from "@/lib/active-context";
+import { CONTEXT_HEADER, isContextScopedRequest } from "@/lib/context-header";
+import { apiErrorCode } from "@/lib/errors";
 
 // Endpoints qui ne doivent jamais recevoir de jeton : un jeton expiré y provoquerait un 401.
 const PUBLIC_AUTH_ENDPOINTS = ["accounts/login/", "accounts/register/", "accounts/token/refresh/"];
@@ -21,6 +24,12 @@ apiClient.interceptors.request.use((config) => {
   const token = tokenStorage.getAccess();
   if (token && !isPublicAuthEndpoint(config.url)) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // Profil actif (ADR 0006 §6.4) : l'en-tête n'accompagne que les appels « de mon profil » de la liste blanche,
+  // et seulement hors profil personnel. Jamais pour contact, avis, favoris, signalement : ils sont toujours personnels.
+  const contextHeader = activeContextHeader();
+  if (contextHeader && token && isContextScopedRequest(config.method, config.url, config.params)) {
+    config.headers[CONTEXT_HEADER] = contextHeader;
   }
   // Avec l'en-tête JSON par défaut, axios convertirait un FormData en JSON (photos perdues).
   // En multipart, le navigateur ajoute lui-même la délimitation (boundary).
@@ -88,6 +97,12 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const original = error.config as RetriableConfig | undefined;
+    // Refus d'autorisation : le fournisseur du profil actif décide s'il faut recharger `contexts/` (règle 9.1).
+    const denyCode = error.response?.status === 403 ? apiErrorCode(error) : undefined;
+    if (denyCode?.startsWith("DENY_") && typeof window !== "undefined") {
+      const detail: ContextDeniedDetail = { code: denyCode, sentContext: !!original?.headers?.[CONTEXT_HEADER] };
+      window.dispatchEvent(new CustomEvent<ContextDeniedDetail>(CONTEXT_DENIED_EVENT, { detail }));
+    }
     if (error.response?.status !== 401 || !original || original._retry || isPublicAuthEndpoint(original.url) || isLogoutEndpoint(original.url)) {
       return Promise.reject(error);
     }

@@ -17,16 +17,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AppShell } from "@/components/layout/AppShell";
 import { RequireAuth } from "@/components/layout/AccountShell";
 import { CommuneSelect } from "@/components/common/CommuneSelect";
-import { ErrorState, PostCard } from "@/components/common";
+import { AccessDenied, ErrorState, PostCard } from "@/components/common";
 import { errorProps, Field, FormAlert } from "@/components/auth/FormFields";
 import { MAX_PHOTOS, PhotoPicker, photoSrc, type EditorPhoto } from "@/components/post-editor/PhotoPicker";
+import { useTranslation } from "react-i18next";
+import { useFeatures } from "@/hooks/use-features";
+import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { marketplaceKeys, useCategories, useCities, usePost } from "@/hooks/use-marketplace";
 import { accountKeys } from "@/hooks/use-account";
 import { categoryIcon } from "@/lib/category-icons";
 import { mediaUrl } from "@/lib/media";
+import { offerAccess } from "@/lib/post";
 import { clearDraft, readDraft, writeDraft } from "@/lib/draft";
+import { describeApiError, getApiErrorCode } from "@/lib/api-errors";
 import { apiErrorMessage } from "@/lib/errors";
+import { contextTypeLabel } from "@/components/layout/ContextSwitcher";
 import { parseApiErrors } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
@@ -162,6 +168,10 @@ function PostEditorForm({ post }: { post?: Post }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { active } = useActiveContext();
+  // Un brouillon appartient au compte ET au profil sous lequel il a été écrit : il n'est jamais proposé (ni publié)
+  // sous un autre profil que celui qui est affiché
+  const draftOwner = user?.id ? `${user.id}:${active.type}:${active.id}` : undefined;
   const { data: categories = [] } = useCategories();
   const { data: cities = [] } = useCities();
 
@@ -174,6 +184,8 @@ function PostEditorForm({ post }: { post?: Post }) {
     return [...main, ...gallery];
   }, [post]);
 
+  const { t } = useTranslation();
+  const { exchangeEnabled } = useFeatures();
   const [step, setStep] = useState(0);
   const [maxReached, setMaxReached] = useState(isEdit ? steps.length - 1 : 0);
   const [photos, setPhotos] = useState<EditorPhoto[]>(originalPhotos);
@@ -208,7 +220,7 @@ function PostEditorForm({ post }: { post?: Post }) {
   // Brouillon (création uniquement) : une coupure réseau ou un onglet fermé ne fait pas tout perdre
   useEffect(() => {
     if (isEdit) return;
-    const draft = readDraft<Partial<FormValues>>(user?.id);
+    const draft = readDraft<Partial<FormValues>>(draftOwner);
     if (draft && (draft.title || draft.description)) {
       form.reset({ ...defaultValues, ...draft });
       toast.info("Brouillon restauré", {
@@ -216,16 +228,16 @@ function PostEditorForm({ post }: { post?: Post }) {
         action: { label: "Effacer", onClick: () => { clearDraft(); form.reset(defaultValues); } },
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restauration quand l'utilisateur est connu (une fois)
-  }, [user?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restauration quand le propriétaire du brouillon est connu (une fois)
+  }, [draftOwner]);
 
   useEffect(() => {
     if (isEdit) return;
     const subscription = watch((draft) => {
-      writeDraft(user?.id, draft);
+      writeDraft(draftOwner, draft);
     });
     return () => subscription.unsubscribe();
-  }, [watch, isEdit, user?.id]);
+  }, [watch, isEdit, draftOwner]);
 
   const goTo = (index: number) => {
     setStep(index);
@@ -262,7 +274,8 @@ function PostEditorForm({ post }: { post?: Post }) {
     data.append("price", String(Number(v.price.replace(",", "."))));
     data.append("currency", v.currency);
     data.append("is_price_negotiable", String(v.is_price_negotiable));
-    data.append("is_exchangeable", String(v.is_exchangeable));
+    // Troc éteint : le serveur ignore le champ, on ne l'envoie pas
+    if (exchangeEnabled) data.append("is_exchangeable", String(v.is_exchangeable));
     data.append("commune", v.commune);
     if (v.post_type === "PRODUIT") {
       data.append("condition", v.condition);
@@ -322,7 +335,25 @@ function PostEditorForm({ post }: { post?: Post }) {
       else toast.success(isEdit ? "Annonce mise à jour." : "Votre annonce est en ligne !");
       navigate(`/post/${saved.id}`, { replace: true });
     } catch (error) {
+      // Refus d'autorisation : message dédié, jamais d'écriture sous un autre profil (le brouillon reste dans le formulaire)
+      const code = getApiErrorCode(error);
+      if (code) {
+        setGeneralError(
+          code === "DENY_OBJECT_STATE" && active.type === "PROVIDER"
+            ? t("scope.providerArchived")
+            : code === "DENY_RELATION" && isEdit
+              ? t("scope.notMember")
+              : describeApiError(error, { inOrganization: active.type === "ORGANIZATION" }),
+        );
+        return;
+      }
       const { fields, general } = parseApiErrors(error);
+      if ("seller_context_id" in fields || "seller" in fields) {
+        // Erreur de programmation (le formulaire n'envoie jamais de vendeur) : trace en développement, message neutre
+        if (import.meta.env.DEV) console.error("L'API a refusé un vendeur dans le corps de l'offre (seller_not_settable).", fields);
+        setGeneralError(t("errors.code.seller_not_settable"));
+        return;
+      }
       const entries = Object.entries(fields);
       entries.forEach(([field, message]) => {
         if (field in defaultValues) setError(field as FieldPath<FormValues>, { message });
@@ -338,12 +369,14 @@ function PostEditorForm({ post }: { post?: Post }) {
   const communeName = cities.flatMap((c) => c.communes).find((c) => c.id === values.commune)?.name;
   const previewPost: Post = {
     id: post?.id ?? "",
-    seller: {
-      id: user?.id ?? "",
-      full_name: user?.full_name ?? "",
-      photo: user?.photo,
-      user_type: user?.user_type ?? "PARTICULIER",
-      business_profile: user?.business_profile,
+    seller: post?.seller ?? {
+      context_type: active.type,
+      context_id: active.id,
+      display_name: active.name,
+      photo: active.photo,
+      org_type: active.orgType,
+      verified_claims: [],
+      verification_summary: { complete: false, label: null },
     },
     category: values.category,
     category_name: categories.find((c) => c.id === values.category)?.name,
@@ -356,7 +389,7 @@ function PostEditorForm({ post }: { post?: Post }) {
     currency: values.currency as Currency,
     condition: values.post_type === "PRODUIT" && values.condition ? values.condition : null,
     is_price_negotiable: values.is_price_negotiable,
-    is_exchangeable: values.is_exchangeable,
+    ...(exchangeEnabled ? { is_exchangeable: values.is_exchangeable } : {}),
     main_image: photos[0] ? photoSrc(photos[0]) : null,
     views_count: post?.views_count ?? 0,
     likes_count: 0,
@@ -377,6 +410,21 @@ function PostEditorForm({ post }: { post?: Post }) {
           <Link to={isEdit ? `/post/${post!.id}` : "/dashboard"}>Annuler</Link>
         </Button>
       </div>
+
+      {/* Profil sous lequel l'offre est publiée : non modifiable ici, le serveur le déduit de X-Context ou de l'offre */}
+      <p className="-mt-3 mb-5 text-sm text-muted-foreground">
+        {isEdit
+          ? t("scope.offerOf", { name: post!.seller.display_name })
+          : t("scope.publishAs", { name: active.name, type: contextTypeLabel(t, active) })}
+        {!isEdit && (
+          <>
+            {" "}
+            <Link to="/profiles" className="font-semibold text-primary underline-offset-2 hover:underline">
+              {t("scope.change")}
+            </Link>
+          </>
+        )}
+      </p>
 
       <StepIndicator current={step} onSelect={(index) => index <= maxReached && goTo(index)} maxReached={maxReached} />
 
@@ -575,7 +623,9 @@ function PostEditorForm({ post }: { post?: Post }) {
             <div className="divide-y rounded-xl border">
               {[
                 { name: "is_price_negotiable" as const, label: "Prix discutable", hint: "Les acheteurs peuvent vous faire une offre." },
-                { name: "is_exchangeable" as const, label: "Ouvert au troc", hint: "Vous acceptez d'échanger contre un autre article." },
+                ...(exchangeEnabled
+                  ? [{ name: "is_exchangeable" as const, label: t("exchange.editorLabel"), hint: t("exchange.editorHint") }]
+                  : []),
               ].map(({ name, label, hint }) => (
                 <div key={name} className="flex items-center justify-between gap-4 p-4">
                   <Label htmlFor={name} className="cursor-pointer">
@@ -626,7 +676,7 @@ function PostEditorForm({ post }: { post?: Post }) {
                   ["Type", values.post_type === "SERVICE" ? "Service" : "Produit"],
                   ["Commune", communeName ?? "—"],
                   ["Prix discutable", values.is_price_negotiable ? "Oui" : "Non"],
-                  ["Troc", values.is_exchangeable ? "Accepté" : "Non"],
+                  ...(exchangeEnabled ? [[t("exchange.summaryLabel"), values.is_exchangeable ? t("exchange.accepted") : t("exchange.no")]] : []),
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-xl bg-muted/60 p-3">
                     <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -676,13 +726,21 @@ function PostEditorForm({ post }: { post?: Post }) {
 const PostEditor = () => {
   const { id } = useParams();
   const { user } = useAuth();
+  const { active, contexts, isLoading: contextsLoading } = useActiveContext();
+  const { t } = useTranslation();
   const { data: post, isLoading, isError, refetch } = usePost(id);
 
   let content: React.ReactNode;
-  if (!id) content = <PostEditorForm />;
-  else if (isLoading) content = <div className="flex justify-center py-24"><Loader2 className="h-8 w-8 animate-spin text-primary" aria-label="Chargement" /></div>;
+  if (!id && active.confirmed && !active.capabilities.includes("offer.publish")) {
+    // Analyste : le masquage évite un formulaire voué au refus (le serveur répondrait DENY_PERMISSION)
+    content = <AccessDenied description={t("errors.deny.PERMISSION.org")} />;
+  } else if (!id) content = <PostEditorForm />;
+  else if (isLoading || contextsLoading) content = <div className="flex justify-center py-24"><Loader2 className="h-8 w-8 animate-spin text-primary" aria-label="Chargement" /></div>;
   else if (isError || !post) content = <ErrorState onRetry={() => refetch()} />;
-  else if (user && post.seller?.id !== user.id) content = <Navigate to={`/post/${post.id}`} replace />;
+  else if (user && !offerAccess(post, contexts).canEdit) {
+    // Les profils du compte disent s'il peut modifier cette offre ; le serveur reste le juge (DENY_*)
+    content = <Navigate to={`/post/${post.id}`} replace />;
+  }
   else content = <PostEditorForm key={post.id} post={post} />;
 
   return (

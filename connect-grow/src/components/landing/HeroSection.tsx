@@ -7,7 +7,7 @@ import { useCategories } from "@/hooks/use-marketplace";
 
 const promises = [
   { icon: Star, label: "Vendeurs notés par de vrais acheteurs" },
-  { icon: BadgeCheck, label: "Boutiques vérifiées" },
+  { icon: BadgeCheck, label: "Mentions de vérification précises" },
   { icon: Sparkles, label: "Publication gratuite" },
 ];
 
@@ -25,7 +25,7 @@ const ReviewIllustration = () => (
           <p className="text-xs text-muted-foreground">Gombe, Kinshasa</p>
         </div>
         <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-1 text-[11px] font-semibold text-success ring-1 ring-inset ring-success/25">
-          <BadgeCheck className="h-3 w-3" /> Vérifié
+          <BadgeCheck className="h-3 w-3" /> RCCM vérifié
         </span>
       </div>
       <div className="mt-4 flex items-end justify-between rounded-xl bg-muted p-3">

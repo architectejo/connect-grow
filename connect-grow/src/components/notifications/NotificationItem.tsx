@@ -1,5 +1,6 @@
 import { Bell, MessageSquare, Repeat, ShieldCheck, Star, UserRoundSearch, type LucideIcon } from "lucide-react";
 import type { AppNotification, NotificationType } from "@/api/types";
+import { Badge } from "@/components/ui/badge";
 import { formatRelativeDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +43,12 @@ export function NotificationItem({ notification, onOpen, compact }: Notification
           {notification.title}
         </span>
         <span className={cn("block text-sm text-muted-foreground", compact ? "line-clamp-1" : "line-clamp-2")}>{notification.content}</span>
+        {notification.context?.name && (
+          // Étiquette du profil concerné : le clic ouvre la cible sans changer le profil actif
+          <Badge variant="outline" className="mt-1 max-w-full">
+            <span className="truncate">{notification.context.name}</span>
+          </Badge>
+        )}
         <time dateTime={notification.created_at} className="mt-1 block text-xs text-muted-foreground">
           {formatRelativeDate(notification.created_at)}
         </time>

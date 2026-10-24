@@ -1,32 +1,51 @@
-import { useMemo } from "react";
-import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
-import { Eye, Package, Share2, Store } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Package, Share2, SearchX } from "lucide-react";
+import type { SellerContextType } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppShell } from "@/components/layout/AppShell";
-import { EmptyState, ErrorState, PostCard, PostGrid, PostGridSkeleton, RatingBlock, StatusBadge, UserAvatar } from "@/components/common";
+import {
+  EmptyState,
+  ErrorState,
+  PostCard,
+  PostGrid,
+  PostGridSkeleton,
+  RatingBlock,
+  SellerTypeBadge,
+  UserAvatar,
+  VerifiedClaims,
+} from "@/components/common";
+import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { usePosts, useToggleFavorite } from "@/hooks/use-marketplace";
+import { usePosts, useSellerProfile, useToggleFavorite } from "@/hooks/use-marketplace";
 import { shareLink } from "@/lib/contact";
-import { formatCount, formatMonthYear } from "@/lib/format";
-import { isSellerVerified, sellerDisplayName } from "@/lib/post";
+import { httpStatus } from "@/lib/errors";
+import { formatMonthYear } from "@/lib/format";
+
+const TYPES: Record<string, SellerContextType> = { user: "USER", provider: "PROVIDER", organization: "ORGANIZATION" };
 
 /**
- * Vitrine publique d'un vendeur ou d'une boutique (CDC 3.1 : profil public).
- * L'API n'expose pas encore de profil utilisateur seul : l'identité vient de ses annonces actives.
+ * Page publique d'un vendeur (ADR 0006 §9.7) : personnel, prestataire ou organisation. Elle ne montre ni
+ * coordonnées, ni adresse exacte, ni membres (jamais fournis par l'API) ; le contact se fait depuis une offre.
  */
 const SellerProfile = () => {
   const { t } = useTranslation();
-  const { id } = useParams();
+  const { contextType, id } = useParams();
+  const type = TYPES[(contextType ?? "").toLowerCase()];
   const { user } = useAuth();
-  const { data: posts = [], isLoading, isError, refetch, isRefetching } = usePosts({ seller: id, ordering: "-created_at" });
+  const { contexts } = useActiveContext();
+  const profile = useSellerProfile(type, id);
+  const { data: posts = [], isLoading: postsLoading, isError: postsError, refetch: refetchPosts } = usePosts(
+    { seller: id, seller_type: type, ordering: "-created_at" },
+    undefined,
+    { enabled: !!type && !!id && profile.isSuccess },
+  );
   const toggleFavorite = useToggleFavorite();
 
-  const seller = posts[0]?.seller;
-  const totalViews = useMemo(() => posts.reduce((sum, p) => sum + (p.views_count ?? 0), 0), [posts]);
+  if (!type) return <SellerNotFound />;
 
-  if (isLoading) {
+  if (profile.isLoading) {
     return (
       <AppShell>
         <Skeleton className="h-36 w-full rounded-2xl" />
@@ -34,41 +53,30 @@ const SellerProfile = () => {
           <Skeleton className="h-24 w-24 rounded-2xl border-4 border-background" />
           <Skeleton className="mb-2 h-6 w-48" />
         </div>
-        <PostGridSkeleton count={8} className="mt-10" />
+        <PostGridSkeleton count={6} className="mt-10" />
       </AppShell>
     );
   }
 
-  if (isError) {
+  if (profile.isError) {
+    if (httpStatus(profile.error) === 404) return <SellerNotFound />;
     return (
       <AppShell>
-        <ErrorState onRetry={() => refetch()} isRetrying={isRefetching} />
+        <ErrorState onRetry={() => profile.refetch()} isRetrying={profile.isRefetching} />
       </AppShell>
     );
   }
 
-  if (!seller) {
-    return (
-      <AppShell>
-        <EmptyState
-          icon={Store}
-          title="Aucune annonce active"
-          description="Ce vendeur n'a pas d'annonce en ligne pour le moment."
-          action={
-            <Button asChild variant="outline">
-              <Link to="/marketplace">Parcourir la marketplace</Link>
-            </Button>
-          }
-        />
-      </AppShell>
-    );
-  }
-
-  const name = sellerDisplayName(seller);
-  const verified = isSellerVerified(seller);
-  const sellerRating = posts[0]?.seller_rating;
-  const isBusiness = seller.user_type === "ENTREPRISE";
-  const isMe = user?.id === seller.id;
+  const seller = profile.data;
+  const shape = seller.context_type === "ORGANIZATION" ? "square" : "circle";
+  const since = seller.member_since ? t("rating.memberSince", { date: formatMonthYear(seller.member_since) }) : undefined;
+  // Mon propre profil : lien de modification vers l'écran qui le gère
+  const mine =
+    seller.context_type === "USER"
+      ? user?.id === seller.context_id
+      : contexts.some((c) => c.type === seller.context_type && c.id === seller.context_id);
+  const editPath =
+    seller.context_type === "ORGANIZATION" ? `/organizations/${seller.context_id}/edit` : seller.context_type === "PROVIDER" ? "/profiles" : "/settings";
 
   return (
     <AppShell>
@@ -79,84 +87,85 @@ const SellerProfile = () => {
         <div className="px-5 pb-6 md:px-8">
           <div className="-mt-12 flex flex-col gap-4 md:-mt-14 md:flex-row md:items-end md:justify-between">
             <div className="flex items-end gap-4">
-              <UserAvatar
-                src={seller.business_profile?.logo || seller.photo}
-                name={name}
-                size="xl"
-                shape={isBusiness ? "square" : "circle"}
-                className="ring-4 ring-card"
-              />
-              <div className="min-w-0 pb-1">
-                <h1 className="truncate text-2xl font-extrabold md:text-3xl">{name}</h1>
-                <p className="text-sm text-muted-foreground">{isBusiness ? "Boutique" : "Particulier"}</p>
+              <UserAvatar src={seller.photo} name={seller.display_name} size="xl" shape={shape} className="ring-4 ring-card" />
+              <div className="min-w-0 space-y-1.5 pb-1">
+                <h1 className="truncate text-2xl font-extrabold md:text-3xl" title={seller.display_name}>
+                  {seller.display_name}
+                </h1>
+                <SellerTypeBadge contextType={seller.context_type} orgType={seller.org_type} />
               </div>
             </div>
 
             <div className="flex gap-2">
-              {isMe && (
+              {mine && (
                 <Button asChild variant="outline">
-                  <Link to="/settings">Modifier mon profil</Link>
+                  <Link to={editPath}>{t("seller.editMine")}</Link>
                 </Button>
               )}
               <Button
                 variant="outline"
                 size="icon"
                 className="h-10 w-10"
-                aria-label="Partager la vitrine"
-                onClick={() => shareLink({ title: `${name} sur Connecte+`, url: window.location.href })}
+                aria-label={t("seller.share")}
+                onClick={() => shareLink({ title: t("seller.shareTitle", { name: seller.display_name }), url: window.location.href })}
               >
                 <Share2 />
               </Button>
             </div>
           </div>
 
-          {verified && (
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <StatusBadge kind="verified" size="md" />
-            </div>
+          <VerifiedClaims claims={seller.verified_claims} summary={seller.verification_summary} className="mt-4" />
+
+          <RatingBlock kind="seller" rating={seller.seller_rating} className="mt-4 sm:max-w-xs" footer={since} />
+
+          {seller.description && (
+            <p className="mt-4 max-w-2xl whitespace-pre-line text-sm leading-relaxed text-muted-foreground">{seller.description}</p>
           )}
 
-          <RatingBlock
-            kind="seller"
-            rating={sellerRating}
-            className="mt-4 sm:max-w-xs"
-            footer={seller.date_joined ? t("rating.memberSince", { date: formatMonthYear(seller.date_joined) }) : undefined}
-          />
-
-          {seller.business_profile?.bio && (
-            <p className="mt-4 max-w-2xl whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
-              {seller.business_profile.bio}
-            </p>
-          )}
-
-          <dl className="mt-6 grid grid-cols-2 gap-2 sm:max-w-md">
-            {[
-              { icon: Package, label: "Annonces", value: String(posts.length) },
-              { icon: Eye, label: "Vues", value: formatCount(totalViews) },
-            ].map(({ icon: Icon, label, value }) => (
-              <div key={label} className="rounded-xl bg-muted/60 p-3">
-                <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Icon className="h-3.5 w-3.5" aria-hidden /> {label}
-                </dt>
-                <dd className="mt-1 font-display text-lg font-bold capitalize tabular-nums">{value}</dd>
-              </div>
-            ))}
-          </dl>
+          <p className="mt-5 flex items-center gap-2 text-sm font-medium">
+            <Package className="h-4 w-4 text-muted-foreground" aria-hidden />
+            {t("seller.offersCount", { count: seller.active_offers_count })}
+          </p>
         </div>
       </section>
 
       <section aria-labelledby="annonces-titre" className="mt-10">
         <h2 id="annonces-titre" className="mb-5 text-xl font-extrabold md:text-2xl">
-          Annonces en ligne <span className="text-muted-foreground">({posts.length})</span>
+          {t("seller.offersTitle")}
         </h2>
-        <PostGrid>
-          {posts.map((post) => (
-            <PostCard key={post.id} post={post} hideSeller isFavorite={post.is_favorited} onToggleFavorite={toggleFavorite} />
-          ))}
-        </PostGrid>
+        {postsLoading ? (
+          <PostGridSkeleton count={6} />
+        ) : postsError ? (
+          <ErrorState onRetry={() => refetchPosts()} />
+        ) : posts.length === 0 ? (
+          <EmptyState icon={Package} title={t("seller.noOffers")} />
+        ) : (
+          <PostGrid>
+            {posts.map((post) => (
+              <PostCard key={post.id} post={post} hideSeller isFavorite={post.is_favorited} onToggleFavorite={toggleFavorite} />
+            ))}
+          </PostGrid>
+        )}
       </section>
     </AppShell>
   );
 };
+
+function SellerNotFound() {
+  const { t } = useTranslation();
+  return (
+    <AppShell>
+      <EmptyState
+        icon={SearchX}
+        title={t("seller.notFound")}
+        action={
+          <Button asChild variant="outline">
+            <Link to="/marketplace">{t("seller.seeMarketplace")}</Link>
+          </Button>
+        }
+      />
+    </AppShell>
+  );
+}
 
 export default SellerProfile;

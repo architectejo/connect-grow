@@ -9,6 +9,8 @@ import { AccountShell } from "@/components/layout/AccountShell";
 import { EmptyState, ErrorState, PageHeader } from "@/components/common";
 import { NotificationItem } from "@/components/notifications/NotificationItem";
 import { useNotificationActions, useNotifications } from "@/hooks/use-account";
+import { useTranslation } from "react-i18next";
+import { useFeatures } from "@/hooks/use-features";
 import { cn } from "@/lib/utils";
 
 const groupLabel = (date: Date) =>
@@ -17,6 +19,8 @@ const groupLabel = (date: Date) =>
 /** Centre de notifications (CDC 3.6) : état lu / non lu, regroupement par date. */
 const Notifications = () => {
   const navigate = useNavigate();
+  const { t } = useTranslation();
+  const { exchangeEnabled } = useFeatures();
   const { data: notifications = [], isLoading, isError, refetch } = useNotifications();
   const { markRead, markAllRead } = useNotificationActions();
   const [filter, setFilter] = useState<"all" | "unread">("all");
@@ -83,7 +87,7 @@ const Notifications = () => {
         <EmptyState
           icon={BellOff}
           title={filter === "unread" ? "Aucune notification non lue" : "Aucune notification"}
-          description="Contacts, avis, messages et propositions de troc apparaîtront ici."
+          description={exchangeEnabled ? t("exchange.notificationsEmpty") : t("exchange.notificationsEmptyNoExchange")}
         />
       ) : (
         <div className="space-y-6">

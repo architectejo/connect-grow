@@ -6,6 +6,10 @@ export { PostCardSkeleton, PostGrid, PostGridSkeleton } from "./PostCardSkeleton
 export { PriceTag } from "./PriceTag";
 export { RatingBlock, RatingValue } from "./Rating";
 export { SellerCard } from "./SellerCard";
+export { AccessDenied } from "./AccessDenied";
 export { EmptyState, ErrorState } from "./StateViews";
 export { StatusBadge, type StatusBadgeKind } from "./StatusBadge";
 export { UserAvatar } from "./UserAvatar";
+export { RoleBadge } from "./RoleBadge";
+export { SellerTypeBadge, sellerTypeLabel } from "./SellerTypeBadge";
+export { VerifiedClaims, claimLabel } from "./VerifiedClaims";

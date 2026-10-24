@@ -1,11 +1,10 @@
 import { cva } from "class-variance-authority";
-import { BadgeCheck, Flame, Megaphone, Repeat, Sparkles, Wrench, type LucideIcon } from "lucide-react";
+import { Flame, Megaphone, Repeat, Sparkles, Wrench, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { PostCondition } from "@/api/types";
 import { cn } from "@/lib/utils";
 
 export type StatusBadgeKind =
-  | "verified"
   | "trending"
   | "sponsored"
   | "exchangeable"
@@ -33,7 +32,6 @@ const badgeStyles = cva(
 );
 
 const config: Record<StatusBadgeKind, { icon?: LucideIcon; tone: "success" | "sun" | "neutral" | "primary" | "muted" }> = {
-  verified: { icon: BadgeCheck, tone: "success" },
   trending: { icon: Flame, tone: "sun" },
   // Cahier des charges 3.8 : une annonce boostée porte toujours le libellé « Sponsorisé »
   sponsored: { icon: Megaphone, tone: "neutral" },

@@ -1,3 +1,4 @@
+import type { ContactChannel, ContactSettings, ContextType } from "@/api/types";
 import i18n from "@/i18n";
 import { apiErrorCode, apiErrorMessage } from "@/lib/errors";
 
@@ -17,6 +18,7 @@ const KNOWN_CODES = [
   "otp_attempts_exceeded",
   "contact_phone_missing",
   "channel_unknown",
+  "account_too_new",
 ] as const;
 
 /** Message français d'une erreur `{detail, code}` des réglages de contact ; le code machine prime sur le `detail` du serveur. */
@@ -31,4 +33,16 @@ export function maskPhone(phone?: string | null): string {
   const digits = (phone ?? "").replace(/\D/g, "");
   if (digits.length < 8) return "";
   return `+${digits.slice(0, 3)} ••• ••• ${digits.slice(-4)}`;
+}
+
+const ALL_CHANNELS: ContactChannel[] = ["MESSAGE", "CALL", "WHATSAPP"];
+
+/**
+ * Canaux que le profil actif peut configurer (`available_channels`, ADR 0006 §17.1). Le client ne code pas l'état
+ * de l'interrupteur des canaux téléphoniques des organisations : il suit la réponse du serveur. Clé absente :
+ * profil personnel ou prestataire, les trois canaux ; organisation, le message seul (repli prudent).
+ */
+export function availableChannels(settings: Pick<ContactSettings, "available_channels"> | undefined, contextType: ContextType): ContactChannel[] {
+  if (settings?.available_channels) return ALL_CHANNELS.filter((channel) => settings.available_channels?.includes(channel));
+  return contextType === "ORGANIZATION" ? ["MESSAGE"] : ALL_CHANNELS;
 }

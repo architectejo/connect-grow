@@ -15,6 +15,24 @@ vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({ isAuthenticated: true, user: { phone: "+243812345678", phone_verified: true } }),
 }));
 
+// Profil actif : personnel par défaut, organisation dans les tests dédiés
+const activeMock = vi.hoisted(() => ({
+  active: { type: "USER", id: "u1", name: "Compte Test", role: null, orgType: null, photo: null, capabilities: [] as string[], confirmed: true },
+}));
+vi.mock("@/contexts/ActiveContextContext", () => ({ useActiveContext: () => ({ active: activeMock.active }) }));
+
+const personalProfile = { type: "USER", id: "u1", name: "Compte Test", role: null, orgType: null, photo: null, capabilities: [], confirmed: true };
+const organizationProfile = (capabilities: string[]) => ({
+  type: "ORGANIZATION",
+  id: "o1",
+  name: "Atelier X",
+  role: "ADMIN",
+  orgType: "BOUTIQUE",
+  photo: null,
+  capabilities,
+  confirmed: true,
+});
+
 const fixture = (over: Partial<ContactSettings> = {}): ContactSettings => ({
   phone: { masked: "+243 81 *** ** 45", is_verified: true, login_phone_masked: "+243 81 *** ** 45", can_use_login_phone: true },
   channels: { MESSAGE: { enabled: true }, CALL: { enabled: false }, WHATSAPP: { enabled: false } },
@@ -30,6 +48,7 @@ const renderSection = () => {
 
 describe("ContactSettingsSection", () => {
   beforeEach(() => {
+    activeMock.active = personalProfile as typeof activeMock.active;
     vi.spyOn(apiClient, "get").mockResolvedValue({ data: fixture() });
   });
   afterEach(() => vi.restoreAllMocks());
@@ -40,6 +59,29 @@ describe("ContactSettingsSection", () => {
     expect(screen.getByRole("switch", { name: "Appel téléphonique" })).not.toBeChecked();
     expect(screen.getByRole("switch", { name: "WhatsApp" })).not.toBeChecked();
     expect(screen.getByTestId("contact-phone-masked")).toHaveTextContent("+243 81 *** ** 45");
+  });
+
+  it("sans numéro de contact : utilise le masque du numéro de connexion fourni par le serveur", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: fixture({ phone: null, login_phone_masked: "+243 99 *** ** 07", can_use_login_phone: true }),
+    });
+    renderSection();
+    expect(await screen.findByText("Utiliser mon numéro de connexion (+243 99 *** ** 07)")).toBeInTheDocument();
+    expect(screen.queryByText(/5678/)).not.toBeInTheDocument();
+  });
+
+  it("racine : can_use_login_phone faux désactive l'usage du numéro de connexion, même si le compte a un téléphone", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: fixture({ phone: null, login_phone_masked: "+243 99 *** ** 07", can_use_login_phone: false }),
+    });
+    renderSection();
+    expect(await screen.findByText(/Vérifiez d'abord votre numéro de connexion/)).toBeInTheDocument();
+  });
+
+  it("ancienne réponse sans champs racine : repli sur le masque calculé côté client", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: fixture({ phone: null }) });
+    renderSection();
+    expect(await screen.findByText("Utiliser mon numéro de connexion (+243 ••• ••• 5678)")).toBeInTheDocument();
   });
 
   it("Appel et WhatsApp restent verrouillés tant que le numéro n'est pas vérifié", async () => {
@@ -117,5 +159,53 @@ describe("ContactSettingsSection", () => {
     expect(put).not.toHaveBeenCalled();
     fireEvent.click(button);
     await waitFor(() => expect(put).toHaveBeenCalledWith("accounts/contact-settings/phone/", { use_login_phone: true }));
+  });
+
+  describe("profil actif : organisation", () => {
+    const orgSettings = (over: Partial<ContactSettings> = {}) =>
+      fixture({
+        phone: null,
+        context: { type: "ORGANIZATION", id: "o1" },
+        available_channels: ["MESSAGE"],
+        login_phone_masked: "+243 99 *** ** 07",
+        can_use_login_phone: true,
+        ...over,
+      });
+
+    it("canal Message seul : ni appel, ni WhatsApp, ni numéro, et le texte explicite", async () => {
+      activeMock.active = organizationProfile(["contact.manage_channels"]) as typeof activeMock.active;
+      vi.mocked(apiClient.get).mockResolvedValue({ data: orgSettings() });
+      renderSection();
+      expect(await screen.findByRole("switch", { name: "Message dans Connecte+" })).toBeChecked();
+      expect(screen.queryByRole("switch", { name: "Appel téléphonique" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("switch", { name: "WhatsApp" })).not.toBeInTheDocument();
+      expect(screen.queryByText(/Utiliser mon numéro de connexion/)).not.toBeInTheDocument();
+      expect(screen.getByText(/ne sont pas encore proposés pour les organisations/)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Contact avec les acheteurs — Atelier X" })).toBeInTheDocument();
+    });
+
+    it("sans available_channels, une organisation n'a que le message (repli prudent)", async () => {
+      activeMock.active = organizationProfile(["contact.manage_channels"]) as typeof activeMock.active;
+      vi.mocked(apiClient.get).mockResolvedValue({ data: orgSettings({ available_channels: undefined }) });
+      renderSection();
+      await screen.findByRole("switch", { name: "Message dans Connecte+" });
+      expect(screen.queryByRole("switch", { name: "Appel téléphonique" })).not.toBeInTheDocument();
+    });
+
+    it("le numéro personnel du membre n'est jamais proposé quand le serveur ouvre les canaux téléphoniques", async () => {
+      activeMock.active = organizationProfile(["contact.manage_channels"]) as typeof activeMock.active;
+      vi.mocked(apiClient.get).mockResolvedValue({ data: orgSettings({ available_channels: ["MESSAGE", "CALL", "WHATSAPP"] }) });
+      renderSection();
+      expect(await screen.findByRole("switch", { name: "Appel téléphonique" })).toBeInTheDocument();
+      expect(screen.queryByText(/Utiliser mon numéro de connexion/)).not.toBeInTheDocument();
+    });
+
+    it("éditeur ou analyste : accès refusé, aucune requête envoyée", async () => {
+      activeMock.active = organizationProfile(["offer.view_internal", "stats.view"]) as typeof activeMock.active;
+      const get = vi.mocked(apiClient.get);
+      renderSection();
+      expect(await screen.findByText("Seuls le propriétaire et les administrateurs gèrent les moyens de contact.")).toBeInTheDocument();
+      expect(get).not.toHaveBeenCalled();
+    });
   });
 });

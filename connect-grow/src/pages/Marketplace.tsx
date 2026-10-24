@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useInView } from "react-intersection-observer";
 import { ArrowUpDown, Plus, Search, SearchX, SlidersHorizontal, X } from "lucide-react";
-import type { PostOrdering } from "@/api/types";
+import type { PostOrdering, SellerContextType } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -13,6 +13,7 @@ import { FiltersPanel } from "@/components/marketplace/FiltersPanel";
 import { DEFAULT_ORDERING, usePostFilters } from "@/components/marketplace/use-post-filters";
 import { useCategories, usePosts, useToggleFavorite } from "@/hooks/use-marketplace";
 import { isRateLimited, rateLimitMessage } from "@/lib/errors";
+import { sellerPath } from "@/lib/post";
 import { cn } from "@/lib/utils";
 
 // L'API renvoie toute la liste : on l'affiche par tranches pour ne charger les images qu'au défilement
@@ -44,7 +45,10 @@ const Marketplace = () => {
   }, [inView, visibleCount, posts.length]);
 
   // Ancien lien « boutique » : la vitrine d'un vendeur a désormais sa propre page
-  if (filters.seller) return <Navigate to={`/u/${filters.seller}`} replace />;
+  if (filters.seller) {
+    const type = (filters.seller_type ?? "USER").toUpperCase() as SellerContextType;
+    return <Navigate to={sellerPath(["USER", "PROVIDER", "ORGANIZATION"].includes(type) ? type : "USER", filters.seller)} replace />;
+  }
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();

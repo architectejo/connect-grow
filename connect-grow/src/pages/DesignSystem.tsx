@@ -23,23 +23,32 @@ const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString(
 
 const sellers: Record<string, Seller> = {
   business: {
-    id: "1",
-    full_name: "Patrick Ilunga",
-    user_type: "ENTREPRISE",
-    business_profile: { business_name: "Gombe Électronique", is_verified: true, logo: null },
-    date_joined: "2025-03-12T10:00:00Z",
+    context_type: "ORGANIZATION",
+    context_id: "1",
+    display_name: "Gombe Électronique",
+    org_type: "BOUTIQUE",
+    verified_claims: [
+      { code: "RCCM_VERIFIED", label: "RCCM vérifié", verified_at: "2026-09-12T10:00:00Z" },
+      { code: "NATIONAL_ID_VERIFIED", label: "Identification nationale vérifiée", verified_at: "2026-09-14T10:00:00Z" },
+    ],
+    verification_summary: { complete: false, label: null },
+    member_since: "2025-03-12T10:00:00Z",
   },
   person: {
-    id: "2",
-    full_name: "Grâce Mbuyi",
-    user_type: "PARTICULIER",
-    date_joined: "2026-06-02T10:00:00Z",
+    context_type: "USER",
+    context_id: "2",
+    display_name: "Grâce M.",
+    verified_claims: [],
+    verification_summary: { complete: false, label: null },
+    member_since: "2026-06-02T10:00:00Z",
   },
   newbie: {
-    id: "3",
-    full_name: "Junior Kabasele",
-    user_type: "PARTICULIER",
-    date_joined: "2026-09-01T10:00:00Z",
+    context_type: "PROVIDER",
+    context_id: "3",
+    display_name: "Junior couture",
+    verified_claims: [],
+    verification_summary: { complete: false, label: null },
+    member_since: "2026-09-01T10:00:00Z",
   },
 };
 
@@ -194,7 +203,7 @@ const DesignSystem = () => (
         <RatingBlock kind="seller" rating={{ average: null, count: 2 }} />
       </div>
       <div className="flex flex-wrap gap-2">
-        {(["verified", "trending", "sponsored", "exchangeable", "service", "NEUF", "OCCASION", "RECONDITIONNE"] as const).map(
+        {(["trending", "sponsored", "exchangeable", "service", "NEUF", "OCCASION", "RECONDITIONNE"] as const).map(
           (kind) => (
             <StatusBadge key={kind} kind={kind} size="md" />
           ),

@@ -7,16 +7,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AppShell } from "@/components/layout/AppShell";
 import { EmptyState, ErrorState, PostCard, PostGrid, PriceTag, RatingBlock, SellerCard, StatusBadge } from "@/components/common";
 import { ContactActions } from "@/components/post/ContactActions";
+import { useTranslation } from "react-i18next";
+import { useFeatures } from "@/hooks/use-features";
 import { ContactDialog, ExchangeDialog } from "@/components/post/ContactDialogs";
 import { PostGallery } from "@/components/post/PostGallery";
 import { ReviewsSection } from "@/components/post/ReviewsSection";
+import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePost, usePosts, useToggleFavorite } from "@/hooks/use-marketplace";
 import { loginPath } from "@/lib/auth-paths";
 import { shareLink } from "@/lib/contact";
 import { allowedChannelsOf } from "@/lib/contact-reveal";
 import { formatCount, formatRelativeDate } from "@/lib/format";
-import { getPostBadges, sellerDisplayName } from "@/lib/post";
+import { getPostBadges, offerAccess, sellerDisplayName } from "@/lib/post";
 import { cn } from "@/lib/utils";
 
 // Graphique réservé au vendeur : Recharts (≈100 Ko) n'est téléchargé que par lui
@@ -77,10 +80,14 @@ const PostDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
+  const { contexts } = useActiveContext();
   const { data: post, isLoading, isError, error, refetch, isRefetching } = usePost(id);
   const toggleFavorite = useToggleFavorite();
   const [contactOpen, setContactOpen] = useState(false);
   const [exchangeOpen, setExchangeOpen] = useState(false);
+  const { t } = useTranslation();
+  const { exchangeEnabled } = useFeatures();
+  const exchangeable = exchangeEnabled && !!post?.is_exchangeable;
 
   const notFound = (error as { response?: { status?: number } } | null)?.response?.status === 404;
 
@@ -113,7 +120,11 @@ const PostDetail = () => {
     );
   }
 
-  const isOwner = !!user && user.id === post.seller?.id;
+  // Droits sur l'offre, déduits des profils du compte (titulaire du profil personnel ou prestataire, membre d'une organisation)
+  const access = offerAccess(post, contexts);
+  const isOwner = !!user && access.canEdit;
+  // Membre sans droit d'édition (analyste) : il ne peut pas contacter sa propre organisation
+  const isSellerMember = !isOwner && access.isMember;
   const sellerName = sellerDisplayName(post.seller);
   const badges = getPostBadges(post);
   const requireAuth = (open: () => void) => () => (isAuthenticated ? open() : navigate(loginPath(`/post/${post.id}`)));
@@ -184,7 +195,7 @@ const PostDetail = () => {
               <div className="mt-4 flex flex-wrap gap-1.5">
                 {post.post_type === "SERVICE" && <StatusBadge kind="service" size="md" />}
                 {post.condition && <StatusBadge kind={post.condition} size="md" />}
-                {post.is_exchangeable && <StatusBadge kind="exchangeable" size="md" />}
+                {exchangeable && <StatusBadge kind="exchangeable" size="md" />}
               </div>
 
               <ul className="mt-5 space-y-2 border-t pt-4 text-sm text-muted-foreground">
@@ -229,17 +240,20 @@ const PostDetail = () => {
                 seller={post.seller}
                 rating={post.seller_rating}
                 actions={
-                  isOwner ? undefined : (
+                  isOwner ? undefined : isSellerMember ? (
+                    <p className="text-center text-sm text-muted-foreground">{t("contact.ownOrg")}</p>
+                  ) : (
                     <>
                       <ContactActions
                         offerId={post.id}
                         sellerName={sellerName}
+                        sellerType={post.seller.context_type}
                         allowedChannels={allowedChannelsOf(post)}
                         onMessage={requireAuth(() => setContactOpen(true))}
                       />
-                      {post.is_exchangeable && (
+                      {exchangeable && (
                         <Button variant="soft" size="lg" onClick={requireAuth(() => setExchangeOpen(true))}>
-                          <Repeat aria-hidden /> Proposer un échange
+                          <Repeat aria-hidden /> {t("exchange.propose")}
                         </Button>
                       )}
                     </>
@@ -281,7 +295,7 @@ const PostDetail = () => {
                 post.category_name && { label: "Catégorie", value: post.category_name },
                 post.post_type === "PRODUIT" && post.stock !== undefined && { label: "Quantité", value: String(post.stock) },
                 { label: "Devise", value: post.currency === "CDF" ? "Franc congolais" : "Dollar US" },
-                { label: "Troc", value: post.is_exchangeable ? "Accepté" : "Non" },
+                exchangeEnabled && { label: t("exchange.summaryLabel"), value: post.is_exchangeable ? t("exchange.accepted") : t("exchange.no") },
               ]
                 .filter((item): item is { label: string; value: string } => !!item)
                 .map((item) => (
@@ -318,11 +332,14 @@ const PostDetail = () => {
               <Pencil aria-hidden /> Modifier mon annonce
             </Link>
           </Button>
+        ) : isSellerMember ? (
+          <p className="py-2 text-center text-sm text-muted-foreground">{t("contact.ownOrg")}</p>
         ) : (
           <ContactActions
             layout="bar"
             offerId={post.id}
             sellerName={sellerName}
+            sellerType={post.seller?.context_type}
             allowedChannels={allowedChannelsOf(post)}
             onMessage={requireAuth(() => setContactOpen(true))}
           />
@@ -330,7 +347,7 @@ const PostDetail = () => {
       </div>
 
       <ContactDialog post={post} open={contactOpen} onOpenChange={setContactOpen} />
-      {post.is_exchangeable && <ExchangeDialog post={post} open={exchangeOpen} onOpenChange={setExchangeOpen} />}
+      {exchangeable && <ExchangeDialog post={post} open={exchangeOpen} onOpenChange={setExchangeOpen} />}
     </AppShell>
   );
 };

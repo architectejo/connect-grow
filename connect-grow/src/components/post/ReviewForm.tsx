@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { AlwaysPersonalNote } from "@/components/profiles/AlwaysPersonalNote";
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ReviewInput } from "@/api/types";
@@ -87,6 +88,7 @@ export function ReviewForm({ initial, submitLabel, isPending, error, onSubmit, o
         </p>
       )}
 
+      <AlwaysPersonalNote />
       <div className="flex justify-end gap-2">
         {onCancel && (
           <Button type="button" variant="ghost" onClick={onCancel} disabled={isPending}>

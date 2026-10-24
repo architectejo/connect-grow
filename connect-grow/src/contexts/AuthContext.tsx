@@ -5,6 +5,7 @@ import apiClient, { refreshSession } from "@/api/client";
 import i18n from "@/i18n";
 import { httpStatus } from "@/lib/errors";
 import type { User } from "@/api/types";
+import { clearLegacyNotices } from "@/lib/legacy-notice";
 import { AUTH_EXPIRED_EVENT, tokenStorage } from "@/lib/tokens";
 
 /** Connexion par e-mail OU par téléphone au format +243XXXXXXXXX (CDC 3.1). */
@@ -82,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Purge locale : jetons, brouillon, caches. Sans appel serveur (session déjà expirée ou fermée ailleurs).
   const clearSession = useCallback(() => {
     tokenStorage.clear();
+    clearLegacyNotices();
     setHasToken(false);
     // Vide tout le cache en mémoire : aucune donnée privée ne survit à la session
     queryClient.clear();

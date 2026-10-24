@@ -1,13 +1,16 @@
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Logo } from "@/components/layout/Logo";
+import { useFeatures } from "@/hooks/use-features";
 
-const columns = [
+type FooterLink = { label: string; to: string; exchangeOnly?: boolean };
+const columns: { title: string; links: FooterLink[] }[] = [
   {
     title: "Marketplace",
     links: [
       { label: "Toutes les annonces", to: "/marketplace" },
-      { label: "Annonces échangeables", to: "/marketplace?is_exchangeable=true" },
-      { label: "Entreprises", to: "/businesses" },
+      { label: "Annonces échangeables", to: "/marketplace?is_exchangeable=true", exchangeOnly: true },
+      { label: "Organisations", to: "/businesses" },
       { label: "Publier une annonce", to: "/create-post" },
     ],
   },
@@ -23,14 +26,17 @@ const columns = [
 // Documents légaux en cours de rédaction (CDC 11.3) : affichés sans lien tant qu'ils n'existent pas.
 const legal = ["Conditions d'utilisation", "Confidentialité"];
 
-const FooterSection = () => (
+const FooterSection = () => {
+  const { t } = useTranslation();
+  const { exchangeEnabled } = useFeatures();
+  return (
   <footer className="border-t bg-card">
     <div className="container py-12 md:py-16">
       <div className="grid gap-10 md:grid-cols-[1.4fr_1fr_1fr]">
         <div className="space-y-4">
           <Logo />
           <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
-            La marketplace de confiance pour acheter, vendre et échanger près de chez vous, à Kinshasa.
+            {exchangeEnabled ? t("exchange.tagline") : t("exchange.taglineNoExchange")}
           </p>
         </div>
 
@@ -38,8 +44,8 @@ const FooterSection = () => (
           <nav key={column.title} aria-label={column.title}>
             <h2 className="mb-4 text-xs font-bold uppercase tracking-[0.14em] text-foreground">{column.title}</h2>
             <ul className="space-y-2.5">
-              {column.links.map((link) => (
-                <li key={link.label}>
+              {column.links.filter((link) => exchangeEnabled || !link.exchangeOnly).map((link) => (
+                <li key={link.exchangeOnly ? t("exchange.footerLink") : link.label}>
                   <Link to={link.to} className="text-sm text-muted-foreground transition-colors hover:text-primary">
                     {link.label}
                   </Link>
@@ -61,6 +67,7 @@ const FooterSection = () => (
       </div>
     </div>
   </footer>
-);
+  );
+};
 
 export default FooterSection;

@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { Navigate, NavLink, useLocation } from "react-router-dom";
-import { BadgeCheck, Bell, Heart, LayoutDashboard, Loader2, MessageSquare, Settings, Trash2, type LucideIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { BadgeCheck, Bell, Heart, LayoutDashboard, Loader2, MessageSquare, Settings, Trash2, Users, type LucideIcon } from "lucide-react";
 import { UserAvatar } from "@/components/common/UserAvatar";
+import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNotifications } from "@/hooks/use-account";
 import { loginPath } from "@/lib/auth-paths";
@@ -12,17 +14,21 @@ interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
-  businessOnly?: boolean;
+  /** Capacité du profil actif exigée (le serveur reste le juge : le masquage n'est pas le contrôle). */
+  capability?: string;
+  /** Visible seulement sous un profil organisation. */
+  organizationOnly?: boolean;
   badge?: "notifications";
 }
 
 const items: NavItem[] = [
-  { to: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
+  { to: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, capability: "stats.view" },
   { to: "/favorites", label: "Favoris", icon: Heart },
   { to: "/notifications", label: "Notifications", icon: Bell, badge: "notifications" },
-  { to: "/messages", label: "Messages", icon: MessageSquare },
-  { to: "/trash", label: "Corbeille", icon: Trash2 },
-  { to: "/verification", label: "Vérification", icon: BadgeCheck, businessOnly: true },
+  { to: "/messages", label: "Messages", icon: MessageSquare, capability: "message.reply" },
+  { to: "/trash", label: "Corbeille", icon: Trash2, capability: "offer.view_internal" },
+  { to: "/verification", label: "Vérification", icon: BadgeCheck, organizationOnly: true },
+  { to: "/profiles", label: "Mes profils", icon: Users },
   { to: "/settings", label: "Paramètres", icon: Settings },
 ];
 
@@ -41,12 +47,21 @@ interface AccountShellProps {
 
 /** Gabarit de l'espace personnel : menu latéral (desktop) ou onglets défilants (mobile). */
 export function AccountShell({ children, className }: AccountShellProps) {
+  const { t } = useTranslation();
   const { user, isLoading } = useAuth();
+  const { active } = useActiveContext();
   const { data: notifications = [] } = useNotifications();
   const unread = notifications.filter((n) => !n.is_read).length;
-  const isBusiness = user?.user_type === "ENTREPRISE";
-  const visibleItems = items.filter((item) => !item.businessOnly || isBusiness);
-  const displayName = user?.business_profile?.business_name || user?.full_name;
+  const isOrganization = active.type === "ORGANIZATION";
+  const visibleItems = items
+    .filter((item) => !item.organizationOnly || isOrganization)
+    // Capacités pas encore reçues du serveur : on ne masque rien (le serveur refusera de toute façon)
+    .filter((item) => !item.capability || !active.confirmed || active.capabilities.includes(item.capability))
+    // « Vérification » d'une organisation vit sous son identifiant : /organizations/<id>/verification
+    .map((item) => (item.organizationOnly ? { ...item, to: `/organizations/${active.id}/verification` } : item));
+  // Le nom du profil actif (organisation ou prestataire), jamais le nom du compte sous un autre profil
+  const displayName = active.type === "USER" ? user?.full_name : active.name;
+  const typeLabel = active.type === "ORGANIZATION" && active.orgType ? t(`orgType.${active.orgType}`) : t(`context.type.${active.type}`);
 
   const renderBadge = (item: NavItem) =>
     item.badge === "notifications" && unread > 0 ? (
@@ -62,10 +77,10 @@ export function AccountShell({ children, className }: AccountShellProps) {
           <aside className="hidden lg:block" aria-label="Espace personnel">
             <div className="sticky top-24 space-y-4">
               <div className="flex items-center gap-3 rounded-2xl border bg-card p-3 shadow-soft">
-                <UserAvatar src={user?.photo || user?.business_profile?.logo} name={displayName} size="md" />
+                <UserAvatar src={active.type === "USER" ? user?.photo : active.photo} name={displayName} size="md" shape={isOrganization ? "square" : "circle"} />
                 <div className="min-w-0">
                   <p className="truncate font-semibold">{displayName ?? (isLoading ? "…" : "")}</p>
-                  <p className="text-xs text-muted-foreground">{isBusiness ? "Compte entreprise" : "Compte particulier"}</p>
+                  <p className="text-xs text-muted-foreground">{typeLabel}</p>
                 </div>
               </div>
               <nav className="space-y-0.5">

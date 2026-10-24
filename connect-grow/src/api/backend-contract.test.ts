@@ -43,7 +43,10 @@ function mismatches(data: Record<string, unknown>, spec: Record<string, string>)
 }
 
 const RATING = { average: "num|null", count: "num" };
-const SELLER = { id: "uuid", full_name: "str", "photo?": "str|null", user_type: "str", "business_profile?": "obj|null", "date_joined?": "date" };
+const SELLER = {
+  context_type: "str", context_id: "uuid", display_name: "str", "photo?": "str|null", "org_type?": "str|null",
+  verified_claims: "list", verification_summary: "obj", "member_since?": "date|null",
+};
 const POST = {
   id: "uuid", seller: "obj", "seller_name?": "str", category: "uuid", "category_name?": "str|null", commune: "uuid",
   "commune_name?": "str|null", post_type: "str", title: "str", description: "str", price: "str", "currency?": "str",
@@ -60,17 +63,9 @@ const REVIEW = {
 };
 const ELIGIBILITY = { can_review: "bool", reason: "str|null", available_at: "date|null", review_id: "uuid|null" };
 const NOTIFICATION = { id: "uuid", "user?": "uuid", notification_type: "str", title: "str", content: "str", "link?": "str|null", is_read: "bool", created_at: "date" };
-const KYC = {
-  id: "uuid", document_type: "str", "download_url?": "str|null", status: "str", "rejection_reason?": "str", created_at: "date",
-  "reviewed_at?": "date|null",
-};
-const BUSINESS = {
-  id: "uuid", business_name: "str", "logo?": "str|null", "bio?": "str", "categories?": "list", "ville_name?": "str|null",
-  "commune_name?": "str|null", is_verified: "bool",
-};
 const USER = {
-  id: "uuid", email: "str|null", full_name: "str", "photo?": "str|null", user_type: "str", "phone?": "str|null", "ville?": "uuid|null",
-  "ville_name?": "str|null", "commune?": "uuid|null", "commune_name?": "str|null", "business_profile?": "obj|null", "date_joined?": "date",
+  id: "uuid", email: "str|null", full_name: "str", "photo?": "str|null", "phone?": "str|null", "ville?": "uuid|null",
+  "ville_name?": "str|null", "commune?": "uuid|null", "commune_name?": "str|null", "date_joined?": "date",
   "phone_verified?": "bool",
 };
 const PAGE = { count: "num", next: "str|null", previous: "str|null", results: "list" };
@@ -92,7 +87,10 @@ describe("contrat backend -> types.ts (réponses réelles du lot 0)", () => {
     const list = unwrapList<Row>(f.post_list);
     expect(list.length).toBeGreaterThan(0);
     expect(mismatches(list[0], POST)).toEqual([]);
-    for (const key of ["phone", "email", "nif"]) expect(detail.seller).not.toHaveProperty(key);
+    for (const key of ["phone", "email", "nif", "id", "full_name", "user_type", "business_profile", "date_joined", "is_verified"]) {
+      expect(detail.seller).not.toHaveProperty(key);
+    }
+    expect((detail.seller as Row).context_type).toBe("USER");
     expect(detail.is_sponsored).toBe(false);
   });
 
@@ -118,24 +116,18 @@ describe("contrat backend -> types.ts (réponses réelles du lot 0)", () => {
     expect(f.eligibility_too_early.available_at).toMatch(DATE);
   });
 
-  it("Notification, KycDocument, Favorite, DashboardStats, entreprises paginées", () => {
+  it("Notification, Favorite, DashboardStats", () => {
     for (const notification of unwrapList<Row>(f.notifications)) expect(mismatches(notification, NOTIFICATION)).toEqual([]);
-    expect(mismatches(f.kyc as Row, KYC)).toEqual([]);
-    expect(f.kyc.download_url).toBeNull();
-    expect(f.kyc).not.toHaveProperty("file");
     expect(f.favorite).toEqual({ favorited: true });
     const favorites = unwrapList<Row>(f.favorites);
     expect(mismatches(favorites[0], { id: "uuid", post: "obj", created_at: "date" })).toEqual([]);
     expect(mismatches(f.dashboard.summary as unknown as Row, DASHBOARD_SUMMARY)).toEqual([]);
-    expect(mismatches(f.businesses as unknown as Row, PAGE)).toEqual([]);
-    const business = (f.businesses.results as unknown as Row[])[0];
-    expect(mismatches(business, BUSINESS)).toEqual([]);
-    for (const key of ["phone", "email", "nif", "full_name", "date_joined"]) expect(business).not.toHaveProperty(key);
   });
 
-  it("User : e-mail, téléphone et noms de localisation pouvant être null (R0-02)", () => {
-    expect(mismatches(f.me_business as Row, USER)).toEqual([]);
+  it("User : e-mail, téléphone et noms de localisation pouvant être null (R0-02) ; plus de type de compte ni de profil entreprise", () => {
     expect(mismatches(f.me_phone_only as Row, USER)).toEqual([]);
+    expect(f.me_phone_only).not.toHaveProperty("user_type");
+    expect(f.me_phone_only).not.toHaveProperty("business_profile");
     expect(f.me_phone_only).toMatchObject({ email: null, ville_name: null, commune_name: null });
   });
 
@@ -224,5 +216,19 @@ describe("erreurs réelles du backend vs helpers du front", () => {
     const error = axiosError(403, f.review_error);
     expect(apiErrorCode(error)).toBe("not_eligible");
     expect(reviewErrorMessage(error)).toBe("Vous pourrez donner votre avis après avoir contacté le vendeur.");
+  });
+
+  it("Troc masqué (L0-14) : configuration publique, annonce sans is_exchangeable, erreur feature_disabled", () => {
+    expect(mismatches(f.features_exchange_off as Row, { features: "obj" })).toEqual([]);
+    expect(mismatches((f.features_exchange_off as Row).features as Row, { exchange_enabled: "bool" })).toEqual([]);
+    expect(f.features_exchange_off).toEqual({ features: { exchange_enabled: false } });
+    expect(f.features_exchange_on).toEqual({ features: { exchange_enabled: true } });
+    expect(f.post_detail_exchange_off).not.toHaveProperty("is_exchangeable");
+    expect(mismatches(f.post_detail_exchange_off as Row, POST)).toEqual([]);
+    expect(mismatches(f.post_detail_exchange_on as Row, POST)).toEqual([]);
+    expect(f.post_detail_exchange_on).toHaveProperty("is_exchangeable", true);
+    expect(apiErrorCode({ response: { status: 403, data: f.exchange_feature_disabled_error } })).toBe("feature_disabled");
+    const serialized = JSON.stringify([f.features_exchange_off, f.features_exchange_on, f.exchange_feature_disabled_error]);
+    expect(serialized).not.toMatch(/phone|email|nif/i);
   });
 });

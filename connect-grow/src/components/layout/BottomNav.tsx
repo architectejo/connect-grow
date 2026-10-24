@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Home, MessageSquare, Plus, Search, UserRound } from "lucide-react";
+import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { loginPath } from "@/lib/auth-paths";
 import { cn } from "@/lib/utils";
@@ -18,6 +19,7 @@ export function BottomNav() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
   const { isAuthenticated } = useAuth();
+  const { active } = useActiveContext();
 
   if (HIDDEN_ON.includes(pathname)) return null;
   if (OWN_ACTION_BAR.some((prefix) => pathname.startsWith(prefix))) {
@@ -26,13 +28,16 @@ export function BottomNav() {
 
   const requireAuth = (to: string) => (isAuthenticated ? to : loginPath(to));
 
+  // Capacités du profil actif (sans réponse du serveur, rien n'est masqué ; le serveur reste le juge)
+  const can = (capability: string) => !isAuthenticated || !active.confirmed || active.capabilities.includes(capability);
+
   const items = [
     { to: "/", label: t("nav.home"), icon: Home, end: true },
     { to: "/marketplace", label: t("nav.explore"), icon: Search },
-    { to: requireAuth("/create-post"), label: t("nav.publish"), icon: Plus, primary: true },
-    { to: requireAuth("/messages"), label: t("nav.messages"), icon: MessageSquare },
+    can("offer.publish") && { to: requireAuth("/create-post"), label: t("nav.publish"), icon: Plus, primary: true },
+    can("message.reply") && { to: requireAuth("/messages"), label: t("nav.messages"), icon: MessageSquare },
     { to: requireAuth("/dashboard"), label: t("nav.profile"), icon: UserRound },
-  ];
+  ].filter((item): item is NonNullable<typeof item> => !!item);
 
   return (
     <>
@@ -41,7 +46,7 @@ export function BottomNav() {
         aria-label={t("nav.mainNavigation")}
         className="fixed inset-x-0 bottom-0 z-50 border-t bg-background/95 pb-safe backdrop-blur-lg md:hidden"
       >
-        <ul className="mx-auto grid h-16 max-w-md grid-cols-5">
+        <ul className={cn("mx-auto grid h-16 max-w-md", items.length === 5 ? "grid-cols-5" : items.length === 4 ? "grid-cols-4" : "grid-cols-3")}>
           {items.map(({ to, label, icon: Icon, end, primary }) => (
             <li key={label}>
               <NavLink

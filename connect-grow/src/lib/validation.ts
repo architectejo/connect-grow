@@ -63,7 +63,7 @@ export function parseApiErrors(error: unknown): { fields: Record<string, string>
   let general: string | undefined;
   const collect = (record: Record<string, unknown>) => {
     for (const [key, value] of Object.entries(record)) {
-      // Profil imbriqué ({ business_profile: { logo: [...] } }) : les erreurs sont ramenées au nom du champ
+      // Objet imbriqué ({ profil: { logo: [...] } }) : les erreurs sont ramenées au nom du champ
       if (value && typeof value === "object" && !Array.isArray(value)) {
         collect(value as Record<string, unknown>);
         continue;

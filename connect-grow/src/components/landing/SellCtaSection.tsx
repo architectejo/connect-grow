@@ -27,7 +27,7 @@ const SellCtaSection = () => {
               </Button>
               <Button asChild size="lg" variant="ghost" className="text-white hover:bg-white/10 hover:text-white">
                 <Link to="/businesses">
-                  Espace entreprises <ArrowRight aria-hidden />
+                  Annuaire des organisations <ArrowRight aria-hidden />
                 </Link>
               </Button>
             </div>

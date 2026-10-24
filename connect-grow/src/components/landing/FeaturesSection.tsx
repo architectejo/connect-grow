@@ -24,8 +24,8 @@ const pillars = [
   },
   {
     icon: BadgeCheck,
-    title: "Des boutiques vérifiées",
-    description: "Les entreprises présentent leurs documents (RCCM, identité du gérant) pour obtenir le badge Vérifié.",
+    title: "Des vérifications qui disent ce qui est vérifié",
+    description: "Une organisation peut faire examiner ses documents. Chaque mention, par exemple « RCCM vérifié », indique précisément le document examiné ; elle ne s'achète pas et ne garantit pas la qualité.",
     tone: "bg-info/10 text-info",
   },
 ];

@@ -107,3 +107,11 @@ Une entrée par tâche terminée ou décision prise, la plus récente en haut.
 - **Prérequis de production notés (ADR 0006 §18-19)** : antivirus, limite de corps Nginx, cache partagé pour les limites de débit, test de concurrence MySQL, purge KYB (réglage à 0 tant que LEG-PRV n'a pas répondu).
 - **Dettes** : chemin de secours pour une organisation sans propriétaire (L1-01), invitation avec acceptation de la cible avant tout ajout de membre exposé, détection de collision de noms avec une organisation vérifiée, motifs de refus codés, `can_reply` N+1 (T5).
 - **Incident** : deux agents interrompus par la limite de session API ; travail repris sans perte (états vérifiés dans les worktrees).
+
+## 2026-10-24 — Unification des branches dans `main`
+- **Décision de l'utilisateur** : une seule branche durable, `main` ; branches temporaires seulement en cas de besoin, supprimées après fusion. `CLAUDE.md` §9 mis à jour.
+- **Fait** : fusion de toutes les lignes de travail (`backend`, `frontend`, intégration L0-09, T1 à T5b, F1, F2, recettes, ADR 0005 et 0006) dans `main`. Conflits : uniquement le journal (deux ajouts en fin de fichier, conservés).
+- **Vérifié sur `main`** : backend 1399 tests verts, `makemigrations --check` propre et migrations appliquées sur base vierge ; front lint 0 erreur, 599 tests, build OK, typecheck OK.
+- **Nettoyage** : 55 branches supprimées (toutes contenues dans `main`, contrôle `--no-merged` vide) ; 28 dossiers de travail supprimés (liens `node_modules` retirés avant, pour ne pas toucher l'original) ; restes `cp-wt-QAf` et `cp-wt-T1` supprimés. Il ne reste que `main` et le dossier `D:\Projects\cp`.
+- **À noter** : `backend/db.sqlite3` du dossier principal est à l'ancien schéma (avant la réinitialisation des migrations UUID) : `makemigrations`/`migrate` y échouent avec `InconsistentMigrationHistory`. À recréer (supprimer puis `migrate`) ; non touchée sans accord (CLAUDE.md §7).
+- **Reste de L0-09** : T6 (avis et notifications par contexte, destinataires d'équipe), T7 (contact et messagerie d'organisation), T9 (conversion des anciens comptes entreprise, contraction : retrait de `BusinessProfile`, `user_type`, `Offer.seller`, passerelles `save()`), T10 (recette). Dettes et prérequis de production : ADR 0006 §15, §17-§19.

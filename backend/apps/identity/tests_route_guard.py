@@ -36,12 +36,6 @@ LEGACY_WRITE_ROUTES = {
     'api/accounts/token/refresh/': 'compte : authentification et réglages toujours personnels',  # POST
     'api/interactions/^messages/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # POST
     'api/interactions/^messages/(?P<pk>[^/.]+)/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # DELETE/PATCH/PUT
-    'api/interactions/^notifications/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # POST
-    'api/interactions/^notifications/(?P<pk>[^/.]+)/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # DELETE/PATCH/PUT
-    'api/interactions/^notifications/mark_all_as_read/$': 'interactions : acheteur personnel, boîte vendeur à migrer en T7',  # POST
-    'api/interactions/^reviews/$': 'avis : acheteur toujours personnel, réponse vendeur à migrer en T6',  # POST
-    'api/interactions/^reviews/(?P<pk>[^/.]+)/$': 'avis : acheteur toujours personnel, réponse vendeur à migrer en T6',  # DELETE/PATCH/PUT
-    'api/interactions/^reviews/(?P<pk>[^/.]+)/reply/$': 'avis : acheteur toujours personnel, réponse vendeur à migrer en T6',  # POST
     'api/moderation/^reports/$': 'modération : hors contexte vendeur',  # POST
     'api/moderation/^reports/(?P<pk>[^/.]+)/$': 'modération : hors contexte vendeur',  # DELETE/PATCH/PUT
     'api/moderation/^reports/(?P<pk>[^/.]+)/author-response/$': 'modération : hors contexte vendeur',  # POST

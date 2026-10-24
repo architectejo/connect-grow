@@ -22,8 +22,10 @@ class NotificationTests(APITestCase):
         self.client.force_authenticate(self.user)
         data = self.client.get(self.url).data
         self.assertEqual([n['id'] for n in data], [str(self.mine.id)])
+        self.assertIsNone(data[0]['context'])  # notification personnelle : contexte nul (ADR 0006, 9.8)
         self.assertEqual(
-            set(data[0]), {'id', 'user', 'notification_type', 'title', 'content', 'link', 'is_read', 'created_at'},
+            set(data[0]),
+            {'id', 'user', 'notification_type', 'title', 'content', 'link', 'is_read', 'created_at', 'context'},
         )
 
     def test_service_truncates_long_titles_and_links(self):

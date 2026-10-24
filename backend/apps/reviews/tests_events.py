@@ -1,4 +1,4 @@
-"""Avis et réponses publiés comme événements de domaine, versions 2 (ADR 0003, ADR 0004)."""
+"""Avis et réponses publiés comme événements de domaine, `review_posted` en version 3 (ADR 0003, ADR 0004, ADR 0006)."""
 from unittest import mock
 
 from django.utils import timezone
@@ -22,13 +22,13 @@ class ReviewEventTests(ReviewsTestBase):
         self.client.force_authenticate(self.buyer)
         return self.client.post(REVIEWS_URL, {'post': str(self.offer.id), **GOOD})
 
-    def test_review_is_saved_with_its_v2_event_and_the_notification_follows_the_diffusion(self):
+    def test_review_is_saved_with_its_v3_event_and_the_notification_follows_the_diffusion(self):
         response = self.post_review()
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         event = OutboxEvent.objects.get(event_type='reviews.review_posted')
-        self.assertEqual(event.version, 2)
+        self.assertEqual(event.version, 3)
         self.assertEqual(event.payload, {
-            'review_id': response.data['id'], 'recipient_id': str(self.seller.pk),
+            'review_id': response.data['id'],
             'author_id': str(self.buyer.pk), 'offer_id': str(self.offer.id), 'offer_title': self.offer.title,
             'seller_context_type': 'USER', 'seller_context_id': str(self.seller.pk),
         })
@@ -65,9 +65,9 @@ class ReviewEventTests(ReviewsTestBase):
         dispatch_outbox_now()
         self.assertEqual(Notification.objects.count(), 1)
 
-    def test_subscriber_refuses_version_1_payloads(self):
+    def test_subscriber_refuses_version_1_and_2_payloads(self):
         subscriber = registry.get_subscriber('notifications.notify_review_posted')
-        self.assertEqual(subscriber.versions, (2,))
+        self.assertEqual(subscriber.versions, (3,))
         crossed = registry.get_subscriber('moderation.file_crossed_reviews_report')
         self.assertEqual(crossed.versions, (2,))
 
@@ -80,7 +80,9 @@ class ReviewEventTests(ReviewsTestBase):
         replied = OutboxEvent.objects.filter(event_type='reviews.review_replied')
         self.assertEqual(replied.count(), 1)  # pas de doublon
         self.assertEqual(replied.get().version, 1)
-        self.assertEqual(replied.get().payload['replier_id'], str(self.seller.pk))
+        self.assertNotIn('replier_id', replied.get().payload)  # le membre qui répond n'est pas dans la charge utile
+        self.assertEqual(replied.get().payload['seller_context_type'], 'USER')
+        self.assertEqual(replied.get().payload['seller_context_id'], str(self.seller.pk))
         self.assertNotIn('Vendeur', str(replied.get().payload))
         dispatch_outbox_now()
         notification = Notification.objects.get()

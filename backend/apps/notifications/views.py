@@ -5,7 +5,6 @@ from rest_framework.response import Response
 from apps.common.pagination import OptionalPagination
 
 from . import services
-from .models import Notification
 from .serializers import NotificationSerializer
 
 
@@ -15,11 +14,13 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]
+    # Notifications du compte, tous contextes confondus (ADR 0006, 9.8) : l'en-tête X-Context est ignoré.
+    acting_context_exempt = "toujours personnel : les notifications appartiennent au compte (ADR 0006, 9.8)"
     pagination_class = OptionalPagination
     http_method_names = ['get', 'patch', 'delete', 'post', 'head', 'options']
 
     def get_queryset(self):
-        return Notification.objects.filter(user=self.request.user).order_by('-created_at')
+        return services.visible_notifications(self.request.user.id).order_by('-created_at')
 
     def create(self, request, *args, **kwargs):
         return Response(

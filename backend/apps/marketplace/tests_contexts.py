@@ -21,6 +21,7 @@ from apps.identity.models import (
     User,
 )
 from apps.moderation.models import AuditLog, Sanction
+from apps.notifications.models import Notification
 from apps.platform_core.models import OutboxEvent
 from apps.platform_core.testing import dispatch_outbox_now
 from apps.visibility.models import DailyVisibilityCounter
@@ -890,6 +891,8 @@ class RequestContextsMemoTests(ContextBase):
 
 
 class ExpirationRecipientsTests(ContextBase):
+    """Expiration v2 : un événement par offre ; les destinataires (`offer.edit`) sont résolus à la livraison."""
+
     def soon(self, offer):
         Offer.objects.filter(pk=offer.pk).update(expires_at=timezone.now() + timezone.timedelta(hours=2))
 
@@ -899,15 +902,28 @@ class ExpirationRecipientsTests(ContextBase):
         self.join(analyst, role=ANALYST)  # l'analyste n'a pas `offer.edit`
         self.soon(offer)
         services.expire_offers()
-        self.assertEqual(OutboxEvent.objects.filter(event_type='marketplace.offer_expiring_soon').count(), 0)
+        events = OutboxEvent.objects.filter(event_type='marketplace.offer_expiring_soon')
+        self.assertEqual(events.count(), 1)
+        dispatch_outbox_now()
+        self.assertEqual(Notification.objects.count(), 0)  # aucun destinataire éligible : rien n'est envoyé
+        self.assertEqual(events.get().status, 'done')  # et l'événement est traité sans erreur, sans rejeu
 
     def test_organization_with_two_editors_notifies_each(self):
         offer = self.org_offer(creator=self.member)
-        for label, role in (('o', OWNER), ('e', EDITOR)):
-            self.join(User.objects.create_user(email=f'{label}@example.com', password='x', full_name=label), role=role)
+        editors = []
+        for label, role in (('o', OWNER), ('e', EDITOR), ('a', ANALYST)):
+            user = User.objects.create_user(email=f'{label}@example.com', password='x', full_name=label)
+            self.join(user, role=role)
+            editors.append(user)
         self.soon(offer)
         services.expire_offers()
-        self.assertEqual(OutboxEvent.objects.filter(event_type='marketplace.offer_expiring_soon').count(), 2)
+        self.assertEqual(OutboxEvent.objects.filter(event_type='marketplace.offer_expiring_soon').count(), 1)
+        dispatch_outbox_now()
+        notified = Notification.objects.all()
+        self.assertEqual({n.user_id for n in notified}, {editors[0].pk, editors[1].pk})  # pas l'analyste
+        self.assertEqual({(n.context_type, n.context_id) for n in notified}, {('ORGANIZATION', self.org.pk)})
+        self.assertTrue(all(n.notification_type == 'EXPIRATION' for n in notified))
+        self.assertNotIn('@', ''.join(n.content + n.title for n in notified))
 
 
 class AuditAndAdminTests(ContextBase):

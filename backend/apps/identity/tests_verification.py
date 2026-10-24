@@ -538,4 +538,5 @@ class EventCatalogTests(VerificationBase):
     def test_event_is_declared_with_an_emitter_and_no_pending_flag(self):
         spec = catalog.EVENT_TYPES[EVENT]
         self.assertFalse(spec.emitter_pending)
-        self.assertTrue(spec.no_subscriber)
+        # T6 : l'abonné `notifications.notify_kyb_decision` remplace le drapeau `no_subscriber`.
+        self.assertFalse(spec.no_subscriber)

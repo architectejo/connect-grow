@@ -23,27 +23,31 @@ class EventType:
 
 _TYPES = (
     # ADR 0006, section 8. Charges utiles : UUID et valeurs simples, aucune donnée personnelle.
-    # Abonnés ajoutés par T5 à T7 ; le drapeau no_subscriber est alors retiré.
-    EventType('identity.membership_changed', no_subscriber=True),
-    # Abonné : `marketplace.sync_seller_visibility` (T5a) ; `notifications.notify_organization_status` viendra avec T6.
+    # Abonnés : `notifications.notify_membership_change` (prévient la personne concernée) et
+    # `notifications.purge_context_notifications` (révocation : supprime ses notifications de l'organisation).
+    EventType('identity.membership_changed'),
+    # Abonnés : `marketplace.sync_seller_visibility` (T5a) ; `notifications.notify_organization_status` (T6).
     EventType('identity.seller_context_status_changed'),
     # Identité d'une organisation modifiée (T8) : noms de champs seulement, aucune valeur.
     EventType('identity.organization_updated', no_subscriber=True),
-    # Émetteur : `decide_kyc_document` (T4) ; abonné `notifications.notify_kyb_decision` ajouté par T6.
-    EventType('identity.organization_verification_changed', no_subscriber=True),
+    # Émetteur : `decide_kyc_document` (T4) ; abonné `notifications.notify_kyb_decision` (T6).
+    EventType('identity.organization_verification_changed'),
     EventType('marketplace.contact_recorded'),
     # ADR 0005 : sans aucun numéro dans la charge utile ; abonné : notifications (prévient le vendeur).
     EventType('marketplace.contact_revealed'),
     EventType('marketplace.exchange_proposed'),
-    EventType('marketplace.offer_expiring_soon'),
+    # Version 2 (ADR 0006, section 8) : `seller_context_type/id` à la place de `seller_id` ; un événement par offre,
+    # destinataires (capacité `offer.edit`) résolus par l'abonné à la livraison.
+    EventType('marketplace.offer_expiring_soon', version=2),
     # ADR 0005, C10 : abonné `marketplace` (pose `delivered_at`) ; ni texte ni numéro dans la charge utile.
     EventType('messaging.contact_message_delivered'),
     EventType('visibility.offer_viewed'),
     EventType('visibility.offer_shared'),
     EventType('visibility.ranking_settings_changed'),
-    # Versions 2 (ADR 0004) : `recipient_id` désigne le destinataire de la notification ;
+    # `review_posted` v3 (ADR 0006, section 8) : plus de `recipient_id`, l'abonné résout les destinataires à la
+    # livraison d'après le contexte vendeur (`seller_context_type/id`). `crossed_reviews_detected` v2 (ADR 0004) :
     # `reviews_count` est le nombre d'avis croisés.
-    EventType('reviews.review_posted', version=2),
+    EventType('reviews.review_posted', version=3),
     EventType('reviews.review_replied'),
     EventType('reviews.crossed_reviews_detected', version=2),
 )

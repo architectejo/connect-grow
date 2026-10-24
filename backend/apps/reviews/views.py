@@ -24,6 +24,9 @@ class ReviewViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     """Avis après contact (ADR 0004, 7.2). Création, modification et suppression passent par
     `services.py` ; la vue ne porte que la validation du corps et le format d'erreur."""
 
+    # Acheteur toujours en contexte personnel (Q-CP8) ; la réponse du vendeur est autorisée PAR OBJET d'après le
+    # contexte propriétaire de l'avis (`review.reply`, ADR 0006, 6.4), jamais d'après l'en-tête X-Context.
+    acting_context_exempt = "avis : acheteur personnel ; réponse autorisée par objet (review.reply du contexte de l'avis)"
     throttle_scopes = {'create': 'review', 'eligibility': 'review_eligibility'}
     serializer_class = ReviewSerializer
     pagination_class = OptionalPagination
@@ -109,8 +112,10 @@ class ReviewViewSet(ActionScopedThrottleMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def reply(self, request, pk=None):
         review = self.get_object()
-        if not services.can_reply(review, request.user):
-            raise CodedAPIException("Seul le vendeur concerné peut répondre à cet avis.", 'not_seller', 403)
+        try:
+            services.ensure_can_reply(review, request.user)
+        except services.ReviewError as exc:
+            raise _api_error(exc)
         body = ReviewReplySerializer(data=request.data)
         body.is_valid(raise_exception=True)
         try:

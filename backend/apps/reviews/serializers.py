@@ -82,6 +82,7 @@ class ReviewSerializer(OfferLookupMixin, serializers.ModelSerializer):
         list_serializer_class = ReviewListSerializer
 
     STATES_KEY = 'reviews_open_report_states'
+    REPLY_CONTEXTS_KEY = 'reviews_reply_contexts'
 
     @classmethod
     def preload(cls, items, context):
@@ -111,10 +112,15 @@ class ReviewSerializer(OfferLookupMixin, serializers.ModelSerializer):
         return SOURCE_CONTACT
 
     def get_is_post_owner(self, obj):
+        """Le demandeur peut répondre à cet avis (capacité `review.reply` du contexte vendeur de l'avis). Les
+        contextes de réponse du demandeur sont calculés UNE fois par sérialisation (4 requêtes au plus), pas par
+        avis : le coût ne dépend pas du nombre d'avis de la page."""
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return False
-        return services.can_reply(obj, request.user)
+        if self.REPLY_CONTEXTS_KEY not in self.context:
+            self.context[self.REPLY_CONTEXTS_KEY] = services.get_reply_contexts(request.user)
+        return (obj.seller_context_type, obj.seller_context_id) in self.context[self.REPLY_CONTEXTS_KEY]
 
     def get_is_mine(self, obj):
         # L'identifiant de l'auteur n'est jamais public : seul l'auteur apprend que l'avis est le sien.

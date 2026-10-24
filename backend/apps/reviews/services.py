@@ -16,7 +16,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Count, F, Q, Sum
 from django.utils import timezone
 
-from apps.common.contexts import CONTEXT_USER
+from apps.common.contexts import CONTEXT_USER, DENY_RELATION, ContextDenied
 from apps.common.utils import parse_uuid, seconds_until_next_day
 from apps.identity import services as identity_services
 from apps.marketplace import services as marketplace_services
@@ -292,9 +292,11 @@ def reject_fictitious_contact(review_id, actor) -> None:
 
 
 def is_review_seller(review_id, user) -> bool:
-    """Vrai si `user` agit pour le vendeur noté par l'avis (contexte vendeur de l'avis)."""
+    """Vrai si `user` peut agir pour le vendeur noté par l'avis (ADR 0006, 11.3) : capacité `review.reply` du contexte
+    vendeur de l'avis (membre éligible de l'organisation, titulaire du prestataire ou du compte ; pas l'analyste,
+    pas un ancien membre). Sert au signalement « contact fictif »."""
     row = Review.objects.filter(pk=review_id).values_list('seller_context_type', 'seller_context_id').first()
-    return row is not None and identity_services.acts_for_context(user.pk, row[0], row[1])
+    return row is not None and identity_services.can(user.pk, row[0], row[1], CAP_REPLY)
 
 
 def reserve_daily_slot(user) -> None:
@@ -423,18 +425,18 @@ def set_review_hidden(review: Review, hidden: bool, actor) -> None:
 
 
 def publish_review_posted(review: Review, author, offer=None) -> None:
-    """Publie `reviews.review_posted` (v2), à appeler dans la transaction de création : le vendeur est
-    notifié à la diffusion. Seuls des identifiants et le titre public de l'annonce sont copiés : le
-    nom de l'auteur et l'extrait sont relus à la diffusion. `recipient_id` est l'utilisateur à
-    notifier (L0-09 résoudra les membres d'une organisation)."""
+    """Publie `reviews.review_posted` (v3), à appeler dans la transaction de création. La charge utile désigne le
+    CONTEXTE vendeur de l'avis, pas des comptes : l'abonné résout les destinataires à la livraison (compte,
+    titulaire du profil prestataire, membres éligibles de l'organisation selon `review.reply`, ADR 0006, section 8).
+    Seuls des identifiants et le titre public de l'annonce sont copiés : le nom de l'auteur et l'extrait sont
+    relus à la diffusion."""
     if offer is None:
         offer = marketplace_services.get_offer(review.offer_id)
     publish_event(
         'reviews.review_posted', aggregate_type='review', aggregate_id=review.pk,
         payload={
-            'review_id': str(review.pk), 'recipient_id': str(review.seller_context_id),
-            'author_id': str(author.pk), 'offer_id': str(review.offer_id) if offer else None,
-            'offer_title': _offer_title(offer),
+            'review_id': str(review.pk), 'author_id': str(author.pk),
+            'offer_id': str(review.offer_id) if offer else None, 'offer_title': _offer_title(offer),
             'seller_context_type': review.seller_context_type, 'seller_context_id': str(review.seller_context_id),
         },
     )
@@ -444,30 +446,64 @@ def _offer_title(offer):
     return offer.title if offer else "une annonce supprimée"
 
 
+CAP_REPLY = 'review.reply'
+NOT_SELLER_MESSAGE = "Seul le vendeur concerné peut répondre à cet avis."
+
+
 def can_reply(review: Review, user) -> bool:
-    """Le vendeur concerné répond à l'avis. Contexte personnel : le titulaire ; organisation : la capacité
-    `review.reply` (propriétaire, administrateur, éditeur ; jamais l'analyste), relue en base."""
-    return identity_services.can(user.pk, review.seller_context_type, review.seller_context_id, 'review.reply')
+    """Le vendeur concerné répond à l'avis. Contexte personnel ou prestataire : le titulaire ; organisation : la
+    capacité `review.reply` (propriétaire, administrateur, éditeur ; jamais l'analyste), relue en base. Compte
+    désactivé ou sanctionné, ancien membre, organisation suspendue ou archivée : non. Pour une LISTE d'avis, utiliser
+    `get_reply_contexts` (une seule fois pour toute la page)."""
+    return identity_services.can(user.pk, review.seller_context_type, review.seller_context_id, CAP_REPLY)
+
+
+def get_reply_contexts(user) -> set:
+    """Contextes vendeur `(type, id)` pour lesquels `user` peut répondre aux avis (capacité `review.reply`),
+    calculés PAR LOT : 4 requêtes au plus, quel que soit le nombre d'avis affichés (plus de N+1). Mêmes règles que
+    `can_reply`. Un utilisateur anonyme n'a aucun contexte."""
+    if user is None or not getattr(user, 'is_authenticated', False):
+        return set()
+    return identity_services.get_capable_contexts(user.pk, CAP_REPLY)
+
+
+def ensure_can_reply(review: Review, user) -> None:
+    """Contrôle d'autorisation de la réponse, par OBJET (contexte propriétaire de l'avis, jamais l'en-tête
+    `X-Context`). Un étranger au contexte, l'auteur de l'avis ou un ancien membre : 403 `not_seller` (contrat de
+    l'ADR 0004). Un membre sans la capacité (analyste) : 403 `DENY_PERMISSION` ; compte sanctionné ou organisation
+    suspendue : `DENY_SECURITY` ; organisation archivée : `DENY_OBJECT_STATE`."""
+    try:
+        identity_services.authorize_on(user, review.seller_context_type, review.seller_context_id, CAP_REPLY)
+    except ContextDenied as exc:
+        if exc.detail.code == DENY_RELATION:
+            raise ReviewError(NOT_SELLER_MESSAGE, 'not_seller')
+        raise
 
 
 def reply_to_review(review: Review, replier, content: str) -> Review:
     """Réponse publique du vendeur concerné ; l'auteur de l'avis en est prévenu (événement
-    `reviews.review_replied`, publié dans la même transaction que la réponse)."""
-    if not can_reply(review, replier):
-        raise ReviewError("Seul le vendeur concerné peut répondre à cet avis.", 'not_seller')
+    `reviews.review_replied`, publié dans la même transaction que la réponse). Écriture sensible : l'autorisation
+    est refaite sous la transaction (une révocation survenue entre-temps est prise en compte) et la réponse est
+    journalisée avec le contexte vendeur (règle 12) ; elle s'affiche au nom du vendeur, jamais du membre."""
     offer = marketplace_services.get_offer(review.offer_id)
     with transaction.atomic():
+        ensure_can_reply(review, replier)
         # Mise à jour conditionnelle : la réponse ne s'écrit qu'une fois, même en cas de requêtes simultanées.
         written = Review.objects.filter(pk=review.pk).filter(
             Q(reply_content__isnull=True) | Q(reply_content=''),
         ).update(reply_content=content, reply_at=timezone.now(), updated_at=timezone.now())
         if not written:
             raise ReviewError("Vous avez déjà répondu à cet avis.", 'already_replied', HTTP_CONFLICT)
+        moderation_services.record_audit(
+            replier, 'REVIEW_REPLIED', target=review, details=f"offer={review.offer_id}",
+            context=(review.seller_context_type, review.seller_context_id),
+        )
         publish_event(
             'reviews.review_replied', aggregate_type='review', aggregate_id=review.pk,
             payload={
                 'review_id': str(review.pk), 'review_author_id': str(review.user_id),
-                'replier_id': str(replier.pk), 'offer_id': str(review.offer_id) if offer else None,
+                'seller_context_type': review.seller_context_type, 'seller_context_id': str(review.seller_context_id),
+                'offer_id': str(review.offer_id) if offer else None,
                 'offer_title': _offer_title(offer),
             },
         )

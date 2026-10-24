@@ -44,6 +44,12 @@ from .sellers import (  # noqa: F401
     set_account_active, announce_account_status,
 )
 
+# Lectures par lot des contextes (droits, comptes agissant, destinataires d'équipe, noms) : ADR 0006, 9.8 et 19.3.
+from .context_reads import (  # noqa: F401
+    get_active_organization_ids, get_capable_contexts, get_context_member_accounts, get_context_names,
+    get_document_type_label, get_organization_recipients, get_role_label,
+)
+
 # Prestataire individuel (ADR 0006, 9.3) : façade publique.
 from .providers import (  # noqa: F401
     ProviderError, activate_provider, archive_provider, get_provider_category_ids, get_provider_profile,

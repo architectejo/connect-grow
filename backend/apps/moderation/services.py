@@ -39,10 +39,35 @@ class ReportRefused(Exception):
         self.status_code = status_code
 
 
-def resolve_target_author(target_type, target_id):
-    """UUID de l'auteur de la cible (vendeur, rédacteur, expéditeur, compte lui-même), ou None."""
+def _raw_target_author(target_type, target_id):
     module = TARGET_RESOLVERS.get(target_type)
     return import_module(module).get_report_authors([target_id]).get(target_id) if module else None
+
+
+def resolve_target_authors(target_type, target_id) -> frozenset:
+    """Comptes qui sont « l'auteur » de la cible : un seul pour un avis, un message ou un compte ; pour une offre,
+    tous les comptes qui agissent pour son contexte vendeur (le compte, le titulaire du prestataire, les membres
+    actifs de l'organisation : ADR 0006, 19.3 n°7). Le domaine propriétaire renvoie un UUID ou une collection."""
+    value = _raw_target_author(target_type, target_id)
+    if value is None:
+        return frozenset()
+    if isinstance(value, (set, frozenset, list, tuple)):
+        return frozenset(value)
+    return frozenset({value})
+
+
+# Types de cible qui ont UN auteur unique ; une offre en a plusieurs (membres d'une organisation), même si un seul
+# est actif : elle n'a jamais d'« auteur unique » (utiliser `resolve_target_authors`).
+SINGLE_AUTHOR_TARGET_TYPES = frozenset({'review', 'message', 'user'})
+
+
+def resolve_target_author(target_type, target_id):
+    """UUID de l'auteur UNIQUE de la cible (rédacteur d'un avis, expéditeur, compte lui-même), ou None s'il n'y en a
+    pas ou s'il y en a plusieurs (offre d'une organisation : voir `resolve_target_authors`)."""
+    if target_type not in SINGLE_AUTHOR_TARGET_TYPES:
+        return None
+    authors = resolve_target_authors(target_type, target_id)
+    return next(iter(authors)) if len(authors) == 1 else None
 
 
 def ensure_can_report(reporter, target_type, target_id, reason=None):
@@ -51,7 +76,7 @@ def ensure_can_report(reporter, target_type, target_id, reason=None):
     Le motif « contact fictif » est réservé au vendeur concerné par l'avis signalé (ADR 0004)."""
     if reason == Report.REASON_CONTACT_FICTIF:
         _ensure_can_report_fictitious_contact(reporter, target_type, target_id)
-    if resolve_target_author(target_type, target_id) == reporter.pk:
+    if reporter.pk in resolve_target_authors(target_type, target_id):
         raise ReportRefused("Vous ne pouvez pas signaler votre propre contenu ou votre propre compte.")
     if Report.objects.filter(
         reporter=reporter, target_type=target_type, target_id=target_id, status__in=Report.OPEN_STATUSES,

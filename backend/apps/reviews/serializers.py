@@ -82,6 +82,7 @@ class ReviewSerializer(OfferLookupMixin, serializers.ModelSerializer):
         list_serializer_class = ReviewListSerializer
 
     STATES_KEY = 'reviews_open_report_states'
+    REPLY_CONTEXTS_KEY = 'reviews_reply_contexts'
 
     @classmethod
     def preload(cls, items, context):
@@ -109,8 +110,6 @@ class ReviewSerializer(OfferLookupMixin, serializers.ModelSerializer):
 
     def get_source(self, obj):
         return SOURCE_CONTACT
-
-    REPLY_CONTEXTS_KEY = 'reviews_reply_contexts'
 
     def get_is_post_owner(self, obj):
         """Le demandeur peut répondre à cet avis (capacité `review.reply` du contexte vendeur de l'avis). Les

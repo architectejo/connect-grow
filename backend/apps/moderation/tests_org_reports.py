@@ -58,6 +58,19 @@ class OrganizationReportTests(ModerationTestBase):
         )
         self.assertIsNone(services.resolve_target_author('offer', self.offer.id))  # plusieurs auteurs : pas d'auteur unique
 
+    def test_suspended_organization_does_not_allow_reporting_its_own_offer(self):
+        Organization.objects.filter(pk=self.org.pk).update(status='SUSPENDED')
+        self.assertEqual(self.report(self.members['EDITOR']).status_code, 400)
+        self.assertEqual(self.report(self.reporter).status_code, 201)
+
+    def test_single_member_organization_offer_has_no_unique_author(self):
+        solo = Organization.objects.create(name='Solo', org_type='ONG')
+        Membership.objects.create(organization=solo, user=self.members['OWNER'], role='OWNER')
+        offer = self.offer_of('ORGANIZATION', solo.pk)
+        self.assertEqual(services.resolve_target_authors('offer', offer.id), frozenset({self.members['OWNER'].pk}))
+        self.assertIsNone(services.resolve_target_author('offer', offer.id))
+        self.assertEqual(services.resolve_target_author('user', self.seller.pk), self.seller.pk)
+
     def test_former_member_stranger_and_buyer_can_report(self):
         Membership.objects.filter(user=self.members['EDITOR']).update(status='REVOKED')
         for user in (self.members['EDITOR'], self.reporter, self.seller):
@@ -117,7 +130,10 @@ class AuthorsEquivalenceTests(ModerationTestBase):
         for context_type, context_id in contexts:
             for user in everyone:
                 with self.subTest(context=(context_type, str(context_id)[:8]), user=user.email):
-                    self.assertEqual(
-                        user.pk in batch[(context_type, context_id)],
-                        identity_services.acts_for_context(user.pk, context_type, context_id),
-                    )
+                    expected = identity_services.acts_for_context(user.pk, context_type, context_id)
+                    if context_id == suspended.pk:
+                        # Écart voulu : la suspension n'autorise pas à signaler sa propre offre.
+                        expected = Membership.objects.filter(
+                            organization_id=suspended.pk, user=user, status='ACTIVE',
+                        ).exists()
+                    self.assertEqual(user.pk in batch[(context_type, context_id)], expected)

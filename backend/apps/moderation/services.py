@@ -56,9 +56,16 @@ def resolve_target_authors(target_type, target_id) -> frozenset:
     return frozenset({value})
 
 
+# Types de cible qui ont UN auteur unique ; une offre en a plusieurs (membres d'une organisation), même si un seul
+# est actif : elle n'a jamais d'« auteur unique » (utiliser `resolve_target_authors`).
+SINGLE_AUTHOR_TARGET_TYPES = frozenset({'review', 'message', 'user'})
+
+
 def resolve_target_author(target_type, target_id):
     """UUID de l'auteur UNIQUE de la cible (rédacteur d'un avis, expéditeur, compte lui-même), ou None s'il n'y en a
     pas ou s'il y en a plusieurs (offre d'une organisation : voir `resolve_target_authors`)."""
+    if target_type not in SINGLE_AUTHOR_TARGET_TYPES:
+        return None
     authors = resolve_target_authors(target_type, target_id)
     return next(iter(authors)) if len(authors) == 1 else None
 

@@ -41,8 +41,9 @@ def get_capable_contexts(user_id, capability) -> set:
 
 def get_context_member_accounts(contexts: Iterable) -> dict:
     """Comptes qui agissent pour chaque contexte, `{(type, id): frozenset[user_id]}` (ADR 0006, 19.3 n°7) : `USER` =
-    le compte ; `PROVIDER` = son titulaire ; `ORGANIZATION` = membres actifs de tout rôle d'une organisation non
-    suspendue. Même définition qu'`acts_for_context` (testée case par case), mais par lot : au plus 2 requêtes.
+    le compte ; `PROVIDER` = son titulaire ; `ORGANIZATION` = membres actifs de tout rôle d'une organisation, QUEL QUE
+    SOIT son état. Comme `acts_for_context` (testée case par case), sauf l'organisation suspendue, qui reste couverte
+    ici. Par lot : au plus 2 requêtes.
     Sert au contrôle « pas de signalement de sa propre offre »."""
     wanted = {CONTEXT_USER: set(), CONTEXT_PROVIDER: set(), CONTEXT_ORGANIZATION: set()}
     for context_type, context_id in contexts:
@@ -56,9 +57,10 @@ def get_context_member_accounts(contexts: Iterable) -> dict:
             result[(CONTEXT_PROVIDER, provider_id)] = frozenset({owner_id})
     if wanted[CONTEXT_ORGANIZATION]:
         members = {}
+        # Quel que soit l'état de l'organisation : la suspension n'autorise pas à signaler sa propre offre.
         for organization_id, user_id in Membership.objects.filter(
             organization_id__in=wanted[CONTEXT_ORGANIZATION], status=Membership.STATUS_ACTIVE,
-        ).exclude(organization__status=Organization.STATUS_SUSPENDED).values_list('organization_id', 'user_id'):
+        ).values_list('organization_id', 'user_id'):
             members.setdefault(organization_id, set()).add(user_id)
         for organization_id in wanted[CONTEXT_ORGANIZATION]:
             result[(CONTEXT_ORGANIZATION, organization_id)] = frozenset(members.get(organization_id, ()))

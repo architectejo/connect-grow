@@ -146,6 +146,34 @@ class ApiContextTests(NotificationContextBase):
         self.assertEqual(self.listing(self.admin).data, [])
 
 
+class SanctionTests(NotificationContextBase):
+    def test_a_sanctioned_member_is_no_longer_a_recipient(self):
+        from apps.moderation.models import Sanction
+
+        Sanction.objects.create(user=self.admin, sanction_type='SUSPENSION_TEMPORAIRE', reason='x')
+        recipients = identity_services.get_context_recipients('ORGANIZATION', self.org.pk, 'review.reply')
+        self.assertEqual(set(recipients), {self.owner.pk, self.editor.pk})
+        profile = ProviderProfile.objects.create(user=self.admin, display_name='P')
+        self.assertEqual(identity_services.get_context_recipients('PROVIDER', profile.pk, 'review.reply'), [])
+        self.assertEqual(identity_services.get_context_recipients('USER', self.admin.pk, 'review.reply'), [])
+
+    def test_a_sanctioned_account_sees_only_its_personal_notifications(self):
+        from apps.moderation.models import Sanction
+
+        profile = ProviderProfile.objects.create(user=self.admin, display_name='P')
+        for title, context in (
+            ('Perso', None), ('Orga', ('ORGANIZATION', self.org.pk)), ('Prest', ('PROVIDER', profile.pk)),
+        ):
+            services.notify(
+                user_id=self.admin.pk, notification_type=services.SYSTEM, title=title, content='c', context=context,
+            )
+        self.assertEqual({n['title'] for n in self.listing(self.admin).data}, {'Perso', 'Orga', 'Prest'})
+        sanction = Sanction.objects.create(user=self.admin, sanction_type='BANNISSEMENT', reason='x')
+        self.assertEqual([n['title'] for n in self.listing(self.admin).data], ['Perso'])
+        Sanction.objects.filter(pk=sanction.pk).update(is_active=False)  # levée : tout réapparaît
+        self.assertEqual(len(self.listing(self.admin).data), 3)
+
+
 class MembershipNotificationTests(NotificationContextBase):
     def test_added_members_are_told_in_the_organization_context_and_the_creator_is_not(self):
         self.deliver()
@@ -190,6 +218,30 @@ class MembershipNotificationTests(NotificationContextBase):
         self.assertEqual((personal.context_type, personal.context_id), (None, None))
         self.assertTrue(self.of(self.admin, title='Admin').exists())  # les autres membres gardent les leurs
 
+    def test_demotion_to_analyst_purges_review_and_expiration_notices_but_keeps_the_rest(self):
+        self.settle()
+        for kind in (services.COMMENT, services.EXPIRATION, services.SYSTEM):
+            services.notify(
+                user_id=self.editor.pk, notification_type=kind, title=kind, content='c',
+                context=('ORGANIZATION', self.org.pk),
+            )
+        services.notify(user_id=self.editor.pk, notification_type=services.COMMENT, title='Perso', content='c')
+        identity_services.change_member_role(self.owner, self.org.pk, self.editor.pk, ANALYST)
+        self.deliver()
+        self.deliver()  # idempotent
+        titles = set(self.of(self.editor).values_list('title', flat=True))
+        self.assertEqual(titles, {'SYSTEM', 'Perso', 'Votre rôle a changé'})
+
+    def test_promotion_or_a_role_keeping_the_capability_purges_nothing(self):
+        self.settle()
+        services.notify(
+            user_id=self.editor.pk, notification_type=services.COMMENT, title='Avis', content='c',
+            context=('ORGANIZATION', self.org.pk),
+        )
+        identity_services.change_member_role(self.owner, self.org.pk, self.editor.pk, ADMIN)
+        self.deliver()
+        self.assertTrue(self.of(self.editor, title='Avis').exists())
+
     def test_voluntary_leave_purges_without_notifying_the_leaver(self):
         self.deliver()
         self.assertTrue(self.of(self.editor, context_id=self.org.pk).exists())
@@ -207,10 +259,16 @@ class MembershipNotificationTests(NotificationContextBase):
         identity_services.revoke_member(self.owner, self.org.pk, self.editor.pk)
         self.deliver()
         Notification.objects.all().delete()
+        services.notify(  # ligne périmée d'une ancienne appartenance
+            user_id=self.editor.pk, notification_type=services.COMMENT, title='Vieux avis', content='c',
+            context=('ORGANIZATION', self.org.pk),
+        )
+        Notification.objects.filter(title='Vieux avis').update(created_at='2020-01-01T00:00:00+00:00')
         identity_services.add_member(self.owner, self.org.pk, self.editor.pk, EDITOR)
         self.deliver()
-        notification = self.of(self.editor).get()
+        notification = self.of(self.editor).get()  # seule la notification de retour reste
         self.assertEqual(notification.context_id, self.org.pk)
+        self.assertEqual(notification.title, 'Vous avez rejoint une organisation')
 
     def test_delivery_is_exactly_once(self):
         self.deliver()

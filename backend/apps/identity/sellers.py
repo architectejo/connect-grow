@@ -177,26 +177,30 @@ def context_has_capability(context_type, role, capability) -> bool:
 
 def get_context_recipients(context_type, context_id, capability) -> list:
     """Comptes à notifier pour un contexte (ADR 0006, 7.1) : `USER` = le compte, `PROVIDER` = son titulaire,
-    `ORGANIZATION` = membres actifs dont le rôle a la capacité. Comptes désactivés exclus. Une requête au plus."""
+    `ORGANIZATION` = membres actifs dont le rôle a la capacité. Comptes désactivés ou sous sanction bloquante exclus. Deux requêtes au plus."""
     parsed = parse_uuid(context_id)
     if parsed is None:
         return []
     if context_type == CONTEXT_USER:
-        return list(User.objects.filter(pk=parsed, is_active=True).values_list('pk', flat=True))
-    if context_type == CONTEXT_PROVIDER:
-        return list(
+        accounts = list(User.objects.filter(pk=parsed, is_active=True).values_list('pk', flat=True))
+    elif context_type == CONTEXT_PROVIDER:
+        accounts = list(
             ProviderProfile.objects.filter(pk=parsed, user__is_active=True).values_list('user_id', flat=True)
         )
-    if context_type == CONTEXT_ORGANIZATION:
+    elif context_type == CONTEXT_ORGANIZATION:
         roles = [role for role in capabilities.ROLES if capabilities.role_has_capability(role, capability)]
-        return sorted(
+        accounts = sorted(
             Membership.objects.filter(
                 organization_id=parsed, status=Membership.STATUS_ACTIVE, role__in=roles,
                 organization__status=Organization.STATUS_ACTIVE, user__is_active=True,
             ).values_list('user_id', flat=True),
             key=str,
         )
-    return []
+    else:
+        return []
+    # Un compte sous sanction bloquante ne reçoit plus rien au titre d'un contexte vendeur.
+    restricted = get_restricted_user_ids(accounts)
+    return [account for account in accounts if account not in restricted]
 
 
 # --- Contact par contexte vendeur (interim T5a, étendu par T7) -------------------------------------------------

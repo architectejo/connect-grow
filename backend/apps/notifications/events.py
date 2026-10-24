@@ -200,12 +200,27 @@ def notify_membership_change(event):
 @subscribe('identity.membership_changed', name='notifications.purge_context_notifications')
 def purge_context_notifications(event):
     """Révocation : supprime les notifications que ce compte avait reçues au titre de l'organisation (il ne doit
-    rien en conserver ni en lire). Idempotent. Les nouvelles notifications ne l'atteignent plus (destinataires
+    rien en conserver ni en lire) ; rétrogradation : supprime celles dont il n'a plus la capacité ; retour : supprime les anciennes. Idempotent. Les nouvelles notifications ne l'atteignent plus (destinataires
     résolus à la livraison) et `visible_notifications` masque celles qui arriveraient après coup."""
-    organization_id, user_id, change = _require(event.payload, 'organization_id', 'user_id', 'change')
-    if change != 'revoked':
-        return
-    services.purge_context_notifications(_user_id(user_id), CONTEXT_ORGANIZATION, _user_id(organization_id))
+    payload = event.payload
+    organization_id, user_id, change = _require(payload, 'organization_id', 'user_id', 'change')
+    organization, user = _user_id(organization_id), _user_id(user_id)
+    if change == 'revoked':
+        services.purge_context_notifications(user, CONTEXT_ORGANIZATION, organization)
+    elif change == 'reactivated':
+        # Retour d'un ancien membre : les lignes antérieures à l'événement sont périmées (la notification de retour,
+        # créée après, est conservée).
+        services.purge_context_notifications(user, CONTEXT_ORGANIZATION, organization, before=event.created_at)
+    elif change == 'role_changed':
+        # Rétrogradation : le membre ne garde pas les notifications dont il n'a plus la capacité (avis -> `review.reply`,
+        # expiration -> `offer.edit`). Idempotent ; une promotion ne purge rien.
+        role = payload.get('new_role')
+        lost = [
+            kind for kind, capability in ((services.COMMENT, CAP_REVIEW_REPLY), (services.EXPIRATION, CAP_OFFER_EDIT))
+            if not identity_services.context_has_capability(CONTEXT_ORGANIZATION, role, capability)
+        ]
+        if lost:
+            services.purge_context_notifications(user, CONTEXT_ORGANIZATION, organization, notification_types=lost)
 
 
 _STATUS_MESSAGES = {

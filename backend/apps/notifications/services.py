@@ -52,14 +52,17 @@ def notify(
     )
 
 
-def purge_context_notifications(user_id, context_type, context_id) -> int:
+def purge_context_notifications(user_id, context_type, context_id, notification_types=None, before=None) -> int:
     """Supprime les notifications de ce compte rattachées à ce contexte (révocation d'un membre : il ne doit plus
-    rien lire de l'organisation, ADR 0006, section 12). Renvoie le nombre de lignes supprimées. Idempotent."""
+    rien lire de l'organisation, ADR 0006, section 12) ; `notification_types` limite la purge à ces types, `before` aux notifications créées avant cette date. Renvoie le nombre de lignes supprimées. Idempotent."""
     if context_type == CONTEXT_USER or context_id is None:
         return 0
-    deleted, _ = Notification.objects.filter(
-        user_id=user_id, context_type=context_type, context_id=context_id,
-    ).delete()
+    rows = Notification.objects.filter(user_id=user_id, context_type=context_type, context_id=context_id)
+    if notification_types is not None:
+        rows = rows.filter(notification_type__in=notification_types)
+    if before is not None:
+        rows = rows.filter(created_at__lt=before)
+    deleted, _ = rows.delete()
     return deleted
 
 
@@ -69,10 +72,17 @@ def visible_notifications(user_id):
     organisation suspendue ou archivée reste visible de ses membres (c'est là qu'on leur annonce la décision)."""
     from apps.identity import services as identity_services  # import tardif : identity -> moderation -> notifications
 
+    from apps.moderation import services as moderation_services
+
     allowed = identity_services.get_active_organization_ids(user_id)
-    return Notification.objects.filter(user_id=user_id).exclude(
+    visible = Notification.objects.filter(user_id=user_id).exclude(
         Q(context_type=CONTEXT_ORGANIZATION) & ~Q(context_id__in=allowed),
     )
+    if moderation_services.is_user_restricted(user_id):
+        # Sanction bloquante : plus aucune notification de contexte vendeur ; les personnelles (contexte nul)
+        # restent lisibles pour que le compte voie sa sanction.
+        visible = visible.filter(context_type__isnull=True)
+    return visible
 
 
 def mark_all_read(user_id) -> int:

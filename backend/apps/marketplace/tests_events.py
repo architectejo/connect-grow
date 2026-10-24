@@ -42,7 +42,8 @@ class ContactEventTests(MarketplaceTestBase):
         payload = OutboxEvent.objects.get().payload
         self.assertEqual(payload, {
             'contact_event_id': str(event.pk), 'offer_id': str(self.offer.id), 'offer_title': self.offer.title,
-            'seller_id': str(self.seller.pk), 'sender_id': str(self.buyer.pk), 'channel': 'MESSAGE',
+            'seller_context_type': 'USER', 'seller_context_id': str(self.seller.pk),
+            'sender_id': str(self.buyer.pk), 'channel': 'MESSAGE',
         })
         self.assertNotIn('Texte confidentiel', str(payload))
         self.assertNotIn('Acheteur', str(payload))
@@ -72,7 +73,9 @@ class ContactEventTests(MarketplaceTestBase):
 
     def test_failing_subscriber_keeps_the_contact_and_is_recovered_by_a_retry(self):
         original = registry.get_subscriber('notifications.notify_contact')
-        failing = registry.Subscriber(original.event_type, original.name, mock.Mock(side_effect=ValueError('x')), (1,))
+        failing = registry.Subscriber(
+            original.event_type, original.name, mock.Mock(side_effect=ValueError('x')), original.versions,
+        )
         with mock.patch.dict(registry._BY_NAME, {original.name: failing}):
             self.contact(message='Bonjour')
             with self.assertLogs('apps.platform_core.services', level='ERROR'):

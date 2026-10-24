@@ -1,6 +1,7 @@
 """Abonnés de `notifications` aux événements de domaine (ADR 0003). N'appellent que des `services.py`."""
 from datetime import datetime
 
+from apps.common.contexts import CONTEXT_ORGANIZATION
 from apps.common.utils import parse_uuid
 from apps.identity import services as identity_services
 from apps.platform_core.registry import PermanentEventError, subscribe
@@ -32,37 +33,61 @@ def _name(user_id_value):
     return identity_services.get_full_names([user_id]).get(user_id) or UNKNOWN_USER
 
 
-@subscribe('marketplace.contact_recorded', name='notifications.notify_contact')
+REPLY_CAPABILITY = 'message.reply'  # équipe qui reçoit les messages d'une organisation (ADR 0006, D6)
+REQUESTERS_CAPABILITY = 'contact.view_requesters'  # équipe qui voit « qui a demandé » (l'analyste n'y a pas droit)
+
+
+def _seller_context(payload):
+    """(type, id) du contexte vendeur d'une charge utile de contact ou d'échange (version 2)."""
+    context_type, context_id = _require(payload, 'seller_context_type', 'seller_context_id')
+    return context_type, _user_id(context_id)
+
+
+def _notify_context(payload, capability, **notification):
+    """Une notification par destinataire du contexte vendeur, résolu À LA LIVRAISON (équipe du moment : un membre
+    révoqué entre-temps n'est pas notifié). Une organisation : la notification est rattachée à l'organisation.
+    Aucune donnée de membre dans la charge utile ni dans les journaux."""
+    context_type, context_id = _seller_context(payload)
+    for recipient_id in identity_services.get_context_recipients(context_type, context_id, capability):
+        services.notify(
+            user_id=recipient_id,
+            context=(context_type, context_id) if context_type == CONTEXT_ORGANIZATION else None,
+            **notification,
+        )
+
+
+@subscribe('marketplace.contact_recorded', name='notifications.notify_contact', versions=(2,))
 def notify_contact(event):
-    seller_id, sender_id, title = _require(event.payload, 'seller_id', 'sender_id', 'offer_title')
-    services.notify(
-        user_id=_user_id(seller_id), notification_type=services.CONTACT,
+    sender_id, title = _require(event.payload, 'sender_id', 'offer_title')
+    _notify_context(
+        event.payload, REPLY_CAPABILITY, notification_type=services.CONTACT,
         title="Nouvelle demande de contact",
         content=f"{_name(sender_id)} vous a contacté pour {title}",
         link='/messages',
     )
 
 
-@subscribe('marketplace.contact_revealed', name='notifications.notify_contact_revealed')
+@subscribe('marketplace.contact_revealed', name='notifications.notify_contact_revealed', versions=(2,))
 def notify_contact_revealed(event):
     """Le vendeur apprend qu'un utilisateur a obtenu son numéro (ADR 0005, C7) : nom d'affichage
-    « Marie K. » (`requester_display_name`, nettoyé comme la liste), jamais de numéro."""
-    seller_id, sender_id, title = _require(event.payload, 'seller_id', 'sender_id', 'offer_title')
+    « Marie K. » (`requester_display_name`, nettoyé comme la liste), jamais de numéro. Organisation : les membres
+    qui ont `contact.view_requesters` (comme la liste « qui a demandé »)."""
+    sender_id, title = _require(event.payload, 'sender_id', 'offer_title')
     sender = _user_id(sender_id)
     name = identity_services.requester_display_name(identity_services.get_full_names([sender]).get(sender))
-    services.notify(
-        user_id=_user_id(seller_id), notification_type=services.CONTACT,
+    _notify_context(
+        event.payload, REQUESTERS_CAPABILITY, notification_type=services.CONTACT,
         title="Votre numéro a été demandé",
         content=f"{name} a demandé votre numéro pour {title}",
         link='/dashboard',
     )
 
 
-@subscribe('marketplace.exchange_proposed', name='notifications.notify_exchange')
+@subscribe('marketplace.exchange_proposed', name='notifications.notify_exchange', versions=(2,))
 def notify_exchange(event):
-    seller_id, sender_id, title = _require(event.payload, 'seller_id', 'sender_id', 'offer_title')
-    services.notify(
-        user_id=_user_id(seller_id), notification_type=services.EXCHANGE,
+    sender_id, title = _require(event.payload, 'sender_id', 'offer_title')
+    _notify_context(
+        event.payload, REPLY_CAPABILITY, notification_type=services.EXCHANGE,
         title="Nouvelle proposition d'échange",
         content=f"{_name(sender_id)} propose un échange pour {title}",
         link='/messages',

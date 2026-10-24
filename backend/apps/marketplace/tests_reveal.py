@@ -107,7 +107,8 @@ class RevealNominalTests(RevealTestBase):
         outbox = OutboxEvent.objects.get(event_type='marketplace.contact_revealed')
         self.assertEqual(outbox.payload, {
             'contact_event_id': str(event.pk), 'offer_id': str(self.offer.id), 'offer_title': self.offer.title,
-            'seller_id': str(self.seller.pk), 'sender_id': str(self.buyer.pk), 'channel': 'CALL',
+            'seller_context_type': 'USER', 'seller_context_id': str(self.seller.pk),
+            'sender_id': str(self.buyer.pk), 'channel': 'CALL',
         })
         for text in (audit.details, str(outbox.payload)):
             self.assertNotIn('891111111', text)

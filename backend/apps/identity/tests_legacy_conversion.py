@@ -1,8 +1,11 @@
 """Conversion des comptes entreprise en organisations (L0-09 T9-1, spec T9 §2 et §6).
 
 Tests par `MigrationExecutor` : état historique avant `identity 0011`, jeu de données fabriqué, migration en avant
-puis retour arrière. Couvre le mapping champ par champ, l'équivalence de la vérification dérivée, l'idempotence, les
-cas limites, le retour arrière, la base vierge, la non-fuite de données personnelles et la commande de pré-vol.
+puis retour arrière.
+
+Coût maîtrisé : les scénarios en lecture seule partagent UN monde (migration et jeu de données construits une fois
+par classe, `_fixture_teardown` neutralisé) ; seuls les scénarios qui modifient l'état (retour arrière, rejeu,
+garde, base vierge, volume) reconstruisent le leur.
 """
 import importlib
 import io
@@ -15,17 +18,18 @@ from django.core.cache import cache
 from django.core.management import call_command
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from django.test import SimpleTestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.identity import legacy_conversion as rules
 from apps.identity import services as identity_services
 from apps.identity.models import (
-    ContactConsent, ContactPoint, KycDocument, LegacyAccountMapping, Membership, Organization,
-    OrganizationCategory,
+    ContactConsent, ContactPoint, KycDocument, LegacyAccountMapping, Membership, Organization, OrganizationCategory,
 )
 from apps.identity.verification import get_verification_summaries
+from apps.moderation.services import get_restricted_user_ids
 
 OLD = [
     ('identity', '0010_identitysettings_kyb_file_retention_days'), ('marketplace', '0009_fill_offer_seller_context'),
@@ -43,55 +47,43 @@ SECRET_EMAIL = 'proprietaire.secret@example.com'
 SECRET_PHONE = '+243899887766'
 SECRET_FULL_NAME = 'Prenom Secret-Proprietaire'
 SECRET_BIO_MARK = 'bio-sentinelle'
+MIGRATION = 'apps.identity.migrations.0011_convert_business_profiles'
 
 
-class ConversionBase(TransactionTestCase):
-    def setUp(self):
-        cache.clear()
-        self.catalog_leaf = lambda executor: executor.loader.graph.leaf_nodes('catalog')[0]  # noqa: E731
-        self.go(OLD)
-        self.old_apps = self.state(OLD)
-        self.build_world()
+def migrate_to(targets):
+    executor = MigrationExecutor(connection)
+    executor.migrate(list(targets) + [executor.loader.graph.leaf_nodes('catalog')[0]])
 
-    def tearDown(self):
-        call_command('migrate', verbosity=0)
 
-    # -- migrations ---------------------------------------------------------------------------------------
-    def go(self, targets):
+def state(targets):
+    """Modèles historiques (rendu coûteux, sans état : un par jeu de cibles pour tout le module)."""
+    key = tuple(targets)
+    if key not in _STATE_CACHE:
         executor = MigrationExecutor(connection)
-        full = list(targets) + [self.catalog_leaf(executor)]
-        executor.migrate(full)
+        _STATE_CACHE[key] = executor.loader.project_state(
+            list(targets) + [executor.loader.graph.leaf_nodes('catalog')[0]]).apps
+    return _STATE_CACHE[key]
 
-    def state(self, targets):
-        # Le rendu des modèles historiques est coûteux et sans état : un seul par jeu de cibles pour tout le module.
-        key = tuple(targets)
-        if key not in _STATE_CACHE:
-            executor = MigrationExecutor(connection)
-            _STATE_CACHE[key] = executor.loader.project_state(list(targets) + [self.catalog_leaf(executor)]).apps
-        return _STATE_CACHE[key]
 
-    def forward(self):
-        self.go(NEW)
-        self.new_apps = self.state(NEW)
+class Builder:
+    """Fabrique des données à l'ancien schéma, avec les modèles historiques."""
 
-    # -- jeu de données historique ------------------------------------------------------------------------
-    def build_world(self):
-        a = self.old_apps
-        self.HUser = a.get_model('identity', 'User')
-        self.HProfile = a.get_model('identity', 'BusinessProfile')
-        self.HProfileCat = a.get_model('identity', 'BusinessProfileCategory')
-        self.HDoc = a.get_model('identity', 'KycDocument')
-        self.HOffer = a.get_model('marketplace', 'Offer')
-        self.HCounter = a.get_model('visibility', 'DailyVisibilityCounter')
-        self.HReview = a.get_model('reviews', 'Review')
-        Req = a.get_model('identity', 'OrganizationDocumentRequirement')
+    def __init__(self, apps):
+        self.apps = apps
+        g = apps.get_model
+        self.User, self.Profile, self.ProfileCat, self.Doc = (
+            g('identity', n) for n in ('User', 'BusinessProfile', 'BusinessProfileCategory', 'KycDocument'))
+        self.Offer, self.Counter, self.Review = (
+            g('marketplace', 'Offer'), g('visibility', 'DailyVisibilityCounter'), g('reviews', 'Review'))
+        self.Sanction = g('moderation', 'Sanction')
+        Req = g('identity', 'OrganizationDocumentRequirement')
         for position, doc_type in enumerate(('RCCM', 'ID_NATIONALE', 'PIECE_GERANT')):
             Req.objects.get_or_create(org_type='ENTREPRISE', document_type=doc_type, defaults={'position': position})
-        City, Commune, Category = (a.get_model('catalog', n) for n in ('City', 'Commune', 'Category'))
+        City, Commune, Category = (g('catalog', n) for n in ('City', 'Commune', 'Category'))
         self.city = City.objects.create(name='Kinshasa', name_key='kinshasa', slug='kinshasa')
         self.commune = Commune.objects.create(city=self.city, name='Gombe', name_key='gombe')
         self.category = Category.objects.create(name='Electronique', name_key='electronique', slug='electronique')
-        self.reviewer = self.HUser.objects.create(email='reviewer@example.com', full_name='Relecteur', is_staff=True)
+        self.reviewer = self.User.objects.create(email='reviewer@example.com', full_name='Relecteur', is_staff=True)
         self.created_at = timezone.now() - timedelta(days=400)
         self.seq = 0
 
@@ -99,14 +91,14 @@ class ConversionBase(TransactionTestCase):
         self.seq += 1
         kwargs.setdefault('email', f'u{self.seq}@example.com')
         kwargs.setdefault('full_name', f'Compte {self.seq}')
-        return self.HUser.objects.create(user_type=user_type, **kwargs)
+        return self.User.objects.create(user_type=user_type, **kwargs)
 
     def profile(self, name='Atelier', user=None, categories=1, **kwargs):
         user = user or self.user(city_id=self.city.id, commune_id=self.commune.id)
-        profile = self.HProfile.objects.create(user=user, business_name=name, **kwargs)
-        self.HProfile.objects.filter(pk=profile.pk).update(created_at=self.created_at)
+        profile = self.Profile.objects.create(user=user, business_name=name, **kwargs)
+        self.Profile.objects.filter(pk=profile.pk).update(created_at=self.created_at)
         for _ in range(categories):
-            self.HProfileCat.objects.create(business_profile=profile, category_id=uuid.uuid4())
+            self.ProfileCat.objects.create(business_profile=profile, category_id=uuid.uuid4())
         profile.refresh_from_db()
         return profile
 
@@ -114,13 +106,17 @@ class ConversionBase(TransactionTestCase):
         if status != 'EN_ATTENTE':
             kwargs.setdefault('reviewed_by', self.reviewer)
             kwargs.setdefault('reviewed_at', timezone.now() - timedelta(days=3))
-        return self.HDoc.objects.create(
+        return self.Doc.objects.create(
             business_profile=profile, document_type=doc_type, status=status,
             file=f'profile-{profile.pk}/{doc_type}.pdf', **kwargs,
         )
 
+    def sanction(self, user, kind='BANNISSEMENT', is_active=True, ends_at=None):
+        return self.Sanction.objects.create(
+            user=user, sanction_type=kind, reason='Test', is_active=is_active, ends_at=ends_at)
+
     def offer(self, owner, title='Offre', public=True):
-        return self.HOffer.objects.create(
+        return self.Offer.objects.create(
             seller=owner, seller_context_type='USER', seller_context_id=owner.pk, created_by=owner,
             seller_is_public=public, category_id=self.category.id, commune_id=self.commune.id, title=title,
             description='Description suffisamment longue pour passer.', price=1,
@@ -128,21 +124,21 @@ class ConversionBase(TransactionTestCase):
         )
 
     def counter(self, offer, views=3):
-        return self.HCounter.objects.create(
+        return self.Counter.objects.create(
             offer_id=offer.id, seller=offer.seller, seller_context_type='USER', seller_context_id=offer.seller_id,
             date=timezone.localdate(), views=views, shares=1, contacts=2,
         )
 
     def review(self, offer, rating=5):
         author = self.user('PARTICULIER')
-        return self.HReview.objects.create(
+        return self.Review.objects.create(
             user=author, offer_id=offer.id, seller_context_type='USER', seller_context_id=offer.seller_id,
             contact_event_id=uuid.uuid4(), contact_channel='MESSAGE', contact_recorded_at=timezone.now(),
             offer_rating=rating, seller_rating=rating, content='Avis suffisamment long pour être valide.',
         )
 
     def complete_profile(self):
-        """Profil complet : bio, logo, NIF, ville, 3 catégories, 3 pièces validées, `is_verified` vrai."""
+        """Profil complet : bio, logo, NIF, ville du compte, 3 catégories, 3 pièces validées, `is_verified` vrai."""
         owner = self.user(
             email=SECRET_EMAIL, phone=SECRET_PHONE, full_name=SECRET_FULL_NAME, city_id=self.city.id,
             commune_id=self.commune.id,
@@ -155,289 +151,330 @@ class ConversionBase(TransactionTestCase):
             self.doc(profile, doc_type)
         return profile
 
-    def org_of(self, profile):
-        return Organization.objects.get(legacy_business_profile_id=profile.pk)
+
+def org_of(profile):
+    return Organization.objects.get(legacy_business_profile_id=profile.pk)
 
 
-class MappingTests(ConversionBase):
-    def test_complete_profile_is_converted_field_by_field(self):
-        profile = self.complete_profile()
-        owner = profile.user
-        owner_id = owner.pk
-        categories = set(self.HProfileCat.objects.filter(business_profile=profile).values_list('category_id', flat=True))
-        docs_before = {
+class SharedStateTestCase(TransactionTestCase):
+    """Un monde construit et migré une fois pour la classe ; les tests le lisent sans le modifier."""
+
+    @classmethod
+    def build(cls, b):
+        raise NotImplementedError
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        migrate_to(OLD)
+        cls.b = Builder(state(OLD))
+        cls.build(cls.b)
+
+    def setUp(self):
+        cache.clear()
+
+    def _fixture_teardown(self):  # pas de vidage entre les tests : le monde est partagé
+        pass
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            call_command('migrate', verbosity=0)
+            call_command('flush', verbosity=0, interactive=False)
+        finally:
+            super().tearDownClass()
+
+
+def forward():
+    migrate_to(NEW)
+    return state(NEW)
+
+
+class ConvertedWorldTests(SharedStateTestCase):
+    @classmethod
+    def build(cls, b):
+        w = cls.w = type('World', (), {})()
+        w.full = b.complete_profile()
+        w.docs_before = {
             d.pk: (d.document_type, d.status, d.rejection_reason, d.reviewed_by_id, d.reviewed_at, d.file.name)
-            for d in self.HDoc.objects.filter(business_profile=profile)
+            for d in b.Doc.objects.filter(business_profile=w.full)
         }
-        self.forward()
+        w.categories = set(b.ProfileCat.objects.filter(business_profile=w.full).values_list('category_id', flat=True))
+        w.owner_id = w.full.user_id
+        w.biz_offers = [b.offer(w.full.user, 'Offre A'), b.offer(w.full.user, 'Offre B')]
+        w.biz_counters = [b.counter(o) for o in w.biz_offers]
+        w.biz_reviews = [b.review(o) for o in w.biz_offers]
+        ContactPoint, Consent = (b.apps.get_model('identity', n) for n in ('ContactPoint', 'ContactConsent'))
+        ContactPoint.objects.create(user=w.full.user, phone=SECRET_PHONE, is_verified=True)
+        for channel in ('CALL', 'WHATSAPP'):
+            Consent.objects.create(user=w.full.user, channel=channel, is_granted=True, granted_at=timezone.now(),
+                                   text_version='2026-10-v1', phone_last4=SECRET_PHONE[-4:])
+        w.public_offer = w.biz_offers[0]
+        # Vérification (règle 3)
+        w.two = b.profile('Deux pieces', is_verified=False)
+        for doc_type in ('RCCM', 'ID_NATIONALE'):
+            b.doc(w.two, doc_type)
+        w.refused = b.profile('Refusee', is_verified=False)
+        b.doc(w.refused, 'RCCM', status='REFUSE', rejection_reason='Illisible')
+        b.doc(w.refused, 'ID_NATIONALE', status='EN_ATTENTE')
+        w.manual = b.profile('Drapeau manuel', is_verified=True)
+        # Critère de conversion
+        w.particulier = b.profile('Chez un particulier', user=b.user('PARTICULIER'))
+        w.no_profile = b.user('ENTREPRISE')
+        w.no_profile_offer = b.offer(w.no_profile, 'Sans profil')
+        w.person = b.user('PARTICULIER')
+        w.person_offer = b.offer(w.person, 'Offre perso')
+        w.person_counter, w.person_review = b.counter(w.person_offer), b.review(w.person_offer)
+        w.staff_plain = b.user('PARTICULIER', is_staff=True, is_superuser=True)
+        w.no_offer = b.profile('Sans offre')
+        # Propriétaires désactivés ou sanctionnés (M1)
+        now = timezone.now()
+        w.inactive = b.profile('Desactive', user=b.user(is_active=False))
+        w.inactive_offer = b.offer(w.inactive.user, public=False)
+        scenarios = {
+            'ban': ('BANNISSEMENT', True, None),
+            'timed': ('SUSPENSION_TEMPORAIRE', True, now + timedelta(days=5)),
+            'expired': ('SUSPENSION_TEMPORAIRE', True, now - timedelta(days=5)),
+            'lifted': ('BANNISSEMENT', False, None),
+            'warning': ('AVERTISSEMENT', True, None),
+        }
+        w.sanctioned, w.sanction_offers = {}, {}
+        for key, (kind, active, ends) in scenarios.items():
+            p = b.profile(f'Sanction {key}')
+            b.sanction(p.user, kind, active, ends)
+            w.sanctioned[key] = p
+            w.sanction_offers[key] = b.offer(p.user, f'offre {key}', public=True)
+        w.pre_private = b.profile('Deja prive')
+        w.pre_private_offer = b.offer(w.pre_private.user, public=False)
+        # Noms et tailles
+        w.control = b.profile('  Atelier​ \t Control\x00e  ')
+        w.empty, w.short = b.profile('​ ‎ '), b.profile('A')
+        w.long_name = b.profile('N' * 300)
+        w.twin_1, w.twin_2 = b.profile('Café Zorglub'), b.profile('cafe  zorglub')
+        w.mixed = b.profile('Bаnque')
+        w.big = b.profile('Gros profil', categories=7, bio='x' * 2500)
+        # Pièces et conflit d'intérêts
+        w.staff_owner = b.profile('Chez le personnel', user=b.user(is_staff=True))
+        w.revoked_owner = b.profile('Ancien proprietaire')
+        for p in (w.staff_owner, w.revoked_owner):
+            b.doc(p, 'RCCM', status='EN_ATTENTE')
+        w.other_org = b.apps.get_model('identity', 'Organization').objects.create(name='Preexistante', org_type='ONG')
+        w.mixed_doc = b.doc(b.profile('Incoherent'), 'RCCM')
+        b.Doc.objects.filter(pk=w.mixed_doc.pk).update(organization=w.other_org)
+        w.profile_count = b.Profile.objects.count()
+        cls.new_apps = forward()
 
-        org = self.org_of(profile)
+    # -- mapping -----------------------------------------------------------------------------------------
+    def test_complete_profile_is_converted_field_by_field(self):
+        w = self.w
+        org = org_of(w.full)
+        # Ville et commune : celles du compte (donnée personnelle) ne sont PAS reprises (le profil n'en avait pas).
         self.assertEqual(
             (org.name, org.org_type, org.description, org.logo.name, org.nif, org.city_id, org.commune_id, org.status,
              org.suspension_reason, org.created_by_id, org.legacy_business_profile_id),
             ('Atelier Zorglub', 'ENTREPRISE', f'Menuiserie {SECRET_BIO_MARK}.', 'business_logos/zorglub.png', SECRET_NIF,
-             self.city.id, self.commune.id, 'ACTIVE', '', owner_id, profile.pk),
+             None, None, 'ACTIVE', '', w.owner_id, w.full.pk),
         )
-        self.assertEqual(org.created_at, profile.created_at)
-        self.assertEqual(set(OrganizationCategory.objects.filter(organization=org).values_list('category_id', flat=True)),
-                         categories)
+        self.assertEqual(org.created_at, w.full.created_at)
+        self.assertEqual(
+            set(OrganizationCategory.objects.filter(organization=org).values_list('category_id', flat=True)),
+            w.categories)
         members = list(Membership.objects.filter(organization=org))
         self.assertEqual(len(members), 1)
         member = members[0]
         self.assertEqual((member.user_id, member.role, member.status, member.added_by_id, member.ended_at),
-                         (owner_id, 'OWNER', 'ACTIVE', None, None))
-        self.assertEqual(member.joined_at, profile.created_at)
-        mapping = LegacyAccountMapping.objects.get()
-        self.assertEqual((mapping.user_id, mapping.organization_id), (owner_id, org.pk))
-        # Pièces : rattachées, auteur du dépôt posé, tout le reste inchangé (fichier compris).
+                         (w.owner_id, 'OWNER', 'ACTIVE', None, None))
+        self.assertEqual(member.joined_at, w.full.created_at)
+        mapping = LegacyAccountMapping.objects.get(user_id=w.owner_id)
+        self.assertEqual(mapping.organization_id, org.pk)
         docs = KycDocument.objects.filter(organization=org)
         self.assertEqual(docs.count(), 3)
         for doc in docs:
-            self.assertEqual(doc.uploaded_by_id, owner_id)
-            self.assertEqual(doc.business_profile_id, profile.pk)  # l'ancien lien reste jusqu'à la contraction
+            self.assertEqual(doc.uploaded_by_id, w.owner_id)
+            self.assertEqual(doc.business_profile_id, w.full.pk)  # l'ancien lien reste jusqu'à la contraction
             self.assertEqual(
                 (doc.document_type, doc.status, doc.rejection_reason, doc.reviewed_by_id, doc.reviewed_at, doc.file.name),
-                docs_before[doc.pk],
-            )
-        self.assertEqual(self.new_apps.get_model('identity', 'BusinessProfile').objects.count(), 1)  # rien supprimé
+                w.docs_before[doc.pk])
+        self.assertEqual(self.new_apps.get_model('identity', 'BusinessProfile').objects.count(), w.profile_count)
+
+    def test_account_address_is_never_copied(self):
+        self.assertFalse(Organization.objects.filter(legacy_business_profile_id__isnull=False)
+                         .exclude(city_id=None, commune_id=None).exists())
 
     def test_conversion_criterion_is_the_profile_not_user_type(self):
-        converted_particulier = self.profile('Chez un particulier', user=self.user('PARTICULIER'))
-        enterprise_without_profile = self.user('ENTREPRISE')
-        plain = self.user('PARTICULIER')
-        self.forward()
-        self.assertTrue(Organization.objects.filter(legacy_business_profile_id=converted_particulier.pk).exists())
-        self.assertEqual(Organization.objects.count(), 1)
-        self.assertEqual(Membership.objects.exclude(user_id=converted_particulier.user_id).count(), 0)
-        self.assertFalse(LegacyAccountMapping.objects.filter(user_id__in=[enterprise_without_profile.pk, plain.pk]).exists())
+        w = self.w
+        self.assertTrue(Organization.objects.filter(legacy_business_profile_id=w.particulier.pk).exists())
+        self.assertEqual(Organization.objects.filter(legacy_business_profile_id__isnull=False).count(), w.profile_count)
+        self.assertFalse(LegacyAccountMapping.objects.filter(user_id__in=[w.no_profile.pk, w.person.pk]).exists())
+
+    def test_only_the_profile_owner_gets_a_role(self):
+        w = self.w
+        self.assertEqual(Membership.objects.count(), w.profile_count)
+        self.assertEqual(set(Membership.objects.values_list('role', 'status', 'added_by')), {('OWNER', 'ACTIVE', None)})
+        self.assertFalse(Membership.objects.filter(user_id=w.staff_plain.pk).exists())
+        # Le personnel propriétaire d'un ancien profil reçoit son appartenance de propriétaire, rien de plus.
+        self.assertEqual(Membership.objects.filter(user_id=w.staff_owner.user_id).count(), 1)
 
     def test_profile_without_offer_is_converted_active(self):
-        profile = self.profile('Sans offre')
-        self.forward()
-        self.assertEqual(self.org_of(profile).status, 'ACTIVE')
-
-    def test_inactive_owner_gives_a_suspended_organization_with_private_offers(self):
-        banned = self.profile('Banni', user=self.user(is_active=False))
-        offer = self.offer(banned.user)
-        self.forward()
-        org = self.org_of(banned)
-        self.assertEqual((org.status, org.suspension_reason), ('SUSPENDED', 'other'))
-        moved = self.new_apps.get_model('marketplace', 'Offer').objects.get(pk=offer.pk)
-        self.assertEqual((moved.seller_context_type, moved.seller_context_id, moved.seller_is_public),
-                         ('ORGANIZATION', org.pk, False))
+        self.assertEqual(org_of(self.w.no_offer).status, 'ACTIVE')
 
     def test_names_are_cleaned_never_rejected_and_never_merged(self):
-        control = self.profile('  Atelier​ \t Control\x00e  ')
-        empty = self.profile('​ ‎ ')
-        short = self.profile('A')
-        long_name = self.profile('N' * 300)
-        twin_1 = self.profile('Café Zorglub')
-        twin_2 = self.profile('cafe  zorglub')
-        mixed = self.profile('Bаnque')  # a cyrillique
-        self.forward()
-        self.assertEqual(self.org_of(control).name, 'Atelier Controle')
-        for profile in (empty, short):
-            self.assertEqual(self.org_of(profile).name, f'Organisation {str(profile.pk)[:8]}')
-        self.assertEqual(len(self.org_of(long_name).name), 255)
-        self.assertNotEqual(self.org_of(twin_1).pk, self.org_of(twin_2).pk)
-        self.assertEqual(self.org_of(twin_1).name, 'Café Zorglub')
-        self.assertEqual(self.org_of(twin_2).name, 'cafe zorglub')
-        self.assertEqual(self.org_of(mixed).name, 'Bаnque')
-        self.assertEqual(Organization.objects.count(), 7)
+        w = self.w
+        self.assertEqual(org_of(w.control).name, 'Atelier Controle')
+        for profile in (w.empty, w.short):
+            self.assertEqual(org_of(profile).name, f'Organisation {str(profile.pk)[:8]}')
+        self.assertEqual(len(org_of(w.long_name).name), 255)
+        self.assertNotEqual(org_of(w.twin_1).pk, org_of(w.twin_2).pk)
+        self.assertEqual((org_of(w.twin_1).name, org_of(w.twin_2).name), ('Café Zorglub', 'cafe zorglub'))
+        self.assertEqual(org_of(w.mixed).name, 'Bаnque')
 
     def test_long_description_is_truncated_and_all_categories_are_kept(self):
-        profile = self.profile('Gros profil', categories=7, bio='x' * 2500)
-        self.forward()
-        org = self.org_of(profile)
+        org = org_of(self.w.big)
         self.assertEqual(len(org.description), 2000)
         self.assertEqual(org.category_links.count(), 7)
-        self.assertEqual(self.HProfile.objects.get(pk=profile.pk).bio, 'x' * 2500)  # l'original reste
+        self.assertEqual(self.b.Profile.objects.get(pk=self.w.big.pk).bio, 'x' * 2500)
 
     def test_missing_logo_gives_no_logo(self):
-        profile = self.profile('Sans logo')
-        self.forward()
-        self.assertFalse(self.org_of(profile).logo)
-
-
-class VerificationTests(ConversionBase):
-    def test_derived_verification_matches_the_old_flag(self):
-        full = self.complete_profile()
-        two = self.profile('Deux pieces', is_verified=False)
-        for doc_type in ('RCCM', 'ID_NATIONALE'):
-            self.doc(two, doc_type)
-        refused = self.profile('Refusee', is_verified=False)
-        self.doc(refused, 'RCCM', status='REFUSE', rejection_reason='Illisible')
-        self.doc(refused, 'ID_NATIONALE', status='EN_ATTENTE')
-        manual = self.profile('Drapeau manuel', is_verified=True)  # aucune pièce : règle 3, jamais recopié
-        self.forward()
-        summaries = get_verification_summaries([self.org_of(p).pk for p in (full, two, refused, manual)])
-        complete = {p.business_name: summaries[self.org_of(p).pk]['summary']['complete'] for p in (full, two, refused, manual)}
-        self.assertEqual(complete, {'Atelier Zorglub': True, 'Deux pieces': False, 'Refusee': False, 'Drapeau manuel': False})
-        self.assertEqual({p.business_name: p.is_verified for p in (full, two, refused, manual)},
-                         {'Atelier Zorglub': True, 'Deux pieces': False, 'Refusee': False, 'Drapeau manuel': True})
-        self.assertEqual([c['code'] for c in summaries[self.org_of(full).pk]['verified_claims']],
-                         ['RCCM_VERIFIED', 'NATIONAL_ID_VERIFIED', 'REPRESENTATIVE_VERIFIED'])
-        self.assertEqual(len(summaries[self.org_of(two).pk]['verified_claims']), 2)
-        self.assertEqual(summaries[self.org_of(refused).pk]['verified_claims'], [])
-        self.assertEqual(summaries[self.org_of(manual).pk]['verified_claims'], [])
-        refused_doc = KycDocument.objects.get(organization=self.org_of(refused), document_type='RCCM')
-        self.assertEqual((refused_doc.status, refused_doc.rejection_reason), ('REFUSE', 'Illisible'))
+        self.assertFalse(org_of(self.w.no_offer).logo)
 
     def test_document_already_on_an_organization_is_left_alone(self):
-        profile = self.profile('Incoherent')
-        other = self.new_org_before(profile)
-        mixed = self.doc(profile, 'RCCM')
-        self.HDoc.objects.filter(pk=mixed.pk).update(organization=other)
-        self.forward()
-        self.assertEqual(KycDocument.objects.get(pk=mixed.pk).organization_id, other.pk)
+        self.assertEqual(KycDocument.objects.get(pk=self.w.mixed_doc.pk).organization_id, self.w.other_org.pk)
 
-    def new_org_before(self, profile):
-        return self.old_apps.get_model('identity', 'Organization').objects.create(name='Preexistante', org_type='ONG')
+    # -- suspension (M1) ---------------------------------------------------------------------------------
+    def test_initial_status_follows_the_state_of_the_owner(self):
+        w = self.w
+        expected = {
+            'ban': 'SUSPENDED', 'timed': 'SUSPENDED', 'expired': 'ACTIVE', 'lifted': 'ACTIVE', 'warning': 'ACTIVE',
+        }
+        for key, status in expected.items():
+            org = org_of(w.sanctioned[key])
+            self.assertEqual(org.status, status, key)
+            self.assertEqual(org.suspension_reason, 'other' if status == 'SUSPENDED' else '', key)
+        inactive = org_of(w.inactive)
+        self.assertEqual((inactive.status, inactive.suspension_reason), ('SUSPENDED', 'other'))
+
+    def test_offers_of_suspended_organizations_are_not_public(self):
+        w = self.w
+        Offer = self.new_apps.get_model('marketplace', 'Offer')
+        public = {key: Offer.objects.get(pk=o.pk).seller_is_public for key, o in w.sanction_offers.items()}
+        self.assertEqual(public, {'ban': False, 'timed': False, 'expired': True, 'lifted': True, 'warning': True})
+        row = Offer.objects.get(pk=w.inactive_offer.pk)
+        self.assertEqual((row.seller_context_type, row.seller_context_id, row.seller_is_public),
+                         ('ORGANIZATION', org_of(w.inactive).pk, False))
+
+    def test_an_already_private_offer_is_never_made_public(self):
+        row = self.new_apps.get_model('marketplace', 'Offer').objects.get(pk=self.w.pre_private_offer.pk)
+        self.assertEqual((row.seller_context_type, row.seller_is_public), ('ORGANIZATION', False))
+
+    def test_audit_status_follows_the_suspension(self):
+        w = self.w
+        AuditLog = self.new_apps.get_model('moderation', 'AuditLog')
+        status = lambda p: AuditLog.objects.get(action='ORG_CONVERTED', target_id=org_of(p).pk).details  # noqa: E731
+        self.assertTrue(status(w.sanctioned['ban']).endswith('status=SUSPENDED'))
+        self.assertTrue(status(w.sanctioned['expired']).endswith('status=ACTIVE'))
+
+    def test_blocking_rule_agrees_with_moderation(self):
+        now = timezone.now()
+        cases = [
+            ('BANNISSEMENT', True, None, True), ('SUSPENSION_TEMPORAIRE', True, now + timedelta(days=1), True),
+            ('SUSPENSION_TEMPORAIRE', True, now - timedelta(days=1), False), ('BANNISSEMENT', False, None, False),
+            ('AVERTISSEMENT', True, None, False), ('MASQUAGE_ANNONCE', True, None, False),
+        ]
+        for kind, active, ends, expected in cases:
+            self.assertIs(rules.is_blocking(kind, active, ends, now), expected, (kind, active, ends))
+        self.assertTrue(rules.owner_is_suspended(False, False))
+        self.assertTrue(rules.owner_is_suspended(True, True))
+        self.assertFalse(rules.owner_is_suspended(True, False))
+        # La commande de pré-vol utilise `get_restricted_user_ids` : même résultat que `is_blocking`.
+        owners = {key: p.user_id for key, p in self.w.sanctioned.items()}
+        self.assertEqual({key for key, uid in owners.items() if uid in get_restricted_user_ids(owners.values())},
+                         {'ban', 'timed'})
+
+    # -- vérification (règle 3) ---------------------------------------------------------------------------
+    def test_derived_verification_matches_the_old_flag(self):
+        w = self.w
+        profiles = (w.full, w.two, w.refused, w.manual)
+        summaries = get_verification_summaries([org_of(p).pk for p in profiles])
+        complete = {p.business_name: summaries[org_of(p).pk]['summary']['complete'] for p in profiles}
+        self.assertEqual(complete, {'Atelier Zorglub': True, 'Deux pieces': False, 'Refusee': False,
+                                    'Drapeau manuel': False})
+        self.assertEqual({p.business_name: p.is_verified for p in profiles},
+                         {'Atelier Zorglub': True, 'Deux pieces': False, 'Refusee': False, 'Drapeau manuel': True})
+        self.assertEqual([c['code'] for c in summaries[org_of(w.full).pk]['verified_claims']],
+                         ['RCCM_VERIFIED', 'NATIONAL_ID_VERIFIED', 'REPRESENTATIVE_VERIFIED'])
+        self.assertEqual(len(summaries[org_of(w.two).pk]['verified_claims']), 2)
+        self.assertEqual(summaries[org_of(w.refused).pk]['verified_claims'], [])
+        self.assertEqual(summaries[org_of(w.manual).pk]['verified_claims'], [])
+        refused = KycDocument.objects.get(organization=org_of(w.refused), document_type='RCCM')
+        self.assertEqual((refused.status, refused.rejection_reason), ('REFUSE', 'Illisible'))
 
     def test_converted_owner_cannot_decide_their_own_pieces(self):
-        staff_owner = self.profile('Chez le personnel', user=self.user(is_staff=True))
-        revoked_owner = self.profile('Ancien proprietaire')
-        self.doc(staff_owner, 'RCCM', status='EN_ATTENTE')
-        self.doc(revoked_owner, 'RCCM', status='EN_ATTENTE')
-        self.forward()
         User = get_user_model()
-        staff = User.objects.get(pk=staff_owner.user_id)
-        for profile, reviewer in ((staff_owner, staff), (revoked_owner, User.objects.get(pk=revoked_owner.user_id))):
-            doc = KycDocument.objects.get(organization=self.org_of(profile))
+        for profile in (self.w.staff_owner, self.w.revoked_owner):
+            doc = KycDocument.objects.get(organization=org_of(profile))
+            with self.assertRaises(identity_services.KycError) as ctx:
+                identity_services.decide_kyc_document(doc.pk, User.objects.get(pk=profile.user_id), 'VALIDE')
+            self.assertEqual(ctx.exception.status_code, 403)
+            self.assertEqual(KycDocument.objects.get(pk=doc.pk).status, 'EN_ATTENTE')
+
+    def test_a_revoked_owner_still_cannot_decide_nor_download(self):
+        User = get_user_model()
+        profile = self.w.revoked_owner
+        membership = Membership.objects.get(organization=org_of(profile))
+        membership.status = Membership.STATUS_REVOKED
+        membership.save()
+        try:
+            doc = KycDocument.objects.get(organization=org_of(profile))
+            reviewer = User.objects.get(pk=profile.user_id)
             with self.assertRaises(identity_services.KycError) as ctx:
                 identity_services.decide_kyc_document(doc.pk, reviewer, 'VALIDE')
             self.assertEqual(ctx.exception.status_code, 403)
-        Membership.objects.filter(organization=self.org_of(revoked_owner)).update(status='REVOKED')
-        doc = KycDocument.objects.get(organization=self.org_of(revoked_owner))
-        with self.assertRaises(identity_services.KycError):
-            identity_services.decide_kyc_document(doc.pk, User.objects.get(pk=revoked_owner.user_id), 'VALIDE')
+            with self.assertRaises(identity_services.KycError) as ctx:
+                identity_services.get_document_for_download(doc.pk, reviewer)
+            self.assertEqual(ctx.exception.status_code, 403)
+            # Plus aucune route ne donne accès aux pièces à un ancien propriétaire (anciennes routes retirées : 404).
+            client = APIClient()
+            client.force_authenticate(reviewer)
+            self.assertEqual(client.get('/api/accounts/kyc/documents/').status_code, 404)
+            self.assertEqual(client.post('/api/accounts/kyc/documents/', {}, format='json').status_code, 404)
+            self.assertEqual(client.delete(f'/api/accounts/kyc/documents/{doc.pk}/').status_code, 404)
+            self.assertIn(client.get(f'/api/accounts/organizations/{org_of(profile).pk}/kyc/documents/').status_code,
+                          (403, 404))
+        finally:
+            membership.status = Membership.STATUS_ACTIVE
+            membership.save()
 
-
-class RelatedDataTests(ConversionBase):
-    def seed(self):
-        self.business = self.complete_profile()
-        self.biz_offers = [self.offer(self.business.user, 'Offre A'), self.offer(self.business.user, 'Offre B')]
-        self.biz_counters = [self.counter(o) for o in self.biz_offers]
-        self.biz_reviews = [self.review(o) for o in self.biz_offers]
-        self.person = self.user('PARTICULIER')
-        self.person_offer = self.offer(self.person, 'Offre perso')
-        self.person_counter = self.counter(self.person_offer)
-        self.person_review = self.review(self.person_offer)
-        self.noprofile = self.user('ENTREPRISE')
-        self.noprofile_offer = self.offer(self.noprofile, 'Sans profil')
-
+    # -- offres, compteurs, avis -------------------------------------------------------------------------
     def test_offers_counters_and_reviews_follow_the_organization(self):
-        self.seed()
-        self.forward()
-        org = self.org_of(self.business)
-        Offer = self.new_apps.get_model('marketplace', 'Offer')
-        Counter = self.new_apps.get_model('visibility', 'DailyVisibilityCounter')
-        Review = self.new_apps.get_model('reviews', 'Review')
-        for offer in self.biz_offers:
+        w = self.w
+        org = org_of(w.full)
+        Offer, Counter, Review = (self.new_apps.get_model(a, m) for a, m in (
+            ('marketplace', 'Offer'), ('visibility', 'DailyVisibilityCounter'), ('reviews', 'Review')))
+        for offer in w.biz_offers:
             row = Offer.objects.get(pk=offer.pk)
             self.assertEqual((row.seller_context_type, row.seller_context_id, row.created_by_id, row.seller_is_public),
-                             ('ORGANIZATION', org.pk, self.business.user_id, True))
-            self.assertEqual(row.seller_id, self.business.user_id)  # FK inchangée jusqu'à la contraction
-        for counter in self.biz_counters:
+                             ('ORGANIZATION', org.pk, w.owner_id, True))
+            self.assertEqual(row.seller_id, w.owner_id)  # FK inchangée jusqu'à la contraction
+        for counter in w.biz_counters:
             row = Counter.objects.get(pk=counter.pk)
             self.assertEqual((row.seller_context_type, row.seller_context_id, row.views, row.shares, row.contacts),
                              ('ORGANIZATION', org.pk, 3, 1, 2))
-        for review in self.biz_reviews:
+        for review in w.biz_reviews:
             row = Review.objects.get(pk=review.pk)
             self.assertEqual((row.seller_context_type, row.seller_context_id, row.counts_for_seller),
                              ('ORGANIZATION', org.pk, True))
-        # Comptes sans profil : rien ne bouge.
-        for row in (self.person_offer, self.noprofile_offer):
+        for row in (w.person_offer, w.no_profile_offer):
             current = Offer.objects.get(pk=row.pk)
             self.assertEqual((current.seller_context_type, current.seller_context_id), ('USER', row.seller_id))
-        self.assertEqual(Counter.objects.get(pk=self.person_counter.pk).seller_context_type, 'USER')
-        self.assertEqual(Review.objects.get(pk=self.person_review.pk).seller_context_type, 'USER')
-
-    def test_second_run_of_the_functions_changes_nothing(self):
-        self.seed()
-        self.forward()
-
-        def snapshot():
-            return (
-                Organization.objects.count(), Membership.objects.count(), LegacyAccountMapping.objects.count(),
-                OrganizationCategory.objects.count(),
-                list(self.new_apps.get_model('moderation', 'AuditLog').objects.order_by('pk').values_list('pk', flat=True)),
-                sorted(self.new_apps.get_model('marketplace', 'Offer').objects.values_list('pk', 'seller_context_id')),
-            )
-
-        before = snapshot()
-        schema_editor = None
-        importlib.import_module('apps.identity.migrations.0011_convert_business_profiles').convert_profiles(
-            self.new_apps, schema_editor)
-        importlib.import_module('apps.marketplace.migrations.0010_convert_offer_contexts').to_organizations(
-            self.new_apps, schema_editor)
-        importlib.import_module('apps.visibility.migrations.0006_convert_counter_contexts').to_organizations(
-            self.new_apps, schema_editor)
-        importlib.import_module('apps.reviews.migrations.0006_convert_review_contexts').to_organizations(
-            self.new_apps, schema_editor)
-        importlib.import_module('apps.moderation.migrations.0005_audit_legacy_conversion').audit(self.new_apps, schema_editor)
-        self.assertEqual(snapshot(), before)
-
-    def test_rollback_then_forward_again_duplicates_nothing_and_deletes_nothing(self):
-        self.seed()
-        self.forward()
-        counts = (Organization.objects.count(), Membership.objects.count(), LegacyAccountMapping.objects.count())
-
-        self.go(OLD)
-        old = self.state(OLD)
-        Offer = old.get_model('marketplace', 'Offer')
-        Counter = old.get_model('visibility', 'DailyVisibilityCounter')
-        Review = old.get_model('reviews', 'Review')
-        self.assertEqual((Offer.objects.count(), Counter.objects.count(), Review.objects.count()), (4, 3, 3))
-        for offer in self.biz_offers:
-            row = Offer.objects.get(pk=offer.pk)
-            self.assertEqual((row.seller_context_type, row.seller_context_id, row.seller_is_public),
-                             ('USER', self.business.user_id, True))
-        for counter in self.biz_counters:
-            self.assertEqual(Counter.objects.get(pk=counter.pk).seller_context_type, 'USER')
-        for review in self.biz_reviews:
-            row = Review.objects.get(pk=review.pk)
-            self.assertEqual((row.seller_context_type, row.seller_context_id), ('USER', self.business.user_id))
-        # Création des organisations en `noop` au retour arrière : rien n'est supprimé.
-        self.assertEqual(
-            (Organization.objects.count(), Membership.objects.count(), LegacyAccountMapping.objects.count()), counts)
-        self.assertEqual(old.get_model('identity', 'BusinessProfile').objects.count(), 1)
-
-        self.forward()
-        self.assertEqual(
-            (Organization.objects.count(), Membership.objects.count(), LegacyAccountMapping.objects.count()), counts)
-        self.assertEqual(self.new_apps.get_model('moderation', 'AuditLog').objects.filter(action='ORG_CONVERTED').count(), 1)
-        self.assertEqual(
-            self.new_apps.get_model('marketplace', 'Offer').objects.filter(seller_context_type='ORGANIZATION').count(), 2)
-
-    def test_rollback_restores_the_visibility_of_the_account(self):
-        banned = self.profile('Banni', user=self.user(is_active=False))
-        offer = self.offer(banned.user, public=False)
-        self.forward()
-        self.go(OLD)
-        row = self.state(OLD).get_model('marketplace', 'Offer').objects.get(pk=offer.pk)
-        self.assertEqual((row.seller_context_type, row.seller_is_public), ('USER', False))
-
-    def test_lost_mapping_is_recovered_without_duplicating_the_organization(self):
-        profile = self.profile('Reprise')
-        self.forward()
-        org_id = self.org_of(profile).pk
-        LegacyAccountMapping.objects.all().delete()
-        Membership.objects.all().delete()
-        importlib.import_module('apps.identity.migrations.0011_convert_business_profiles').convert_profiles(
-            self.new_apps, None)
-        self.assertEqual(Organization.objects.count(), 1)
-        self.assertEqual(LegacyAccountMapping.objects.get().organization_id, org_id)
-        self.assertEqual(Membership.objects.filter(organization_id=org_id, role='OWNER').count(), 1)
+        self.assertEqual(Counter.objects.get(pk=w.person_counter.pk).seller_context_type, 'USER')
+        self.assertEqual(Review.objects.get(pk=w.person_review.pk).seller_context_type, 'USER')
 
     def test_audit_log_has_one_line_per_conversion_and_only_identifiers(self):
-        self.seed()
-        banned = self.profile('Banni', user=self.user(is_active=False))
-        self.forward()
+        w = self.w
         AuditLog = self.new_apps.get_model('moderation', 'AuditLog')
         lines = list(AuditLog.objects.filter(action='ORG_CONVERTED'))
         self.assertEqual(len(lines), LegacyAccountMapping.objects.count())
-        self.assertEqual(len(lines), 2)
+        self.assertEqual(len(lines), w.profile_count)
         by_org = {line.target_id: line for line in lines}
         for mapping in LegacyAccountMapping.objects.all():
             line = by_org[mapping.organization_id]
@@ -445,133 +482,264 @@ class RelatedDataTests(ConversionBase):
             self.assertEqual((line.actor_id, line.target_type, line.context_type, line.context_id),
                              (None, 'organization', 'ORGANIZATION', org.pk))
             self.assertEqual(line.details, f'legacy_business_profile={org.legacy_business_profile_id}; status={org.status}')
-        self.assertIn('status=SUSPENDED', by_org[self.org_of(banned).pk].details)
+        self.assertIn('status=SUSPENDED', by_org[org_of(w.inactive).pk].details)
         blob = ' '.join(f'{line.details} {line.target_type} {line.action}' for line in lines)
         for secret in (SECRET_NIF, SECRET_EMAIL, SECRET_PHONE, SECRET_FULL_NAME, 'Zorglub', SECRET_BIO_MARK):
             self.assertNotIn(secret, blob)
 
-
-class SafetyTests(ConversionBase):
-    def test_no_contact_data_is_copied_and_only_the_owner_gets_a_role(self):
-        profile = self.complete_profile()
-        staff = self.user('PARTICULIER', is_staff=True, is_superuser=True)
-        owner = profile.user
-        ContactPoint = self.old_apps.get_model('identity', 'ContactPoint')
-        Consent = self.old_apps.get_model('identity', 'ContactConsent')
-        ContactPoint.objects.create(user=owner, phone=SECRET_PHONE, is_verified=True)
-        for channel in ('CALL', 'WHATSAPP'):
-            Consent.objects.create(user=owner, channel=channel, is_granted=True, granted_at=timezone.now(),
-                                   text_version='2026-10-v1', phone_last4=SECRET_PHONE[-4:])
-        offer = self.offer(owner)
-        self.forward()
-        org = self.org_of(profile)
+    # -- non-fuite ---------------------------------------------------------------------------------------
+    def test_no_contact_data_is_copied_and_the_public_api_leaks_nothing(self):
+        w = self.w
+        org = org_of(w.full)
         self.assertFalse(ContactPoint.objects.filter(organization__isnull=False).exists())
         self.assertFalse(ContactConsent.objects.filter(organization__isnull=False).exists())
-        self.assertEqual(ContactConsent.objects.filter(user_id=owner.pk).count(), 2)  # le personnel reste au propriétaire
-        self.assertEqual(list(Membership.objects.values_list('user_id', 'organization_id')), [(owner.pk, org.pk)])
-        self.assertFalse(Membership.objects.filter(user_id=staff.pk).exists())
-
+        self.assertEqual(ContactConsent.objects.filter(user_id=w.owner_id).count(), 2)
         client = APIClient()
-        detail = client.get(f'/api/marketplace/posts/{offer.pk}/')
+        detail = client.get(f'/api/marketplace/posts/{w.public_offer.pk}/')
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()['allowed_channels'], ['MESSAGE'])
         self.assertEqual(detail.json()['seller']['context_type'], 'ORGANIZATION')
         self.assertEqual(detail.json()['seller']['context_id'], str(org.pk))
         listing = client.get('/api/accounts/organizations/')
         self.assertEqual(listing.status_code, 200)
-        item = listing.json()['results'][0]
-        self.assertEqual(set(item), {
+        self.assertEqual(set(listing.json()['results'][0]), {
             'id', 'name', 'org_type', 'description', 'logo', 'city_id', 'commune_id', 'category_ids',
             'verified_claims', 'verification_summary', 'member_since',
         })
-        profile_page = client.get(f'/api/marketplace/sellers/organization/{org.pk}/')
-        self.assertEqual(profile_page.status_code, 200)
-        for response in (detail, listing, profile_page):
+        page = client.get(f'/api/marketplace/sellers/organization/{org.pk}/')
+        self.assertEqual(page.status_code, 200)
+        for response in (detail, listing, page):
             text = response.content.decode()
-            for secret in (SECRET_NIF, SECRET_EMAIL, SECRET_PHONE, SECRET_FULL_NAME, str(owner.pk)):
+            for secret in (SECRET_NIF, SECRET_EMAIL, SECRET_PHONE, SECRET_FULL_NAME, str(w.owner_id)):
                 self.assertNotIn(secret, text)
 
     def test_converted_organization_is_listed_in_the_contexts_of_its_owner(self):
-        profile = self.complete_profile()
-        self.forward()
-        User = get_user_model()
         client = APIClient()
-        client.force_authenticate(User.objects.get(pk=profile.user_id))
-        results = client.get('/api/accounts/contexts/').json()['results']
-        organizations = [r for r in results if r['type'] == 'ORGANIZATION']
+        client.force_authenticate(get_user_model().objects.get(pk=self.w.owner_id))
+        organizations = [r for r in client.get('/api/accounts/contexts/').json()['results'] if r['type'] == 'ORGANIZATION']
         self.assertEqual(len(organizations), 1)
         self.assertTrue(organizations[0]['migrated_from_business'])
         self.assertEqual(organizations[0]['role'], 'OWNER')
 
-    def test_empty_database_conversion_is_a_noop(self):
-        self.forward()
-        self.assertEqual(
-            (Organization.objects.count(), Membership.objects.count(), LegacyAccountMapping.objects.count()), (0, 0, 0))
-        self.assertEqual(self.new_apps.get_model('moderation', 'AuditLog').objects.filter(action='ORG_CONVERTED').count(), 0)
+    def test_preflight_after_conversion_has_nothing_left_to_convert(self):
+        out = io.StringIO()
+        call_command('check_legacy_conversion', stdout=out)
+        self.assertIn('profils à convertir: 0', out.getvalue())
+        self.assertIn(f'profils déjà convertis (correspondance): {self.w.profile_count}', out.getvalue())
 
 
-class RulesTests(ConversionBase):
+class RulesTests(SimpleTestCase):
     def test_clean_name(self):
         self.assertEqual(rules.clean_name('  A​B \n  C\x00 '), 'AB C')
         self.assertEqual(rules.clean_name(None), '')
         self.assertEqual(len(rules.clean_name('x' * 400)), 255)
+        self.assertEqual(len(rules.clean_name_full('x' * 400)), 400)
         self.assertEqual(rules.name_key('Café  ZORGLUB'), rules.name_key('cafe zorglub'))
         self.assertTrue(rules.mixes_scripts('Bаnque'))
         self.assertFalse(rules.mixes_scripts('Banque'))
 
 
-class PreflightCommandTests(ConversionBase):
-    def run_command(self):
+class PreflightCommandTests(SharedStateTestCase):
+    """Pré-vol lancé AVANT la conversion (les modèles courants lisent le même schéma qu'`identity 0010`)."""
+
+    @classmethod
+    def build(cls, b):
+        w = cls.w = type('World', (), {})()
+        w.full = b.complete_profile()
+        w.banned = b.profile('Banni', user=b.user(is_active=False))
+        w.sanctioned = b.profile('Sanctionne')
+        b.sanction(w.sanctioned.user)
+        w.twin_1, w.twin_2 = b.profile('Doublon Zorglub', nif='NIF-DOUBLE'), b.profile('DOUBLON zorglub', nif='NIF-DOUBLE')
+        w.empty = b.profile('​')
+        w.manual = b.profile('Drapeau', is_verified=True)
+        b.doc(w.manual, 'RCCM')
+        w.orphan_user = b.user('ENTREPRISE')
+        # Collision avec une organisation DÉJÀ existante
+        existing = b.apps.get_model('identity', 'Organization').objects.create(name='Chez CAFÉ', org_type='ONG')
+        w.existing_org = existing
+        w.collider = b.profile('chez cafe')
+        # Pièce déjà rattachée aux deux
+        w.both = b.doc(b.profile('Double lien'), 'RCCM')
+        b.Doc.objects.filter(pk=w.both.pk).update(organization=existing)
+        w.n = b.Profile.objects.count()
+        cls.before = cls.snapshot()
         out = io.StringIO()
         call_command('check_legacy_conversion', stdout=out)
-        return out.getvalue()
+        cls.output = out.getvalue()
+        cls.after = cls.snapshot()
 
-    def snapshot(self):
+    @staticmethod
+    def snapshot():
         from apps.identity.models import BusinessProfile, User
+
         return (
             list(BusinessProfile.objects.order_by('pk').values()), list(KycDocument.objects.order_by('pk').values()),
             list(User.objects.order_by('pk').values_list('pk', 'is_active', 'user_type')),
             Organization.objects.count(), LegacyAccountMapping.objects.count(), Membership.objects.count(),
         )
 
-    def test_report_has_only_identifiers_and_counts_and_changes_nothing(self):
-        full = self.complete_profile()
-        banned = self.profile('Banni', user=self.user(is_active=False))
-        twin_1 = self.profile('Doublon Zorglub', nif='NIF-DOUBLE')
-        twin_2 = self.profile('DOUBLON zorglub', nif='NIF-DOUBLE')
-        empty = self.profile('​')
-        manual = self.profile('Drapeau', is_verified=True)
-        self.doc(manual, 'RCCM')
-        orphan_user = self.user('ENTREPRISE')
-        before = self.snapshot()
-        output = self.run_command()
-        self.assertEqual(self.snapshot(), before)
+    def test_changes_nothing(self):
+        self.assertEqual(self.before, self.after)
 
-        self.assertIn('profils: 6', output)
-        self.assertIn('profils à convertir: 6', output)
-        self.assertIn(f'{twin_1.pk}~{twin_2.pk}' if str(twin_1.pk) < str(twin_2.pk) else f'{twin_2.pk}~{twin_1.pk}',
-                      output.replace(' ', ''))
-        for expected in (str(banned.pk), str(empty.pk), str(manual.pk), str(orphan_user.pk), str(twin_1.pk)):
-            self.assertIn(expected, output)
-        self.assertIn('propriétaires désactivés (organisation SUSPENDED): 1', output)
-        self.assertIn('noms vides ou trop courts après nettoyage (nom neutre): 1', output)
-        self.assertIn('profils partageant un NIF non vide: 2', output)
-        self.assertIn('pièces dont le fichier est absent du stockage privé: 4', output)
-        self.assertIn('is_verified diffère du calcul dérivé des pièces (le drapeau n\'est pas recopié): 1', output)
+    def test_counts_and_identifiers(self):
+        w, out = self.w, self.output
+        self.assertIn(f'profils: {w.n}', out)
+        self.assertIn(f'profils à convertir: {w.n}', out)
+        for profile in (w.banned, w.empty, w.manual, w.twin_1, w.sanctioned):
+            self.assertIn(str(profile.pk), out)
+        self.assertIn(str(w.orphan_user.pk), out)
+        self.assertIn('propriétaires désactivés (organisation sera SUSPENDED): 1', out)
+        self.assertIn('propriétaires sous sanction bloquante en cours (organisation sera SUSPENDED): 1', out)
+        self.assertIn('organisations qui seront SUSPENDED à la conversion (total): 2', out)
+        self.assertIn('noms vides ou trop courts après nettoyage (nom neutre): 1', out)
+        self.assertIn('profils partageant un NIF non vide: 2', out)
+        self.assertIn("is_verified diffère du calcul dérivé des pièces (le drapeau n'est pas recopié): 1", out)
+        self.assertIn('pièces déjà rattachées à une organisation ET à un profil (non réaffectées): 1', out)
+
+    def test_name_collisions_between_profiles_and_with_existing_organizations(self):
+        w = self.w
+        flat = self.output.replace(' ', '')
+        pair = '~'.join(sorted((str(w.twin_1.pk), str(w.twin_2.pk))))
+        self.assertIn(pair, flat)
+        self.assertIn(f'{w.collider.pk}~{w.existing_org.pk}', flat)
+
+    def test_output_has_no_personal_data(self):
         for secret in (SECRET_NIF, 'NIF-DOUBLE', SECRET_EMAIL, SECRET_PHONE, SECRET_FULL_NAME, 'Zorglub', 'Banni',
-                       'Drapeau', 'Doublon', 'u1@example.com', SECRET_BIO_MARK):
-            self.assertNotIn(secret, output)
-        self.assertNotIn('@', output)
-
-    def test_after_conversion_nothing_is_left_to_convert(self):
-        self.complete_profile()
-        self.forward()
-        output = self.run_command()
-        self.assertIn('profils à convertir: 0', output)
-        self.assertIn('profils déjà convertis (correspondance): 1', output)
+                       'Drapeau', 'Doublon', 'u1@example.com', SECRET_BIO_MARK, 'Sanctionne', 'CAF'):
+            self.assertNotIn(secret, self.output)
+        self.assertNotIn('@', self.output)
 
     def test_missing_table_gives_exit_code_1(self):
         with mock.patch('django.db.backends.base.introspection.BaseDatabaseIntrospection.table_names', return_value=[]):
             with self.assertRaises(SystemExit) as ctx:
                 call_command('check_legacy_conversion', stdout=io.StringIO(), stderr=io.StringIO())
         self.assertEqual(ctx.exception.code, 1)
+
+
+class RollbackAndReplayTests(TransactionTestCase):
+    """Scénarios qui modifient l'état : chacun reconstruit son monde à l'ancien schéma."""
+
+    def setUp(self):
+        cache.clear()
+        migrate_to(OLD)
+        self.b = Builder(state(OLD))
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            call_command('migrate', verbosity=0)
+        finally:
+            super().tearDownClass()
+
+    def seed(self):
+        b = self.b
+        self.business = b.complete_profile()
+        self.offers = [b.offer(self.business.user, 'Offre A'), b.offer(self.business.user, 'Offre B')]
+        self.counters = [b.counter(o) for o in self.offers]
+        self.reviews = [b.review(o) for o in self.offers]
+        self.person = b.user('PARTICULIER')
+        b.offer(self.person, 'Offre perso')
+        self.banned = b.profile('Banni', user=b.user(is_active=False))
+        self.banned_offer = b.offer(self.banned.user, public=False)
+        self.private_offer = b.offer(b.profile('Prive').user, 'Deja prive', public=False)
+
+    def counts(self):
+        return (Organization.objects.count(), Membership.objects.count(), LegacyAccountMapping.objects.count(),
+                OrganizationCategory.objects.count())
+
+    def test_rollback_restores_the_contexts_and_deletes_nothing_then_forward_again_duplicates_nothing(self):
+        self.seed()
+        new = forward()
+        counts = self.counts()
+        audits = new.get_model('moderation', 'AuditLog').objects.filter(action='ORG_CONVERTED').count()
+
+        migrate_to(OLD)
+        old = state(OLD)
+        Offer, Counter, Review = (old.get_model(a, m) for a, m in (
+            ('marketplace', 'Offer'), ('visibility', 'DailyVisibilityCounter'), ('reviews', 'Review')))
+        self.assertEqual((Offer.objects.count(), Counter.objects.count(), Review.objects.count()), (5, 2, 2))
+        for offer in self.offers:
+            row = Offer.objects.get(pk=offer.pk)
+            self.assertEqual((row.seller_context_type, row.seller_context_id, row.seller_is_public),
+                             ('USER', self.business.user_id, True))
+        for counter in self.counters:
+            self.assertEqual(Counter.objects.get(pk=counter.pk).seller_context_type, 'USER')
+        for review in self.reviews:
+            row = Review.objects.get(pk=review.pk)
+            self.assertEqual((row.seller_context_type, row.seller_context_id), ('USER', self.business.user_id))
+        # Compte désactivé : offres non publiques ; offre déjà privée : jamais rendue publique.
+        self.assertEqual((Offer.objects.get(pk=self.banned_offer.pk).seller_context_type,
+                          Offer.objects.get(pk=self.banned_offer.pk).seller_is_public), ('USER', False))
+        self.assertFalse(Offer.objects.get(pk=self.private_offer.pk).seller_is_public)
+        # Création des organisations en `noop` au retour arrière : rien n'est supprimé.
+        self.assertEqual(self.counts(), counts)
+        self.assertEqual(old.get_model('identity', 'BusinessProfile').objects.count(), 3)
+
+        new = forward()
+        self.assertEqual(self.counts(), counts)
+        self.assertEqual(new.get_model('moderation', 'AuditLog').objects.filter(action='ORG_CONVERTED').count(), audits)
+        self.assertEqual(new.get_model('marketplace', 'Offer').objects.filter(
+            seller_context_type='ORGANIZATION').count(), 4)
+
+    def test_second_run_of_every_function_changes_nothing(self):
+        self.seed()
+        new = forward()
+
+        def snapshot():
+            return (
+                self.counts(),
+                sorted(new.get_model('moderation', 'AuditLog').objects.values_list('pk', flat=True)),
+                sorted(new.get_model('marketplace', 'Offer').objects.values_list('pk', 'seller_context_id', 'seller_is_public')),
+            )
+
+        before = snapshot()
+        for module, name in (
+            (MIGRATION, 'convert_profiles'),
+            ('apps.marketplace.migrations.0010_convert_offer_contexts', 'to_organizations'),
+            ('apps.visibility.migrations.0006_convert_counter_contexts', 'to_organizations'),
+            ('apps.reviews.migrations.0006_convert_review_contexts', 'to_organizations'),
+            ('apps.moderation.migrations.0005_audit_legacy_conversion', 'audit'),
+        ):
+            getattr(importlib.import_module(module), name)(new, None)
+        self.assertEqual(snapshot(), before)
+
+    def test_lost_mapping_is_recovered_without_duplicating_the_organization(self):
+        profile = self.b.profile('Reprise')
+        new = forward()
+        org_id = org_of(profile).pk
+        LegacyAccountMapping.objects.all().delete()
+        Membership.objects.all().delete()
+        importlib.import_module(MIGRATION).convert_profiles(new, None)
+        self.assertEqual(Organization.objects.count(), 1)
+        self.assertEqual(LegacyAccountMapping.objects.get().organization_id, org_id)
+        self.assertEqual(Membership.objects.filter(organization_id=org_id, role='OWNER').count(), 1)
+
+    def test_incomplete_conversion_aborts_with_a_clear_error(self):
+        self.b.profile('Reprise')
+        new = forward()
+        LegacyAccountMapping.objects.all().delete()
+        Membership.objects.all().delete()
+        Organization.objects.all().delete()
+        Mapping = new.get_model('identity', 'LegacyAccountMapping')
+        with mock.patch.object(Mapping.objects, 'create', return_value=None):  # la correspondance n'est pas écrite
+            with self.assertRaises(RuntimeError) as ctx:
+                importlib.import_module(MIGRATION).convert_profiles(new, None)
+        self.assertIn('Conversion incomplète', str(ctx.exception))
+
+    def test_empty_database_conversion_is_a_noop(self):
+        new = forward()
+        self.assertEqual(self.counts(), (0, 0, 0, 0))
+        self.assertEqual(new.get_model('moderation', 'AuditLog').objects.filter(action='ORG_CONVERTED').count(), 0)
+
+    def test_query_count_is_linear_in_the_number_of_profiles(self):
+        """Volume : 200 profils convertis par la migration en un nombre de requêtes borné par profil (pas
+        quadratique). Les migrations de contexte par ligne de correspondance restent un N+1 assumé avant la production."""
+        b = self.b
+        for i in range(200):
+            profile = b.profile(f'Boutique {i}', categories=2)
+            b.doc(profile, 'RCCM')
+        with CaptureQueriesContext(connection) as queries:
+            forward()
+        self.assertEqual(Organization.objects.count(), 200)
+        self.assertEqual(Membership.objects.count(), 200)
+        self.assertLess(len(queries), 200 * 15)

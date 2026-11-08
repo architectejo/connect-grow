@@ -15,7 +15,8 @@ def audit(apps, schema_editor):
     Mapping = apps.get_model('identity', 'LegacyAccountMapping')
     Organization = apps.get_model('identity', 'Organization')
     done = set(AuditLog.objects.filter(action=ACTION).values_list('target_id', flat=True))
-    orgs = {o.pk: o for o in Organization.objects.filter(pk__in=Mapping.objects.values('organization_id'))}
+    orgs = {o.pk: o for o in Organization.objects.filter(
+        pk__in=Mapping.objects.values('organization_id')).only('pk', 'legacy_business_profile_id', 'status')}
     rows = []
     for org_id in Mapping.objects.values_list('organization_id', flat=True):
         org = orgs.get(org_id)

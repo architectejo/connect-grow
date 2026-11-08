@@ -6,7 +6,11 @@ Une organisation `ENTREPRISE` par profil, jamais de fusion ni de suffixe en cas 
 - Le propriétaire du profil devient l'unique membre `OWNER`. Aucun autre compte ne reçoit de rôle.
 - La vérification n'est JAMAIS recopiée (règle 3) : elle se dérive des pièces `VALIDE` (`is_verified` ignoré).
 - Contact, consentements, conversations, messages et notifications ne sont pas transférés (règle 10).
-- Propriétaire désactivé (désactivation ou sanction) : organisation `SUSPENDED`, pour ne pas republier ses offres.
+- Propriétaire désactivé OU sous sanction bloquante en cours (`moderation.Sanction`, lue en lecture seule par
+  `apps.get_model`, exception A11) : organisation `SUSPENDED`, pour ne pas republier ses offres. Réactivation par
+  le personnel.
+- Adresse : l'ancien `BusinessProfile` n'avait pas de ville ni de commune propres ; celles du compte (donnée personnelle)
+  ne sont PAS reprises (`NULL`), l'organisation les renseignera elle-même (LEG-PRV).
 - Le logo garde le même nom de fichier ; les pièces KYC gardent leur fichier (aucun déplacement).
 - Idempotente : un profil déjà dans `LegacyAccountMapping` (ou déjà lié par `legacy_business_profile_id`) n'est pas
   recréé. La transaction de la migration couvre tout : un échec n'écrit rien.
@@ -19,6 +23,7 @@ Lecture des modèles historiques par `apps.get_model` (exception A11 de l'ADR 00
 import logging
 
 from django.db import migrations
+from django.utils import timezone
 
 from apps.identity import legacy_conversion as rules
 
@@ -34,6 +39,16 @@ def convert_profiles(apps, schema_editor):
     KycDocument = apps.get_model('identity', 'KycDocument')
     Mapping = apps.get_model('identity', 'LegacyAccountMapping')
 
+    Sanction = apps.get_model('moderation', 'Sanction')
+    now = timezone.now()
+    # Une seule requête avant la boucle : propriétaires de profils sous sanction bloquante en cours.
+    sanctioned = {
+        user_id for user_id, kind, active, ends_at in Sanction.objects.filter(
+            user_id__in=BusinessProfile.objects.values('user_id'), is_active=True,
+            sanction_type__in=rules.BLOCKING_SANCTION_TYPES,
+        ).values_list('user_id', 'sanction_type', 'is_active', 'ends_at')
+        if rules.is_blocking(kind, active, ends_at, now)
+    }
     mapped_users = set(Mapping.objects.values_list('user_id', flat=True))
     org_by_legacy = dict(
         Organization.objects.filter(legacy_business_profile_id__isnull=False)
@@ -48,16 +63,15 @@ def convert_profiles(apps, schema_editor):
         user = profile.user
         org_id = org_by_legacy.get(profile.pk)
         if org_id is None:
+            suspended = rules.owner_is_suspended(user.is_active, user.pk in sanctioned)
             org = Organization.objects.create(
                 name=rules.converted_name(profile.business_name, profile.pk),
                 org_type=rules.ORG_TYPE,
                 description=(profile.bio or '')[:rules.DESCRIPTION_MAX_LENGTH],
                 logo=profile.logo.name if profile.logo else None,
                 nif=profile.nif or '',
-                city_id=user.city_id,
-                commune_id=user.commune_id,
-                status='ACTIVE' if user.is_active else 'SUSPENDED',
-                suspension_reason='' if user.is_active else rules.SUSPENSION_REASON,
+                status='SUSPENDED' if suspended else 'ACTIVE',
+                suspension_reason=rules.SUSPENSION_REASON if suspended else '',
                 created_by_id=user.pk,
                 legacy_business_profile_id=profile.pk,
             )
@@ -102,6 +116,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('identity', '0010_identitysettings_kyb_file_retention_days'),
+        ('moderation', '0004_auditlog_context'),
     ]
 
     operations = [

@@ -258,6 +258,7 @@ class ObjectAuthorizationTests(ContextBase):
         author, colleague = self.member, User.objects.create_user(email='col@example.com', password='x', full_name='C')
         membership = self.join(author, role=EDITOR)
         self.join(colleague, role=EDITOR)
+        self.join(User.objects.create_user(email='own@example.com', password='x', full_name='P'), role=OWNER)  # M3
         response = self.create(author, ctx_header('ORGANIZATION', self.org.pk))
         offer = Offer.objects.get(pk=response.data['id'])
         membership.status = Membership.STATUS_REVOKED
@@ -452,6 +453,7 @@ class SellerVisibilityTests(ContextBase):
     def test_sanction_hides_the_personal_and_provider_offers_but_not_those_of_an_organization(self):
         profile = self.provider()
         self.join(self.seller, role=OWNER)
+        self.join(self.member, role=OWNER)  # un second propriétaire actif : l'organisation reste publique (T9-1, M3)
         personal = self.make_offer(title='Offre personnelle du vendeur')
         provider_offer = self.make_offer(
             seller_context_type='PROVIDER', seller_context_id=profile.pk, created_by=self.seller,
@@ -505,6 +507,8 @@ class SellerVisibilityTests(ContextBase):
 
     def test_reconciliation_command_repairs_a_missed_event(self):
         profile = self.provider()
+        self.join(self.member, role=OWNER)
+        self.join(self.member, self.other_org, role=OWNER)
         suspended = self.org_offer(creator=self.member, title='Offre d une organisation suspendue')
         Organization.objects.filter(pk=self.org.pk).update(status=Organization.STATUS_SUSPENDED)  # sans événement
         user_offer = self.make_offer(title='Offre d un compte désactivé')
@@ -539,6 +543,7 @@ class SellerVisibilityTests(ContextBase):
 
     def test_an_offer_created_for_a_restricted_context_is_never_published_public(self):
         # La création refuse déjà un compte restreint ; le calcul d'origine reste la source de vérité.
+        self.join(self.member, role=OWNER)
         self.assertTrue(identity_services.is_seller_context_public('ORGANIZATION', self.org.pk))
         Organization.objects.filter(pk=self.org.pk).update(status=Organization.STATUS_SUSPENDED)
         self.assertFalse(identity_services.is_seller_context_public('ORGANIZATION', self.org.pk))

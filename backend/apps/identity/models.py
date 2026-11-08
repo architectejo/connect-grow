@@ -516,7 +516,8 @@ class Organization(BaseModel):
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
     )
-    # Idempotence de la migration de données (T9) ; retiré avec la table de correspondance.
+    # Idempotence de la migration de données (T9) ; retiré avec la table de correspondance. Identifiant de l'ancien
+    # profil : pseudonymisé, conservation à fixer (LEG-PRV).
     legacy_business_profile_id = models.UUIDField(null=True, blank=True)
 
     class Meta:
@@ -637,8 +638,9 @@ class OrganizationDocumentRequirement(BaseModel):
 
 
 class LegacyAccountMapping(BaseModel):
-    """Table de correspondance ancien compte -> organisation (migration T9, ADR 0006 A11). Deux UUID,
-    aucune donnée personnelle. À retirer après la mise à jour des bases de développement."""
+    """Table de correspondance ancien compte -> organisation (migration T9, ADR 0006 A11). Deux UUID : donnée
+    PSEUDONYMISÉE (elle relie un compte à une organisation), pas anonyme ; durée de conservation à fixer (LEG-PRV).
+    À retirer après la mise à jour des bases de développement."""
 
     user_id = models.UUIDField(unique=True)
     organization_id = models.UUIDField()

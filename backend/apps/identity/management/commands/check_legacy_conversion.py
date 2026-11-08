@@ -57,7 +57,7 @@ class Command(BaseCommand):
         self.emit("noms vides ou trop courts après nettoyage (nom neutre)",
                   [p.pk for p in todo if rules.needs_neutral_name(p.business_name)])
         self.emit("noms de plus de 255 caractères après nettoyage (tronqués)",
-                  [p.pk for p in todo if len(' '.join((p.business_name or '').split())) > rules.NAME_MAX_LENGTH])
+                  [p.pk for p in todo if len(rules.clean_name_full(p.business_name)) > rules.NAME_MAX_LENGTH])
         self.emit("noms mélangeant latin, cyrillique et grec (conservés)",
                   [p.pk for p in todo if rules.mixes_scripts(p.business_name)])
 
@@ -65,7 +65,7 @@ class Command(BaseCommand):
         for p in todo:
             by_key[rules.name_key(rules.converted_name(p.business_name, p.pk))].append(p.pk)
         existing_orgs = defaultdict(list)
-        for pk, name, legacy in Organization.objects.values_list('pk', 'name', 'legacy_business_profile_id'):
+        for pk, name in Organization.objects.values_list('pk', 'name'):
             existing_orgs[rules.name_key(name)].append(pk)
         pairs = []
         for key, ids in by_key.items():
@@ -99,11 +99,12 @@ class Command(BaseCommand):
                   [p.pk for p in todo if p.is_verified != (bool(required) and required <= validated[p.pk])])
 
         owners = {p.user_id: p.pk for p in todo}
-        self.emit("propriétaires désactivés (organisation SUSPENDED)",
-                  [p.pk for p in todo if not p.user.is_active])
-        restricted = get_restricted_user_ids(owners.keys())
-        self.emit("propriétaires sous sanction bloquante (examen par le personnel si le compte reste actif)",
-                  [owners[uid] for uid in restricted])
+        restricted = get_restricted_user_ids(owners.keys())  # même règle que `legacy_conversion.is_blocking`
+        inactive = {p.pk for p in todo if not p.user.is_active}
+        sanctioned = {owners[uid] for uid in restricted}
+        self.emit("propriétaires désactivés (organisation sera SUSPENDED)", inactive)
+        self.emit("propriétaires sous sanction bloquante en cours (organisation sera SUSPENDED)", sanctioned)
+        self.emit("organisations qui seront SUSPENDED à la conversion (total)", inactive | sanctioned)
 
         missing_files, both = [], []
         for doc in KycDocument.objects.filter(business_profile__isnull=False).only(

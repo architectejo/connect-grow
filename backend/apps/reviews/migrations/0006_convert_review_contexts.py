@@ -3,8 +3,9 @@
 Lecture seule de `identity.LegacyAccountMapping` (exception A11). Les avis reçus par le contexte `USER` de l'ancien
 compte passent au contexte `ORGANIZATION` : la note reste par contexte, jamais fusionnée. Tous les avis d'un même
 acheteur sur ce contexte sont déplacés ensemble : `counts_for_seller` n'a pas à être recalculé. Idempotente ;
-post-condition : aucun avis `USER` pour un compte converti. Retour arrière réel (même hypothèse de développement) ;
-aucune ligne supprimée.
+post-condition : aucun avis `USER` pour un compte converti. Retour arrière réel ; aucune ligne supprimée.
+ATTENTION : réservé à une COPIE de base (aucun avis rattaché à l'organisation par d'autres depuis la conversion) ;
+sur une base réelle, restaurer la sauvegarde.
 """
 import logging
 
@@ -30,6 +31,7 @@ def to_organizations(apps, schema_editor):
 
 
 def back_to_users(apps, schema_editor):
+    logger.warning("Retour arrière des conversions de contexte : réservé à une copie de base, jamais à une base réelle.")
     Review = apps.get_model('reviews', 'Review')
     Mapping = apps.get_model('identity', 'LegacyAccountMapping')
     restored = 0

@@ -9,6 +9,7 @@ d'e-mail, de liste de membres ni d'adresse exacte (règle 10).
 Ce module est exposé par `identity.services` ; les autres domaines n'importent jamais ce sous-module.
 """
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
@@ -110,7 +111,8 @@ def _public_name(full_name) -> str:
 def get_seller_context_public_flags(contexts: Iterable) -> dict:
     """`{(type, id): bool}` : le vendeur est-il public ? Source du recalcul de `Offer.seller_is_public`.
     `USER` : compte actif et sans sanction bloquante ; `PROVIDER` : profil ACTIVE et compte titulaire public ;
-    `ORGANIZATION` : organisation ACTIVE. Un contexte inconnu est non public. Par lot."""
+    `ORGANIZATION` : organisation ACTIVE avec au moins un propriétaire actif, compte actif et sans sanction
+    bloquante. Un contexte inconnu est non public. Par lot."""
     grouped = _pairs(contexts)
     flags = {}
 
@@ -137,8 +139,21 @@ def get_seller_context_public_flags(contexts: Iterable) -> dict:
                 pk__in=grouped[CONTEXT_ORGANIZATION], status=Organization.STATUS_ACTIVE,
             ).values_list('pk', flat=True)
         )
+        # Une organisation dont tous les propriétaires actifs sont désactivés ou sous sanction bloquante n'est pas
+        # publique (T9-1, audit M3) : le statut stocké de l'organisation n'est pas modifié.
+        led_orgs = set()
+        if active_orgs:
+            owners = defaultdict(set)
+            for org_id, user_id in Membership.objects.filter(
+                organization_id__in=active_orgs, role=capabilities.ROLE_OWNER, status=Membership.STATUS_ACTIVE,
+                user__is_active=True,
+            ).values_list('organization_id', 'user_id'):
+                owners[org_id].add(user_id)
+            all_owners = set().union(*owners.values()) if owners else set()
+            restricted = get_restricted_user_ids(all_owners) if all_owners else set()
+            led_orgs = {org_id for org_id, users in owners.items() if users - restricted}
         for org_id in grouped[CONTEXT_ORGANIZATION]:
-            flags[(CONTEXT_ORGANIZATION, org_id)] = org_id in active_orgs
+            flags[(CONTEXT_ORGANIZATION, org_id)] = org_id in led_orgs
     return flags
 
 
@@ -383,11 +398,16 @@ def set_account_active(user_id, active: bool, actor=None) -> bool:
 
 
 def announce_account_status(user_id, active: bool, actor=None) -> None:
-    """Publie le changement de statut des contextes vendeur d'un compte (personnel et prestataire) et le
+    """Publie le changement de statut des contextes vendeur d'un compte (personnel, prestataire et organisations dont il est propriétaire) et le
     diffuse immédiatement aux abonnés, dans la transaction. À appeler dans `transaction.atomic()`. Sert aussi
     à l'administration Django, qui peut modifier `is_active` directement."""
     reason = STATUS_REASON_ACCOUNT_REACTIVATED if active else STATUS_REASON_ACCOUNT_DEACTIVATED
     contexts = [(CONTEXT_USER, 'user', user_id)]
+    # Organisations dont ce compte est propriétaire actif : leur visibilité dépend de leurs propriétaires.
+    for org_id in Membership.objects.filter(
+        user_id=user_id, role=capabilities.ROLE_OWNER, status=Membership.STATUS_ACTIVE,
+    ).values_list('organization_id', flat=True):
+        contexts.append((CONTEXT_ORGANIZATION, 'organization', org_id))
     provider_id = ProviderProfile.objects.filter(user_id=user_id).values_list('pk', flat=True).first()
     if provider_id is not None:
         contexts.append((CONTEXT_PROVIDER, 'provider', provider_id))

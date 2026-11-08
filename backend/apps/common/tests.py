@@ -41,7 +41,6 @@ EXPECTED_PUBLIC = {
 
 # Routes qui doivent figurer dans le parcours (garde contre un parcours qui raterait des vues).
 MUST_BE_WALKED = {
-    'api/accounts/kyc/documents/<pk>/',
     'api/accounts/kyc/documents/<pk>/decision/',
     'api/accounts/kyc/documents/<pk>/download/',
     'api/accounts/organizations/',
@@ -186,6 +185,10 @@ class DomainBoundariesTests(SimpleTestCase):
                 continue
             for dep_label, dep_name in migration.dependencies:
                 if dep_label in ALL_DOMAINS and dep_label != label and dep_label != 'identity':
+                    # Exception A11 (ADR 0006, section 20) : la conversion `identity 0011` lit `moderation.Sanction`
+                    # (lecture seule, via `apps.get_model`) pour suspendre les organisations de propriétaires sanctionnés.
+                    if (label, name, dep_label) == ('identity', '0011_convert_business_profiles', 'moderation'):
+                        continue
                     offenders.append(f'{label}.{name} -> {dep_label}.{dep_name}')
         self.assertEqual(offenders, [])
 

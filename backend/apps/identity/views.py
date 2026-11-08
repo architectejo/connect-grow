@@ -2,10 +2,9 @@ import hashlib
 import logging
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
 from django.http import FileResponse
 from rest_framework import generics, permissions, serializers, status
-from rest_framework.exceptions import AuthenticationFailed, NotFound
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
@@ -33,7 +32,7 @@ from .services import (
 from .sms import send_otp_sms
 from .throttles import (
     ContactSettingsThrottle, ProfileWriteIpThrottle, ProfileWriteThrottle, RegisterIpThrottle,
-    ChangePasswordThrottle, ContextsListThrottle, FailureLimiter, KycWriteThrottle, LoginIpThrottle,
+    ChangePasswordThrottle, ContextsListThrottle, FailureLimiter, LoginIpThrottle,
     OtpConfirmIpThrottle,
     LogoutIpThrottle, OtpRequestIpThrottle, OtpRequestPhoneDailyThrottle, OtpRequestPhoneThrottle, RefreshIpThrottle,
 )
@@ -309,55 +308,6 @@ class PasswordResetConfirmView(APIView):
         revoke_all_sessions(user)
         RESET_FAILURES.success(keys)
         return Response({'message': "Mot de passe mis à jour avec succès."}, status=status.HTTP_200_OK)
-
-
-class KycDocumentListCreateView(generics.ListCreateAPIView):
-    """Soumission et suivi des pièces KYC d'un Profil Business (CDC 3.1)."""
-
-    serializer_class = KycDocumentSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    throttle_classes = [KycWriteThrottle]
-
-    def get_queryset(self):
-        return KycDocument.objects.filter(business_profile__user=self.request.user)
-
-    def perform_create(self, serializer):
-        document = serializer.save(business_profile=self.request.user.business_profile)
-        record_audit(
-            self.request.user, 'KYC_SUBMITTED', target=document,
-            details=f"Pièce {document.get_document_type_display()} déposée.",
-        )
-
-
-class KycDocumentDeleteView(generics.DestroyAPIView):
-    """Suppression, par son propriétaire, d'une pièce non validée."""
-
-    permission_classes = [permissions.IsAuthenticated]
-    throttle_classes = [KycWriteThrottle]
-
-    def get_queryset(self):
-        return KycDocument.objects.filter(business_profile__user=self.request.user)
-
-    def destroy(self, request, *args, **kwargs):
-        # Verrou de ligne : une décision de modération simultanée ne peut pas valider la
-        # pièce pendant qu'on la supprime.
-        with transaction.atomic():
-            try:
-                document = self.get_queryset().select_for_update().get(pk=kwargs['pk'])
-            except KycDocument.DoesNotExist:
-                raise NotFound()
-            if document.status == KycDocument.STATUS_VALIDE:
-                return Response(
-                    {'error': "Une pièce validée ne peut pas être supprimée."}, status=status.HTTP_400_BAD_REQUEST,
-                )
-            record_audit(
-                request.user, 'KYC_DELETED', target=document,
-                details=f"Pièce {document.get_document_type_display()} supprimée (statut {document.status}).",
-            )
-            stored_file = document.file
-            document.delete()
-        stored_file.delete(save=False)
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class KycReviewQueueView(generics.ListAPIView):

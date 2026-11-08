@@ -12,16 +12,24 @@ NAME_MIN_LENGTH = 2
 DESCRIPTION_MAX_LENGTH = 2000
 MAX_CATEGORIES = 5
 SUSPENSION_REASON = 'other'
+# Sanctions de `moderation` qui bloquent le compte (copie volontaire des constantes de `Sanction`, lues sans import
+# de modèle : une migration ne dépend pas du code courant d'un autre domaine).
+BLOCKING_SANCTION_TYPES = ('SUSPENSION_TEMPORAIRE', 'BANNISSEMENT')
 _STRIPPED_CATEGORIES = {'Cc', 'Cf', 'Zl', 'Zp'}
 _SCRIPTS = ('LATIN', 'CYRILLIC', 'GREEK')
 
 
-def clean_name(raw):
-    """Nettoie sans rejeter : caractères Cc/Cf/Zl/Zp retirés, espaces repliés, bords retirés, 255 caractères
-    au plus. Pas de NFKC (une marque ne doit pas être modifiée). Peut renvoyer une chaîne vide ou trop courte."""
+def clean_name_full(raw):
+    """Nettoyage non tronqué : caractères Cc/Cf/Zl/Zp retirés, espaces repliés, bords retirés. Pas de NFKC (une
+    marque ne doit pas être modifiée)."""
     text = ''.join(' ' if ch in '\t\n\r' else ch for ch in (raw or ''))
     text = ''.join(ch for ch in text if unicodedata.category(ch) not in _STRIPPED_CATEGORIES)
-    return ' '.join(text.split())[:NAME_MAX_LENGTH].strip()
+    return ' '.join(text.split())
+
+
+def clean_name(raw):
+    """Nom converti : nettoyage puis 255 caractères au plus. Peut renvoyer une chaîne vide ou trop courte."""
+    return clean_name_full(raw)[:NAME_MAX_LENGTH].strip()
 
 
 def needs_neutral_name(raw):
@@ -54,3 +62,14 @@ def mixes_scripts(value):
                 if label.startswith(script):
                     found.add(script)
     return len(found) > 1
+
+
+def is_blocking(sanction_type, is_active, ends_at, now):
+    """Vrai si la sanction bloque encore le compte : type bloquant, active, sans échéance ou échéance future.
+    Une sanction levée (`is_active` faux), échue ou non bloquante (avertissement) ne compte pas."""
+    return bool(is_active) and sanction_type in BLOCKING_SANCTION_TYPES and (ends_at is None or ends_at > now)
+
+
+def owner_is_suspended(is_active, sanctioned):
+    """Règle de l'état initial : propriétaire désactivé OU sous sanction bloquante en cours => `SUSPENDED`."""
+    return (not is_active) or bool(sanctioned)

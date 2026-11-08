@@ -8,9 +8,7 @@ from .views import (
     ContactSettingsView,
     ContextListView,
     KycDecisionView,
-    KycDocumentDeleteView,
     KycDocumentDownloadView,
-    KycDocumentListCreateView,
     KycReviewQueueView,
     LoginView,
     LogoutAllView,
@@ -73,9 +71,7 @@ urlpatterns = [
     path('contact-settings/channels/<str:channel>/', ContactChannelView.as_view(), name='contact_settings_channel'),
 
     # KYC Business (CDC 3.1, 3.11)
-    path('kyc/documents/', KycDocumentListCreateView.as_view(), name='kyc_documents'),
     path('kyc/review-queue/', KycReviewQueueView.as_view(), name='kyc_review_queue'),
-    path('kyc/documents/<uuid:pk>/', KycDocumentDeleteView.as_view(), name='kyc_document_delete'),
     path('kyc/documents/<uuid:pk>/decision/', KycDecisionView.as_view(), name='kyc_decision'),
     path('kyc/documents/<uuid:pk>/download/', KycDocumentDownloadView.as_view(), name='kyc_download'),
 

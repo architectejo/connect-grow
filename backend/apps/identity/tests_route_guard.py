@@ -20,8 +20,6 @@ WRITE_METHODS = ('post', 'put', 'patch', 'delete')
 # Chemin normalisé -> raison. Vues d'écriture existantes sans garde de contexte à la date de T2.
 LEGACY_WRITE_ROUTES = {
     'api/accounts/change-password/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/accounts/kyc/documents/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/accounts/kyc/documents/<uuid:pk>/': 'compte : authentification et réglages toujours personnels',  # DELETE
     'api/accounts/kyc/documents/<uuid:pk>/decision/': 'compte : authentification et réglages toujours personnels',  # POST
     'api/accounts/login/': 'compte : authentification et réglages toujours personnels',  # POST
     'api/accounts/logout-all/': 'compte : authentification et réglages toujours personnels',  # POST

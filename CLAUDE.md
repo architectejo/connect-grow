@@ -197,7 +197,7 @@ python manage.py makemigrations --check --dry-run       # aucune migration oubli
 
 ```bash
 npm install
-cp .env.example .env            # VITE_API_URL=http://localhost:8000/api/
+cp .env.example .env            # VITE_API_URL=http://localhost:8000/api/v1/
 npm run dev                     # http://localhost:8080
 npm run lint && npm run test && npm run build
 ```

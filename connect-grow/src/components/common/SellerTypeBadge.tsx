@@ -10,11 +10,11 @@ type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 /** Libellé du type de vendeur : « Particulier », « Prestataire », « Organisation · Boutique » (forme complète) ou « Boutique » (compacte). */
 export function sellerTypeLabel(t: Translate, contextType: SellerContextType, orgType?: OrganizationType | null, compact = false): string {
-  const group = compact ? "seller.typeCompact" : "seller.type";
+  const group = compact ? "typeCompact" : "type";
   if (contextType === "ORGANIZATION") {
-    return t(`${group}.ORGANIZATION`, { orgType: orgType ? t(`orgType.${orgType}`) : t("context.type.ORGANIZATION") });
+    return t(`seller.${group}.ORGANIZATION`, { orgType: orgType ? t(`orgType.${orgType}`) : t("context.type.ORGANIZATION") });
   }
-  return t(`${group}.${contextType}`);
+  return t(`seller.${group}.${contextType}`);
 }
 
 interface SellerTypeBadgeProps {

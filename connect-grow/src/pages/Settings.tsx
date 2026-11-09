@@ -31,12 +31,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useChangePassword, useUpdateProfile } from "@/hooks/use-account";
 import { useCities } from "@/hooks/use-marketplace";
 import { useRequestOtp } from "@/hooks/use-otp";
+import i18n from "@/i18n";
 import { formatLocalPhone, localPhoneSchema, parseApiErrors, passwordSchema, toE164 } from "@/lib/validation";
 
 // --- Profil ---
 
 const profileSchema = z.object({
-  full_name: z.string().trim().min(2, "Saisissez votre nom complet.").max(255),
+  full_name: z.string().trim().min(2, i18n.t("validation.fullNameRequired")).max(255),
   commune: z.string(),
 });
 
@@ -66,12 +67,12 @@ function ProfileTab() {
     try {
       await update.mutateAsync(data);
       setPhoto(null);
-      toast.success("Profil mis à jour.");
+      toast.success(t("settings.profileUpdated"));
     } catch (err) {
       const { fields, general } = parseApiErrors(err);
       if (fields.full_name) form.setError("full_name", { message: fields.full_name });
       // photo refusée : clé `photo` ; commune hors de la ville ou ville manquante : clés `commune` / `ville`
-      setError(general ?? fields.photo ?? fields.commune ?? fields.ville ?? (fields.full_name ? undefined : "La mise à jour a échoué."));
+      setError(general ?? fields.photo ?? fields.commune ?? fields.ville ?? (fields.full_name ? undefined : t("settings.updateFailed")));
     }
   });
 
@@ -84,21 +85,21 @@ function ProfileTab() {
         shape="circle"
         onSelect={(file, preview) => setPhoto({ file, preview })}
       />
-      <Field label="Nom complet" htmlFor="full_name" error={form.formState.errors.full_name?.message}>
+      <Field label={t("authForm.fullName")} htmlFor="full_name" error={form.formState.errors.full_name?.message}>
         <Input id="full_name" autoComplete="name" className={fieldInputClass} {...errorProps("full_name", form.formState.errors.full_name?.message)} {...form.register("full_name")} />
       </Field>
-      <Field label="Commune" htmlFor="commune" hint="Affichée sur votre profil public pour situer vos annonces.">
+      <Field label={t("settings.communeLabel")} htmlFor="commune" hint={t("settings.communeHint")}>
         <Controller
           control={form.control}
           name="commune"
           render={({ field }) => (
-            <CommuneSelect id="commune" value={field.value} onChange={field.onChange} allowAll={false} placeholder="Choisissez votre commune" className="h-12 rounded-xl bg-card" />
+            <CommuneSelect id="commune" value={field.value} onChange={field.onChange} allowAll={false} placeholder={t("settings.communePlaceholder")} className="h-12 rounded-xl bg-card" />
           )}
         />
       </Field>
       <FormAlert message={error} />
       <Button type="submit" disabled={update.isPending}>
-        {update.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Save aria-hidden />} Enregistrer
+        {update.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Save aria-hidden />} {t("common.save")}
       </Button>
       <p className="border-t pt-4 text-sm">
         <Link to="/profiles" className="inline-flex items-center gap-2 font-semibold text-primary underline-offset-2 hover:underline">
@@ -147,7 +148,7 @@ function ChangePhoneDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       setStep("otp");
       return true;
     } catch (err) {
-      setError(parseApiErrors(err).general ?? "L'envoi du code a échoué.");
+      setError(parseApiErrors(err).general ?? t("authForm.register.resendFailed"));
       return false;
     }
   };
@@ -156,11 +157,11 @@ function ChangePhoneDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     setError(undefined);
     try {
       await update.mutateAsync({ phone: toE164(phone), otp_code: code });
-      toast.success("Numéro vérifié et enregistré.");
+      toast.success(t("settings.phoneSaved"));
       onOpenChange(false);
     } catch (err) {
       const { fields, general } = parseApiErrors(err);
-      setError(fields.otp_code ?? fields.phone ?? general ?? "La vérification a échoué.");
+      setError(fields.otp_code ?? fields.phone ?? general ?? t("settings.verifyFailed"));
     }
   };
 
@@ -168,8 +169,8 @@ function ChangePhoneDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="rounded-2xl sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{step === "phone" ? "Nouveau numéro" : "Vérifiez votre numéro"}</DialogTitle>
-          {step === "phone" && <DialogDescription>Nous enverrons un code par SMS pour confirmer ce numéro.</DialogDescription>}
+          <DialogTitle>{step === "phone" ? t("settings.newPhone") : t("authForm.register.verifyTitle")}</DialogTitle>
+          {step === "phone" && <DialogDescription>{t("settings.newPhoneDescription")}</DialogDescription>}
         </DialogHeader>
         {step === "phone" ? (
           <form
@@ -179,10 +180,10 @@ function ChangePhoneDialog({ open, onOpenChange }: { open: boolean; onOpenChange
             }}
             className="space-y-4"
           >
-            <PhoneInput id="new-phone" value={phone} onChange={setPhone} invalid={!!error} autoFocus aria-label="Nouveau numéro" />
+            <PhoneInput id="new-phone" value={phone} onChange={setPhone} invalid={!!error} autoFocus aria-label={t("settings.newPhone")} />
             <FormAlert message={error} />
             <Button type="submit" className="w-full" disabled={requestOtp.isPending}>
-              {requestOtp.isPending && <Loader2 className="animate-spin" aria-hidden />} Recevoir le code
+              {requestOtp.isPending && <Loader2 className="animate-spin" aria-hidden />} {t("authForm.forgot.receiveCode")}
             </Button>
           </form>
         ) : (
@@ -195,12 +196,12 @@ function ChangePhoneDialog({ open, onOpenChange }: { open: boolean; onOpenChange
             }}
             onSubmit={confirm}
             onResend={async () => {
-              if (!(await send())) throw new Error("Échec du renvoi");
+              if (!(await send())) throw new Error(t("authForm.forgot.resendFailed"));
             }}
             onChangeNumber={() => setStep("phone")}
             isSubmitting={update.isPending}
             error={error}
-            submitLabel="Confirmer ce numéro"
+            submitLabel={t("settings.confirmPhone")}
           />
         )}
       </DialogContent>
@@ -221,21 +222,21 @@ function ContactTab() {
           <Phone className="h-5 w-5" aria-hidden />
         </span>
         <div className="flex-1">
-          <p className="text-sm text-muted-foreground">Téléphone</p>
-          <p className="font-semibold">{localPhone ? `+243 ${formatLocalPhone(localPhone)}` : "Aucun numéro"}</p>
+          <p className="text-sm text-muted-foreground">{t("authForm.phone")}</p>
+          <p className="font-semibold">{localPhone ? `+243 ${formatLocalPhone(localPhone)}` : t("settings.noPhone")}</p>
           {user?.phone && user.phone_verified && (
             <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-success">
-              <BadgeCheck className="h-3.5 w-3.5" aria-hidden /> Vérifié par SMS
+              <BadgeCheck className="h-3.5 w-3.5" aria-hidden /> {t("settings.verifiedBySms")}
             </p>
           )}
         </div>
         <Button variant="outline" onClick={() => setOpen(true)}>
-          {user?.phone ? "Changer de numéro" : "Ajouter un numéro"}
+          {user?.phone ? t("settings.changePhone") : t("settings.addPhone")}
         </Button>
       </div>
       <div className="rounded-xl border p-4">
-        <p className="text-sm text-muted-foreground">E-mail</p>
-        <p className="font-semibold">{user?.email || "Aucune adresse e-mail"}</p>
+        <p className="text-sm text-muted-foreground">{t("authForm.email")}</p>
+        <p className="font-semibold">{user?.email || t("settings.noEmail")}</p>
       </div>
       <p className="text-xs text-muted-foreground">
         {t("settings.phonePurpose")}
@@ -249,9 +250,9 @@ function ContactTab() {
 // --- Sécurité ---
 
 const passwordFormSchema = z
-  .object({ old_password: z.string().min(1, "Saisissez votre mot de passe actuel."), new_password: passwordSchema, confirm: z.string() })
-  .refine((v) => v.new_password === v.confirm, { path: ["confirm"], message: "Les deux mots de passe ne correspondent pas." })
-  .refine((v) => v.new_password !== v.old_password, { path: ["new_password"], message: "Choisissez un mot de passe différent de l'actuel." });
+  .object({ old_password: z.string().min(1, i18n.t("settings.currentPasswordRequired")), new_password: passwordSchema, confirm: z.string() })
+  .refine((v) => v.new_password === v.confirm, { path: ["confirm"], message: i18n.t("validation.passwordMismatch") })
+  .refine((v) => v.new_password !== v.old_password, { path: ["new_password"], message: i18n.t("settings.differentPassword") });
 
 function SecurityTab() {
   const { t } = useTranslation();
@@ -279,26 +280,26 @@ function SecurityTab() {
     } catch (err) {
       const { general } = parseApiErrors(err);
       if (general && /ancien/i.test(general)) form.setError("old_password", { message: general });
-      else setError(general ?? "La modification a échoué.");
+      else setError(general ?? t("settings.changeFailed"));
     }
   });
 
   return (
     <div className="space-y-8">
       <form onSubmit={onSubmit} noValidate className="space-y-5">
-        <h2 className="font-bold">Changer de mot de passe</h2>
-        <Field label="Mot de passe actuel" htmlFor="old_password" error={errors.old_password?.message}>
+        <h2 className="font-bold">{t("settings.changePasswordTitle")}</h2>
+        <Field label={t("settings.currentPassword")} htmlFor="old_password" error={errors.old_password?.message}>
           <PasswordInput id="old_password" autoComplete="current-password" value={oldPassword} {...errorProps("old_password", errors.old_password?.message)} {...form.register("old_password")} />
         </Field>
-        <Field label="Nouveau mot de passe" htmlFor="new_password" error={errors.new_password?.message}>
+        <Field label={t("authForm.newPassword")} htmlFor="new_password" error={errors.new_password?.message}>
           <PasswordInput id="new_password" autoComplete="new-password" showStrength value={newPassword} {...errorProps("new_password", errors.new_password?.message)} {...form.register("new_password")} />
         </Field>
-        <Field label="Confirmer le nouveau mot de passe" htmlFor="confirm" error={errors.confirm?.message}>
+        <Field label={t("settings.confirmNewPassword")} htmlFor="confirm" error={errors.confirm?.message}>
           <PasswordInput id="confirm" autoComplete="new-password" value={confirm} {...errorProps("confirm", errors.confirm?.message)} {...form.register("confirm")} />
         </Field>
         <FormAlert message={error} />
         <Button type="submit" disabled={changePassword.isPending}>
-          {changePassword.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Save aria-hidden />} Mettre à jour
+          {changePassword.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Save aria-hidden />} {t("settings.updatePassword")}
         </Button>
       </form>
 
@@ -311,7 +312,7 @@ function SecurityTab() {
             navigate("/", { replace: true });
           }}
         >
-          <LogOut aria-hidden /> Se déconnecter
+          <LogOut aria-hidden /> {t("settings.logout")}
         </Button>
         <Button
           variant="ghost"
@@ -347,18 +348,19 @@ function SecurityTab() {
 const TABS = ["profile", "contact", "security"] as const;
 
 const Settings = () => {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get("tab");
   const tab = TABS.find((value) => value === requested) ?? "profile";
 
   return (
     <AccountShell>
-      <PageHeader title="Paramètres" description="Gérez votre profil public, vos coordonnées et la sécurité de votre compte." />
+      <PageHeader title={t("settings.title")} description={t("settings.description")} />
       <Tabs value={tab} onValueChange={(value) => setSearchParams(value === "profile" ? {} : { tab: value }, { replace: true })}>
         <TabsList className="mb-6 h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-muted p-1 scrollbar-none sm:w-auto">
-          <TabsTrigger value="profile" className="rounded-lg px-4 py-2">Profil</TabsTrigger>
-          <TabsTrigger value="contact" className="rounded-lg px-4 py-2">Coordonnées</TabsTrigger>
-          <TabsTrigger value="security" className="rounded-lg px-4 py-2">Sécurité</TabsTrigger>
+          <TabsTrigger value="profile" className="rounded-lg px-4 py-2">{t("settings.tabProfile")}</TabsTrigger>
+          <TabsTrigger value="contact" className="rounded-lg px-4 py-2">{t("settings.tabContact")}</TabsTrigger>
+          <TabsTrigger value="security" className="rounded-lg px-4 py-2">{t("settings.tabSecurity")}</TabsTrigger>
         </TabsList>
         <div className="rounded-2xl border bg-card p-5 shadow-soft sm:p-6">
           <TabsContent value="profile" className="mt-0">

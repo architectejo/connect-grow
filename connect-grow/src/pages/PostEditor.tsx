@@ -21,6 +21,7 @@ import { AccessDenied, ErrorState, PostCard } from "@/components/common";
 import { errorProps, Field, FormAlert } from "@/components/auth/FormFields";
 import { MAX_PHOTOS, PhotoPicker, photoSrc, type EditorPhoto } from "@/components/post-editor/PhotoPicker";
 import { useTranslation } from "react-i18next";
+import i18n from "@/i18n";
 import { useFeatures } from "@/hooks/use-features";
 import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -45,33 +46,33 @@ const DESCRIPTION_MAX = 3000;
 const schema = z
   .object({
     post_type: z.enum(["PRODUIT", "SERVICE"]),
-    category: z.string().min(1, "Choisissez une catégorie."),
+    category: z.string().min(1, i18n.t("editor.validation.category")),
     title: z
       .string()
       .trim()
-      .min(TITLE_MIN, `Au moins ${TITLE_MIN} caractères : soyez précis (marque, modèle…).`)
-      .max(TITLE_MAX, `${TITLE_MAX} caractères maximum.`),
+      .min(TITLE_MIN, i18n.t("editor.validation.titleMin", { min: TITLE_MIN }))
+      .max(TITLE_MAX, i18n.t("editor.validation.titleMax", { max: TITLE_MAX })),
     description: z
       .string()
       .trim()
-      .min(DESCRIPTION_MIN, `Au moins ${DESCRIPTION_MIN} caractères.`)
-      .max(DESCRIPTION_MAX, `${DESCRIPTION_MAX} caractères maximum.`),
+      .min(DESCRIPTION_MIN, i18n.t("editor.validation.descriptionMin", { min: DESCRIPTION_MIN }))
+      .max(DESCRIPTION_MAX, i18n.t("editor.validation.descriptionMax", { max: DESCRIPTION_MAX })),
     condition: z.enum(["", "NEUF", "OCCASION", "RECONDITIONNE"]),
     stock: z.string(),
     price: z
       .string()
-      .min(1, "Indiquez un prix.")
-      .refine((v) => Number(v.replace(",", ".")) >= 0 && !Number.isNaN(Number(v.replace(",", "."))), "Prix invalide."),
+      .min(1, i18n.t("editor.validation.priceRequired"))
+      .refine((v) => Number(v.replace(",", ".")) >= 0 && !Number.isNaN(Number(v.replace(",", "."))), i18n.t("editor.validation.priceInvalid")),
     currency: z.enum(["USD", "CDF"]),
     is_price_negotiable: z.boolean(),
     is_exchangeable: z.boolean(),
-    commune: z.string().min(1, "Choisissez la commune où se trouve l'article."),
+    commune: z.string().min(1, i18n.t("editor.validation.commune")),
   })
   .superRefine((values, ctx) => {
     if (values.post_type === "PRODUIT") {
-      if (!values.condition) ctx.addIssue({ code: "custom", path: ["condition"], message: "Précisez l'état du produit." });
+      if (!values.condition) ctx.addIssue({ code: "custom", path: ["condition"], message: i18n.t("editor.validation.condition") });
       const stock = Number(values.stock);
-      if (!Number.isInteger(stock) || stock < 1) ctx.addIssue({ code: "custom", path: ["stock"], message: "Au moins 1." });
+      if (!Number.isInteger(stock) || stock < 1) ctx.addIssue({ code: "custom", path: ["stock"], message: i18n.t("editor.validation.stock") });
     }
   });
 
@@ -91,11 +92,11 @@ const defaultValues: FormValues = {
   commune: "",
 };
 
-const steps: { title: string; fields: FieldPath<FormValues>[] }[] = [
-  { title: "Photos", fields: [] },
-  { title: "Description", fields: ["post_type", "category", "title", "description", "condition", "stock"] },
-  { title: "Prix et lieu", fields: ["price", "currency", "commune"] },
-  { title: "Aperçu", fields: [] },
+const steps: { titleKey: string; fields: FieldPath<FormValues>[] }[] = [
+  { titleKey: "editor.steps.photos", fields: [] },
+  { titleKey: "editor.steps.description", fields: ["post_type", "category", "title", "description", "condition", "stock"] },
+  { titleKey: "editor.steps.priceLocation", fields: ["price", "currency", "commune"] },
+  { titleKey: "editor.steps.preview", fields: [] },
 ];
 
 /** Étape où corriger un champ refusé par le serveur. */
@@ -105,11 +106,7 @@ const stepOfField = (field: string) => {
   return index === -1 ? 3 : index;
 };
 
-const conditions = [
-  { value: "NEUF", label: "Neuf", hint: "Jamais utilisé, emballage d'origine" },
-  { value: "OCCASION", label: "Occasion", hint: "Déjà utilisé, en bon état" },
-  { value: "RECONDITIONNE", label: "Reconditionné", hint: "Remis à neuf par un professionnel" },
-] as const;
+const conditions = ["NEUF", "OCCASION", "RECONDITIONNE"] as const;
 
 function CharCount({ value, min, max }: { value: string; min: number; max: number }) {
   const length = value.trim().length;
@@ -121,14 +118,15 @@ function CharCount({ value, min, max }: { value: string; min: number; max: numbe
 }
 
 function StepIndicator({ current, onSelect, maxReached }: { current: number; onSelect: (step: number) => void; maxReached: number }) {
+  const { t } = useTranslation();
   return (
-    <ol className="flex items-center gap-2" aria-label="Étapes de la publication">
+    <ol className="flex items-center gap-2" aria-label={t("editor.stepsLabel")}>
       {steps.map((step, index) => {
         const done = index < current;
         const active = index === current;
         const reachable = index <= maxReached;
         return (
-          <li key={step.title} className="flex flex-1 items-center gap-2" aria-current={active ? "step" : undefined}>
+          <li key={step.titleKey} className="flex flex-1 items-center gap-2" aria-current={active ? "step" : undefined}>
             <button
               type="button"
               disabled={!reachable}
@@ -144,7 +142,7 @@ function StepIndicator({ current, onSelect, maxReached }: { current: number; onS
                 {done ? <Check className="h-4 w-4" aria-hidden /> : index + 1}
               </span>
               <span className={cn("hidden truncate text-sm font-semibold sm:inline", active ? "text-foreground" : "text-muted-foreground")}>
-                {step.title}
+                {t(step.titleKey)}
               </span>
             </button>
             {index < steps.length - 1 && <span className={cn("h-0.5 flex-1 rounded-full", done ? "bg-success" : "bg-border")} aria-hidden />}
@@ -158,7 +156,7 @@ function StepIndicator({ current, onSelect, maxReached }: { current: number; onS
 /** Télécharge une photo déjà en ligne pour la renvoyer comme photo principale. */
 async function fileFromUrl(url: string): Promise<File> {
   const response = await fetch(mediaUrl(url) ?? url);
-  if (!response.ok) throw new Error("Téléchargement impossible");
+  if (!response.ok) throw new Error(i18n.t("editor.downloadFailed"));
   const blob = await response.blob();
   return new File([blob], url.split("/").pop() || "photo.webp", { type: blob.type });
 }
@@ -223,9 +221,9 @@ function PostEditorForm({ post }: { post?: Post }) {
     const draft = readDraft<Partial<FormValues>>(draftOwner);
     if (draft && (draft.title || draft.description)) {
       form.reset({ ...defaultValues, ...draft });
-      toast.info("Brouillon restauré", {
-        description: "Vos photos sont à ajouter de nouveau.",
-        action: { label: "Effacer", onClick: () => { clearDraft(); form.reset(defaultValues); } },
+      toast.info(t("editor.draftRestored"), {
+        description: t("editor.draftRestoredHint"),
+        action: { label: t("editor.draftClear"), onClick: () => { clearDraft(); form.reset(defaultValues); } },
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restauration quand le propriétaire du brouillon est connu (une fois)
@@ -247,7 +245,7 @@ function PostEditorForm({ post }: { post?: Post }) {
 
   const next = async () => {
     if (step === 0 && photos.length === 0) {
-      setPhotoError("Ajoutez au moins une photo : les annonces illustrées sont bien plus consultées.");
+      setPhotoError(t("editor.photoRequired"));
       return;
     }
     setPhotoError(undefined);
@@ -289,7 +287,7 @@ function PostEditorForm({ post }: { post?: Post }) {
       if (mainChanged) {
         const file = main.kind === "new" ? main.file : await fileFromUrl(main.url).catch(() => null);
         if (!file) {
-          setGeneralError("Impossible de réutiliser cette photo comme principale. Ajoutez-la de nouveau depuis votre appareil.");
+          setGeneralError(t("editor.mainPhotoFailed"));
           goTo(0);
           return;
         }
@@ -330,9 +328,9 @@ function PostEditorForm({ post }: { post?: Post }) {
       ]);
 
       if (galleryFailed) {
-        toast.warning("Annonce enregistrée, mais certaines photos n'ont pas pu être ajoutées.", { description: galleryMessage || undefined });
+        toast.warning(t("editor.savedPartial"), { description: galleryMessage || undefined });
       }
-      else toast.success(isEdit ? "Annonce mise à jour." : "Votre annonce est en ligne !");
+      else toast.success(isEdit ? t("editor.updated") : t("editor.published"));
       navigate(`/post/${saved.id}`, { replace: true });
     } catch (error) {
       // Refus d'autorisation : message dédié, jamais d'écriture sous un autre profil (le brouillon reste dans le formulaire)
@@ -359,7 +357,7 @@ function PostEditorForm({ post }: { post?: Post }) {
         if (field in defaultValues) setError(field as FieldPath<FormValues>, { message });
         if (field === "main_image") setPhotoError(message);
       });
-      setGeneralError(general ?? (entries.length ? "Certaines informations sont à corriger." : "L'enregistrement a échoué. Réessayez."));
+      setGeneralError(general ?? (entries.length ? t("editor.fieldsToFix") : t("editor.saveFailed")));
       if (entries.length) goTo(stepOfField(entries[0][0]));
     } finally {
       setIsSaving(false);
@@ -383,7 +381,7 @@ function PostEditorForm({ post }: { post?: Post }) {
     commune: values.commune,
     commune_name: communeName,
     post_type: values.post_type,
-    title: values.title || "Titre de votre annonce",
+    title: values.title || t("editor.previewTitle"),
     description: values.description,
     price: values.price.replace(",", ".") || "0",
     currency: values.currency as Currency,
@@ -403,11 +401,11 @@ function PostEditorForm({ post }: { post?: Post }) {
     <div ref={topRef} className="mx-auto max-w-3xl scroll-mt-24">
       <div className="mb-6 flex items-center justify-between gap-4">
         <div>
-          <p className="text-sm font-medium text-muted-foreground">{isEdit ? "Modification" : "Nouvelle annonce"}</p>
-          <h1 className="text-2xl font-extrabold md:text-3xl">{steps[step].title}</h1>
+          <p className="text-sm font-medium text-muted-foreground">{isEdit ? t("editor.modification") : t("editor.newPost")}</p>
+          <h1 className="text-2xl font-extrabold md:text-3xl">{t(steps[step].titleKey)}</h1>
         </div>
         <Button asChild variant="ghost" size="sm">
-          <Link to={isEdit ? `/post/${post!.id}` : "/dashboard"}>Annuler</Link>
+          <Link to={isEdit ? `/post/${post!.id}` : "/dashboard"}>{t("common.cancel")}</Link>
         </Button>
       </div>
 
@@ -440,7 +438,7 @@ function PostEditorForm({ post }: { post?: Post }) {
         {step === 0 && (
           <section className="space-y-4 rounded-2xl border bg-card p-5 shadow-soft sm:p-6">
             <p className="text-sm text-muted-foreground">
-              La première photo apparaît dans les résultats. Montrez l'article en entier, puis les détails et les défauts éventuels.
+              {t("editor.photosHint")}
             </p>
             <PhotoPicker
               photos={photos}
@@ -456,11 +454,11 @@ function PostEditorForm({ post }: { post?: Post }) {
         {step === 1 && (
           <section className="space-y-6 rounded-2xl border bg-card p-5 shadow-soft sm:p-6">
             <fieldset>
-              <legend className="mb-2 text-sm font-semibold">Vous proposez</legend>
+              <legend className="mb-2 text-sm font-semibold">{t("editor.youOffer")}</legend>
               <div role="radiogroup" className="grid grid-cols-2 gap-3">
                 {[
-                  { value: "PRODUIT" as const, label: "Un produit", icon: Package },
-                  { value: "SERVICE" as const, label: "Un service", icon: Wrench },
+                  { value: "PRODUIT" as const, label: t("editor.product"), icon: Package },
+                  { value: "SERVICE" as const, label: t("editor.service"), icon: Wrench },
                 ].map(({ value, label, icon: Icon }) => {
                   const selected = values.post_type === value;
                   return (
@@ -482,14 +480,14 @@ function PostEditorForm({ post }: { post?: Post }) {
               </div>
             </fieldset>
 
-            <Field label="Catégorie" htmlFor="category" error={errors.category?.message}>
+            <Field label={t("editor.category")} htmlFor="category" error={errors.category?.message}>
               <Controller
                 control={control}
                 name="category"
                 render={({ field }) => (
                   <Select value={field.value} onValueChange={field.onChange}>
                     <SelectTrigger id="category" className={cn("h-12 rounded-xl bg-card", errors.category && "border-destructive")} {...errorProps("category", errors.category?.message)}>
-                      <SelectValue placeholder="Choisissez une catégorie" />
+                      <SelectValue placeholder={t("editor.categoryPlaceholder")} />
                     </SelectTrigger>
                     <SelectContent className="max-h-80 rounded-xl">
                       {categories.map((category) => {
@@ -509,7 +507,7 @@ function PostEditorForm({ post }: { post?: Post }) {
             </Field>
 
             <Field
-              label="Titre"
+              label={t("editor.titleLabel")}
               htmlFor="title"
               error={errors.title?.message}
               aside={<CharCount value={values.title} min={TITLE_MIN} max={TITLE_MAX} />}
@@ -517,7 +515,7 @@ function PostEditorForm({ post }: { post?: Post }) {
               <Input
                 id="title"
                 maxLength={TITLE_MAX}
-                placeholder={values.post_type === "SERVICE" ? "Ex. : Plombier, dépannage rapide 7j/7" : "Ex. : iPhone 13 Pro 256 Go, très bon état"}
+                placeholder={values.post_type === "SERVICE" ? t("editor.titlePlaceholderService") : t("editor.titlePlaceholderProduct")}
                 className="h-12 rounded-xl bg-card text-base"
                 {...errorProps("title", errors.title?.message)}
                 {...register("title")}
@@ -525,11 +523,11 @@ function PostEditorForm({ post }: { post?: Post }) {
             </Field>
 
             <Field
-              label="Description"
+              label={t("editor.descriptionLabel")}
               htmlFor="description"
               error={errors.description?.message}
               aside={<CharCount value={values.description} min={DESCRIPTION_MIN} max={DESCRIPTION_MAX} />}
-              hint="Caractéristiques, état réel, accessoires fournis, disponibilité, lieu de remise…"
+              hint={t("editor.descriptionHint")}
             >
               <Textarea
                 id="description"
@@ -543,24 +541,24 @@ function PostEditorForm({ post }: { post?: Post }) {
             {values.post_type === "PRODUIT" && (
               <>
                 <fieldset>
-                  <legend className="mb-2 text-sm font-semibold">État</legend>
+                  <legend className="mb-2 text-sm font-semibold">{t("editor.conditionLabel")}</legend>
                   <div role="radiogroup" className="grid gap-2 sm:grid-cols-3">
                     {conditions.map((condition) => {
-                      const selected = values.condition === condition.value;
+                      const selected = values.condition === condition;
                       return (
                         <button
-                          key={condition.value}
+                          key={condition}
                           type="button"
                           role="radio"
                           aria-checked={selected}
-                          onClick={() => setValue("condition", condition.value, { shouldValidate: true })}
+                          onClick={() => setValue("condition", condition, { shouldValidate: true })}
                           className={cn(
                             "rounded-xl border-2 p-3 text-left transition-colors",
                             selected ? "border-primary bg-primary/5" : "border-border hover:border-primary/40",
                           )}
                         >
-                          <span className="block text-sm font-bold">{condition.label}</span>
-                          <span className="block text-xs text-muted-foreground">{condition.hint}</span>
+                          <span className="block text-sm font-bold">{t(`badge.${condition}`)}</span>
+                          <span className="block text-xs text-muted-foreground">{t(`editor.conditionHint.${condition}`)}</span>
                         </button>
                       );
                     })}
@@ -572,7 +570,7 @@ function PostEditorForm({ post }: { post?: Post }) {
                   )}
                 </fieldset>
 
-                <Field label="Quantité disponible" htmlFor="stock" error={errors.stock?.message}>
+                <Field label={t("editor.stock")} htmlFor="stock" error={errors.stock?.message}>
                   <Input
                     id="stock"
                     type="number"
@@ -590,7 +588,7 @@ function PostEditorForm({ post }: { post?: Post }) {
 
         {step === 2 && (
           <section className="space-y-6 rounded-2xl border bg-card p-5 shadow-soft sm:p-6">
-            <Field label="Prix" htmlFor="price" error={errors.price?.message}>
+            <Field label={t("editor.price")} htmlFor="price" error={errors.price?.message}>
               <div className="flex gap-2">
                 <Input
                   id="price"
@@ -600,7 +598,7 @@ function PostEditorForm({ post }: { post?: Post }) {
                   {...errorProps("price", errors.price?.message)}
                   {...register("price")}
                 />
-                <div role="radiogroup" aria-label="Devise" className="flex rounded-xl bg-muted p-1">
+                <div role="radiogroup" aria-label={t("editor.currency")} className="flex rounded-xl bg-muted p-1">
                   {(["USD", "CDF"] as const).map((currency) => (
                     <button
                       key={currency}
@@ -613,7 +611,7 @@ function PostEditorForm({ post }: { post?: Post }) {
                         values.currency === currency ? "bg-card text-foreground shadow-soft" : "text-muted-foreground",
                       )}
                     >
-                      {currency === "USD" ? "$ USD" : "FC CDF"}
+                      {currency === "USD" ? t("editor.currencyUsd") : t("editor.currencyCdf")}
                     </button>
                   ))}
                 </div>
@@ -622,7 +620,7 @@ function PostEditorForm({ post }: { post?: Post }) {
 
             <div className="divide-y rounded-xl border">
               {[
-                { name: "is_price_negotiable" as const, label: "Prix discutable", hint: "Les acheteurs peuvent vous faire une offre." },
+                { name: "is_price_negotiable" as const, label: t("editor.negotiable"), hint: t("editor.negotiableHint") },
                 ...(exchangeEnabled
                   ? [{ name: "is_exchangeable" as const, label: t("exchange.editorLabel"), hint: t("exchange.editorHint") }]
                   : []),
@@ -641,7 +639,7 @@ function PostEditorForm({ post }: { post?: Post }) {
               ))}
             </div>
 
-            <Field label="Commune" htmlFor="commune" error={errors.commune?.message} hint="Seule la commune est affichée, jamais votre adresse.">
+            <Field label={t("editor.commune")} htmlFor="commune" error={errors.commune?.message} hint={t("editor.communeHint")}>
               <Controller
                 control={control}
                 name="commune"
@@ -651,7 +649,7 @@ function PostEditorForm({ post }: { post?: Post }) {
                     value={field.value}
                     onChange={field.onChange}
                     allowAll={false}
-                    placeholder="Choisissez une commune"
+                    placeholder={t("editor.communePlaceholder")}
                     invalid={!!errors.commune}
                     className="h-12 rounded-xl bg-card"
                   />
@@ -664,18 +662,18 @@ function PostEditorForm({ post }: { post?: Post }) {
         {step === 3 && (
           <section className="grid gap-6 md:grid-cols-[260px_1fr]">
             <div>
-              <p className="mb-2 text-sm font-semibold">Dans les résultats</p>
+              <p className="mb-2 text-sm font-semibold">{t("editor.inResults")}</p>
               <PostCard post={previewPost} hideSeller={false} className="pointer-events-none" />
             </div>
             <div className="space-y-4 rounded-2xl border bg-card p-5 shadow-soft">
-              <h2 className="font-bold">Récapitulatif</h2>
+              <h2 className="font-bold">{t("editor.summary")}</h2>
               <dl className="grid grid-cols-2 gap-3 text-sm">
                 {[
-                  ["Photos", `${photos.length}/${MAX_PHOTOS}`],
-                  ["Catégorie", previewPost.category_name ?? "—"],
-                  ["Type", values.post_type === "SERVICE" ? "Service" : "Produit"],
-                  ["Commune", communeName ?? "—"],
-                  ["Prix discutable", values.is_price_negotiable ? "Oui" : "Non"],
+                  [t("editor.summaryPhotos"), `${photos.length}/${MAX_PHOTOS}`],
+                  [t("editor.category"), previewPost.category_name ?? "—"],
+                  [t("editor.summaryType"), values.post_type === "SERVICE" ? t("postDetail.details.service") : t("postDetail.details.product")],
+                  [t("editor.commune"), communeName ?? "—"],
+                  [t("editor.negotiable"), values.is_price_negotiable ? t("editor.yes") : t("editor.no")],
                   ...(exchangeEnabled ? [[t("exchange.summaryLabel"), values.is_exchangeable ? t("exchange.accepted") : t("exchange.no")]] : []),
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-xl bg-muted/60 p-3">
@@ -686,7 +684,7 @@ function PostEditorForm({ post }: { post?: Post }) {
               </dl>
               <p className="line-clamp-4 whitespace-pre-line text-sm text-muted-foreground">{values.description}</p>
               <p className="text-xs text-muted-foreground">
-                En publiant, vous confirmez que l'article respecte la liste des produits interdits (médicaments, armes, contrefaçons…).
+                {t("editor.prohibited")}
               </p>
             </div>
           </section>
@@ -698,21 +696,21 @@ function PostEditorForm({ post }: { post?: Post }) {
         <div className="fixed inset-x-0 bottom-0 z-40 flex gap-3 border-t bg-background/95 px-4 py-3 pb-safe backdrop-blur-lg md:static md:border-0 md:bg-transparent md:p-0">
           {step > 0 && (
             <Button type="button" variant="outline" size="lg" onClick={() => goTo(step - 1)} disabled={isSaving}>
-              <ArrowLeft aria-hidden /> <span className="hidden sm:inline">Précédent</span>
+              <ArrowLeft aria-hidden /> <span className="hidden sm:inline">{t("editor.previous")}</span>
             </Button>
           )}
           <Button type="submit" size="lg" className="flex-1 shadow-glow md:ml-auto md:flex-none md:px-8" disabled={isSaving}>
             {isSaving ? (
               <>
-                <Loader2 className="animate-spin" aria-hidden /> Envoi en cours…
+                <Loader2 className="animate-spin" aria-hidden /> {t("editor.sending")}
               </>
             ) : isLastStep ? (
               <>
-                <Rocket aria-hidden /> {isEdit ? "Enregistrer les modifications" : "Publier l'annonce"}
+                <Rocket aria-hidden /> {isEdit ? t("editor.saveChanges") : t("editor.publish")}
               </>
             ) : (
               <>
-                Continuer <ArrowRight aria-hidden />
+                {t("editor.continue")} <ArrowRight aria-hidden />
               </>
             )}
           </Button>
@@ -735,7 +733,7 @@ const PostEditor = () => {
     // Analyste : le masquage évite un formulaire voué au refus (le serveur répondrait DENY_PERMISSION)
     content = <AccessDenied description={t("errors.deny.PERMISSION.org")} />;
   } else if (!id) content = <PostEditorForm />;
-  else if (isLoading || contextsLoading) content = <div className="flex justify-center py-24"><Loader2 className="h-8 w-8 animate-spin text-primary" aria-label="Chargement" /></div>;
+  else if (isLoading || contextsLoading) content = <div className="flex justify-center py-24"><Loader2 className="h-8 w-8 animate-spin text-primary" aria-label={t("states.loading")} /></div>;
   else if (isError || !post) content = <ErrorState onRetry={() => refetch()} />;
   else if (user && !offerAccess(post, contexts).canEdit) {
     // Les profils du compte disent s'il peut modifier cette offre ; le serveur reste le juge (DENY_*)

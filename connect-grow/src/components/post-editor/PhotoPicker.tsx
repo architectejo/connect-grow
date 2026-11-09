@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Camera, ImagePlus, Loader2, Star, X } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import type { Uuid } from "@/api/types";
 import { mediaUrl } from "@/lib/media";
 import { ACCEPTED_IMAGE_TYPES, compressImage, MAX_SOURCE_SIZE } from "@/lib/image";
@@ -26,6 +27,7 @@ interface PhotoPickerProps {
 }
 
 export function PhotoPicker({ photos, onChange, error }: PhotoPickerProps) {
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [processing, setProcessing] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -42,21 +44,21 @@ export function PhotoPicker({ photos, onChange, error }: PhotoPickerProps) {
     const files = Array.from(fileList);
     const room = MAX_PHOTOS - photos.length;
     if (room <= 0) {
-      toast.error(`${MAX_PHOTOS} photos maximum par annonce.`);
+      toast.error(t("photos.max", { max: MAX_PHOTOS }));
       return;
     }
     const accepted = files.filter((file) => {
       if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-        toast.error(`« ${file.name} » n'est pas une photo JPG, PNG ou WebP.`);
+        toast.error(t("photos.badType", { name: file.name }));
         return false;
       }
       if (file.size > MAX_SOURCE_SIZE) {
-        toast.error(`« ${file.name} » est trop lourde (15 Mo maximum).`);
+        toast.error(t("photos.tooHeavy", { name: file.name, size: MAX_SOURCE_SIZE / (1024 * 1024) }));
         return false;
       }
       return true;
     });
-    if (accepted.length > room) toast.info(`Seules les ${room} premières photos ont été ajoutées (${MAX_PHOTOS} maximum).`);
+    if (accepted.length > room) toast.info(t("photos.partial", { room, max: MAX_PHOTOS }));
     const toProcess = accepted.slice(0, room);
     if (toProcess.length === 0) return;
 
@@ -111,17 +113,17 @@ export function PhotoPicker({ photos, onChange, error }: PhotoPickerProps) {
               index === 0 ? "col-span-2 row-span-2 aspect-square sm:aspect-auto" : "aspect-square",
             )}
           >
-            <img src={photoSrc(photo)} alt={`Photo ${index + 1}`} className="h-full w-full object-cover" />
+            <img src={photoSrc(photo)} alt={t("photos.alt", { n: index + 1 })} className="h-full w-full object-cover" />
             {index === 0 && (
               <figcaption className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-foreground/80 px-2.5 py-1 text-xs font-semibold text-background backdrop-blur-sm">
-                <Star className="h-3 w-3 fill-current" aria-hidden /> Photo principale
+                <Star className="h-3 w-3 fill-current" aria-hidden /> {t("photos.main")}
               </figcaption>
             )}
             <button
               type="button"
               onClick={() => remove(photo.key)}
               className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground shadow-soft backdrop-blur-sm transition-colors hover:bg-destructive hover:text-destructive-foreground"
-              aria-label={`Retirer la photo ${index + 1}`}
+              aria-label={t("photos.remove", { n: index + 1 })}
             >
               <X className="h-4 w-4" />
             </button>
@@ -133,7 +135,7 @@ export function PhotoPicker({ photos, onChange, error }: PhotoPickerProps) {
                     onClick={() => move(index, index - 1)}
                     disabled={index === 0}
                     className="flex h-8 w-8 items-center justify-center rounded-full bg-background/90 shadow-soft backdrop-blur-sm disabled:opacity-0"
-                    aria-label={`Déplacer la photo ${index + 1} vers la gauche`}
+                    aria-label={t("photos.moveLeft", { n: index + 1 })}
                   >
                     <ArrowLeft className="h-4 w-4" />
                   </button>
@@ -142,7 +144,7 @@ export function PhotoPicker({ photos, onChange, error }: PhotoPickerProps) {
                     onClick={() => move(index, index + 1)}
                     disabled={index === photos.length - 1}
                     className="flex h-8 w-8 items-center justify-center rounded-full bg-background/90 shadow-soft backdrop-blur-sm disabled:opacity-0"
-                    aria-label={`Déplacer la photo ${index + 1} vers la droite`}
+                    aria-label={t("photos.moveRight", { n: index + 1 })}
                   >
                     <ArrowRight className="h-4 w-4" />
                   </button>
@@ -153,7 +155,7 @@ export function PhotoPicker({ photos, onChange, error }: PhotoPickerProps) {
                     onClick={() => move(index, 0)}
                     className="rounded-full bg-background/90 px-2.5 text-xs font-semibold shadow-soft backdrop-blur-sm"
                   >
-                    Principale
+                    {t("photos.makeMain")}
                   </button>
                 )}
               </div>
@@ -164,7 +166,7 @@ export function PhotoPicker({ photos, onChange, error }: PhotoPickerProps) {
         {Array.from({ length: processing }, (_, i) => (
           <div key={`processing-${i}`} className="flex aspect-square flex-col items-center justify-center gap-2 rounded-xl border bg-muted text-xs text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-            Optimisation…
+            {t("photos.optimizing")}
           </div>
         ))}
 
@@ -178,9 +180,9 @@ export function PhotoPicker({ photos, onChange, error }: PhotoPickerProps) {
             )}
           >
             {photos.length === 0 ? <Camera className="h-8 w-8" aria-hidden /> : <ImagePlus className="h-6 w-6" aria-hidden />}
-            <span className="text-sm font-semibold">{photos.length === 0 ? "Ajouter des photos" : "Ajouter"}</span>
+            <span className="text-sm font-semibold">{photos.length === 0 ? t("photos.addFirst") : t("photos.add")}</span>
             {photos.length === 0 && (
-              <span className="text-xs text-primary/70">Prenez-les en pleine lumière · jusqu'à {MAX_PHOTOS} photos</span>
+              <span className="text-xs text-primary/70">{t("photos.addHint", { max: MAX_PHOTOS })}</span>
             )}
           </button>
         )}
@@ -201,7 +203,7 @@ export function PhotoPicker({ photos, onChange, error }: PhotoPickerProps) {
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
-          {photos.length}/{MAX_PHOTOS} photos · optimisées automatiquement pour les petits forfaits
+          {t("photos.count", { current: photos.length, max: MAX_PHOTOS })}
         </span>
       </div>
       {error && (

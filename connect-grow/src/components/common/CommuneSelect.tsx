@@ -1,4 +1,5 @@
 import { MapPin } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCities } from "@/hooks/use-marketplace";
 import { cn } from "@/lib/utils";
@@ -23,13 +24,15 @@ interface CommuneSelectProps {
 export function CommuneSelect({
   value,
   onChange,
-  placeholder = "Toutes les communes",
+  placeholder: placeholderProp,
   className,
   id,
   allowAll = true,
   invalid,
   "aria-label": ariaLabel,
 }: CommuneSelectProps) {
+  const { t } = useTranslation();
+  const placeholder = placeholderProp ?? t("common.allCommunes");
   const { data: cities = [], isLoading } = useCities();
 
   return (

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
+import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, Expand, Package } from "lucide-react";
 import type { Post } from "@/api/types";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -31,12 +32,13 @@ function useCarousel(startIndex = 0) {
 }
 
 const NavButton = ({ direction, onClick, className }: { direction: "prev" | "next"; onClick: () => void; className?: string }) => {
+  const { t } = useTranslation();
   const Icon = direction === "prev" ? ChevronLeft : ChevronRight;
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label={direction === "prev" ? "Photo précédente" : "Photo suivante"}
+      aria-label={direction === "prev" ? t("post.gallery.previous") : t("post.gallery.next")}
       className={cn(
         "absolute top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-background/90 text-foreground shadow-card backdrop-blur-sm transition-transform hover:scale-105",
         direction === "prev" ? "left-3" : "right-3",
@@ -50,6 +52,7 @@ const NavButton = ({ direction, onClick, className }: { direction: "prev" | "nex
 
 /** Visionneuse plein écran. */
 function Lightbox({ photos, title, startIndex, onClose }: { photos: string[]; title: string; startIndex: number; onClose: () => void }) {
+  const { t } = useTranslation();
   const { emblaRef, emblaApi, selected } = useCarousel(startIndex);
 
   return (
@@ -63,7 +66,7 @@ function Lightbox({ photos, title, startIndex, onClose }: { photos: string[]; ti
                 <div key={src} className="min-w-0 flex-[0_0_100%]">
                   <img
                     src={mediaUrl(src)}
-                    alt={`${title}, photo ${i + 1}`}
+                    alt={t("post.gallery.photoAlt", { title, n: i + 1 })}
                     className="mx-auto h-[80vh] w-full object-contain"
                   />
                 </div>
@@ -91,6 +94,7 @@ interface PostGalleryProps {
 }
 
 export function PostGallery({ post, className }: PostGalleryProps) {
+  const { t } = useTranslation();
   const photos = postPhotos(post);
   const { emblaRef, emblaApi, selected } = useCarousel();
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -102,7 +106,7 @@ export function PostGallery({ post, className }: PostGalleryProps) {
         src={null}
         alt={post.title}
         fallbackIcon={Package}
-        fallbackLabel="Pas de photo"
+        fallbackLabel={t("post.noImage")}
         wrapperClassName={cn("aspect-[4/3] rounded-2xl border", className)}
       />
     );
@@ -119,11 +123,11 @@ export function PostGallery({ post, className }: PostGalleryProps) {
                 type="button"
                 onClick={() => setLightboxIndex(i)}
                 className="relative min-w-0 flex-[0_0_100%] cursor-zoom-in"
-                aria-label={`Agrandir la photo ${i + 1}`}
+                aria-label={t("post.gallery.enlargePhoto", { n: i + 1 })}
               >
                 <ImageWithFallback
                   src={src}
-                  alt={`${post.title}, photo ${i + 1}`}
+                  alt={t("post.gallery.photoAlt", { title: post.title, n: i + 1 })}
                   wrapperClassName="aspect-[4/3]"
                   className="object-contain"
                   // Première photo prioritaire : c'est l'élément principal de la page
@@ -152,7 +156,7 @@ export function PostGallery({ post, className }: PostGalleryProps) {
 
         <span className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-foreground/70 px-2.5 py-1 text-xs font-semibold text-background backdrop-blur-sm">
           <Expand className="h-3.5 w-3.5" aria-hidden />
-          {photos.length > 1 ? `${selected + 1} / ${photos.length}` : "Agrandir"}
+          {photos.length > 1 ? `${selected + 1} / ${photos.length}` : t("post.gallery.enlarge")}
         </span>
       </div>
 
@@ -163,7 +167,7 @@ export function PostGallery({ post, className }: PostGalleryProps) {
               key={src}
               type="button"
               onClick={() => scrollTo(i)}
-              aria-label={`Voir la photo ${i + 1}`}
+              aria-label={t("post.gallery.viewPhoto", { n: i + 1 })}
               aria-current={i === selected}
               className={cn(
                 "shrink-0 overflow-hidden rounded-xl border-2 transition-all",

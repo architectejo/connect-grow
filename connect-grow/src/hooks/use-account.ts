@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import i18n from "@/i18n";
 import apiClient, { unwrapList } from "@/api/client";
 import type { AppNotification, DashboardStats, Favorite, Post, Uuid, User } from "@/api/types";
 import { ME_QUERY_KEY, useAuth } from "@/contexts/AuthContext";
@@ -46,12 +47,12 @@ export function useTrash() {
 
 export function usePostLifecycle() {
   const invalidate = useInvalidatePosts();
-  const onError = (error: unknown) => toast.error(apiErrorMessage(error, "L'action n'a pas abouti. Réessayez."));
+  const onError = (error: unknown) => toast.error(apiErrorMessage(error, i18n.t("feedback.actionFailed")));
 
   const moveToTrash = useMutation({
     mutationFn: (id: Uuid) => apiClient.post(`marketplace/posts/${id}/soft_delete/`),
     onSuccess: () => {
-      toast.success("Annonce placée dans la corbeille.", { description: "Vous pouvez la restaurer pendant 30 jours." });
+      toast.success(i18n.t("feedback.movedToTrash"), { description: i18n.t("feedback.movedToTrashHint") });
       return invalidate();
     },
     onError,
@@ -60,7 +61,7 @@ export function usePostLifecycle() {
   const restore = useMutation({
     mutationFn: (id: Uuid) => apiClient.post(`marketplace/posts/${id}/restore/`),
     onSuccess: () => {
-      toast.success("Annonce restaurée et de nouveau en ligne.");
+      toast.success(i18n.t("feedback.restored"));
       return invalidate();
     },
     onError,
@@ -69,7 +70,7 @@ export function usePostLifecycle() {
   const destroy = useMutation({
     mutationFn: (id: Uuid) => apiClient.delete(`marketplace/posts/${id}/hard_delete/`),
     onSuccess: () => {
-      toast.success("Annonce supprimée définitivement.");
+      toast.success(i18n.t("feedback.deleted"));
       return invalidate();
     },
     onError,
@@ -115,7 +116,7 @@ export function useNotificationActions() {
     mutationFn: () => apiClient.post("interactions/notifications/mark_all_as_read/"),
     onMutate: () => setAll((items) => items.map((n) => ({ ...n, is_read: true }))),
     onError: () => {
-      toast.error("Impossible de marquer les notifications comme lues.");
+      toast.error(i18n.t("feedback.markReadFailed"));
       return queryClient.invalidateQueries({ queryKey: accountKeys.notifications });
     },
   });

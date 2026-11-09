@@ -1,6 +1,7 @@
 import { differenceInDays, differenceInHours, differenceInMonths, differenceInYears, formatDistanceToNowStrict } from "date-fns";
 import { fr } from "date-fns/locale";
 import type { Currency } from "@/api/types";
+import i18n from "@/i18n";
 
 const LOCALE = "fr-FR";
 
@@ -38,15 +39,15 @@ export function formatShortAge(date: string | Date): string {
   if (Number.isNaN(d.getTime())) return "";
   const now = new Date();
   const hours = differenceInHours(now, d);
-  if (hours < 1) return "à l'instant";
-  if (hours < 24) return `${hours} h`;
+  if (hours < 1) return i18n.t("time.justNow");
+  if (hours < 24) return i18n.t("time.hours", { count: hours });
   const days = differenceInDays(now, d);
-  if (days < 7) return `${days} j`;
-  if (days < 30) return `${Math.floor(days / 7)} sem.`;
+  if (days < 7) return i18n.t("time.days", { count: days });
+  if (days < 30) return i18n.t("time.weeks", { count: Math.floor(days / 7) });
   const months = differenceInMonths(now, d);
-  if (months < 12) return `${months} mois`;
+  if (months < 12) return i18n.t("time.months", { count: months });
   const years = differenceInYears(now, d);
-  return `${years} an${years > 1 ? "s" : ""}`;
+  return i18n.t("time.years", { count: years });
 }
 
 const ratingFormatter = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 1, maximumFractionDigits: 1 });

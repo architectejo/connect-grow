@@ -1,6 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import i18n from "@/i18n";
 import apiClient, { unwrapList } from "@/api/client";
 import type {
   Category,
@@ -166,17 +167,17 @@ export function useToggleFavorite() {
     },
     onSuccess: (data, post) => {
       if (data.favorited !== !post.is_favorited) setFavoriteInCache(queryClient, post.id, data.favorited);
-      toast.success(data.favorited ? "Ajoutée à vos favoris" : "Retirée de vos favoris");
+      toast.success(data.favorited ? i18n.t("feedback.favoriteAdded") : i18n.t("feedback.favoriteRemoved"));
     },
     onError: (error, post) => {
       setFavoriteInCache(queryClient, post.id, !!post.is_favorited);
-      toast.error(apiErrorMessage(error, "Impossible de modifier vos favoris. Réessayez."));
+      toast.error(apiErrorMessage(error, i18n.t("feedback.favoriteFailed")));
     },
   });
 
   return (post: Post) => {
     if (!isAuthenticated) {
-      toast.info("Connectez-vous pour enregistrer vos annonces favorites.");
+      toast.info(i18n.t("feedback.favoriteLogin"));
       navigate(loginPath(location.pathname + location.search));
       return;
     }

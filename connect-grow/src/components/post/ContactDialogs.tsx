@@ -26,11 +26,12 @@ interface DialogProps {
 
 /** Message interne au vendeur : ouvre une conversation liée à l'annonce. */
 export function ContactDialog({ post, open, onOpenChange }: DialogProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    if (open && !message) setMessage(`Bonjour, votre annonce « ${post.title} » est-elle toujours disponible ?`);
+    if (open && !message) setMessage(t("contactDialog.defaultMessage", { title: post.title }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- préremplissage à l'ouverture uniquement
   }, [open]);
 
@@ -39,11 +40,11 @@ export function ContactDialog({ post, open, onOpenChange }: DialogProps) {
     onSuccess: () => {
       // Le contact ouvre le droit d'avis (après le délai éventuel) : on relit l'éligibilité
       void queryClient.invalidateQueries({ queryKey: reviewKeys.eligibilityOf(post.id) });
-      toast.success("Message envoyé. Retrouvez la conversation dans vos messages.");
+      toast.success(t("contactDialog.sent"));
       setMessage("");
       onOpenChange(false);
     },
-    onError: (error) => toast.error(apiErrorMessage(error, "Le message n'a pas pu être envoyé.")),
+    onError: (error) => toast.error(apiErrorMessage(error, t("contactDialog.failed"))),
   });
 
   return (
@@ -51,24 +52,24 @@ export function ContactDialog({ post, open, onOpenChange }: DialogProps) {
       <DialogContent className="rounded-2xl sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5 text-primary" aria-hidden /> Contacter {sellerDisplayName(post.seller)}
+            <MessageSquare className="h-5 w-5 text-primary" aria-hidden /> {t("contactDialog.title", { name: sellerDisplayName(post.seller) })}
           </DialogTitle>
-          <DialogDescription>Votre message ouvre une conversation privée à propos de cette annonce.</DialogDescription>
+          <DialogDescription>{t("contactDialog.description")}</DialogDescription>
         </DialogHeader>
         <Textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           className="min-h-[140px] rounded-xl"
-          aria-label="Votre message"
+          aria-label={t("contactDialog.messageLabel")}
           autoFocus
         />
         <DialogFooter className="gap-2">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Annuler
+            {t("common.cancel")}
           </Button>
           <Button onClick={() => send.mutate()} disabled={send.isPending || !message.trim()}>
             {send.isPending && <Loader2 className="animate-spin" aria-hidden />}
-            Envoyer
+            {t("contactDialog.send")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -88,7 +89,7 @@ export function ExchangeDialog({ post, open, onOpenChange }: DialogProps) {
     mutationFn: () => {
       // Le back-end ne stocke pas encore l'annonce proposée : elle est indiquée dans le message
       const offered = myPosts.find((p) => p.id === selectedId);
-      const text = offered ? `[Annonce proposée : « ${offered.title} » (n° ${offered.id})] ${message.trim()}` : message.trim();
+      const text = offered ? t("exchange.offeredPrefix", { title: offered.title, id: offered.id, message: message.trim() }) : message.trim();
       return apiClient.post("interactions/exchanges/", { post: post.id, message: text });
     },
     onSuccess: () => {
@@ -171,18 +172,18 @@ export function ExchangeDialog({ post, open, onOpenChange }: DialogProps) {
         <Textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          placeholder="Ex. : je propose mon téléphone + 20 $ de complément."
+          placeholder={t("exchange.placeholder")}
           className="min-h-[100px] rounded-xl"
-          aria-label="Votre proposition"
+          aria-label={t("exchange.messageLabel")}
         />
 
         <DialogFooter className="gap-2">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Annuler
+            {t("common.cancel")}
           </Button>
           <Button onClick={() => send.mutate()} disabled={send.isPending || !message.trim()}>
             {send.isPending && <Loader2 className="animate-spin" aria-hidden />}
-            Envoyer la proposition
+            {t("exchange.send")}
           </Button>
         </DialogFooter>
       </DialogContent>

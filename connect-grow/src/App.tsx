@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
@@ -102,6 +103,7 @@ const RouteBoundary = ({ children }: { children: ReactNode }) => {
 };
 
 const App = () => {
+  const { t } = useTranslation();
   usePrefetchLikelyRoutes();
 
   return (
@@ -120,7 +122,7 @@ const App = () => {
                 href="#contenu"
                 className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[70] focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground"
               >
-                Aller au contenu
+                {t("a11y.skipToContent")}
               </a>
               <ScrollManager />
               <RouteBoundary>

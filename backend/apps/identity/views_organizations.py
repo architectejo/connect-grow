@@ -354,6 +354,6 @@ class OrganizationTransferOwnershipView(APIView):
         sole = sole_effective_owner_id(pk)
         can_manage = capabilities.role_has_capability(me.role, 'org.manage_members')
         return _private(Response({
-            'new_owner': serialize_member(target, request.user, True, sole),
+            'new_owner': serialize_member(target, request.user, can_manage, sole),
             'me': serialize_member(me, request.user, can_manage, sole),
         }))

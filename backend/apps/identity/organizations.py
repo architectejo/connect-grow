@@ -813,6 +813,7 @@ def _ensure_not_orphaned(organization, effective_before) -> bool:
 
 def _apply_role_change(
     actor, organization, membership, new_role, audit_action='MEMBERSHIP_ROLE_CHANGED', reauth=False,
+    publish_owners=True,
 ):
     """Écrit un changement de rôle (verrou déjà posé, autorisation déjà faite) et vérifie les invariants
     après l'écriture : `last_owner` (zéro propriétaire) puis `last_effective_owner` (ADR 0008 §9) ; une
@@ -832,7 +833,7 @@ def _apply_role_change(
         orphaned = _ensure_not_orphaned(organization, effective_before)
     _audit_membership(actor, audit_action, organization, membership, old_role, new_role, reauth, orphaned)
     _publish_membership_change(organization, membership, CHANGE_ROLE_CHANGED, old_role, new_role, actor)
-    if ROLE_OWNER in (old_role, new_role):
+    if publish_owners and ROLE_OWNER in (old_role, new_role):
         _publish_owners_changed(organization, actor)
     return membership
 
@@ -878,8 +879,10 @@ def transfer_ownership(actor, organization_id, new_owner_user_id, actor_new_role
 
 def _transfer_core(actor, organization, actor_membership, target, actor_new_role, reauth=False):
     """Deux changements de rôle et la trace `ORG_OWNERSHIP_TRANSFERRED` (verrou et autorisation déjà faits)."""
-    _apply_role_change(actor, organization, target, ROLE_OWNER, reauth=reauth)
-    _apply_role_change(actor, organization, actor_membership, actor_new_role, reauth=reauth)
+    # `owners_changed` n'est publié qu'une fois, après les deux écritures (le transfert est un seul mouvement).
+    _apply_role_change(actor, organization, target, ROLE_OWNER, reauth=reauth, publish_owners=False)
+    _apply_role_change(actor, organization, actor_membership, actor_new_role, reauth=reauth, publish_owners=False)
+    _publish_owners_changed(organization, actor)
     record_audit(
         actor, 'ORG_OWNERSHIP_TRANSFERRED', target=organization,
         details=f"from_user={actor.pk}; to_user={target.user_id}" + ("; reauth=true" if reauth else ""),
@@ -1007,9 +1010,8 @@ def _require_reauthentication(actor, organization, confirm, password, action):
             "Saisissez votre mot de passe pour confirmer.", 'password_required', status.HTTP_400_BAD_REQUEST,
         )
     key = str(actor.pk)
-    REAUTH_FAILURES.check(key)
+    REAUTH_FAILURES.acquire(key)  # atomique : la tentative est comptée avant la vérification
     if not actor.check_password(password):
-        REAUTH_FAILURES.failure(key)
         record_audit(
             actor, 'ORG_SENSITIVE_REAUTH_FAILED', target=organization,
             details=f"organization={organization.pk}; action={action}",
@@ -1043,6 +1045,8 @@ def change_role(actor, organization_id, membership_id, new_role, confirm=False, 
     _validate_role(new_role)
     organization = _get_organization(organization_id)
     membership = _resolve_role_change(actor, organization, membership_id, new_role)
+    if membership.role == new_role:
+        return membership  # même rôle : ni ressaisie, ni quota, ni trace (l'autorisation a déjà été vérifiée)
     reauth = _role_change_needs_reauth(membership, new_role)
     if reauth:
         _require_reauthentication(

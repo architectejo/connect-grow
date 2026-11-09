@@ -200,11 +200,13 @@ class OrganizationSensitiveThrottle(UserWriteThrottle):
     scope = 'org_sensitive'
 
     def allow_request(self, request, view):
+        if request.method == 'POST':
+            return super().allow_request(request, view)  # transfert de propriété
         if request.method == 'PATCH':
             data = request.data if hasattr(request.data, 'get') else {}
-            if 'password' not in data and data.get('role') != 'OWNER':
-                return True
-        return super().allow_request(request, view)
+            if 'password' in data or data.get('role') == 'OWNER':
+                return super().allow_request(request, view)
+        return True  # DELETE de membre et PATCH ordinaire : `org_write` seul
 
 
 class ContextsListThrottle(SimpleRateThrottle):
@@ -261,6 +263,34 @@ class FailureLimiter:
         remaining = last + self.delay_for(count) - time.time()
         if remaining > 0:
             raise Throttled(wait=max(1, math.ceil(remaining)))
+
+    def acquire(self, key):
+        """Variante ATOMIQUE de `check` + `failure` : la tentative est comptée AVANT d'être vérifiée (`cache.add` /
+        `cache.incr`), si bien que des requêtes parallèles ne partagent pas le même compteur lu. Au-delà de
+        `threshold` tentatives non effacées, lève `Throttled` (429, Retry-After) ; la tentative refusée est retirée
+        du compteur. Un succès appelle `success(key)` qui efface tout ; un échec n'a rien à faire (déjà compté).
+        Le cache de production doit être partagé entre processus (sinon le compteur est par processus)."""
+        count_key, last_key = self._keys(key)
+        if cache.add(count_key, 1, self.window):
+            count = 1
+        else:
+            try:
+                count = cache.incr(count_key)
+            except ValueError:  # expiré entre add et incr
+                cache.add(count_key, 1, self.window)
+                count = 1
+        before = count - 1
+        now = time.time()
+        if before >= self.threshold:
+            last = cache.get(last_key)
+            remaining = (last + self.delay_for(before) - now) if last is not None else 0
+            if remaining > 0:
+                try:
+                    cache.decr(count_key)
+                except ValueError:
+                    pass
+                raise Throttled(wait=max(1, math.ceil(remaining)))
+        cache.set(last_key, now, self.window)
 
     def failure(self, key):
         count_key, last_key = self._keys(key)

@@ -867,3 +867,70 @@ class TeamOpenApiTests(TestCase):
         paths = SchemaGenerator().get_schema(request=None, public=True)['paths']
         found = {p: sorted(m for m in ops if m in ('get', 'post', 'patch', 'delete')) for p, ops in paths.items() if p.startswith('/api/v1/accounts/organizations/') and ('members' in p or 'transfer' in p)}
         self.assertEqual(sorted(found.values()), [['delete', 'patch'], ['get'], ['post']], found)
+
+
+class ReviewFixesTests(TeamBase):
+    def test_delete_never_consumes_the_org_sensitive_quota(self):
+        from rest_framework.throttling import SimpleRateThrottle
+        rates = {**SimpleRateThrottle.THROTTLE_RATES, 'org_sensitive': '2/hour', 'org_write': '1000/hour'}
+        with mock.patch.object(SimpleRateThrottle, 'THROTTLE_RATES', rates):
+            client = self.as_role(OWNER)
+            for index in range(6):
+                _, membership = self.add(f'del{index}', ANALYST, org=self.org)
+                self.assertEqual(client.delete(url_member(self.org, membership)).status_code, 204)
+
+    def test_transfer_post_still_consumes_the_org_sensitive_quota(self):
+        from rest_framework.throttling import SimpleRateThrottle
+        rates = {**SimpleRateThrottle.THROTTLE_RATES, 'org_sensitive': '1/hour'}
+        with mock.patch.object(SimpleRateThrottle, 'THROTTLE_RATES', rates):
+            client = self.as_role(OWNER)
+            body = {'membership_id': str(self.memberships[ADMIN].pk), 'confirm': True, 'password': 'faux'}
+            self.assertEqual(client.post(url_transfer(self.org), body, format='json').status_code, 403)
+            self.assertEqual(client.post(url_transfer(self.org), body, format='json').status_code, 429)
+
+    def test_failure_limiter_acquire_counts_before_verification(self):
+        from .throttles import FailureLimiter
+        from rest_framework.exceptions import Throttled
+        limiter = FailureLimiter('t-acquire', threshold=3)
+        for _ in range(3):
+            limiter.acquire('k')  # trois tentatives en vol, aucune n'a encore « échoué » ni réussi
+        with self.assertRaises(Throttled):
+            limiter.acquire('k')
+        with self.assertRaises(Throttled):
+            limiter.acquire('k')
+        self.assertEqual(cache.get('fail:t-acquire:k'), 3)  # les tentatives refusées ne gonflent pas le compteur
+        limiter.success('k')
+        limiter.acquire('k')
+
+    def test_same_role_on_an_owner_seat_needs_no_password_and_uses_no_quota(self):
+        response = self.as_role(OWNER).patch(
+            url_member(self.org, self.memberships[OWNER]), {'role': OWNER}, format='json',
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(AuditLog.objects.filter(action='ORG_SENSITIVE_REAUTH_FAILED').exists())
+        self.assertFalse(AuditLog.objects.filter(action='MEMBERSHIP_ROLE_CHANGED').exists())
+        self.assertIsNone(cache.get('fail:org_reauth:' + str(self.owner.pk)))
+
+    def test_same_role_still_requires_the_permission(self):
+        response = self.as_role(ADMIN).patch(
+            url_member(self.org, self.memberships[OWNER]), {'role': OWNER}, format='json',
+        )
+        self.assertDenied(response, DENY_PERMISSION)
+
+    def test_transfer_publishes_owners_changed_once(self):
+        before = OutboxEvent.objects.filter(payload__reason='owners_changed').count()
+        body = {'membership_id': str(self.memberships[ADMIN].pk), 'confirm': True, 'password': PASSWORD}
+        self.assertEqual(self.as_role(OWNER).post(url_transfer(self.org), body, format='json').status_code, 200)
+        self.assertEqual(OutboxEvent.objects.filter(payload__reason='owners_changed').count(), before + 1)
+
+    def test_transfer_response_flag_follows_the_effective_role_after_transfer(self):
+        body = {
+            'membership_id': str(self.memberships[ADMIN].pk), 'confirm': True, 'password': PASSWORD,
+            'my_new_role': ANALYST,
+        }
+        data = self.as_role(OWNER).post(url_transfer(self.org), body, format='json').json()
+        self.assertIsNone(data['me']['is_last_effective_owner'])
+        self.assertIsNone(data['new_owner']['is_last_effective_owner'])
+        for key in ('me', 'new_owner'):
+            self.assertEqual(set(data[key]), MEMBER_KEYS)
+

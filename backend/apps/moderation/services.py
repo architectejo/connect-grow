@@ -297,6 +297,16 @@ def has_open_report(target, grave_only=False) -> bool:
     return reports.exists()
 
 
+def has_open_grave_report(target_type, target_ids) -> bool:
+    """Variante par lot de `has_open_report(grave_only=True)` : vrai si l'une des cibles (`target_ids` : liste ou
+    sous-requête d'identifiants, jamais matérialisée par l'appelant) du type `target_type` fait l'objet d'un
+    signalement ouvert pour un motif de fond. Sert à ne pas effacer de preuves (suppression de compte)."""
+    return Report.objects.filter(
+        target_type=target_type, target_id__in=target_ids, status__in=Report.OPEN_STATUSES,
+        reason__in=Report.GRAVE_REASONS,
+    ).exists()
+
+
 def get_open_report_states(target_type, target_ids) -> dict:
     """État des signalements ouverts par cible, en une requête : `{cible: {'grave', 'contest_report_id',
     'contest_responded'}}` ; une cible sans signalement ouvert est absente. Réservé à l'auteur de la

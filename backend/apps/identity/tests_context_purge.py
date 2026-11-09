@@ -337,7 +337,7 @@ class AuditTests(PurgeBase):
             marketplace_entry.details, 'offers=1; images=1; favorites=1; contacts=1; exchanges=1',
         )
         self.assertEqual(entries.get(action='SELLER_CONTEXT_PURGED_REVIEWS').details, 'reviews=1')
-        self.assertEqual(entries.get(action='SELLER_CONTEXT_PURGED_VISIBILITY').details, 'counters=1')
+        self.assertEqual(entries.get(action='SELLER_CONTEXT_PURGED_VISIBILITY').details, 'counters=1; unique_views=0')
 
     def test_account_without_data_writes_no_purge_audit(self):
         self.buyer.delete()

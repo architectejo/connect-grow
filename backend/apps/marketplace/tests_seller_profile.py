@@ -292,7 +292,9 @@ class NoLeakTests(ProfileBase):
                     '+243855500011', 'member@example.com',
                 ):
                     self.assertNotIn(secret, text, secret)
-                self.assertIsNone(re.search(r'\+?\d{9,}', text), text)
+                # Les UUID aléatoires contiennent parfois 9 chiffres d'affilée : on les retire avant de chercher un numéro.
+                without_uuids = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '', text)
+                self.assertIsNone(re.search(r'\+?\d{9,}', without_uuids), text)
                 self.assertNotIn('@', text)
                 for forbidden in (
                     'nif', 'members', 'phone', 'email', 'address', 'user_type', 'business_profile', 'is_verified',

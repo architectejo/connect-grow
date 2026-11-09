@@ -519,17 +519,23 @@ def apply_seller_status_event(payload: dict) -> int:
     return sync_seller_visibility(context_type, context_id)
 
 
+DELETE_BATCH_SIZE = 500
+
+
 def delete_offers(queryset) -> int:
     """Suppression définitive : l'offre, sa galerie, ses favoris et contacts (cascade interne),
     puis les compteurs de visibilité. Les avis et conversations liés sont conservés
-    (CDC 3.10) : ils gardent l'UUID de l'offre, qui n'existe plus."""
-    ids = list(queryset.values_list('id', flat=True))
-    if not ids:
-        return 0
-    with transaction.atomic():
-        Offer.objects.filter(id__in=ids).delete()
-    visibility_services.delete_offer_data(ids)
-    return len(ids)
+    (CDC 3.10) : ils gardent l'UUID de l'offre, qui n'existe plus. Par lots de `DELETE_BATCH_SIZE` (jamais une
+    liste d'identifiants non bornée dans une clause `IN`) ; le jeu est relu à chaque lot."""
+    total = 0
+    while True:
+        batch = list(queryset.order_by().values_list('id', flat=True)[:DELETE_BATCH_SIZE])
+        if not batch:
+            return total
+        with transaction.atomic():
+            Offer.objects.filter(id__in=batch).delete()
+        visibility_services.delete_offer_data(batch)
+        total += len(batch)
 
 
 def purge_seller_context(context_type, context_id) -> dict:
@@ -544,25 +550,35 @@ def purge_seller_context(context_type, context_id) -> dict:
     parsed = parse_uuid(context_id)
     if parsed is None:
         raise PermanentEventError("charge utile invalide")
+    # Défense en profondeur : un contexte qui existe encore ne se purge pas (événement forgé ou rejoué trop tôt).
+    if identity_services.seller_context_exists(context_type, parsed):
+        raise PermanentEventError("contexte encore existant")
     with transaction.atomic():
         offers = Offer.objects.filter(seller_context_type=context_type, seller_context_id=parsed)
         offers.exclude(seller_is_public=False).update(seller_is_public=False)
-        ids = list(offers.values_list('id', flat=True))
+        # Sous-requêtes : aucun volume d'offres ne gonfle une clause `IN`.
         counts = {
-            'offers': len(ids),
-            'images': OfferImage.objects.filter(offer_id__in=ids).count(),
-            'favorites': Favorite.objects.filter(offer_id__in=ids).count(),
-            'contacts': ContactEvent.objects.filter(offer_id__in=ids).count(),
-            'exchanges': ExchangeProposal.objects.filter(offer_id__in=ids).count(),
+            'offers': offers.count(),
+            'images': OfferImage.objects.filter(offer__in=offers.values('id')).count(),
+            'favorites': Favorite.objects.filter(offer__in=offers.values('id')).count(),
+            'contacts': ContactEvent.objects.filter(offer__in=offers.values('id')).count(),
+            'exchanges': ExchangeProposal.objects.filter(offer__in=offers.values('id')).count(),
         }
-        delete_offers(Offer.objects.filter(id__in=ids))
-        if ids:
+        delete_offers(offers)
+        if counts['offers']:
             record_audit(
                 None, 'SELLER_CONTEXT_PURGED_MARKETPLACE',
                 details="; ".join(f"{key}={value}" for key, value in counts.items()),
                 context=(context_type, parsed),
             )
     return counts
+
+
+def has_open_grave_report_on_seller(context_type, context_id) -> bool:
+    """Vrai si une offre du contexte vendeur fait l'objet d'un signalement ouvert pour motif grave (preuve à ne pas
+    effacer : suppression de compte refusée par `identity`)."""
+    offers = Offer.objects.filter(seller_context_type=context_type, seller_context_id=context_id)
+    return moderation_services.has_open_grave_report('offer', offers.values('id'))
 
 
 def purge_expired_trash(retention_days: Optional[int] = None) -> int:

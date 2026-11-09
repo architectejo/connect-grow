@@ -143,6 +143,13 @@ def reconcile_seller_flag(user_id, context_type, context_id) -> None:
 
 # --- Purge d'un contexte supprimé (T9-3) -----------------------------------------------
 
+def has_open_grave_report_on_seller(context_type, context_id) -> bool:
+    """Vrai si un avis reçu par le contexte vendeur fait l'objet d'un signalement ouvert pour motif grave (preuve à
+    ne pas effacer : suppression de compte refusée par `identity`)."""
+    reviews = Review.objects.filter(seller_context_type=context_type, seller_context_id=context_id)
+    return moderation_services.has_open_grave_report('review', reviews.values('id'))
+
+
 def purge_seller_context(context_type, context_id) -> int:
     """Efface les avis REÇUS par un contexte vendeur supprimé (`USER` ou `PROVIDER`), réponses comprises. Choix : la
     suppression, pas l'anonymisation. Un avis note un contexte précis (règle 4) ; sans ce contexte il n'a plus de sujet

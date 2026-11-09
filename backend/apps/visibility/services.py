@@ -251,8 +251,16 @@ def purge_seller_context(context_type, context_id) -> int:
         deleted, _ = DailyVisibilityCounter.objects.filter(
             seller_context_type=context_type, seller_context_id=parsed,
         ).delete()
-        if deleted:
+        views = 0
+        if context_type == CONTEXT_USER:
+            # Les vues et partages que ce compte a faits sur les offres des AUTRES vendeurs (clés `user:<id>` et
+            # `share:user:<id>`) ne doivent pas lui survivre.
+            views, _ = OfferUniqueView.objects.filter(
+                viewer_key__in=[f"user:{parsed}", f"{SHARE_KEY_PREFIX}user:{parsed}"],
+            ).delete()
+        if deleted or views:
             record_audit(
-                None, 'SELLER_CONTEXT_PURGED_VISIBILITY', details=f"counters={deleted}", context=(context_type, parsed),
+                None, 'SELLER_CONTEXT_PURGED_VISIBILITY', details=f"counters={deleted}; unique_views={views}",
+                context=(context_type, parsed),
             )
-    return deleted
+    return deleted + views

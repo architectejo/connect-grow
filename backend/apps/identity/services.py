@@ -19,7 +19,7 @@ from .acting import (  # noqa: F401
 
 # Organisations et équipes (ADR 0006) : façade publique, les autres domaines n'importent jamais le sous-module.
 from .organizations import (  # noqa: F401
-    OrganizationError, SUSPENSION_REASONS, add_member, assert_account_removable, archive_organization, change_member_role,
+    OrganizationError, SUSPENSION_REASONS, add_member, assert_account_removable, assert_provider_removable, archive_organization, change_member_role,
     count_active_owners, create_organization, get_active_role, get_identity_settings, get_organization_for_member,
     leave_organization, reactivate_organization, revoke_member, suspend_organization, transfer_ownership,
     update_organization,
@@ -44,6 +44,7 @@ from .sellers import (  # noqa: F401
     get_context_allowed_channels, get_context_contact_endpoint, get_context_recipients,
     get_seller_context_public_flags, get_seller_summaries, get_user_context_roles, is_seller_context_public,
     set_account_active, announce_account_status, announce_seller_context_removed,
+    seller_context_exists,
 )
 
 # Lectures par lot des contextes (droits, comptes agissant, destinataires d'équipe, noms) : ADR 0006, 9.8 et 19.3.

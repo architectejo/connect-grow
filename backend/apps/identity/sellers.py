@@ -398,6 +398,16 @@ def set_account_active(user_id, active: bool, actor=None) -> bool:
     return True
 
 
+def seller_context_exists(context_type, context_id) -> bool:
+    """Le compte, le profil prestataire ou l'organisation désigné existe-t-il encore ? Sert aux abonnés de purge
+    (défense en profondeur : on ne purge jamais un contexte vivant)."""
+    parsed = parse_uuid(context_id)
+    if parsed is None:
+        return False
+    model = {CONTEXT_USER: User, CONTEXT_PROVIDER: ProviderProfile, CONTEXT_ORGANIZATION: Organization}.get(context_type)
+    return model is not None and model.objects.filter(pk=parsed).exists()
+
+
 def announce_seller_context_removed(context_type, context_id) -> None:
     """Un contexte personnel (`USER`) ou prestataire (`PROVIDER`) vient d'être supprimé (T9-3, règle 10) : publie
     d'abord le changement de statut (les offres cessent aussitôt d'être publiques, même si la purge échoue), puis

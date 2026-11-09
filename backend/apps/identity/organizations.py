@@ -20,18 +20,19 @@ from rest_framework import serializers, status
 from rest_framework.exceptions import ErrorDetail
 
 from apps.common.contexts import (
-    CONTEXT_ORGANIZATION, DENY_OBJECT_STATE, DENY_PERMISSION, DENY_RELATION, DENY_SECURITY, ContextDenied,
+    CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER, DENY_OBJECT_STATE, DENY_PERMISSION, DENY_RELATION, DENY_SECURITY, ContextDenied,
 )
 from apps.common.exception_handler import CodedAPIException
 from apps.common.images import reencode_image, validate_image_pixels, validate_image_upload_size
 from apps.common.utils import parse_uuid
+from apps.moderation import services as moderation_services
 from apps.moderation.services import is_user_restricted, record_audit
 from apps.platform_core.services import publish_event
 
 from . import capabilities
 from .capabilities import ROLE_OWNER, ROLES
 from .models import (
-    IdentitySettings, KycDocument, Membership, Organization, OrganizationCategory, ORG_TYPES, User,
+    IdentitySettings, KycDocument, Membership, Organization, OrganizationCategory, ORG_TYPES, ProviderProfile, User,
 )
 
 # Motifs de suspension normalisés (jamais de texte libre, ADR 0006 §4.2).
@@ -801,10 +802,14 @@ def leave_organization(user, organization_id) -> Membership:
 
 
 def assert_account_removable(user):
-    """Refuse (409 `last_owner_account`) la suppression d'un compte seul propriétaire ACTIF d'une organisation
-    active : l'organisation deviendrait orpheline. Ne bloque PAS la désactivation par sanction (`is_active`).
-    Dette (ADR 0006, section 15) : chemin de secours audité du personnel et sort des organisations orphelines,
-    à livrer avec L1-01 / la suppression de compte."""
+    """Refuse la suppression définitive d'un compte (point unique : `UserAdmin`, récepteur `pre_delete`) :
+    - 409 `last_owner_account` : seul propriétaire ACTIF d'une organisation active (elle deviendrait orpheline) ;
+    - 409 `blocking_sanction` : sanction bloquante en cours (on désactive le compte, l'historique de sanction ne
+      doit pas disparaître) ;
+    - 409 `open_grave_report` : signalement ouvert pour motif grave visant le compte, une de ses offres ou un de
+      ses avis reçus (preuves à conserver jusqu'à la clôture).
+    Ne bloque PAS la désactivation (`is_active`). Dette (ADR 0006, section 15) : chemin de secours audité du
+    personnel et sort des organisations orphelines, à livrer avec L1-01 / la suppression de compte."""
     owned = list(Membership.objects.filter(
         user_id=user.pk, role=ROLE_OWNER, status=Membership.STATUS_ACTIVE,
         organization__status=Organization.STATUS_ACTIVE,
@@ -815,3 +820,40 @@ def assert_account_removable(user):
                 "Ce compte est le seul propriétaire d'une organisation active : transférez la propriété d'abord.",
                 'last_owner_account',
             )
+    if is_user_restricted(user.pk):
+        raise OrganizationError(
+            "Ce compte fait l'objet d'une sanction en cours : désactivez-le plutôt que de le supprimer.",
+            'blocking_sanction',
+        )
+    provider_id = ProviderProfile.objects.filter(user_id=user.pk).values_list('pk', flat=True).first()
+    if moderation_services.has_open_grave_report('user', [user.pk]) or _context_has_grave_evidence(
+        CONTEXT_USER, user.pk,
+    ) or (provider_id is not None and _context_has_grave_evidence(CONTEXT_PROVIDER, provider_id)):
+        raise _open_report_error()
+
+
+def assert_provider_removable(profile):
+    """Refuse la suppression définitive d'un profil prestataire tant qu'un signalement ouvert pour motif grave vise
+    le profil, une de ses offres ou un de ses avis reçus (409 `open_grave_report`)."""
+    if moderation_services.has_open_grave_report('providerprofile', [profile.pk]) or _context_has_grave_evidence(
+        CONTEXT_PROVIDER, profile.pk,
+    ):
+        raise _open_report_error()
+
+
+def _open_report_error():
+    return OrganizationError(
+        "Un signalement grave est en cours : la suppression est impossible tant qu'il n'est pas clos.",
+        'open_grave_report',
+    )
+
+
+def _context_has_grave_evidence(context_type, context_id) -> bool:
+    """Offres et avis reçus d'un contexte sous signalement grave ouvert. Imports locaux : `marketplace` et `reviews`
+    importent `identity.services` (cycle) ; l'appel reste par leurs `services.py`."""
+    from apps.marketplace import services as marketplace_services
+    from apps.reviews import services as reviews_services
+    return (
+        marketplace_services.has_open_grave_report_on_seller(context_type, context_id)
+        or reviews_services.has_open_grave_report_on_seller(context_type, context_id)
+    )

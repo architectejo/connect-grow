@@ -27,6 +27,9 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('identity', '0012_kycdocument_organization_required'),
+        # Les gardes des autres domaines s'exécutent tant que les profils existent encore.
+        ('marketplace', '0012_offer_seller_context_required'),
+        ('visibility', '0008_counter_seller_context_required'),
     ]
 
     operations = [

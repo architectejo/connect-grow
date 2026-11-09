@@ -114,6 +114,29 @@ class UserAdminHardeningTests(TestCase):
         self.assertFalse(Permission.objects.filter(codename__endswith='businessprofilecategory').exists())
 
 
+class IdentitySettingsAuditTests(TestCase):
+    def test_a_change_of_the_kyb_retention_is_journaled_with_old_and_new_values(self):
+        from .models import IdentitySettings
+
+        staff = make_admin_user('adm@example.com', perms=['view_identitysettings', 'change_identitysettings'])
+        settings_row = IdentitySettings.get_solo()
+        old = settings_row.kyb_file_retention_days
+        self.client.force_login(staff)
+        data = {
+            'max_organizations_per_account': settings_row.max_organizations_per_account,
+            'max_categories_per_context': settings_row.max_categories_per_context,
+            'kyb_file_retention_days': old + 30,
+        }
+        if settings_row.org_phone_channels_enabled:
+            data['org_phone_channels_enabled'] = 'on'
+        response = self.client.post(reverse('admin:identity_identitysettings_change', args=[settings_row.pk]), data)
+        self.assertEqual(response.status_code, 302, getattr(response, 'context', None) and response.context['adminform'].form.errors)
+        entry = AuditLog.objects.get(action='SETTINGS_CHANGED', actor=staff)
+        self.assertIn('kyb_file_retention_days', entry.details)
+        self.assertIn(str(old), entry.details)
+        self.assertIn(str(old + 30), entry.details)
+
+
 class KycAdminHardeningTests(TestCase):
     def setUp(self):
         owner = User.objects.create_user(email='biz@example.com', password='x', full_name='B')

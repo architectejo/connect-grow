@@ -952,7 +952,8 @@ class OfferContextMigrationTests(TransactionTestCase):
 
     def targets(self, executor, marketplace, visibility):
         leaf = lambda app: executor.loader.graph.leaf_nodes(app)[0]  # noqa: E731
-        return [(marketplace[0], marketplace[1]), (visibility[0], visibility[1]), leaf('identity'), leaf('catalog')]
+        return [(marketplace[0], marketplace[1]), (visibility[0], visibility[1]),
+                ('identity', '0012_kycdocument_organization_required'), leaf('catalog')]
 
     def tearDown(self):
         call_command('migrate', verbosity=0)

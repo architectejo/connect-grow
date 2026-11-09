@@ -166,6 +166,9 @@ def decide_kyc_document(document_id, reviewer, decision, reason=''):
         organization = Organization.objects.select_for_update().get(pk=doc.organization_id)
         if has_interest_conflict(doc, organization, reviewer):
             raise KycError(INTEREST_CONFLICT_MESSAGE, 403)
+        if organization.status != Organization.STATUS_ACTIVE:
+            # Une vérification ne s'accorde pas à une organisation suspendue ou archivée (règle 3).
+            raise KycError("Cette organisation n'est pas active : la pièce ne peut pas être décidée.", 409)
 
         previous = doc.status
         revoking = previous == KycDocument.STATUS_VALIDE and decision == KycDocument.STATUS_REFUSE

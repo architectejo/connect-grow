@@ -365,9 +365,9 @@ class NonLeakTests(NotificationContextBase):
         staff = self.staff_user()
         identity_services.change_member_role(self.owner, self.org.pk, self.editor.pk, ANALYST)
         identity_services.revoke_member(self.owner, self.org.pk, self.analyst.pk)
-        identity_services.suspend_organization(staff, self.org.pk, 'other')
         doc = self.make_doc(RCCM)
-        self.decide(doc, reviewer(), 'VALIDE')
+        self.decide(doc, reviewer(), 'VALIDE')  # avant la suspension : on ne décide pas sur une organisation inactive
+        identity_services.suspend_organization(staff, self.org.pk, 'other')
         self.deliver()
         types = (
             'identity.membership_changed', 'identity.seller_context_status_changed',

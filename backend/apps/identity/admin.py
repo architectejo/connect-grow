@@ -126,18 +126,18 @@ class KycDocumentAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         queryset = super().get_queryset(request)
         if not self._may_see_organization_documents(request):
-            queryset = queryset.filter(organization__isnull=True)
+            queryset = queryset.none()  # toute pièce est rattachée à une organisation
         return queryset
 
     def has_view_permission(self, request, obj=None):
-        if obj is not None and obj.organization_id is not None and not self._may_see_organization_documents(request):
+        if obj is not None and not self._may_see_organization_documents(request):
             return False
         return super().has_view_permission(request, obj)
 
     def change_view(self, request, object_id, form_url='', extra_context=None):
         response = super().change_view(request, object_id, form_url, extra_context)
         if request.method == 'GET' and response.status_code == 200:
-            document = KycDocument.objects.filter(pk=object_id, organization__isnull=False).first()
+            document = KycDocument.objects.filter(pk=object_id).first()
             if document is not None:
                 record_audit(
                     request.user, 'KYC_ADMIN_VIEWED', target=document,

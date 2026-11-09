@@ -290,7 +290,9 @@ CAP_EDIT = 'offer.edit'
 CAP_DELETE = 'offer.delete'
 CAP_VIEW_INTERNAL = 'offer.view_internal'
 
-# Champs que l'API ne modifie jamais : le propriétaire est posé par le serveur (ADR 0006, 9.6).
+# Champs que l'API ne modifie jamais : le propriétaire est posé par le serveur (ADR 0006, 9.6). `seller` et
+# `seller_id` n'existent plus sur le modèle (contraction T9-2) : ils restent listés pour REJETER les anciens clients
+# qui les enverraient encore.
 PROTECTED_FIELDS = frozenset({
     'seller', 'seller_id', 'seller_context_type', 'seller_context_id', 'created_by', 'created_by_id',
     'seller_is_public',

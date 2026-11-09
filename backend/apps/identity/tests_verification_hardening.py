@@ -154,6 +154,22 @@ class HardeningTests(VerificationBase):
         self.assertEqual(caught.exception.status_code, 400)
         self.decide(doc, reviewer('r2'), 'REFUSE', 'x' * 500)
 
+    def test_no_decision_on_a_document_of_a_suspended_or_archived_organization(self):
+        staff = self.staff_user()
+        doc = self.make_doc()
+        services.suspend_organization(staff, self.org.pk, 'moderation')
+        with self.assertRaises(services.KycError) as caught:
+            self.decide(doc, reviewer())
+        self.assertEqual(caught.exception.status_code, 409)
+        services.reactivate_organization(staff, self.org.pk)
+        services.archive_organization(self.owner, self.org.pk)
+        with self.assertRaises(services.KycError) as caught:
+            self.decide(doc, reviewer('r2'), 'REFUSE', 'motif')
+        self.assertEqual(caught.exception.status_code, 409)
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, KycDocument.STATUS_EN_ATTENTE)
+        self.assertEqual(self.claims(), [])
+
     def test_document_without_organization_cannot_exist(self):
         # Contraction (T9-2) : l'ancien cas « pièce sans profil ni organisation » (409) est devenu impossible, la
         # base refuse la ligne (`organization` NOT NULL).

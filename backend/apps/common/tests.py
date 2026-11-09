@@ -189,6 +189,10 @@ class DomainBoundariesTests(SimpleTestCase):
                     # (lecture seule, via `apps.get_model`) pour suspendre les organisations de propriétaires sanctionnés.
                     if (label, name, dep_label) == ('identity', '0011_convert_business_profiles', 'moderation'):
                         continue
+                    # Contraction T9-2 : `identity 0013` (suppression des profils) attend les gardes de `marketplace`
+                    # et `visibility`, qui lisent les profils/organisations tant qu'ils existent.
+                    if (label, name) == ('identity', '0013_remove_business_profile') and dep_label in ('marketplace', 'visibility'):
+                        continue
                     offenders.append(f'{label}.{name} -> {dep_label}.{dep_name}')
         self.assertEqual(offenders, [])
 

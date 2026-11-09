@@ -120,6 +120,34 @@ class GuardRefusesAnUnconvertedBaseTests(ContractionBase):
         self.assertRefused(VISIBILITY_0007, '1 compteur(s) encore au contexte personnel')
         self.assertIn('seller_id', columns('visibility_dailyvisibilitycounter'))
 
+    def converted_without_mapping(self):
+        """Organisation issue d'un profil (`legacy_business_profile_id`), table de correspondance vidée à la main."""
+        owner = self.b.user()
+        Org = self.b.apps.get_model('identity', 'Organization')
+        org = Org.objects.create(name='Org', org_type='ENTREPRISE', legacy_business_profile_id=uuid.uuid4(), created_by=owner)
+        self.b.apps.get_model('identity', 'Membership').objects.create(organization=org, user=owner, role='OWNER')
+        self.assertEqual(self.b.apps.get_model('identity', 'LegacyAccountMapping').objects.count(), 0)
+        return owner
+
+    def test_marketplace_guard_does_not_depend_on_the_mapping_table(self):
+        self.b.offer(self.converted_without_mapping())
+        self.assertRefused(MARKETPLACE_0011, '1 offre(s) encore au contexte personnel')
+
+    def test_visibility_guard_does_not_depend_on_the_mapping_table(self):
+        self.b.counter(self.b.offer(self.converted_without_mapping()))
+        # Les offres ne sont pas visées ici : la garde de `visibility` se refuse seule sur le compteur.
+        self.assertRefused(VISIBILITY_0007, '1 compteur(s) encore au contexte personnel')
+
+    def test_the_profiles_cannot_be_dropped_before_the_other_guards_ran(self):
+        """`identity 0013` dépend des contractions de `marketplace` et `visibility` (les profils existent pendant leurs gardes)."""
+        graph = MigrationExecutor(connection).loader.graph
+        needed = {n for n in graph.forwards_plan(IDENTITY_0013)}
+        for node in (MARKETPLACE_0011, ('marketplace', '0012_offer_seller_context_required'), VISIBILITY_0007,
+                     ('visibility', '0008_counter_seller_context_required')):
+            self.assertIn(node, needed)
+        self.assertLess(graph.forwards_plan(IDENTITY_0013).index(MARKETPLACE_0011),
+                        graph.forwards_plan(IDENTITY_0013).index(IDENTITY_0013))
+
     def test_the_not_null_steps_refuse_a_null_context(self):
         owner = self.b.user()
         migrate_to([MARKETPLACE_0011, VISIBILITY_0007])

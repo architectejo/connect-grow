@@ -599,12 +599,32 @@ def suspend_organization(actor, organization_id, reason) -> Organization:
 
 
 def reactivate_organization(actor, organization_id) -> Organization:
-    """Réactivation par le personnel d'une organisation suspendue ou archivée."""
+    """Réactivation par le personnel d'une organisation SUSPENDUE. Une organisation archivée est un choix de ses
+    membres : le personnel ne la réactive jamais. Conflit d'intérêts : un acteur qui est ou a été membre de
+    l'organisation, ou qui l'a créée, ne la réactive pas (refus journalisé avec l'acteur et l'ancien statut)."""
     _ensure_staff_permission(actor)
+    # Refus d'abord, hors transaction : la trace du refus ne doit pas être annulée avec lui.
+    known = Organization.objects.filter(pk=organization_id).first()
+    if known is not None and known.status == Organization.STATUS_SUSPENDED and (
+        known.created_by_id == actor.pk or Membership.objects.filter(organization=known, user_id=actor.pk).exists()
+    ):
+        record_audit(
+            actor, 'ORG_REACTIVATION_DENIED', target=known,
+            details=f"old_status={known.status}; reason=interest_conflict",
+            context=(CONTEXT_ORGANIZATION, known.pk),
+        )
+        raise OrganizationError(
+            "Vous ne pouvez pas réactiver une organisation dont vous êtes ou avez été membre, ou que vous avez créée.",
+            'interest_conflict', status.HTTP_403_FORBIDDEN,
+        )
     with transaction.atomic():
         organization = _lock_organization(organization_id)
         if organization.status == Organization.STATUS_ACTIVE:
             raise OrganizationError("Cette organisation est déjà active.", 'invalid_status')
+        if organization.status == Organization.STATUS_ARCHIVED:
+            raise OrganizationError(
+                "Une organisation archivée ne peut pas être réactivée par le personnel.", 'invalid_status',
+            )
         old_status, old_reason = organization.status, organization.suspension_reason
         organization.status = Organization.STATUS_ACTIVE
         organization.suspension_reason = ''

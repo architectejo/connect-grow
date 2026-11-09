@@ -64,7 +64,8 @@ def read_anon_id(request):
 
 
 # Champs que le corps d'une requête ne peut jamais imposer : le vendeur est posé par le serveur d'après le
-# contexte actif (ADR 0006, 9.6).
+# contexte actif (ADR 0006, 9.6). `seller` n'existe plus sur le modèle (T9-2) : il reste listé pour rejeter les
+# anciens clients qui l'enverraient encore.
 SERVER_OWNED_FIELDS = ('seller', 'seller_context_type', 'seller_context_id', 'created_by', 'seller_is_public')
 
 

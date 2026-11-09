@@ -24,7 +24,7 @@ MARK = 'CHECK_OUTBOX_TEMP_DB'
 
 def seed(count):
     from apps.catalog.models import Category, City, Commune
-    from apps.common.factories import make_test_image
+    from apps.common.factories import make_test_image, owner_kwargs
     from apps.identity.models import User
     from apps.marketplace import services
     from apps.marketplace.models import Offer
@@ -34,7 +34,7 @@ def seed(count):
     category = Category.objects.create(name='Catégorie', slug='categorie')
     seller = User.objects.create_user(email='vendeur@example.com', password='x', full_name='Vendeur')
     offer = Offer.objects.create(
-        seller=seller, category_id=category.id, commune_id=commune.id, title='Annonce',
+        **owner_kwargs(seller), category_id=category.id, commune_id=commune.id, title='Annonce',
         description='Description suffisamment longue pour le test.', price=1, main_image=make_test_image(),
     )
     for n in range(count):

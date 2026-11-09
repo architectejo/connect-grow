@@ -532,6 +532,54 @@ class AuditAndEventTests(TeamTestBase):
         services.suspend_organization(staff, self.org.pk, 'legal')
         self.assertBusiness('invalid_status', services.suspend_organization, staff, self.org.pk, 'legal')
 
+    def test_staff_never_reactivates_an_archived_organization(self):
+        staff = self.staff_user()
+        services.archive_organization(self.owner, self.org.pk)
+        self.assertBusiness('invalid_status', services.reactivate_organization, staff, self.org.pk)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.status, 'ARCHIVED')
+        # Même refus par l'action d'administration (compte en échec, statut inchangé).
+        from django.contrib.admin.sites import site
+        from django.test import RequestFactory
+
+        from .models import Organization
+        request = RequestFactory().post('/')
+        request.user, request._messages = staff, mock.Mock()
+        site._registry[Organization].reactivate_selected(request, Organization.objects.filter(pk=self.org.pk))
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.status, 'ARCHIVED')
+        self.assertFalse(AuditLog.objects.filter(action='ORG_REACTIVATED').exists())
+
+    def test_staff_who_is_or_was_a_member_or_the_creator_cannot_reactivate(self):
+        other = make_user('autre-staff', is_staff=True)
+        other.user_permissions.add(Permission.objects.get(codename='suspend_organization'))
+        other = User.objects.get(pk=other.pk)
+        for who in ('member', 'former', 'creator'):
+            staff = make_user(f'conflit-{who}', is_staff=True)
+            staff.user_permissions.add(Permission.objects.get(codename='suspend_organization'))
+            staff = User.objects.get(pk=staff.pk)
+            if who == 'creator':
+                self.org.created_by = staff
+                self.org.save(update_fields=['created_by'])
+            else:
+                Membership.objects.create(
+                    organization=self.org, user=staff, role=ANALYST,
+                    status=Membership.STATUS_ACTIVE if who == 'member' else Membership.STATUS_REVOKED,
+                )
+            services.suspend_organization(other, self.org.pk, 'moderation')
+            with self.assertRaises(services.OrganizationError) as caught:
+                services.reactivate_organization(staff, self.org.pk)
+            self.assertEqual((caught.exception.get_codes(), caught.exception.status_code), ('interest_conflict', 403))
+            self.org.refresh_from_db()
+            self.assertEqual(self.org.status, 'SUSPENDED', who)
+            denied = AuditLog.objects.filter(action='ORG_REACTIVATION_DENIED', actor=staff).get()
+            self.assertIn('old_status=SUSPENDED', denied.details)
+            self.assertEqual((denied.context_type, denied.context_id), ('ORGANIZATION', self.org.pk))
+            services.reactivate_organization(other, self.org.pk)  # un autre membre du personnel le peut
+            self.org.created_by = None
+            self.org.save(update_fields=['created_by'])
+        self.assertEqual(AuditLog.objects.filter(action='ORG_REACTIVATED', actor=other).count(), 3)
+
     def test_no_personal_data_in_audit_details_or_event_payloads(self):
         """Valeurs sentinelles : ni nom d'organisation, ni e-mail, ni téléphone ne sortent dans le journal ni l'outbox."""
         owner = make_user('sentinel-owner', phone='+243999000222')

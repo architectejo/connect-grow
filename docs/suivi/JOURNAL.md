@@ -141,3 +141,10 @@ Une entrée par tâche terminée ou décision prise, la plus récente en haut.
 - **Suites finales sur main** : backend 1739 tests OK, `makemigrations --check` propre ; front 732 tests, lint 0 erreur, build OK.
 - **Dettes ouvertes** : questions LEG-PRV (conservation des sanctions, signalements et avis après suppression ; identifiant pseudonymisé des bannis ; sort d'une organisation SUSPENDED sans propriétaire ; `LegacyAccountMapping`) ; Q-SUSP1 (canal de support), Q-SUSP3 (restauration d'une organisation archivée), Q-SUSP5 (prévenir hors application les propriétaires d'organisations converties suspendues) ; TOCTOU de la garde de suppression ; alerte sur livraisons `dead` de l'outbox ; fichiers orphelins après crash ; DDL MySQL non transactionnel à rejouer avant production ; endpoints d'équipe et « supprimer mon compte » avant L1-01 ; réinitialisation des migrations en fin de projet (MySQL).
 - **Prochain** : L0-11 (`/api/v1/` et plafond de pagination), L0-18 (i18n finale, « Laxpaie » de la landing), puis Lot 1.
+
+## 2026-11-09 — L0-11 : API versionnée, pagination plafonnée, OpenAPI
+
+- **Backend** (9a50eca, acc660a, 07d5591) : tout sous `/api/v1/` (ancien préfixe : 404, pas de double montage), pagination commune plafonnée (défaut 20, plafond 100, réglages validés au démarrage), middleware de cache aligné, OpenAPI via `drf-spectacular==0.30.0` (`GET /api/v1/schema/` public, structure seulement ; `docs/` Swagger en DEBUG uniquement), 84 chemins documentés, `X-Context` et Bearer décrits. ADR 0007.
+- **Front** (bdb89dc, 590d299) : `VITE_API_URL` par défaut en `/api/v1/`, règles de cache du Service Worker (rien de privé cacheable, garde-fous valables pour toute version), le client ne demande jamais plus de 100 par page.
+- **Vérifié sur main** : backend 1760 tests OK, `makemigrations --check` propre ; front 739 tests, lint 0 erreur, build OK ; script de recette HTTP rejoué : 170 étapes, 0 écart.
+- **Dettes** : 50 type hints OpenAPI manquants et 3 paramètres de chemin non typés ; mise à jour forcée du Service Worker à prévoir dans le runbook de déploiement ; si un `.env` local du front existe, y mettre `/api/v1/`.

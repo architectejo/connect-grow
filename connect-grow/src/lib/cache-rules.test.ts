@@ -69,7 +69,8 @@ describe("isContactRevealRequest (révélation du numéro : réseau seul)", () =
 
   it("reconnaît reveal et reveals/received, avec ou sans /v1/ et paramètres", () => {
     expect(match("/api/v1/interactions/contacts/reveal/")).toBe(true);
-    expect(match("/api/v1/interactions/contacts/reveal/")).toBe(true);
+    expect(match("/api/interactions/contacts/reveal/")).toBe(true);
+    expect(match("/api/v2/interactions/contacts/reveal/")).toBe(true);
     expect(match("/api/v1/interactions/contacts/reveals/received/")).toBe(true);
     expect(match("/api/v1/interactions/contacts/reveals/received/?channel=CALL&page=2")).toBe(true);
   });
@@ -104,7 +105,8 @@ describe("liste des profils (accounts/contexts/) : jamais en cache hors ligne", 
 
   it("reconnaît contexts/ avec ou sans /v1/", () => {
     expect(match("/api/v1/accounts/contexts/")).toBe(true);
-    expect(match("/api/v1/accounts/contexts/")).toBe(true);
+    expect(match("/api/accounts/contexts/")).toBe(true);
+    expect(match("/api/v2/accounts/contexts/")).toBe(true);
     expect(match("/api/v1/accounts/contacts/")).toBe(false);
   });
   it("n'est jamais éligible au cache de contenus publics", () => {
@@ -147,6 +149,12 @@ describe("espace d'une organisation, prestataire et pièces : jamais en cache ho
 
   it("les routes sensibles (hors contexts, couvert plus haut) sont reconnues pour la règle NetworkOnly", () => {
     for (const path of privatePaths.filter((p) => !p.includes("/contexts/"))) expect(match(path), path).toBe(true);
+  });
+
+  it("reste en réseau seul sans v1 et sous une future v2", () => {
+    for (const path of [`/api/accounts/organizations/${ID}/internal/`, `/api/v2/accounts/organizations/${ID}/internal/`, "/api/accounts/kyc/documents/", "/api/v2/accounts/kyc/documents/", "/api/v2/accounts/provider/"]) {
+      expect(match(path), path).toBe(true);
+    }
   });
 
   it("la liste publique des organisations n'est pas une route sensible", () => {

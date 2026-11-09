@@ -27,7 +27,7 @@ export function isCacheableApiContent({ url, request }: { url: URL; request: Req
  * Même contrainte d'autonomie que ci-dessus.
  */
 export function isContactRevealRequest({ url }: { url: URL }): boolean {
-  return /\/api\/(v1\/)?interactions\/contacts\/(reveal|reveals\/received)\/?$/.test(url.pathname);
+  return /\/api\/(v\d+\/)?interactions\/contacts\/(reveal|reveals\/received)\/?$/.test(url.pathname);
 }
 
 /**
@@ -35,7 +35,7 @@ export function isContactRevealRequest({ url }: { url: URL }): boolean {
  * (le serveur répond déjà `Cache-Control: private, no-store`). Réseau seul. Même contrainte d'autonomie que ci-dessus.
  */
 export function isContextsRequest({ url }: { url: URL }): boolean {
-  return /\/api\/(v1\/)?accounts\/contexts\/?$/.test(url.pathname);
+  return /\/api\/(v\d+\/)?accounts\/contexts\/?$/.test(url.pathname);
 }
 
 /**
@@ -44,5 +44,5 @@ export function isContextsRequest({ url }: { url: URL }): boolean {
  * La liste PUBLIQUE `organizations/` n'en fait pas partie. Même contrainte d'autonomie que ci-dessus.
  */
 export function isSensitiveIdentityRequest({ url }: { url: URL }): boolean {
-  return /\/api\/(v1\/)?accounts\/(organizations\/[^/]+|provider|kyc)(\/|$)/.test(url.pathname);
+  return /\/api\/(v\d+\/)?accounts\/(organizations\/[^/]+|provider|kyc)(\/|$)/.test(url.pathname);
 }

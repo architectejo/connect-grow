@@ -371,16 +371,20 @@ class QueryBudgetTests(TestCase):
         client.force_authenticate(user)
         for i in range(2):
             join(make_org(name=f'A{i}'), user)
-        with self.assertNumQueries(2):
+        for i in range(2):
+            join(make_org(name=f'S{i}', status=Organization.STATUS_SUSPENDED), user)
+        with self.assertNumQueries(3):  # prestataire, organisations actives, organisations indisponibles
             client.get(CONTEXTS_URL)
         for i in range(6):
             join(make_org(name=f'B{i}'), user)
-        with self.assertNumQueries(2):
+            join(make_org(name=f'T{i}', status=Organization.STATUS_ARCHIVED), user)
+        with self.assertNumQueries(3):
             client.get(CONTEXTS_URL)
 
 
 class ContextsEndpointTests(TestCase):
-    EXPECTED_KEYS = {'type', 'id', 'name', 'role', 'org_type', 'photo', 'capabilities', 'migrated_from_business'}
+    EXPECTED_KEYS = {'type', 'id', 'name', 'role', 'org_type', 'photo', 'capabilities', 'migrated_from_business',
+                     'status'}
 
     def setUp(self):
         cache.clear()

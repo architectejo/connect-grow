@@ -14,7 +14,7 @@ from apps.moderation.services import record_audit
 # Contexte actif (ADR 0006, section 6) : façade publique.
 from .acting import (  # noqa: F401
     ActingContextMixin, AvailableContext, authorize, authorize_on, can, capability_permission, get_acting_context,
-    get_contexts_for_user, resolve_acting_context,
+    get_contexts_for_user, get_unavailable_organizations, resolve_acting_context,
 )
 
 # Organisations et équipes (ADR 0006) : façade publique, les autres domaines n'importent jamais le sous-module.

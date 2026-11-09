@@ -16,7 +16,7 @@ UNKNOWN_ORGANIZATION = "votre organisation"
 # Capacités d'`identity` (matrice ADR 0006, section 5), désignées par leur nom stable.
 CAP_REVIEW_REPLY = 'review.reply'
 CAP_OFFER_EDIT = 'offer.edit'
-CAP_MANAGE_MEMBERS = 'org.manage_members'
+CAP_LEAVE = 'org.leave'  # détenue par tous les rôles : sert à joindre toute l'équipe
 CAP_VERIFICATION_SUBMIT = 'org.verification_submit'
 
 
@@ -272,9 +272,10 @@ _STATUS_MESSAGES = {
 
 @subscribe('identity.seller_context_status_changed', name='notifications.notify_organization_status')
 def notify_organization_status(event):
-    """Annonce la suspension, l'archivage ou la réactivation d'une organisation à ses propriétaires et
-    administrateurs (hors auteur de l'action). Les autres contextes (compte, prestataire) ne produisent aucune
-    notification ici. Aucun propriétaire ou administrateur actif : rien n'est envoyé."""
+    """Annonce la suspension, l'archivage ou la réactivation d'une organisation à toute son équipe active
+    (propriétaires, administrateurs, éditeurs, analystes ; hors auteur de l'action). Texte neutre, sans motif ni
+    auteur ; le lien mène à la page de l'organisation. Les autres contextes (compte, prestataire) ne produisent
+    aucune notification ici. Aucun membre actif : rien n'est envoyé."""
     payload = event.payload
     context_type, context_id, reason = _require(payload, 'context_type', 'context_id', 'reason')
     if context_type != CONTEXT_ORGANIZATION or reason not in _STATUS_MESSAGES:
@@ -282,12 +283,12 @@ def notify_organization_status(event):
     organization = _user_id(context_id)
     name = _organization_name(organization)
     title, template = _STATUS_MESSAGES[reason]
-    for recipient in identity_services.get_organization_recipients(organization, CAP_MANAGE_MEMBERS):
+    for recipient in identity_services.get_organization_recipients(organization, CAP_LEAVE):
         if str(recipient) == payload.get('actor_id'):
             continue
         services.notify(
             user_id=recipient, notification_type=services.SYSTEM, title=title, content=template.format(name=name),
-            link='/dashboard', context=(CONTEXT_ORGANIZATION, organization),
+            link=f'/organizations/{organization}', context=(CONTEXT_ORGANIZATION, organization),
         )
 
 

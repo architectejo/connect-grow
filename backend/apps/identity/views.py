@@ -25,7 +25,7 @@ from .serializers import (
     UserSerializer,
 )
 from .services import (
-    ActingContextMixin, ContactSettingsError, get_acting_context, KycError, decide_kyc_document, get_contact_settings, get_contexts_for_user,
+    ActingContextMixin, ContactSettingsError, get_acting_context, KycError, decide_kyc_document, get_contact_settings, get_contexts_for_user, get_unavailable_organizations,
     get_document_for_download,
     revoke_all_sessions, set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
 )
@@ -129,17 +129,21 @@ class ContextListView(APIView):
     throttle_classes = [ContextsListThrottle]
 
     def get(self, request):
-        results = [
-            {
+        def serialize(item):
+            return {
                 'type': item.type, 'id': str(item.id), 'name': item.name, 'role': item.role,
                 'org_type': item.org_type,
                 'photo': request.build_absolute_uri(item.photo) if item.photo else None,
                 'capabilities': list(item.capabilities),
                 'migrated_from_business': item.migrated_from_business,
+                'status': item.status,
             }
-            for item in get_contexts_for_user(request.user)
-        ]
-        response = Response({'count': len(results), 'next': None, 'previous': None, 'results': results})
+
+        results = [serialize(item) for item in get_contexts_for_user(request.user)]
+        unavailable = [serialize(item) for item in get_unavailable_organizations(request.user)]
+        response = Response({
+            'count': len(results), 'next': None, 'previous': None, 'results': results, 'unavailable': unavailable,
+        })
         response['Cache-Control'] = 'private, no-store'
         return response
 

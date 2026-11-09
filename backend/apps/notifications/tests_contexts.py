@@ -283,29 +283,43 @@ class StatusNotificationTests(NotificationContextBase):
         self.settle()
         self.staff = self.staff_user()
 
-    def test_suspension_and_reactivation_notify_owners_and_admins_only(self):
+    def test_suspension_and_reactivation_notify_the_whole_active_team(self):
         identity_services.suspend_organization(self.staff, self.org.pk, 'moderation')
         self.deliver()
-        self.assertEqual({n.user_id for n in Notification.objects.all()}, {self.owner.pk, self.admin.pk})
+        team = {self.owner.pk, self.admin.pk, self.editor.pk, self.analyst.pk}
+        self.assertEqual({n.user_id for n in Notification.objects.all()}, team)
         for notification in Notification.objects.all():
             self.assertEqual((notification.context_type, notification.context_id), ('ORGANIZATION', self.org.pk))
             self.assertEqual(notification.title, 'Organisation suspendue')
+            self.assertEqual(notification.link, f'/organizations/{self.org.pk}')
+            self.assertNotIn(self.staff.full_name, notification.content)
             self.assertNotIn('moderation', notification.content)  # le motif n'est pas repris
-        self.assertEqual(len(self.listing(self.owner).data), 1)  # visible malgré la suspension
+        for member in (self.owner, self.editor, self.analyst):
+            self.assertEqual(len(self.listing(member).data), 1)  # visible malgré la suspension
         Notification.objects.all().delete()
         identity_services.reactivate_organization(self.staff, self.org.pk)
         self.deliver()
         self.assertEqual({n.title for n in Notification.objects.all()}, {'Organisation réactivée'})
-        self.assertEqual(Notification.objects.count(), 2)
+        self.assertEqual({n.user_id for n in Notification.objects.all()}, team)
+        self.assertEqual({n.link for n in Notification.objects.all()}, {f'/organizations/{self.org.pk}'})
 
-    def test_archiving_notifies_the_other_managers_not_the_actor(self):
+    def test_revoked_member_and_inactive_account_are_not_notified(self):
+        identity_services.revoke_member(self.owner, self.org.pk, self.editor.pk)
+        User.objects.filter(pk=self.analyst.pk).update(is_active=False)
+        self.settle()
+        identity_services.suspend_organization(self.staff, self.org.pk, 'legal')
+        self.deliver()
+        self.assertEqual({n.user_id for n in Notification.objects.all()}, {self.owner.pk, self.admin.pk})
+
+    def test_archiving_notifies_the_other_members_not_the_actor(self):
         identity_services.archive_organization(self.owner, self.org.pk)
         self.deliver()
-        self.assertEqual(self.of(self.admin).get().title, 'Organisation archivée')
+        for member in (self.admin, self.editor, self.analyst):
+            self.assertEqual(self.of(member).get().title, 'Organisation archivée')
         self.assertFalse(self.of(self.owner).exists())
 
-    def test_no_active_owner_or_admin_means_nobody_is_notified_and_no_failure(self):
-        User.objects.filter(pk__in=[self.owner.pk, self.admin.pk]).update(is_active=False)
+    def test_no_active_member_means_nobody_is_notified_and_no_failure(self):
+        User.objects.filter(pk__in=[self.owner.pk, self.admin.pk, self.editor.pk, self.analyst.pk]).update(is_active=False)
         identity_services.suspend_organization(self.staff, self.org.pk, 'legal')
         self.deliver()
         self.assertFalse(Notification.objects.exists())

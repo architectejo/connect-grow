@@ -267,6 +267,7 @@ class AvailableContext:
     photo: Optional[str]  # URL relative du média, ou None
     capabilities: tuple
     migrated_from_business: bool
+    status: str = 'ACTIVE'  # `results` : toujours ACTIVE ; `unavailable` : SUSPENDED ou ARCHIVED
 
 
 def get_contexts_for_user(user) -> list:
@@ -299,3 +300,28 @@ def get_contexts_for_user(user) -> list:
             migrated_from_business=org.legacy_business_profile_id is not None,
         ))
     return result
+
+
+CAP_ORG_LEAVE = 'org.leave'
+
+
+def get_unavailable_organizations(user) -> list:
+    """Organisations SUSPENDED ou ARCHIVED dont `user` est membre ACTIF (ADR 0006, 9.1 : clé `unavailable`). Elles
+    ne sont jamais des contextes activables ; seule la capacité `org.leave` reste ouverte, quel que soit le rôle
+    (ADR 0006, 6.2). Une requête (jointure), tri par nom insensible à la casse puis identifiant. Ni motif, ni date,
+    ni auteur, ni liste de membres (CLAUDE.md, règle 10) : seul l'état est exposé."""
+    memberships = (
+        Membership.objects.filter(user_id=user.pk, status=Membership.STATUS_ACTIVE)
+        .exclude(organization__status=Organization.STATUS_ACTIVE)
+        .select_related('organization').order_by(Lower('organization__name'), 'organization_id')
+    )
+    return [
+        AvailableContext(
+            type=CONTEXT_ORGANIZATION, id=m.organization.pk, name=m.organization.name, role=m.role,
+            org_type=m.organization.org_type, photo=m.organization.logo.url if m.organization.logo else None,
+            capabilities=(CAP_ORG_LEAVE,),
+            migrated_from_business=m.organization.legacy_business_profile_id is not None,
+            status=m.organization.status,
+        )
+        for m in memberships
+    ]

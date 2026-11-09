@@ -1,6 +1,6 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import apiClient from "@/api/client";
-import type { AvailableContext, ContextsResponse, Uuid } from "@/api/types";
+import type { AvailableContext, ContextsData, ContextsResponse, UnavailableOrganization, Uuid } from "@/api/types";
 import { shouldRetryQuery } from "@/lib/errors";
 
 export const contextsKeys = {
@@ -17,9 +17,22 @@ export const CONTEXTS_STALE_TIME_MS = 5 * 60 * 1000;
 
 export const CONTEXTS_URL = "accounts/contexts/";
 
-export async function fetchContexts(): Promise<AvailableContext[]> {
+/**
+ * Normalise la réponse de `contexts/` : `status` absent vaut `ACTIVE`, `unavailable` absent vaut `[]`,
+ * et seules les organisations `SUSPENDED` ou `ARCHIVED` sont gardées dans `unavailable`.
+ */
+export function parseContexts(data: ContextsResponse | AvailableContext[] | null | undefined): ContextsData {
+  const body = Array.isArray(data) ? { results: data, unavailable: undefined } : (data ?? { results: [], unavailable: undefined });
+  const results = (body.results ?? []).map((item) => ({ ...item, status: item.status ?? "ACTIVE" }));
+  const unavailable = (body.unavailable ?? []).filter(
+    (item): item is UnavailableOrganization => item?.type === "ORGANIZATION" && (item.status === "SUSPENDED" || item.status === "ARCHIVED"),
+  );
+  return { results, unavailable };
+}
+
+export async function fetchContexts(): Promise<ContextsData> {
   const { data } = await apiClient.get<ContextsResponse | AvailableContext[]>(CONTEXTS_URL);
-  return Array.isArray(data) ? data : (data?.results ?? []);
+  return parseContexts(data);
 }
 
 export const contextsQueryOptions = (userId: Uuid) => ({

@@ -125,13 +125,16 @@ export function toSelection(userId: Uuid, context: AvailableContext): ActiveSele
 
 // --- Validation contre la liste du serveur ---
 
-/** Pourquoi le profil actif a été quitté. Les quatre premières valeurs sont les codes `DENY_*` du serveur. */
-export type LostReason = "CONTEXT" | "RELATION" | "SECURITY" | "OBJECT_STATE" | "left" | "archived";
+/**
+ * Pourquoi le profil actif a été quitté. Les quatre premières valeurs sont les codes `DENY_*` du serveur ;
+ * `org_suspended` et `org_archived` sont déduites de `unavailable` (le serveur confirme le statut de l'organisation).
+ */
+export type LostReason = "CONTEXT" | "RELATION" | "SECURITY" | "OBJECT_STATE" | "left" | "archived" | "org_suspended" | "org_archived";
 
 export type Reconciliation =
   | { kind: "personal" }
   | { kind: "keep"; selection: ActiveSelection }
-  | { kind: "lost"; lostName: string };
+  | { kind: "lost"; lostName: string; lostId: Uuid };
 
 /**
  * Compare le profil mémorisé à la liste fraîche de `contexts/` (le serveur fait foi) :
@@ -143,7 +146,7 @@ export function reconcileSelection(selection: ActiveSelection | null, userId: Uu
   if (!selection) return { kind: "personal" };
   if (selection.userId !== userId) return { kind: "personal" };
   const found = contexts.find((c) => c.type === selection.type && c.id === selection.id);
-  if (!found) return { kind: "lost", lostName: selection.name };
+  if (!found) return { kind: "lost", lostName: selection.name, lostId: selection.id };
   return { kind: "keep", selection: toSelection(userId, found) as ActiveSelection };
 }
 

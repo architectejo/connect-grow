@@ -20,6 +20,7 @@ const [personal, provider, shop, collective] = all;
 const USER_ID = personal.id;
 
 let server: AvailableContext[];
+let serverUnavailable: unknown[] | undefined;
 let failWith: { status?: number } | null;
 let calls: number;
 let queryClient: QueryClient;
@@ -45,6 +46,7 @@ beforeEach(() => {
   auth.user = { id: USER_ID, full_name: "Compte Test" };
   auth.isAuthenticated = true;
   server = all;
+  serverUnavailable = undefined;
   failWith = null;
   calls = 0;
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -52,7 +54,7 @@ beforeEach(() => {
     if (url !== CONTEXTS_URL) return { data: {} };
     calls++;
     if (failWith) throw failure(failWith.status);
-    return { data: { count: server.length, next: null, previous: null, results: server } };
+    return { data: { count: server.length, next: null, previous: null, results: server, ...(serverUnavailable ? { unavailable: serverUnavailable } : {}) } };
   });
 });
 afterEach(() => {
@@ -169,12 +171,50 @@ describe("profil mémorisé", () => {
     server = all.filter((c) => c.id !== shop.id);
     const { result } = setup();
     await waitFor(() => expect(result.current.ctx.lost).not.toBeNull());
-    expect(result.current.ctx.lost).toEqual({ reason: "CONTEXT", lostName: "Boutique Test" });
+    expect(result.current.ctx.lost).toEqual({ reason: "CONTEXT", lostName: "Boutique Test", lostId: shop.id });
     expect(result.current.ctx.active.type).toBe("USER");
     expect(activeContextStore.get()).toBeNull();
     expect(localStorage.getItem(ACTIVE_CONTEXT_KEY)).toBeNull();
     act(() => result.current.ctx.dismissLost());
     expect(result.current.ctx.lost).toBeNull();
+  });
+
+  it("absent de results mais présent dans unavailable (SUSPENDED) : alerte spécifique avec l'identifiant", async () => {
+    remember(shop);
+    server = all.filter((c) => c.id !== shop.id);
+    serverUnavailable = [{ ...shop, status: "SUSPENDED", capabilities: ["org.leave"] }];
+    const { result } = setup();
+    await waitFor(() => expect(result.current.ctx.lost).not.toBeNull());
+    expect(result.current.ctx.lost).toEqual({ reason: "org_suspended", lostName: "Boutique Test", lostId: shop.id });
+    expect(result.current.ctx.active.type).toBe("USER");
+    expect(result.current.ctx.unavailable.map((org) => org.id)).toEqual([shop.id]);
+  });
+
+  it("présent dans unavailable (ARCHIVED), refus DENY_OBJECT_STATE : alerte « archivée »", async () => {
+    remember(shop);
+    const { result } = setup();
+    await waitFor(() => expect(result.current.ctx.active.confirmed).toBe(true));
+    server = all.filter((c) => c.id !== shop.id);
+    serverUnavailable = [{ ...shop, status: "ARCHIVED", capabilities: ["org.leave"] }];
+    deny("DENY_OBJECT_STATE");
+    await waitFor(() => expect(result.current.ctx.lost?.reason).toBe("org_archived"));
+  });
+
+  it("DENY_SECURITY sans entrée dans unavailable (compte limité) : texte générique, jamais « suspendue »", async () => {
+    remember(shop);
+    const { result } = setup();
+    await waitFor(() => expect(result.current.ctx.active.confirmed).toBe(true));
+    server = all.filter((c) => c.id !== shop.id);
+    deny("DENY_SECURITY");
+    await waitFor(() => expect(result.current.ctx.lost?.reason).toBe("SECURITY"));
+  });
+
+  it("unavailable absent : liste vide, status absent traité comme ACTIVE", async () => {
+    server = all.map(({ status: _status, ...rest }) => rest as unknown as AvailableContext);
+    const { result } = setup();
+    await waitFor(() => expect(result.current.ctx.contexts.length).toBeGreaterThan(0));
+    expect(result.current.ctx.unavailable).toEqual([]);
+    expect(result.current.ctx.contexts.every((c) => c.status === "ACTIVE")).toBe(true);
   });
 
   it("l'alerte s'efface seule après 30 minutes", async () => {
@@ -256,7 +296,7 @@ describe("règle 9.1 : refus DENY_* sur une requête portant X-Context", () => {
     const { result } = await start();
     server = all.filter((c) => c.id !== shop.id);
     deny(code);
-    await waitFor(() => expect(result.current.ctx.lost).toEqual({ reason, lostName: "Boutique Test" }));
+    await waitFor(() => expect(result.current.ctx.lost).toEqual({ reason, lostName: "Boutique Test", lostId: shop.id }));
     expect(calls).toBe(1);
     expect(result.current.ctx.active.type).toBe("USER");
     expect(activeContextStore.get()).toBeNull();

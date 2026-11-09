@@ -32,12 +32,14 @@ interface MyPostsListProps {
 export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListProps) {
   const { t } = useTranslation();
   const { moveToTrash } = usePostLifecycle();
-  const { active, contexts } = useActiveContext();
+  const { active, contexts, unavailable = [] } = useActiveContext();
   const canPublish = useCan("offer.publish");
   const canEdit = useCan("offer.edit");
   const canDelete = useCan("offer.delete");
   // Après la migration d'un ancien compte entreprise, les offres vivent sous l'organisation : on le dit à la place d'un vide trompeur
-  const otherProfiles = active.type === "USER" && contexts.some((c) => c.type !== "USER");
+  // Une organisation suspendue ou archivée n'est plus dans le sélecteur : on renvoie vers son état (L0-09 UX-SUSP 4.4)
+  const unavailableHint = active.type === "USER" && unavailable.length > 0;
+  const otherProfiles = !unavailableHint && active.type === "USER" && contexts.some((c) => c.type !== "USER");
   const [query, setQuery] = useState("");
   const [trashing, setTrashing] = useState<Post | null>(null);
 
@@ -92,6 +94,11 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
             <>
               Une annonce gratuite, quelques photos, et les acheteurs de votre commune vous trouvent.
               {otherProfiles && <span className="mt-2 block">{t("emptyOffers.otherProfiles")}</span>}
+              {unavailableHint && (
+                <span className="mt-2 block">
+                  {unavailable.length === 1 ? t("emptyOffers.unavailableOrg", { name: unavailable[0].name }) : t("emptyOffers.unavailableOrgs")}
+                </span>
+              )}
             </>
           }
           action={
@@ -100,6 +107,13 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
                 <Button asChild>
                   <Link to="/create-post">
                     <Plus aria-hidden /> Publier ma première annonce
+                  </Link>
+                </Button>
+              )}
+              {unavailableHint && (
+                <Button asChild variant="outline">
+                  <Link to={unavailable.length === 1 ? `/organizations/${unavailable[0].id}` : "/profiles"}>
+                    {unavailable.length === 1 ? t("emptyOffers.unavailableOrgLink", { name: unavailable[0].name }) : t("emptyOffers.unavailableOrgsLink")}
                   </Link>
                 </Button>
               )}

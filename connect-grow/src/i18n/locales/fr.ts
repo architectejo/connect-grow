@@ -344,7 +344,7 @@ const fr = {
         generic: "Vous n'avez pas le droit d'effectuer cette action.",
       },
       SECURITY: {
-        lost: "Cette organisation est suspendue. Vous agissez maintenant sous votre profil personnel.",
+        lost: "Votre profil n'est plus disponible pour le moment. Vous agissez maintenant sous votre profil personnel.",
         action: "Cette action est temporairement impossible : le compte ou l'organisation est limité. Contactez le support de Connecte+.",
       },
       OBJECT_STATE: {
@@ -380,6 +380,8 @@ const fr = {
       profile: "Profil concerné : {{name}}",
       left: "Vous avez quitté l'organisation. Vous agissez maintenant sous votre profil personnel.",
       archived: "L'organisation est archivée. Vous agissez maintenant sous votre profil personnel.",
+      suspended: "Cette organisation est suspendue. Vous agissez maintenant sous votre profil personnel.",
+      archivedByStatus: "Cette organisation est archivée. Vous agissez maintenant sous votre profil personnel.",
       dismiss: "J'ai compris",
     },
   },
@@ -707,9 +709,48 @@ const fr = {
     },
     denied: {
       relation: "Vous n'avez pas accès à cette organisation.",
-      security:
-        "Cette organisation est suspendue. Ses offres ne sont plus visibles. Pour en savoir plus, contactez le support de Connecte+.",
+      security: "Cet accès est limité pour le moment.",
+      accountRestricted: "Votre compte est limité pour le moment. Pour en savoir plus, contactez le support de Connecte+.",
       archived: "Cette organisation est archivée.",
+    },
+    status: {
+      SUSPENDED: "Suspendue",
+      ARCHIVED: "Archivée",
+      aria: "Statut de l'organisation : {{status}}",
+    },
+    unavailable: {
+      title: { SUSPENDED: "Cette organisation est suspendue", ARCHIVED: "Cette organisation est archivée" },
+      body: {
+        SUSPENDED: "Ses offres ne sont plus visibles du public. Vous ne pouvez plus la modifier ni agir en son nom pour le moment.",
+        ARCHIVED: "Ses offres ne sont plus visibles du public. Elle ne peut plus être modifiée.",
+      },
+      recourse: {
+        SUSPENDED: {
+          OWNER: "Pour en savoir plus sur cette suspension, contactez le support de Connecte+.",
+          other: "Pour en savoir plus, adressez-vous au propriétaire de l'organisation ou au support de Connecte+.",
+        },
+        ARCHIVED: {
+          OWNER: "Un archivage ne peut pas être annulé depuis l'application. Pour toute question, contactez le support de Connecte+.",
+          other: "Pour toute question, adressez-vous au propriétaire de l'organisation.",
+        },
+      },
+      migrated: "Cette organisation vient de votre ancien compte entreprise.",
+      blockedTitle: "Ce qui n'est pas possible actuellement",
+      blocked: {
+        offers: "Publier, modifier ou renouveler des offres.",
+        profile: "Modifier le profil de l'organisation.",
+        verification: "Envoyer ou consulter les pièces de vérification.",
+        messages: "Répondre aux messages et aux avis.",
+        team: "Gérer l'équipe et les rôles.",
+      },
+      leaveBody: "Vous perdrez l'accès à cette organisation. Elle n'apparaîtra plus dans vos profils.",
+      archivedDone: "Organisation archivée.",
+      listTitle: "Organisations indisponibles",
+      listDescription: "Vous ne pouvez plus agir au nom de ces organisations.",
+      see: "Voir l'état",
+      seeAria: "Voir l'état de {{name}}",
+      seeFromAlert: "Voir l'état de l'organisation",
+      pageTitle: "{{name}} · {{status}}",
     },
     loadError: "Impossible de charger cette organisation.",
     home: {
@@ -888,6 +929,10 @@ const fr = {
   },
   emptyOffers: {
     otherProfiles: "Vos offres d'entreprise se trouvent peut-être sous une organisation.",
+    unavailableOrg: "Vos offres d'entreprise sont liées à « {{name}} », qui n'est plus disponible pour le moment.",
+    unavailableOrgLink: "Voir {{name}}",
+    unavailableOrgs: "Certaines de vos organisations ne sont plus disponibles pour le moment.",
+    unavailableOrgsLink: "Voir mes organisations",
     changeProfile: "Changer de profil",
   },
   scope: {

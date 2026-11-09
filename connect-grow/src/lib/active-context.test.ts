@@ -20,10 +20,10 @@ beforeEach(() => {
 });
 
 describe("contrat de contexts/ (fixture)", () => {
-  it("chaque élément porte exactement les 8 clés du contrat", () => {
+  it("chaque élément porte exactement les 9 clés du contrat", () => {
     for (const item of contexts) {
       expect(Object.keys(item).sort()).toEqual(
-        ["capabilities", "id", "migrated_from_business", "name", "org_type", "photo", "role", "type"].sort(),
+        ["capabilities", "id", "migrated_from_business", "name", "org_type", "photo", "role", "status", "type"].sort(),
       );
     }
   });
@@ -97,7 +97,7 @@ describe("validation contre contexts/ (le serveur fait foi)", () => {
 
   it("profil absent de la liste : perdu, avec son nom (jamais de repli silencieux)", () => {
     const withoutShop = contexts.filter((c) => c.id !== shop.id);
-    expect(reconcileSelection(toSelection(USER_ID, shop), USER_ID, withoutShop)).toEqual({ kind: "lost", lostName: "Boutique Test" });
+    expect(reconcileSelection(toSelection(USER_ID, shop), USER_ID, withoutShop)).toEqual({ kind: "lost", lostName: "Boutique Test", lostId: shop.id });
   });
 
   it("profil mémorisé par un autre compte : ignoré", () => {

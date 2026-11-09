@@ -81,7 +81,7 @@ describe("Messages : boîte selon le profil actif (T7)", () => {
     activeMock.active = organization(["message.reply"]);
     vi.spyOn(apiClient, "get").mockRejectedValue(httpError(403, identity.conversations_suspended_organization_error.body));
     renderPage();
-    expect(await screen.findByText(/suspendue/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Votre compte est limité pour le moment/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Réessayer" })).toBeInTheDocument();
   });
 

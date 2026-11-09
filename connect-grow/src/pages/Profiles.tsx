@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AccountShell } from "@/components/layout/AccountShell";
 import { EmptyState, ErrorState, PageHeader, RoleBadge, SellerTypeBadge, UserAvatar } from "@/components/common";
 import { LegacyOrgNotice } from "@/components/profiles/LegacyOrgNotice";
+import { UnavailableOrganizationsSection } from "@/components/profiles/UnavailableOrganizationsSection";
 import { ProviderDialog } from "@/components/profiles/ProviderDialog";
 import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -207,7 +208,7 @@ const Profiles = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
   const online = useOnlineStatus();
-  const { contexts, active, setActive, isLoading, isError, refetch } = useActiveContext();
+  const { contexts, unavailable, active, setActive, isLoading, isError, refetch } = useActiveContext();
   const organizations = contexts.filter((c) => c.type === "ORGANIZATION");
   const personal = contexts.find((c) => c.type === "USER");
   const createOffline = !online;
@@ -273,6 +274,8 @@ const Profiles = () => {
 
           <ProviderCard />
 
+          {/* Sans organisation active mais avec des organisations indisponibles, l'état vide serait contradictoire : on masque la section */}
+          {(organizations.length > 0 || unavailable.length === 0) && (
           <section aria-labelledby={orgsTitleId} className="space-y-3">
             <h2 id={orgsTitleId} className="flex items-center gap-2 font-display text-lg font-bold">
               <Building2 className="h-5 w-5 text-primary" aria-hidden /> {t("profiles.orgs.title")}
@@ -326,6 +329,9 @@ const Profiles = () => {
               </ul>
             )}
           </section>
+          )}
+
+          <UnavailableOrganizationsSection />
         </div>
       )}
     </AccountShell>

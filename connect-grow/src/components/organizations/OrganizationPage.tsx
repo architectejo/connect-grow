@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { OrganizationInternal } from "@/api/types";
@@ -6,6 +6,9 @@ import { AccessDenied, ErrorState } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AccountShell } from "@/components/layout/AccountShell";
+import { OrganizationUnavailableView } from "@/components/organizations/OrganizationUnavailableView";
+import { useOptionalActiveContext } from "@/contexts/ActiveContextContext";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import { useOrganization } from "@/hooks/use-organizations";
 import { organizationDeniedKey } from "@/lib/api-errors";
 import { cn } from "@/lib/utils";
@@ -58,10 +61,23 @@ interface OrganizationPageProps {
 export function OrganizationPage({ section, children, hideTabs }: OrganizationPageProps) {
   const { t } = useTranslation();
   const { id } = useParams();
-  const query = useOrganization(id);
+  const { unavailable = [], isLoading: contextsLoading = false, isError: contextsError = false, refetch: refetchContexts } = useOptionalActiveContext() ?? {};
+  const online = useOnlineStatus();
+  // Une organisation suspendue ou archivée se lit dans `contexts/`, jamais dans `internal/` (qui répondrait 403)
+  const unavailableOrg = unavailable.find((org) => org.id === id);
+  const query = useOrganization(contextsLoading || unavailableOrg ? undefined : id);
+
+  // Relecture unique à l'ouverture (en ligne) : une organisation réactivée entre-temps réapparaît dans `results`
+  const unavailableId = unavailableOrg?.id;
+  useEffect(() => {
+    if (unavailableId && online) refetchContexts?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- une seule fois par organisation ouverte
+  }, [unavailableId]);
 
   let body: ReactNode;
-  if (query.isLoading) {
+  if (unavailableOrg) {
+    body = <OrganizationUnavailableView org={unavailableOrg} />;
+  } else if (contextsLoading || query.isLoading) {
     body = (
       <div className="space-y-4" aria-busy="true">
         <Skeleton className="h-10 w-2/3" />
@@ -71,7 +87,9 @@ export function OrganizationPage({ section, children, hideTabs }: OrganizationPa
     );
   } else if (query.isError) {
     const deniedKey = organizationDeniedKey(query.error);
-    body = deniedKey ? (
+    // Refus d'état (suspendue, archivée) alors que la liste des profils n'a pas pu être lue : on ne devine pas
+    const stateDenied = deniedKey === "org.denied.accountRestricted" || deniedKey === "org.denied.archived";
+    body = deniedKey && !(stateDenied && contextsError) ? (
       <AccessDenied
         description={t(deniedKey)}
         action={
@@ -81,7 +99,7 @@ export function OrganizationPage({ section, children, hideTabs }: OrganizationPa
         }
       />
     ) : (
-      <ErrorState description={t("org.loadError")} onRetry={() => query.refetch()} isRetrying={query.isFetching} />
+      <ErrorState description={t("org.loadError")} onRetry={() => (deniedKey ? refetchContexts?.() : void query.refetch())} isRetrying={query.isFetching} />
     );
   } else if (query.data) {
     body = (

@@ -1,5 +1,5 @@
 {
-  "_note": "Forme de GET accounts/contexts/ (apps/identity/views.py ContextListView, ADR 0006 section 9.1) : 8 cles par element, capacites de apps/identity/capabilities.py. Identifiants et noms fictifs, aucune donnee personnelle.",
+  "_note": "Forme de GET accounts/contexts/ (apps/identity/views.py ContextListView, ADR 0006 section 9.1) : 9 cles par element (status ajoute par L0-09 UX-SUSP, contrat de la spec section 3), capacites de apps/identity/capabilities.py. Identifiants et noms fictifs, aucune donnee personnelle.",
   "response": {
     "count": 4,
     "next": null,
@@ -9,25 +9,45 @@
         "type": "USER", "id": "11111111-1111-4111-8111-111111111111", "name": "Compte Test", "role": null, "org_type": null,
         "photo": null,
         "capabilities": ["offer.view_internal", "offer.publish", "offer.edit", "offer.delete", "review.reply", "contact.view_requesters", "contact.manage_channels", "message.reply", "stats.view"],
-        "migrated_from_business": false
+        "migrated_from_business": false,
+        "status": "ACTIVE"
       },
       {
         "type": "PROVIDER", "id": "22222222-2222-4222-8222-222222222222", "name": "Atelier Test", "role": null, "org_type": null,
         "photo": null,
         "capabilities": ["offer.view_internal", "offer.publish", "offer.edit", "offer.delete", "review.reply", "contact.view_requesters", "contact.manage_channels", "message.reply", "stats.view"],
-        "migrated_from_business": false
+        "migrated_from_business": false,
+        "status": "ACTIVE"
       },
       {
         "type": "ORGANIZATION", "id": "33333333-3333-4333-8333-333333333333", "name": "Boutique Test", "role": "ADMIN", "org_type": "BOUTIQUE",
         "photo": "http://testserver/media/organization_logos/x.webp",
         "capabilities": ["org.view_internal", "org.leave", "org.edit_profile", "org.manage_members", "org.manage_roles", "org.verification_submit", "offer.view_internal", "offer.publish", "offer.edit", "offer.delete", "review.reply", "contact.view_requesters", "contact.manage_channels", "message.reply", "stats.view"],
-        "migrated_from_business": true
+        "migrated_from_business": true,
+        "status": "ACTIVE"
       },
       {
         "type": "ORGANIZATION", "id": "44444444-4444-4444-8444-444444444444", "name": "Collectif Test", "role": "ANALYST", "org_type": "ONG",
         "photo": null,
         "capabilities": ["org.view_internal", "org.leave", "offer.view_internal", "stats.view"],
-        "migrated_from_business": false
+        "migrated_from_business": false,
+        "status": "ACTIVE"
+      }
+    ],
+    "unavailable": [
+      {
+        "type": "ORGANIZATION", "id": "55555555-5555-4555-8555-555555555555", "name": "Atelier Suspendu", "role": "OWNER", "org_type": "ENTREPRISE",
+        "photo": null,
+        "capabilities": ["org.leave"],
+        "migrated_from_business": true,
+        "status": "SUSPENDED"
+      },
+      {
+        "type": "ORGANIZATION", "id": "66666666-6666-4666-8666-666666666666", "name": "Association Archivee", "role": "EDITOR", "org_type": "ONG",
+        "photo": null,
+        "capabilities": ["org.leave"],
+        "migrated_from_business": false,
+        "status": "ARCHIVED"
       }
     ]
   }

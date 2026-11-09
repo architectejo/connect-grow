@@ -191,13 +191,36 @@ describe("ContextLostAlert", () => {
 
   it.each([
     ["CONTEXT", "Le profil sélectionné n'est pas disponible."],
-    ["SECURITY", "Cette organisation est suspendue."],
+    ["SECURITY", "Votre profil n'est plus disponible pour le moment."],
+    ["org_suspended", "Cette organisation est suspendue."],
+    ["org_archived", "Cette organisation est archivée."],
     ["OBJECT_STATE", "Ce profil est archivé."],
     ["left", "Vous avez quitté l'organisation."],
     ["archived", "L'organisation est archivée."],
   ] as const)("raison %s", (reason, text) => {
     render(<ContextLostAlert reason={reason} lostName="" onDismiss={() => {}} />);
     expect(screen.getByRole("alert")).toHaveTextContent(text);
+  });
+
+  it("organisation perdue confirmée suspendue ou archivée : lien « Voir l'état de l'organisation » vers /organizations/:id", () => {
+    render(
+      <MemoryRouter>
+        <ContextLostAlert reason="org_suspended" lostName="Atelier" lostId="55555555-5555-4555-8555-555555555555" onDismiss={() => {}} />
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole("link", { name: "Voir l'état de l'organisation" });
+    expect(link).toHaveAttribute("href", "/organizations/55555555-5555-4555-8555-555555555555");
+    expect(screen.getByRole("alert")).toHaveFocus();
+  });
+
+  it("raison inconnue du serveur (compte limité) : pas de lien d'état", () => {
+    render(
+      <MemoryRouter>
+        <ContextLostAlert reason="SECURITY" lostName="Atelier" lostId="55555555-5555-4555-8555-555555555555" onDismiss={() => {}} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).not.toHaveTextContent("est suspendue");
   });
 
   it("l'hôte affiche la perte réelle et reste affiché tant qu'elle n'est pas fermée", async () => {

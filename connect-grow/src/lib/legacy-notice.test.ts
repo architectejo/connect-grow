@@ -11,6 +11,7 @@ const ctx = (over: Partial<AvailableContext>): AvailableContext => ({
   photo: null,
   capabilities: [],
   migrated_from_business: false,
+  status: "ACTIVE",
   ...over,
 });
 

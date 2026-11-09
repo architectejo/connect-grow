@@ -23,7 +23,7 @@ import { useOnlineStatus } from "@/hooks/use-online-status";
 import { describeApiError, getApiErrorCode } from "@/lib/api-errors";
 
 /** Carte « Quitter l'organisation » (tous les rôles). `last_owner` reste un message dans la page, pas un blocage de l'interface (D10). */
-export function LeaveOrganizationCard({ org, titleKey = "org.home.leaveTitle", bodyKey = "org.home.leaveBody" }: { org: OrganizationInternal; titleKey?: string; bodyKey?: string }) {
+export function LeaveOrganizationCard({ org, titleKey = "org.home.leaveTitle", bodyKey = "org.home.leaveBody" }: { org: Pick<OrganizationInternal, "id">; titleKey?: string; bodyKey?: string }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const online = useOnlineStatus();
@@ -103,11 +103,14 @@ export function ArchiveOrganizationCard({ org }: { org: OrganizationInternal }) 
   const { t } = useTranslation();
   const navigate = useNavigate();
   const online = useOnlineStatus();
-  const { leaveActive } = useActiveContext();
+  const { active, switchToPersonal } = useActiveContext();
   const [open, setOpen] = useState(false);
   const [understood, setUnderstood] = useState(false);
   const [error, setError] = useState<string>();
-  const archive = useArchiveOrganization(org.id, () => leaveActive({ type: "ORGANIZATION", id: org.id }, "archived"));
+  // Archivage voulu par le propriétaire : retour silencieux au profil personnel, la vue « Archivée » explique l'état (pas d'alerte de perte)
+  const archive = useArchiveOrganization(org.id, () => {
+    if (active.type === "ORGANIZATION" && active.id === org.id) switchToPersonal();
+  });
   const titleId = useId();
   const consentId = useId();
 
@@ -117,8 +120,8 @@ export function ArchiveOrganizationCard({ org }: { org: OrganizationInternal }) 
     setError(undefined);
     try {
       await archive.mutateAsync();
-      toast.success(t("team.archived"));
-      navigate("/profiles", { replace: true });
+      toast.success(t("org.unavailable.archivedDone"));
+      navigate(`/organizations/${org.id}`, { replace: true });
     } catch (err) {
       setOpen(false);
       setError(describeApiError(err, { inOrganization: true }));

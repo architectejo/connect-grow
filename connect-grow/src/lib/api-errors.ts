@@ -48,7 +48,10 @@ export function lostReasonFor(code: ContextDenyCode): LostReason {
 
 /** Clé i18n du message « profil perdu » (alerte persistante). */
 export function lostMessageKey(reason: LostReason): string {
-  return reason === "left" || reason === "archived" ? `errors.lost.${reason}` : `errors.deny.${reason}.lost`;
+  if (reason === "left" || reason === "archived") return `errors.lost.${reason}`;
+  if (reason === "org_suspended") return "errors.lost.suspended";
+  if (reason === "org_archived") return "errors.lost.archivedByStatus";
+  return `errors.deny.${reason}.lost`;
 }
 
 export interface DescribeOptions {
@@ -85,7 +88,8 @@ export function organizationDeniedKey(error: unknown): string | null {
   if (httpStatus(error) !== 403) return null;
   switch (apiErrorCode(error)) {
     case "DENY_SECURITY":
-      return "org.denied.security";
+      // Sans entrée dans `unavailable`, c'est le compte qui est limité : on n'affirme jamais une suspension d'organisation
+      return "org.denied.accountRestricted";
     case "DENY_OBJECT_STATE":
       return "org.denied.archived";
     case "DENY_RELATION":

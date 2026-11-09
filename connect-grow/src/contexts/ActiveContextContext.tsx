@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import type { AvailableContext, ContextType, OrganizationRole, OrganizationType, Uuid } from "@/api/types";
+import type { AvailableContext, ContextType, ContextsData, OrganizationRole, OrganizationType, UnavailableOrganization, Uuid } from "@/api/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { contextsQueryOptions, useContextsQuery } from "@/hooks/use-contexts";
 import {
@@ -36,10 +36,14 @@ export interface ActiveContext {
 export interface LostInfo {
   reason: LostReason;
   lostName: string;
+  /** Identifiant du profil perdu (organisation) : sert au lien « Voir l'état de l'organisation ». */
+  lostId?: Uuid;
 }
 
 interface ActiveContextValue {
   contexts: AvailableContext[];
+  /** Organisations suspendues ou archivées dont le compte est membre (jamais dans le sélecteur). Vide si le serveur ne les renvoie pas. */
+  unavailable: UnavailableOrganization[];
   active: ActiveContext;
   /** Premier chargement de `contexts/` en cours (aucune liste reçue). */
   isLoading: boolean;
@@ -69,7 +73,8 @@ export function ActiveContextProvider({ children }: { children: ReactNode }) {
   const userId = user?.id;
   const selection = useSyncExternalStore(activeContextStore.subscribe, activeContextStore.get, () => null);
   const query = useContextsQuery(userId);
-  const contexts = useMemo(() => query.data ?? [], [query.data]);
+  const contexts = useMemo(() => query.data?.results ?? [], [query.data]);
+  const unavailable = useMemo(() => query.data?.unavailable ?? [], [query.data]);
   const [lost, setLost] = useState<LostInfo | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const pendingReason = useRef<LostReason | null>(null);
@@ -87,10 +92,10 @@ export function ActiveContextProvider({ children }: { children: ReactNode }) {
 
   /** Valide le profil actif contre la liste fraîche du serveur, qui fait foi (règle 9.1). */
   const applyContexts = useCallback(
-    (list: AvailableContext[]) => {
+    (data: ContextsData) => {
       if (!userId) return;
       const current = activeContextStore.get();
-      const result = reconcileSelection(current, userId, list);
+      const result = reconcileSelection(current, userId, data.results);
       if (result.kind === "keep") {
         pendingReason.current = null;
         const next = result.selection;
@@ -98,10 +103,13 @@ export function ActiveContextProvider({ children }: { children: ReactNode }) {
           activeContextStore.set(next);
         }
       } else if (result.kind === "lost") {
-        const reason = pendingReason.current ?? "CONTEXT";
+        let reason = pendingReason.current ?? "CONTEXT";
         pendingReason.current = null;
+        // Le serveur confirme le statut : texte spécifique, sinon le texte générique du code de refus
+        const unavailableOrg = data.unavailable.find((org) => org.id === result.lostId);
+        if (unavailableOrg) reason = unavailableOrg.status === "SUSPENDED" ? "org_suspended" : "org_archived";
         leaveSelection();
-        setLost({ reason, lostName: result.lostName });
+        setLost({ reason, lostName: result.lostName, lostId: result.lostId });
       } else if (current) {
         leaveSelection(); // profil mémorisé par un autre compte du même appareil : effacé sans alerte
       }
@@ -216,7 +224,7 @@ export function ActiveContextProvider({ children }: { children: ReactNode }) {
       if (!current || current.type !== target.type || current.id !== target.id) return;
       const lostName = current.name;
       leaveSelection();
-      setLost({ reason, lostName });
+      setLost({ reason, lostName, lostId: target.id });
     },
     [leaveSelection],
   );
@@ -225,6 +233,7 @@ export function ActiveContextProvider({ children }: { children: ReactNode }) {
     () => ({
       contexts,
       active,
+      unavailable,
       isLoading: !!userId && query.isPending,
       isError: query.isError,
       refetch: () => void query.refetch(),
@@ -234,7 +243,7 @@ export function ActiveContextProvider({ children }: { children: ReactNode }) {
       lost,
       dismissLost: () => setLost(null),
     }),
-    [contexts, active, userId, query, setActive, switchToPersonal, leaveActive, lost],
+    [contexts, unavailable, active, userId, query, setActive, switchToPersonal, leaveActive, lost],
   );
 
   return (
@@ -252,6 +261,11 @@ export function useActiveContext(): ActiveContextValue {
   const value = useContext(ActiveContextContext);
   if (!value) throw new Error("useActiveContext doit être utilisé dans un ActiveContextProvider");
   return value;
+}
+
+/** Organisations suspendues ou archivées du compte, lues dans la même réponse que `contexts/` (aucune requête de plus). */
+export function useUnavailableOrganizations(): UnavailableOrganization[] {
+  return useContext(ActiveContextContext)?.unavailable ?? [];
 }
 
 /** Profil actif si un fournisseur est monté, sinon undefined (composants affichables hors du fournisseur, comme les rappels). */

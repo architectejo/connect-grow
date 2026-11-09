@@ -9,7 +9,9 @@ import identity from "@/api/__fixtures__/backend-identity.json";
 import { ArchiveOrganizationCard, LeaveOrganizationCard } from "./OrganizationActions";
 
 const leaveActive = vi.fn();
-vi.mock("@/contexts/ActiveContextContext", () => ({ useActiveContext: () => ({ leaveActive }) }));
+const switchToPersonal = vi.fn();
+const activeState = vi.hoisted(() => ({ active: { type: "USER", id: "u" } as { type: string; id: string } }));
+vi.mock("@/contexts/ActiveContextContext", () => ({ useActiveContext: () => ({ leaveActive, switchToPersonal, active: activeState.active }) }));
 const online = vi.hoisted(() => ({ value: true }));
 vi.mock("@/hooks/use-online-status", () => ({ useOnlineStatus: () => online.value }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
@@ -23,6 +25,7 @@ const renderCard = (ui: React.ReactNode) =>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
         <Routes>
           <Route path="/organizations/x" element={ui} />
+          <Route path="/organizations/:id" element={<p>Vue de l'état (page)</p>} />
           <Route path="/profiles" element={<p>Mes profils (page)</p>} />
         </Routes>
       </QueryClientProvider>
@@ -31,6 +34,8 @@ const renderCard = (ui: React.ReactNode) =>
 
 beforeEach(() => {
   leaveActive.mockReset();
+  switchToPersonal.mockReset();
+  activeState.active = { type: "USER", id: "u" };
   online.value = true;
   vi.spyOn(apiClient, "get").mockResolvedValue({ data: { count: 0, next: null, previous: null, results: [] } });
 });
@@ -99,9 +104,24 @@ describe("Archiver l'organisation (propriétaire)", () => {
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Je comprends" }));
     expect(confirm).toBeEnabled();
     fireEvent.click(confirm);
-    expect(await screen.findByText("Mes profils (page)")).toBeInTheDocument();
+    // Archivage voulu : la vue d'état s'affiche, sans alerte « profil perdu »
+    expect(await screen.findByText("Vue de l'état (page)")).toBeInTheDocument();
     expect(post).toHaveBeenCalledWith(`accounts/organizations/${owner.id}/archive/`);
-    expect(leaveActive).toHaveBeenCalledWith({ type: "ORGANIZATION", id: owner.id }, "archived");
+    expect(leaveActive).not.toHaveBeenCalled();
+    expect(switchToPersonal).not.toHaveBeenCalled();
+  });
+
+  it("archiver l'organisation active : retour silencieux au profil personnel (aucune alerte)", async () => {
+    activeState.active = { type: "ORGANIZATION", id: owner.id };
+    vi.spyOn(apiClient, "post").mockResolvedValue({ status: 200, data: { ...owner, status: "ARCHIVED" } });
+    renderCard(<ArchiveOrganizationCard org={owner} />);
+    fireEvent.click(screen.getByRole("button", { name: "Archiver l'organisation" }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Je comprends" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archiver l'organisation" }));
+    await screen.findByText("Vue de l'état (page)");
+    expect(switchToPersonal).toHaveBeenCalledTimes(1);
+    expect(leaveActive).not.toHaveBeenCalled();
   });
 
   it("droit retiré entre-temps (DENY_PERMISSION) : message de rôle, la page reste", async () => {

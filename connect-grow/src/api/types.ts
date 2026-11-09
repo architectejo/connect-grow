@@ -381,6 +381,19 @@ export interface AvailableContext {
   capabilities: string[];
   /** Organisation issue d'un ancien compte entreprise. */
   migrated_from_business: boolean;
+  /** `ACTIVE` dans `results`. Absent (serveur plus ancien) : traité comme `ACTIVE`. */
+  status: OrganizationStatus;
+}
+
+/**
+ * Organisation `SUSPENDED` ou `ARCHIVED` dont le compte est membre actif (L0-09 UX-SUSP, section 3).
+ * Jamais de motif, de date, d'auteur de décision, de NIF ni de liste de membres (règle 10).
+ */
+export interface UnavailableOrganization extends Omit<AvailableContext, "type" | "status" | "role" | "org_type"> {
+  type: "ORGANIZATION";
+  status: "SUSPENDED" | "ARCHIVED";
+  role: OrganizationRole;
+  org_type: OrganizationType;
 }
 
 export interface ContextsResponse {
@@ -388,6 +401,14 @@ export interface ContextsResponse {
   next: string | null;
   previous: string | null;
   results: AvailableContext[];
+  /** Absent = `[]` (serveur plus ancien). */
+  unavailable?: UnavailableOrganization[];
+}
+
+/** Réponse de `contexts/` normalisée par le front : `unavailable` toujours présent, `status` toujours renseigné. */
+export interface ContextsData {
+  results: AvailableContext[];
+  unavailable: UnavailableOrganization[];
 }
 
 // --- Organisations (ADR 0006 §9.2, §17.2, §19.1) ---

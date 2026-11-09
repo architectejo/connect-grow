@@ -2,7 +2,7 @@ import { AxiosError, type AxiosResponse } from "axios";
 import { describe, expect, it } from "vitest";
 import "@/i18n";
 import fr from "@/i18n/locales/fr";
-import { CONTEXT_DENY_CODES, DENY_CODES, describeApiError, isContextDenyCode, isDenyCode, isNetworkError, lostMessageKey, lostReasonFor } from "./api-errors";
+import { CONTEXT_DENY_CODES, DENY_CODES, describeApiError, isContextDenyCode, isDenyCode, isNetworkError, lostMessageKey, lostReasonFor, organizationDeniedKey } from "./api-errors";
 
 const failure = (status: number, data: unknown = {}, headers: Record<string, string> = {}) =>
   new AxiosError(`HTTP ${status}`, String(status), undefined, null, { status, data, headers } as unknown as AxiosResponse);
@@ -72,6 +72,18 @@ describe("messages de profil perdu", () => {
     for (const reason of ["CONTEXT", "RELATION", "SECURITY", "OBJECT_STATE", "left", "archived"] as const) {
       expect(typeof lookup(lostMessageKey(reason))).toBe("string");
     }
+  });
+  it("organisation confirmée suspendue ou archivée : textes dédiés, sans motif", () => {
+    expect(lostMessageKey("org_suspended")).toBe("errors.lost.suspended");
+    expect(lostMessageKey("org_archived")).toBe("errors.lost.archivedByStatus");
+    expect(fr.errors.lost.suspended).toContain("suspendue");
+    expect(fr.errors.deny.SECURITY.lost).not.toMatch(/suspendue/);
+  });
+  it("DENY_SECURITY sans entrée dans unavailable : compte limité, pas une suspension", () => {
+    const error = failure(403, { detail: "x", code: "DENY_SECURITY" });
+    expect(organizationDeniedKey(error)).toBe("org.denied.accountRestricted");
+    expect(organizationDeniedKey(failure(403, { detail: "x", code: "DENY_OBJECT_STATE" }))).toBe("org.denied.archived");
+    expect(organizationDeniedKey(failure(403, { detail: "x", code: "DENY_RELATION" }))).toBe("org.denied.relation");
   });
   it("code DENY_* vers raison", () => {
     expect(lostReasonFor("DENY_OBJECT_STATE")).toBe("OBJECT_STATE");

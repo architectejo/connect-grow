@@ -25,7 +25,8 @@ from .serializers import (
     UserSerializer,
 )
 from .services import (
-    ActingContextMixin, ContactSettingsError, get_acting_context, KycError, decide_kyc_document, get_contact_settings, get_contexts_for_user, get_unavailable_organizations,
+    ActingContextMixin, ContactSettingsError, get_acting_context, KycError, decide_kyc_document, get_contact_settings,
+    get_contexts_for_user, get_unavailable_organizations,
     get_document_for_download,
     revoke_all_sessions, set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
 )
@@ -429,7 +430,9 @@ class ContactPhoneView(_ContactSettingsBase):
     """PUT : définit le numéro de contact (saisi, ou numéro de connexion sur geste explicite, jamais pour une
     organisation) et envoie un code SMS s'il n'est pas vérifié d'emblée. Limites des OTP + réglages."""
 
-    throttle_classes = [ContactSettingsThrottle, OtpRequestIpThrottle, OtpRequestPhoneThrottle, OtpRequestPhoneDailyThrottle]
+    throttle_classes = [
+        ContactSettingsThrottle, OtpRequestIpThrottle, OtpRequestPhoneThrottle, OtpRequestPhoneDailyThrottle,
+    ]
 
     def put(self, request):
         data = self.body(request)

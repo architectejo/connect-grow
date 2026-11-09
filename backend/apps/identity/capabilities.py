@@ -26,9 +26,13 @@ _OWNER_ADMIN = frozenset({ROLE_OWNER, ROLE_ADMIN})
 _NOT_ANALYST = frozenset({ROLE_OWNER, ROLE_ADMIN, ROLE_EDITOR})
 _OWNER = frozenset({ROLE_OWNER})
 
+# Capacité détenue par tous les rôles (seule ouverte sur une organisation suspendue ou archivée) ; sert aussi à joindre
+# toute l'équipe (notifications).
+CAP_ORG_LEAVE = 'org.leave'
+
 CAPABILITIES = {
     'org.view_internal': _ALL,
-    'org.leave': _ALL,
+    CAP_ORG_LEAVE: _ALL,
     'org.edit_profile': _OWNER_ADMIN,
     'org.manage_members': _OWNER_ADMIN,
     'org.manage_roles': _OWNER_ADMIN,

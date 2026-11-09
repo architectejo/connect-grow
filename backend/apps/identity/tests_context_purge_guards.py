@@ -4,11 +4,13 @@ import uuid
 from unittest import mock
 
 from django.contrib import admin
-from django.db import transaction
+from django.db import connection, transaction
+from django.test.utils import CaptureQueriesContext
 from django.test import RequestFactory
 from django.utils import timezone
 
 from apps.common.factories import owner_kwargs
+from apps.messaging.models import Conversation, Message
 from apps.marketplace import services as marketplace_services
 from apps.marketplace.models import ContactEvent, ExchangeProposal, Favorite, Offer, OfferImage
 from apps.moderation.models import AuditLog, Report, Sanction
@@ -19,7 +21,7 @@ from apps.visibility.models import DailyVisibilityCounter, OfferUniqueView
 
 from . import services
 from .admin import UserAdmin
-from .models import ProviderProfile, User
+from .models import Membership, Organization, ProviderProfile, User
 from .tests_context_purge import PurgeBase
 
 
@@ -115,8 +117,9 @@ class DeletionGuardTests(PurgeBase):
 
     def test_admin_refusal_is_audited_without_personal_data(self):
         self.report('user', self.seller.pk)
-        with self.assertRaises(services.OrganizationError):
-            self.model_admin.delete_model(self.request(), self.seller)
+        with mock.patch.object(self.model_admin, 'message_user') as error:
+            self.model_admin.delete_model(self.request(), self.seller)  # pas d'exception, pas de 500
+        self.assertTrue(error.called)
         with mock.patch.object(self.model_admin, 'message_user') as message:
             self.model_admin.delete_queryset(self.request(), User.objects.filter(pk=self.seller.pk))
         self.assertTrue(message.called)
@@ -233,3 +236,95 @@ class FileRemovalTests(PurgeBase):
             self.seller.delete()
         self.assertEqual(self.residue('USER', seller_pk), self.zero())
         self.assertFalse(storage.exists(name))
+
+
+class AuthoredEvidenceTests(PurgeBase):
+    """Avis écrits et messages envoyés par le compte (cascade de clé étrangère) : preuves à conserver."""
+
+    def setUp(self):
+        super().setUp()
+        self.other_offer = self.make_offer(**owner_kwargs(self.buyer))
+
+    def write_review(self):
+        return Review.objects.create(
+            user=self.seller, offer_id=self.other_offer.pk, seller_context_type='USER', seller_context_id=self.buyer.pk,
+            contact_event_id=uuid.uuid4(), contact_channel='MESSAGE', contact_recorded_at=timezone.now(),
+            offer_rating=1, seller_rating=1, content='Avis écrit par le compte supprimé, assez long.',
+        )
+
+    def test_grave_report_on_a_review_written_by_the_account_blocks_deletion(self):
+        review = self.write_review()
+        report = Report.objects.create(
+            target_type='review', target_id=review.pk, reporter=self.buyer, reason='HARCELEMENT',
+        )
+        with self.assertRaises(services.OrganizationError) as caught:
+            with transaction.atomic():
+                self.seller.delete()
+        self.assertEqual(caught.exception.detail.code, 'open_grave_report')
+        report.resolve()
+        self.seller.delete()
+
+    def test_grave_report_on_a_message_sent_by_the_account_blocks_deletion(self):
+        conversation = Conversation.objects.create()
+        conversation.participants.add(self.seller, self.buyer)
+        message = Message.objects.create(conversation=conversation, sender=self.seller, content='Propos signalés')
+        report = Report.objects.create(
+            target_type='message', target_id=message.pk, reporter=self.buyer, reason='HARCELEMENT',
+        )
+        with self.assertRaises(services.OrganizationError) as caught:
+            with transaction.atomic():
+                self.seller.delete()
+        self.assertEqual(caught.exception.detail.code, 'open_grave_report')
+        report.reject()
+        self.seller.delete()
+
+
+class SuspendedOrganizationTests(PurgeBase):
+    def test_sole_owner_of_a_suspended_organization_cannot_be_deleted(self):
+        Membership.objects.filter(user=self.other_owner).delete()
+        Membership.objects.filter(user=self.seller).update(role='OWNER')
+        Organization.objects.filter(pk=self.org.pk).update(status=Organization.STATUS_SUSPENDED)
+        with self.assertRaises(services.OrganizationError) as caught:
+            services.assert_account_removable(self.seller)
+        self.assertEqual(caught.exception.detail.code, 'last_owner_account')
+
+    def test_archived_organization_does_not_block(self):
+        Membership.objects.filter(user=self.other_owner).delete()
+        Membership.objects.filter(user=self.seller).update(role='OWNER')
+        Organization.objects.filter(pk=self.org.pk).update(status=Organization.STATUS_ARCHIVED)
+        services.assert_account_removable(self.seller)
+
+    def test_guard_query_count_does_not_depend_on_the_number_of_organizations(self):
+        def count():
+            with CaptureQueriesContext(connection) as queries:
+                services.assert_account_removable(self.seller)
+            return len(queries)
+
+        Membership.objects.filter(user=self.seller).update(role='OWNER')
+        before = count()
+        for i in range(4):
+            org = Organization.objects.create(name=f'Autre {i}', org_type='ENTREPRISE')
+            Membership.objects.create(organization=org, user=self.seller, role='OWNER')
+            Membership.objects.create(organization=org, user=self.buyer, role='OWNER')
+        self.assertEqual(count(), before)
+
+    def test_last_owner_message_of_a_suspended_organization_explains_the_way_out(self):
+        Membership.objects.filter(user=self.other_owner).delete()
+        Membership.objects.filter(user=self.seller).update(role='OWNER')
+        Organization.objects.filter(pk=self.org.pk).update(status=Organization.STATUS_SUSPENDED)
+        with self.assertRaises(services.OrganizationError) as caught:
+            services.leave_organization(self.seller, self.org.pk)
+        self.assertEqual(caught.exception.detail.code, 'last_owner')
+        self.assertIn('suspendue', str(caught.exception.detail))
+        self.assertIn('support', str(caught.exception.detail))
+        # Organisation active : message général inchangé.
+        Organization.objects.filter(pk=self.org.pk).update(status=Organization.STATUS_ACTIVE)
+        with self.assertRaises(services.OrganizationError) as general:
+            services.leave_organization(self.seller, self.org.pk)
+        self.assertEqual(str(general.exception.detail), "Une organisation doit garder au moins un propriétaire.")
+
+
+class IndexTests(PurgeBase):
+    def test_viewer_key_is_indexed_with_an_explicit_length(self):
+        self.assertIn('viewer_key', [f for index in OfferUniqueView._meta.indexes for f in index.fields])
+        self.assertEqual(OfferUniqueView._meta.get_field('viewer_key').max_length, 64)

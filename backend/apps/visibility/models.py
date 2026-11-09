@@ -133,3 +133,5 @@ class OfferUniqueView(BaseModel):
         constraints = [
             models.UniqueConstraint(fields=['offer_id', 'date', 'viewer_key'], name='uniq_unique_view_offer_day_viewer'),
         ]
+        # Purge des vues d'un compte supprimé (T9-3) : recherche par visiteur, sans parcourir toute la table.
+        indexes = [models.Index(fields=['viewer_key'], name='visib_uview_viewer_key')]

@@ -15,18 +15,20 @@ import unicodedata
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files import File
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.exceptions import ErrorDetail
 
 from apps.common.contexts import (
-    CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER, DENY_OBJECT_STATE, DENY_PERMISSION, DENY_RELATION, DENY_SECURITY, ContextDenied,
+    CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER, DENY_OBJECT_STATE, DENY_PERMISSION, DENY_RELATION,
+    DENY_SECURITY, ContextDenied,
 )
 from apps.common.exception_handler import CodedAPIException
 from apps.common.images import reencode_image, validate_image_pixels, validate_image_upload_size
 from apps.common.utils import parse_uuid
 from apps.moderation import services as moderation_services
-from apps.moderation.services import is_user_restricted, record_audit
+from apps.moderation.services import record_audit
 from apps.platform_core.services import publish_event
 
 from . import capabilities
@@ -62,7 +64,16 @@ class OrganizationError(CodedAPIException):
         super().__init__(detail, code, status_code)
 
 
-def _last_owner_error():
+def _last_owner_error(organization=None):
+    """Refus `last_owner`. Pour une organisation SUSPENDED (le seul propriétaire ne peut ni partir ni changer de
+    rôle), le message explique l'issue : attendre la levée de la suspension ou contacter le support."""
+    if organization is not None and organization.status == Organization.STATUS_SUSPENDED:
+        return OrganizationError(
+            "Cette organisation est suspendue et vous en êtes le seul propriétaire : vous ne pouvez pas la quitter ni "
+            "changer votre rôle tant que la suspension n'est pas levée. Attendez la levée de la suspension ou "
+            "contactez le support.",
+            'last_owner',
+        )
     return OrganizationError("Une organisation doit garder au moins un propriétaire.", 'last_owner')
 
 
@@ -129,7 +140,7 @@ def _authorize_member(actor, organization, capability, allow_inactive=False, all
     if membership is None:
         raise ContextDenied(DENY_RELATION, "Vous n'êtes pas membre de cette organisation.")
     _ensure_organization_usable(organization, allow_archived=allow_archived, allow_inactive=allow_inactive)
-    if capability != 'org.leave' and (not actor.is_active or is_user_restricted(actor.pk)):
+    if capability != 'org.leave' and (not actor.is_active or moderation_services.is_user_restricted(actor.pk)):
         raise ContextDenied(DENY_SECURITY, "Votre compte ne permet pas cette action.")
     if not capabilities.role_has_capability(membership.role, capability):
         raise ContextDenied(DENY_PERMISSION, "Votre rôle ne permet pas cette action.")
@@ -147,7 +158,7 @@ def _unavailable_user_error():
 
 def _ensure_target_available(user_id):
     """Cible active et non restreinte, sinon réponse neutre."""
-    if not User.objects.filter(pk=user_id, is_active=True).exists() or is_user_restricted(user_id):
+    if not User.objects.filter(pk=user_id, is_active=True).exists() or moderation_services.is_user_restricted(user_id):
         raise _unavailable_user_error()
 
 
@@ -365,7 +376,7 @@ def create_organization(
             "Vérifiez votre numéro de téléphone avant de créer une organisation.",
             'phone_verification_required', status.HTTP_403_FORBIDDEN,
         )
-    if is_user_restricted(creator.pk):
+    if moderation_services.is_user_restricted(creator.pk):
         raise ContextDenied(DENY_SECURITY, "Votre compte fait l'objet d'une restriction.")
     name, description, nif, wanted_categories = _validate_creation_input(
         name, org_type, description, nif, category_ids, city_id, commune_id, logo,
@@ -615,7 +626,8 @@ def reactivate_organization(actor, organization_id) -> Organization:
             context=(CONTEXT_ORGANIZATION, known.pk),
         )
         raise OrganizationError(
-            "Vous ne pouvez pas réactiver une organisation dont vous êtes ou avez été membre, ou que vous avez créée.",
+            "Vous ne pouvez pas réactiver une organisation dont vous êtes ou avez été membre, "
+            "ou que vous avez créée.",
             'interest_conflict', status.HTTP_403_FORBIDDEN,
         )
     with transaction.atomic():
@@ -668,7 +680,7 @@ def add_member(actor, organization_id, user_id, role) -> Membership:
             raise ContextDenied(DENY_PERMISSION, "Vous ne pouvez pas attribuer ce rôle.")
         # La cible est verrouillée et son plafond vérifié avant toute lecture de ses appartenances.
         target = User.objects.select_for_update().filter(pk=user_id, is_active=True).first()
-        if target is None or is_user_restricted(target.pk):
+        if target is None or moderation_services.is_user_restricted(target.pk):
             raise _unavailable_user_error()
         try:
             _ensure_under_limit(target.pk)
@@ -706,7 +718,7 @@ def _apply_role_change(actor, organization, membership, new_role, audit_action='
     )
     membership.role = new_role
     if old_role == ROLE_OWNER and count_active_owners(organization.pk) < 1:
-        raise _last_owner_error()
+        raise _last_owner_error(organization)
     _audit_membership(actor, audit_action, organization, membership, old_role, new_role)
     _publish_membership_change(organization, membership, CHANGE_ROLE_CHANGED, old_role, new_role, actor)
     return membership
@@ -769,7 +781,7 @@ def _end_membership(actor, organization, membership, end_reason, audit_action):
     # Une organisation archivée n'a plus de vie active : son dernier propriétaire peut la quitter (tracé).
     if (old_role == ROLE_OWNER and organization.status != Organization.STATUS_ARCHIVED
             and count_active_owners(organization.pk) < 1):
-        raise _last_owner_error()
+        raise _last_owner_error(organization)
     membership.status, membership.end_reason, membership.ended_at = Membership.STATUS_REVOKED, end_reason, now
     _audit_membership(actor, audit_action, organization, membership, old_role, None)
     _publish_membership_change(organization, membership, CHANGE_REVOKED, old_role, None, actor)
@@ -803,41 +815,54 @@ def leave_organization(user, organization_id) -> Membership:
 
 def assert_account_removable(user):
     """Refuse la suppression définitive d'un compte (point unique : `UserAdmin`, récepteur `pre_delete`) :
-    - 409 `last_owner_account` : seul propriétaire ACTIF d'une organisation active (elle deviendrait orpheline) ;
+    - 409 `last_owner_account` : seul propriétaire ACTIF d'une organisation active OU suspendue (elle deviendrait
+      orpheline) ;
     - 409 `blocking_sanction` : sanction bloquante en cours (on désactive le compte, l'historique de sanction ne
       doit pas disparaître) ;
-    - 409 `open_grave_report` : signalement ouvert pour motif grave visant le compte, une de ses offres ou un de
-      ses avis reçus (preuves à conserver jusqu'à la clôture).
+    - 409 `open_grave_report` : signalement ouvert pour motif grave visant le compte, une de ses offres, un avis qu'il
+      a reçu OU écrit, un message qu'il a envoyé, ou ceux de son profil prestataire (preuves à conserver jusqu'à la
+      clôture).
     Ne bloque PAS la désactivation (`is_active`). Dette (ADR 0006, section 15) : chemin de secours audité du
-    personnel et sort des organisations orphelines, à livrer avec L1-01 / la suppression de compte."""
-    owned = list(Membership.objects.filter(
+    personnel et sort des organisations orphelines, à livrer avec L1-01 / la suppression de compte. Garde sans
+    verrou (TOCTOU possible entre le contrôle et la suppression, voir ADR §20)."""
+    # Une seule requête : organisations (active ou suspendue) dont ce compte est propriétaire actif, avec leur nombre
+    # de propriétaires actifs.
+    owned = Membership.objects.filter(
         user_id=user.pk, role=ROLE_OWNER, status=Membership.STATUS_ACTIVE,
-        organization__status=Organization.STATUS_ACTIVE,
-    ).values_list('organization_id', flat=True))
-    for organization_id in owned:
-        if count_active_owners(organization_id) <= 1:
-            raise OrganizationError(
-                "Ce compte est le seul propriétaire d'une organisation active : transférez la propriété d'abord.",
-                'last_owner_account',
-            )
-    if is_user_restricted(user.pk):
+    ).values('organization_id')
+    sole = Organization.objects.filter(
+        status__in=(Organization.STATUS_ACTIVE, Organization.STATUS_SUSPENDED), pk__in=owned,
+    ).annotate(
+        owners=Count(
+            'memberships', filter=Q(memberships__role=ROLE_OWNER, memberships__status=Membership.STATUS_ACTIVE),
+        ),
+    )
+    if any(organization.owners <= 1 for organization in sole):
+        raise OrganizationError(
+            "Ce compte est le seul propriétaire d'une organisation active ou suspendue : transférez la propriété "
+            "d'abord.",
+            'last_owner_account',
+        )
+    if moderation_services.is_user_restricted(user.pk):
         raise OrganizationError(
             "Ce compte fait l'objet d'une sanction en cours : désactivez-le plutôt que de le supprimer.",
             'blocking_sanction',
         )
     provider_id = ProviderProfile.objects.filter(user_id=user.pk).values_list('pk', flat=True).first()
-    if moderation_services.has_open_grave_report('user', [user.pk]) or _context_has_grave_evidence(
-        CONTEXT_USER, user.pk,
-    ) or (provider_id is not None and _context_has_grave_evidence(CONTEXT_PROVIDER, provider_id)):
+    if (
+        moderation_services.has_open_grave_report('user', [user.pk])
+        or _context_has_grave_evidence(CONTEXT_USER, user.pk)
+        or (provider_id is not None and _context_has_grave_evidence(CONTEXT_PROVIDER, provider_id))
+        or _author_has_grave_evidence(user.pk)
+    ):
         raise _open_report_error()
 
 
 def assert_provider_removable(profile):
     """Refuse la suppression définitive d'un profil prestataire tant qu'un signalement ouvert pour motif grave vise
-    le profil, une de ses offres ou un de ses avis reçus (409 `open_grave_report`)."""
-    if moderation_services.has_open_grave_report('providerprofile', [profile.pk]) or _context_has_grave_evidence(
-        CONTEXT_PROVIDER, profile.pk,
-    ):
+    une de ses offres ou un de ses avis reçus (409 `open_grave_report`). Il n'existe pas de signalement du profil
+    lui-même : la cible « utilisateur » est contrôlée avec le compte."""
+    if _context_has_grave_evidence(CONTEXT_PROVIDER, profile.pk):
         raise _open_report_error()
 
 
@@ -856,4 +881,15 @@ def _context_has_grave_evidence(context_type, context_id) -> bool:
     return (
         marketplace_services.has_open_grave_report_on_seller(context_type, context_id)
         or reviews_services.has_open_grave_report_on_seller(context_type, context_id)
+    )
+
+
+def _author_has_grave_evidence(user_id) -> bool:
+    """Avis écrits et messages envoyés par le compte sous signalement grave ouvert (ils partent avec lui par cascade
+    de clé étrangère : preuves à conserver)."""
+    from apps.messaging import services as messaging_services
+    from apps.reviews import services as reviews_services
+    return (
+        reviews_services.has_open_grave_report_on_author(user_id)
+        or messaging_services.has_open_grave_report_on_sender(user_id)
     )

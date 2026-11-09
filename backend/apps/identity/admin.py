@@ -11,6 +11,7 @@ Principes (règles 2, 3, 10, 12) :
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin.utils import unquote
+from django.db import transaction
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 
@@ -49,7 +50,6 @@ class UserAdmin(admin.ModelAdmin):
         return False
 
     def save_model(self, request, obj, form, change):
-        from django.db import transaction
 
         from . import services
 
@@ -83,36 +83,39 @@ class UserAdmin(admin.ModelAdmin):
                     return redirect('admin:identity_user_change', obj.pk)
         return super().delete_view(request, object_id, extra_context)
 
+    def _delete_one(self, request, obj):
+        """Garde puis suppression, trace comprise, dans une seule transaction : une suppression qui échoue (refus de
+        la garde, y compris par le récepteur `pre_delete`) ne laisse aucune trace de suppression."""
+        services.assert_account_removable(obj)
+        with transaction.atomic():
+            record_audit(request.user, 'USER_ADMIN_DELETED', target=obj, details=f"Compte supprimé ({obj.pk}).")
+            obj.delete()
+
     def delete_model(self, request, obj):
         try:
-            services.assert_account_removable(obj)
+            self._delete_one(request, obj)
         except services.OrganizationError as exc:
             self._audit_refusal(request, obj, exc)
-            raise
-        record_audit(request.user, 'USER_ADMIN_DELETED', target=obj, details=f"Compte supprimé ({obj.pk}).")
-        super().delete_model(request, obj)
+            self.message_user(request, exc.detail, messages.ERROR)
 
     def delete_queryset(self, request, queryset):
-        # Suppression en masse (action « supprimer la sélection ») : une trace par compte ; les comptes non
-        # supprimables (seul propriétaire, sanction en cours, signalement grave ouvert) sont ignorés et signalés.
-        removable, blocked = [], 0
+        # Suppression en masse (action « supprimer la sélection ») : une transaction et une trace par compte ; les
+        # comptes non supprimables (seul propriétaire, sanction en cours, signalement grave ouvert) sont ignorés et
+        # signalés.
+        blocked = 0
         for obj in queryset:
             try:
-                services.assert_account_removable(obj)
+                self._delete_one(request, obj)
             except services.OrganizationError as exc:
                 self._audit_refusal(request, obj, exc)
                 blocked += 1
-                continue
-            removable.append(obj.pk)
-            record_audit(request.user, 'USER_ADMIN_DELETED', target=obj, details=f"Compte supprimé ({obj.pk}).")
         if blocked:
             self.message_user(
                 request,
-                f"{blocked} compte(s) non supprimé(s) : seul propriétaire d'une organisation active, sanction en "
+                f"{blocked} compte(s) non supprimé(s) : seul propriétaire d'une organisation, sanction en "
                 "cours ou signalement grave ouvert.",
                 messages.WARNING,
             )
-        super().delete_queryset(request, queryset.filter(pk__in=removable))
 
 
 @admin.register(KycDocument)

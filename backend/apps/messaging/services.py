@@ -196,6 +196,14 @@ def get_report_labels(ids) -> dict:
     return {message.id: str(message) for message in Message.objects.filter(id__in=wanted)}
 
 
+def has_open_grave_report_on_sender(user_id) -> bool:
+    """Vrai si un message ENVOYÉ par ce compte fait l'objet d'un signalement ouvert pour motif grave (preuve à ne pas
+    effacer : suppression de compte refusée par `identity`)."""
+    from apps.moderation import services as moderation_services
+
+    return moderation_services.has_open_grave_report('message', Message.objects.filter(sender_id=user_id).values('id'))
+
+
 def get_report_authors(ids) -> dict:
     """Expéditeur de chaque message, `{message: expéditeur}` (une requête)."""
     from apps.common.utils import parse_uuid

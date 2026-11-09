@@ -19,7 +19,8 @@ from .acting import (  # noqa: F401
 
 # Organisations et équipes (ADR 0006) : façade publique, les autres domaines n'importent jamais le sous-module.
 from .organizations import (  # noqa: F401
-    OrganizationError, SUSPENSION_REASONS, add_member, assert_account_removable, assert_provider_removable, archive_organization, change_member_role,
+    OrganizationError, SUSPENSION_REASONS, add_member, assert_account_removable, assert_provider_removable,
+    archive_organization, change_member_role,
     count_active_owners, create_organization, get_active_role, get_identity_settings, get_organization_for_member,
     leave_organization, reactivate_organization, revoke_member, suspend_organization, transfer_ownership,
     update_organization,
@@ -36,6 +37,8 @@ from .verification import (  # noqa: F401
     delete_kyb_document, get_organization_verification, get_verification_summaries, get_verified_claims,
     list_kyb_documents, submit_kyb_document,
 )
+
+from .capabilities import CAP_ORG_LEAVE  # noqa: F401
 
 # Contextes vendeur : fiches publiques, visibilité, destinataires, canaux, état du compte (ADR 0006, 7.1).
 from .sellers import (  # noqa: F401
@@ -405,8 +408,8 @@ class _Owner:
             Organization.objects.select_for_update().filter(pk=self.organization_id).first()
 
     def audit(self, user_action, organization_action, details) -> None:
-        """Compte : actions `contact.*` historiques, cible = le compte. Organisation : `CONTACT_*`, cible = l'organisation,
-        avec le contexte (ADR 0006, A10). Jamais de numéro ni de nom dans `details`."""
+        """Compte : actions `contact.*` historiques, cible = le compte. Organisation : `CONTACT_*`, cible =
+        l'organisation, avec le contexte (ADR 0006, A10). Jamais de numéro ni de nom dans `details`."""
         if self.is_organization:
             from apps.common.contexts import CONTEXT_ORGANIZATION
 
@@ -596,7 +599,8 @@ def set_contact_phone(user, *, phone=None, use_login_phone=False, context=None) 
                 point.save(update_fields=['phone', 'is_verified', 'verified_at', 'updated_at'])
             _revoke_number_channels(owner, 'phone_changed')
             owner.audit(
-                'contact.phone_changed', 'CONTACT_PHONE_CHANGED', "Numéro de contact modifié ; CALL et WHATSAPP désactivés.",
+                'contact.phone_changed', 'CONTACT_PHONE_CHANGED',
+                "Numéro de contact modifié ; CALL et WHATSAPP désactivés.",
             )
             if verified_at_once:
                 owner.audit(
@@ -682,7 +686,9 @@ def set_channel_consent(user, channel, *, enabled, text_version=None, context=No
                 consent.revoked_at = now
                 consent.revoked_reason = ContactConsent.REVOKED_USER
                 consent.save(update_fields=['is_granted', 'revoked_at', 'revoked_reason', 'updated_at'])
-                owner.audit('contact.consent_revoked', 'CONTACT_CHANNEL_CHANGED', f"Canal {channel} retiré (motif : user).")
+                owner.audit(
+                    'contact.consent_revoked', 'CONTACT_CHANNEL_CHANGED', f"Canal {channel} retiré (motif : user).",
+                )
             return
         if channel == 'MESSAGE':
             if not consent.is_granted:
@@ -692,7 +698,9 @@ def set_channel_consent(user, channel, *, enabled, text_version=None, context=No
                 owner.audit('contact.consent_granted', 'CONTACT_CHANNEL_CHANGED', "Canal MESSAGE activé.")
             return
         if not text_version:
-            raise ContactSettingsError("Acceptez le texte de consentement pour activer ce moyen.", 'consent_text_required')
+            raise ContactSettingsError(
+                "Acceptez le texte de consentement pour activer ce moyen.", 'consent_text_required',
+            )
         if text_version != CONTACT_CONSENT_TEXT_VERSION:
             raise ContactSettingsError(
                 "Le texte a changé, relisez-le avant d'accepter.", 'consent_version_mismatch',

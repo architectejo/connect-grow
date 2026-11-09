@@ -16,7 +16,7 @@ UNKNOWN_ORGANIZATION = "votre organisation"
 # Capacités d'`identity` (matrice ADR 0006, section 5), désignées par leur nom stable.
 CAP_REVIEW_REPLY = 'review.reply'
 CAP_OFFER_EDIT = 'offer.edit'
-CAP_LEAVE = 'org.leave'  # détenue par tous les rôles : sert à joindre toute l'équipe
+CAP_LEAVE = identity_services.CAP_ORG_LEAVE  # détenue par tous les rôles : sert à joindre toute l'équipe
 CAP_VERIFICATION_SUBMIT = 'org.verification_submit'
 
 

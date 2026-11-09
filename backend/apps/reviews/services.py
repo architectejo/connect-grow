@@ -143,6 +143,12 @@ def reconcile_seller_flag(user_id, context_type, context_id) -> None:
 
 # --- Purge d'un contexte supprimé (T9-3) -----------------------------------------------
 
+def has_open_grave_report_on_author(user_id) -> bool:
+    """Vrai si un avis ÉCRIT par ce compte fait l'objet d'un signalement ouvert pour motif grave (l'avis partirait avec
+    le compte par cascade : preuve à ne pas effacer)."""
+    return moderation_services.has_open_grave_report('review', Review.objects.filter(user_id=user_id).values('id'))
+
+
 def has_open_grave_report_on_seller(context_type, context_id) -> bool:
     """Vrai si un avis reçu par le contexte vendeur fait l'objet d'un signalement ouvert pour motif grave (preuve à
     ne pas effacer : suppression de compte refusée par `identity`)."""

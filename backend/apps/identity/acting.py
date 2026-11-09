@@ -267,7 +267,7 @@ class AvailableContext:
     photo: Optional[str]  # URL relative du média, ou None
     capabilities: tuple
     migrated_from_business: bool
-    status: str = 'ACTIVE'  # `results` : toujours ACTIVE ; `unavailable` : SUSPENDED ou ARCHIVED
+    status: str  # `results` : toujours ACTIVE ; `unavailable` : SUSPENDED ou ARCHIVED (explicite à la construction)
 
 
 def get_contexts_for_user(user) -> list:
@@ -277,6 +277,7 @@ def get_contexts_for_user(user) -> list:
         type=CONTEXT_USER, id=user.pk, name=user.full_name, role=None, org_type=None,
         photo=user.photo.url if user.photo else None,
         capabilities=tuple(capabilities.capabilities_for_context(CONTEXT_USER)), migrated_from_business=False,
+        status=Organization.STATUS_ACTIVE,
     )]
     provider = ProviderProfile.objects.filter(user_id=user.pk, status=ProviderProfile.STATUS_ACTIVE).first()
     if provider is not None:
@@ -284,7 +285,7 @@ def get_contexts_for_user(user) -> list:
             type=CONTEXT_PROVIDER, id=provider.pk, name=provider.display_name, role=None, org_type=None,
             photo=user.photo.url if user.photo else None,
             capabilities=tuple(capabilities.capabilities_for_context(CONTEXT_PROVIDER)),
-            migrated_from_business=False,
+            migrated_from_business=False, status=Organization.STATUS_ACTIVE,
         ))
     memberships = (
         Membership.objects.filter(
@@ -297,12 +298,9 @@ def get_contexts_for_user(user) -> list:
             type=CONTEXT_ORGANIZATION, id=org.pk, name=org.name, role=membership.role, org_type=org.org_type,
             photo=org.logo.url if org.logo else None,
             capabilities=tuple(capabilities.capabilities_for_context(CONTEXT_ORGANIZATION, membership.role)),
-            migrated_from_business=org.legacy_business_profile_id is not None,
+            migrated_from_business=org.legacy_business_profile_id is not None, status=Organization.STATUS_ACTIVE,
         ))
     return result
-
-
-CAP_ORG_LEAVE = 'org.leave'
 
 
 def get_unavailable_organizations(user) -> list:
@@ -319,7 +317,7 @@ def get_unavailable_organizations(user) -> list:
         AvailableContext(
             type=CONTEXT_ORGANIZATION, id=m.organization.pk, name=m.organization.name, role=m.role,
             org_type=m.organization.org_type, photo=m.organization.logo.url if m.organization.logo else None,
-            capabilities=(CAP_ORG_LEAVE,),
+            capabilities=(capabilities.CAP_ORG_LEAVE,),
             migrated_from_business=m.organization.legacy_business_profile_id is not None,
             status=m.organization.status,
         )

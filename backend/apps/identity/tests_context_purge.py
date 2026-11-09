@@ -379,8 +379,9 @@ class AdminDeletionTests(PurgeBase):
         offer = self.make_offer(**owner_kwargs(self.seller))
         self.populate(offer, 'USER', self.seller.pk)
         before = self.residue('USER', self.seller.pk)
-        with self.assertRaises(services.OrganizationError):
-            self.model_admin.delete_model(self.request(), self.seller)
+        with mock.patch.object(self.model_admin, 'message_user') as message:
+            self.model_admin.delete_model(self.request(), self.seller)  # pas d'exception : message d'erreur
+        self.assertEqual(message.call_args.args[2], 40)  # messages.ERROR
         with mock.patch.object(self.model_admin, 'message_user'):
             self.model_admin.delete_queryset(self.request(), User.objects.filter(pk=self.seller.pk))
         self.assertTrue(User.objects.filter(pk=self.seller.pk).exists())

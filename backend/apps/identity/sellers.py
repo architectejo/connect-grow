@@ -29,6 +29,7 @@ NO_CLAIMS_SUMMARY = {'complete': False, 'label': None}
 
 STATUS_REASON_ACCOUNT_DEACTIVATED = 'account_deactivated'
 STATUS_REASON_ACCOUNT_REACTIVATED = 'account_reactivated'
+STATUS_REASON_CONTEXT_REMOVED = 'context_removed'
 
 _CONTEXT_TYPES = (CONTEXT_USER, CONTEXT_PROVIDER, CONTEXT_ORGANIZATION)
 
@@ -395,6 +396,31 @@ def set_account_active(user_id, active: bool, actor=None) -> bool:
         user.save(update_fields=['is_active'])
         announce_account_status(parsed, bool(active), actor)
     return True
+
+
+def announce_seller_context_removed(context_type, context_id) -> None:
+    """Un contexte personnel (`USER`) ou prestataire (`PROVIDER`) vient d'être supprimé (T9-3, règle 10) : publie
+    d'abord le changement de statut (les offres cessent aussitôt d'être publiques, même si la purge échoue), puis
+    `identity.seller_context_removed` dont les abonnés (marketplace, visibility, reviews) effacent ce qui était
+    rattaché au contexte. Les deux sont diffusés dans la transaction de la suppression ; un abonné en échec est repris
+    par le cron. `ORGANIZATION` n'est JAMAIS purgée par cet événement (refus). Charge utile : type et identifiant
+    seulement. À appeler dans `transaction.atomic()` (récepteurs `post_delete` de `identity.signals`)."""
+    if context_type not in (CONTEXT_USER, CONTEXT_PROVIDER):
+        raise ValueError("Seuls les contextes personnel et prestataire peuvent être purgés.")
+    aggregate_type = 'user' if context_type == CONTEXT_USER else 'provider'
+    publish_event(
+        'identity.seller_context_status_changed', aggregate_type=aggregate_type, aggregate_id=context_id,
+        payload={
+            'context_type': context_type, 'context_id': str(context_id), 'reason': STATUS_REASON_CONTEXT_REMOVED,
+            'actor_id': None,
+        },
+        deliver_now=True,
+    )
+    publish_event(
+        'identity.seller_context_removed', aggregate_type=aggregate_type, aggregate_id=context_id,
+        payload={'context_type': context_type, 'context_id': str(context_id)},
+        deliver_now=True,
+    )
 
 
 def announce_account_status(user_id, active: bool, actor=None) -> None:

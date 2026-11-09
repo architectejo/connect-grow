@@ -6,17 +6,22 @@ UUID (`category_id`, `commune_id`) et lus via `apps.catalog.services` ; seul le 
 est une clé étrangère (vers l'utilisateur). La logique métier (cycle de vie, score) est
 dans `services.py`.
 """
+import logging
 from datetime import timedelta
 
 from django.conf import settings
 from django.core.validators import MaxLengthValidator, MaxValueValidator, MinLengthValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils import timezone
 
 from apps.common.contexts import ALL_CONTEXT_CHOICES
 from apps.common.images import sanitize_uploaded_field, validate_image_pixels, validate_image_upload_size
 from apps.common.models import BaseModel, SingletonSettingsModel
 
+
+logger = logging.getLogger(__name__)
 
 # Garde-fou contre les valeurs absurdes (saisie erronée) ; pas une règle commerciale.
 MAX_STOCK = 1_000_000
@@ -229,6 +234,31 @@ class OfferImage(BaseModel):
 
     def __str__(self):
         return f"Photo de {self.offer_id} (#{self.order})"
+
+
+def _delete_file_after_commit(stored_file, label):
+    """Le fichier disparaît avec sa ligne (suppression directe, en cascade ou purge de contexte, T9-3), une fois la
+    transaction validée : un retour arrière ne perd jamais de fichier. Un échec disque est journalisé, jamais remonté."""
+    if not stored_file or not stored_file.name:
+        return
+
+    def remove():
+        try:
+            stored_file.delete(save=False)
+        except OSError:
+            logger.exception("Suppression du fichier de %s impossible.", label)
+
+    transaction.on_commit(remove)
+
+
+@receiver(post_delete, sender=Offer, dispatch_uid='marketplace.delete_offer_main_image')
+def delete_offer_main_image(sender, instance, **kwargs):
+    _delete_file_after_commit(instance.main_image, f"l'offre {instance.pk}")
+
+
+@receiver(post_delete, sender=OfferImage, dispatch_uid='marketplace.delete_offer_gallery_image')
+def delete_offer_gallery_image(sender, instance, **kwargs):
+    _delete_file_after_commit(instance.image, f"la photo {instance.pk}")
 
 
 class Favorite(BaseModel):

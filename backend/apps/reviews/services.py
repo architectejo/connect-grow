@@ -16,11 +16,12 @@ from django.db import IntegrityError, transaction
 from django.db.models import Count, F, Q, Sum
 from django.utils import timezone
 
-from apps.common.contexts import CONTEXT_USER, DENY_RELATION, ContextDenied
+from apps.common.contexts import CONTEXT_PROVIDER, CONTEXT_USER, DENY_RELATION, ContextDenied
 from apps.common.utils import parse_uuid, seconds_until_next_day
 from apps.identity import services as identity_services
 from apps.marketplace import services as marketplace_services
 from apps.moderation import services as moderation_services
+from apps.platform_core.registry import PermanentEventError
 from apps.platform_core.services import publish_event
 
 from .models import DeletedReviewMark, Review, ReviewDailyCount, ReviewSettings
@@ -138,6 +139,26 @@ def reconcile_seller_flag(user_id, context_type, context_id) -> None:
         rows.exclude(pk=latest).filter(counts_for_seller=True).update(counts_for_seller=False)
         if latest is not None:
             rows.filter(pk=latest, counts_for_seller=False).update(counts_for_seller=True)
+
+
+# --- Purge d'un contexte supprimé (T9-3) -----------------------------------------------
+
+def purge_seller_context(context_type, context_id) -> int:
+    """Efface les avis REÇUS par un contexte vendeur supprimé (`USER` ou `PROVIDER`), réponses comprises. Choix : la
+    suppression, pas l'anonymisation. Un avis note un contexte précis (règle 4) ; sans ce contexte il n'a plus de sujet
+    et son texte (écrit par un tiers, à propos d'une personne) n'a plus de finalité (règle 10). Les avis RÉDIGÉS par le
+    compte partent déjà avec lui (clé étrangère `Review.user`). Les avis d'une organisation ne sont jamais touchés.
+    Idempotent. Journalise sans donnée personnelle si des avis existaient. Renvoie le nombre d'avis supprimés."""
+    parsed = parse_uuid(context_id)
+    if context_type not in (CONTEXT_USER, CONTEXT_PROVIDER) or parsed is None:
+        raise PermanentEventError("charge utile invalide")
+    with transaction.atomic():
+        deleted, _ = Review.objects.filter(seller_context_type=context_type, seller_context_id=parsed).delete()
+        if deleted:
+            moderation_services.record_audit(
+                None, 'SELLER_CONTEXT_PURGED_REVIEWS', details=f"reviews={deleted}", context=(context_type, parsed),
+            )
+    return deleted
 
 
 # --- Avis croisés ----------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # L0-09 T9 (L0-09h) — Conversion des comptes entreprise puis contraction du modèle
 
-- **Statut :** T9-1 (conversion) et T9-2 (contraction) livrées le 09/11/2026 (voir ADR 0006 §20, « Livraison de T9-2 ») ; T9-3 et F-T9 restent à faire. Plan proposé par architecte-technique ; les points de la section 9 ont été validés par le chef de projet (délégation du client).
+- **Statut :** T9-1 (conversion) et T9-2 (contraction) livrées le 09/11/2026 (voir ADR 0006 §20, « Livraison de T9-2 ») ; T9-3 (purge par contexte) livrée le 09/11/2026 (ADR 0006 §20, « Livraison de T9-3 »). Plan proposé par architecte-technique ; les points de la section 9 ont été validés par le chef de projet (délégation du client).
 - **Date :** 24/10/2026. **Base de départ :** `main` a85a453 (1568 tests backend verts).
 - **Références :** ADR 0006 §2 (D1, D2), §3 (A3, A11), §10 (migrations), §11.4, §15, §17.3, §19.2 à 19.6 ; ADR 0001 (SQLite seul), ADR 0002 (réinitialisation d'octobre), ADR 0003 (outbox) ; CLAUDE.md §4 (règles 1, 3, 10, 12) et §5, §9 (migrations).
 - **Résumé :** la conversion est une **migration de données** (une par domaine, un seul `migrate`), précédée d'un contrôle de pré-vol en lecture seule et suivie d'une **contraction** livrée à part, après accord. Aucune réinitialisation de migrations maintenant (recommandée une seule fois, en fin de projet, avec le passage à MySQL).

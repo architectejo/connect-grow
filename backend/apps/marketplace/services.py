@@ -532,6 +532,39 @@ def delete_offers(queryset) -> int:
     return len(ids)
 
 
+def purge_seller_context(context_type, context_id) -> dict:
+    """Purge d'un contexte vendeur supprimé (`USER` ou `PROVIDER`, T9-3, règle 10) : ses offres (corbeille comprise),
+    photos (fichiers effacés après validation), favoris, contacts et propositions d'échange reçus, puis les
+    compteurs et vues uniques de ces offres. Les offres sont d'abord masquées (`seller_is_public`) dans la même
+    transaction. Idempotent : sans offre, ne fait rien. `ORGANIZATION` est refusée (une organisation n'est jamais
+    purgée automatiquement). Journalise sans donnée personnelle (type, identifiant, comptages) si quelque chose a été
+    effacé. Renvoie les comptages."""
+    if context_type not in (CONTEXT_USER, CONTEXT_PROVIDER):
+        raise PermanentEventError("contexte non purgeable")
+    parsed = parse_uuid(context_id)
+    if parsed is None:
+        raise PermanentEventError("charge utile invalide")
+    with transaction.atomic():
+        offers = Offer.objects.filter(seller_context_type=context_type, seller_context_id=parsed)
+        offers.exclude(seller_is_public=False).update(seller_is_public=False)
+        ids = list(offers.values_list('id', flat=True))
+        counts = {
+            'offers': len(ids),
+            'images': OfferImage.objects.filter(offer_id__in=ids).count(),
+            'favorites': Favorite.objects.filter(offer_id__in=ids).count(),
+            'contacts': ContactEvent.objects.filter(offer_id__in=ids).count(),
+            'exchanges': ExchangeProposal.objects.filter(offer_id__in=ids).count(),
+        }
+        delete_offers(Offer.objects.filter(id__in=ids))
+        if ids:
+            record_audit(
+                None, 'SELLER_CONTEXT_PURGED_MARKETPLACE',
+                details="; ".join(f"{key}={value}" for key, value in counts.items()),
+                context=(context_type, parsed),
+            )
+    return counts
+
+
 def purge_expired_trash(retention_days: Optional[int] = None) -> int:
     retention_days = MarketplaceSettings.get_solo().trash_retention_days if retention_days is None else retention_days
     cutoff = timezone.now() - timedelta(days=retention_days)

@@ -13,6 +13,10 @@ from django.db import transaction
 from django.db.models import F, Sum
 from django.utils import timezone
 
+from apps.common.contexts import CONTEXT_PROVIDER, CONTEXT_USER
+from apps.common.utils import parse_uuid
+from apps.moderation.services import record_audit
+from apps.platform_core.registry import PermanentEventError
 from apps.platform_core.services import publish_event
 
 from .models import DailyVisibilityCounter, OfferUniqueView, RankingSettings, VisibilitySettings
@@ -234,3 +238,21 @@ def delete_offer_data(offer_ids: Iterable) -> None:
         return
     DailyVisibilityCounter.objects.filter(offer_id__in=ids).delete()
     OfferUniqueView.objects.filter(offer_id__in=ids).delete()
+
+
+def purge_seller_context(context_type, context_id) -> int:
+    """Efface les compteurs journaliers d'un contexte vendeur supprimé (T9-3, règle 10) ; les vues uniques de ses
+    offres partent avec les offres (`delete_offer_data`). Idempotent. Journalise sans donnée personnelle si des lignes
+    existaient. Renvoie le nombre de compteurs supprimés."""
+    parsed = parse_uuid(context_id)
+    if context_type not in (CONTEXT_USER, CONTEXT_PROVIDER) or parsed is None:
+        raise PermanentEventError("charge utile invalide")
+    with transaction.atomic():
+        deleted, _ = DailyVisibilityCounter.objects.filter(
+            seller_context_type=context_type, seller_context_id=parsed,
+        ).delete()
+        if deleted:
+            record_audit(
+                None, 'SELLER_CONTEXT_PURGED_VISIBILITY', details=f"counters={deleted}", context=(context_type, parsed),
+            )
+    return deleted

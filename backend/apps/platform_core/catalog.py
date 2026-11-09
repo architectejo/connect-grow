@@ -28,6 +28,10 @@ _TYPES = (
     EventType('identity.membership_changed'),
     # Abonnés : `marketplace.sync_seller_visibility` (T5a) ; `notifications.notify_organization_status` (T6).
     EventType('identity.seller_context_status_changed'),
+    # T9-3 : un compte (contexte `USER`) ou un profil prestataire (`PROVIDER`) est supprimé ; jamais `ORGANIZATION`.
+    # Charge utile : `context_type`, `context_id`, aucune donnée personnelle. Abonnés : `marketplace.purge_seller_context`,
+    # `visibility.purge_seller_context`, `reviews.purge_seller_context`.
+    EventType('identity.seller_context_removed'),
     # Identité d'une organisation modifiée (T8) : noms de champs seulement, aucune valeur.
     EventType('identity.organization_updated', no_subscriber=True),
     # Émetteur : `decide_kyc_document` (T4) ; abonné `notifications.notify_kyb_decision` (T6).

@@ -47,7 +47,7 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 
 | ID | Tâche | Agents | Statut | Réf. CDC / client |
 |---|---|---|---|---|
-| L1-01 | Organisations : création, revendication, invitation, membres et rôles | dev-backend, dev-frontend | À faire | §3.1 — IAM-005/006 |
+| L1-01 | Organisations : création, revendication, invitation, membres et rôles | dev-backend, dev-frontend | En cours (analyse, ADR 0008, contrat, spec d'écran D1 et B1 endpoints d'équipe faits, 1865 tests backend ; F1 en cours ; restent B2a/B2b invitations, B4, F2, F3, S2, recette ; revendication L1-01i/j/l bloquée par les questions client, voir `questions.md`) | §3.1 — IAM-005/006 |
 | L1-02 | Vérification KYB des organisations avec badge précis | dev-backend, dev-frontend, auditeur-securite | À faire | §3.1 — TRU-003 |
 | L1-03 | Page publique d'organisation façon Facebook (onglets, couverture, abonnés) | designer-ux, dev-backend, dev-frontend | À faire | §3.2 — ORG-001 |
 | L1-04 | Profil public prestataire individuel | designer-ux, dev-frontend | À faire | §3.2 — ORG-002 |

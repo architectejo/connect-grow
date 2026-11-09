@@ -16,7 +16,7 @@ export function isCacheableApiContent({ url, request }: { url: URL; request: Req
   if (/\/accounts\/(organizations\/[^/]+|provider|contexts)(\/|$)/.test(url.pathname)) return false;
   // Lectures publiques : offres, profils publics de vendeurs, liste (seule) des organisations
   return (
-    /\/api\/(v1\/)?marketplace\/(posts|sellers)\//.test(url.pathname) || /\/api\/(v1\/)?accounts\/organizations\/$/.test(url.pathname)
+    /\/api\/v1\/marketplace\/(posts|sellers)\//.test(url.pathname) || /\/api\/v1\/accounts\/organizations\/$/.test(url.pathname)
   );
 }
 

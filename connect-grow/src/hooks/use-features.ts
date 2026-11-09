@@ -5,8 +5,8 @@ import { API_URL } from "@/config/env";
 
 export const featuresKeys = { all: ["config", "features"] as const };
 
-/** Le point d'entrée est hors /api/v1/ : /api/config/features/ (contrat L0-14). */
-export const FEATURES_URL = `${API_URL.replace(/v\d+\/$/, "")}config/features/`;
+/** `config/features/` vit sous le préfixe unique /api/v1/ (L0-11). */
+export const FEATURES_URL = `${API_URL}config/features/`;
 
 /** Durée de fraîcheur alignée sur le Cache-Control du serveur (max-age=60). */
 export const FEATURES_STALE_TIME_MS = 60_000;

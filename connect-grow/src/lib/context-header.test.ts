@@ -56,9 +56,9 @@ describe("liste blanche des appels « de mon profil » (ADR 0006 §6.4)", () => 
   });
 
   it("reconnaît les URL absolues, le préfixe /api/ et /v1/", () => {
-    expect(isContextScopedRequest("get", "http://localhost:8000/api/marketplace/posts/trash/")).toBe(true);
+    expect(isContextScopedRequest("get", "http://localhost:8000/api/v1/marketplace/posts/trash/")).toBe(true);
     expect(isContextScopedRequest("get", "/api/v1/interactions/conversations/")).toBe(true);
-    expect(isContextScopedRequest("get", "http://localhost:8000/api/config/features/")).toBe(false);
+    expect(isContextScopedRequest("get", "http://localhost:8000/api/v1/config/features/")).toBe(false);
   });
 
   it("URL absente : pas d'en-tête", () => {

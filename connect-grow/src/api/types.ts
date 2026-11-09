@@ -357,7 +357,7 @@ export interface ReceivedReveal {
     offer: { id: Uuid; title: string };
 }
 
-/** GET /api/config/features/ (hors /api/v1/) : fonctionnalités activables par le back-office. */
+/** GET /api/v1/config/features/ (sous /api/v1/) : fonctionnalités activables par le back-office. */
 export interface FeaturesResponse {
   features: { exchange_enabled: boolean };
 }

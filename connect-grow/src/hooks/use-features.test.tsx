@@ -14,13 +14,12 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 describe("useFeatures", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("appelle /api/config/features/ (hors /api/v1/) et expose le troc allumé", async () => {
+  it("appelle /api/v1/config/features/ et expose le troc allumé", async () => {
     const get = vi.spyOn(apiClient, "get").mockResolvedValue({ data: { features: { exchange_enabled: true } } });
     const { result } = renderHook(() => useFeatures(), { wrapper });
     await waitFor(() => expect(result.current.exchangeEnabled).toBe(true));
     expect(get).toHaveBeenCalledWith(FEATURES_URL);
-    expect(FEATURES_URL).toMatch(/\/api\/config\/features\/$/);
-    expect(FEATURES_URL).not.toContain("/v1/");
+    expect(FEATURES_URL).toMatch(/\/api\/v1\/config\/features\/$/);
   });
 
   it("troc éteint quand le serveur répond false", async () => {

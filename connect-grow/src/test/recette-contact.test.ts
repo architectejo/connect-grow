@@ -169,24 +169,24 @@ describe("recette contact : scénario 9 (service worker)", () => {
   const dist = resolve(__dirname, "../../dist/sw.js");
   const url = (path: string) => new URL(path, "http://localhost");
 
-  it("la règle de non-cache couvre reveal et reveals/received, toutes méthodes, avec ou sans /v1", () => {
+  it("la règle de non-cache couvre reveal et reveals/received, toutes méthodes, avec ou sans /v1 (garde-fou)", () => {
     for (const path of [
-      "/api/interactions/contacts/reveal/",
-      "/api/interactions/contacts/reveal",
       "/api/v1/interactions/contacts/reveal/",
-      "/api/interactions/contacts/reveals/received/",
+      "/api/v1/interactions/contacts/reveal",
+      "/api/interactions/contacts/reveal/",
       "/api/v1/interactions/contacts/reveals/received/",
+      "/api/interactions/contacts/reveals/received/",
     ]) {
       expect(isContactRevealRequest({ url: url(path) }), path).toBe(true);
     }
-    expect(isContactRevealRequest({ url: url("/api/accounts/contact-settings/") })).toBe(false);
+    expect(isContactRevealRequest({ url: url("/api/v1/accounts/contact-settings/") })).toBe(false);
   });
 
   it("aucune de ces routes (ni les réglages de contact) n'est mise en cache par la règle de lecture publique", () => {
     for (const path of [
-      "/api/interactions/contacts/reveals/received/?page=2",
-      "/api/interactions/contacts/reveal/",
-      "/api/accounts/contact-settings/",
+      "/api/v1/interactions/contacts/reveals/received/?page=2",
+      "/api/v1/interactions/contacts/reveal/",
+      "/api/v1/accounts/contact-settings/",
     ]) {
       const request = new Request("http://localhost" + path);
       expect(isCacheableApiContent({ url: url(path), request }), path).toBe(false);

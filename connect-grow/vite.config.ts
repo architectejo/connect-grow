@@ -106,7 +106,7 @@ export default defineConfig(({ mode }) => ({
           },
           {
             // Référentiels : changent rarement
-            urlPattern: ({ url }) => /\/api\/(v1\/)?marketplace\/(categories|cities|communes)\//.test(url.pathname),
+            urlPattern: ({ url }) => /\/api\/v1\/marketplace\/(categories|cities|communes)\//.test(url.pathname),
             handler: "StaleWhileRevalidate",
             options: { cacheName: "api-referentiels", expiration: { maxEntries: 20, maxAgeSeconds: 7 * ONE_DAY } },
           },

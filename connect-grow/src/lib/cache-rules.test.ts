@@ -133,6 +133,12 @@ describe("espace d'une organisation, prestataire et pièces : jamais en cache ho
     `/api/v1/accounts/organizations/${ID}/verification/`,
     `/api/v1/accounts/organizations/${ID}/leave/`,
     `/api/v1/accounts/organizations/${ID}/archive/`,
+    // Équipe (L1-01) : noms de personnes, réponses `no-store`
+    `/api/v1/accounts/organizations/${ID}/members/`,
+    `/api/v1/accounts/organizations/${ID}/members/?page=2`,
+    `/api/v1/accounts/organizations/${ID}/members/${ID}/`,
+    `/api/v1/accounts/organizations/${ID}/transfer-ownership/`,
+    `/api/v1/accounts/organizations/${ID}/invitations/`,
     `/api/v1/accounts/organizations/${ID}/`,
     "/api/v1/accounts/organizations/limits/",
     "/api/v1/accounts/provider/",
@@ -154,6 +160,18 @@ describe("espace d'une organisation, prestataire et pièces : jamais en cache ho
   it("reste en réseau seul sans v1 et sous une future v2", () => {
     for (const path of [`/api/accounts/organizations/${ID}/internal/`, `/api/v2/accounts/organizations/${ID}/internal/`, "/api/accounts/kyc/documents/", "/api/v2/accounts/kyc/documents/", "/api/v2/accounts/provider/"]) {
       expect(match(path), path).toBe(true);
+    }
+  });
+
+  it("les routes d'équipe sont réseau seul, avec ou sans /v1/ et sous une future v2", () => {
+    for (const path of [
+      `/api/v1/accounts/organizations/${ID}/members/`,
+      `/api/accounts/organizations/${ID}/members/${ID}/`,
+      `/api/v2/accounts/organizations/${ID}/transfer-ownership/`,
+    ]) {
+      expect(match(path), path).toBe(true);
+      expect(call(path), path).toBe(false);
+      expect(call(path, {}, "POST"), path).toBe(false);
     }
   });
 

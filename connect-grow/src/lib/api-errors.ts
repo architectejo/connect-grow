@@ -28,6 +28,16 @@ const BUSINESS_CODES = [
   "invalid_name",
   "invalid_logo",
   "provider_not_found",
+  // Équipe d'une organisation (L1-01, contrat §1.2 à §1.4)
+  "last_effective_owner",
+  "owner_must_be_demoted",
+  "reauthentication_failed",
+  "member_not_found",
+  "user_unavailable",
+  "invalid_transfer",
+  "use_leave",
+  "confirmation_required",
+  "password_required",
 ] as const;
 export type BusinessCode = (typeof BUSINESS_CODES)[number];
 

@@ -481,6 +481,42 @@ export interface OrganizationLimits {
     description_max_length: number;
 }
 
+/**
+ * Membre actif d'une organisation (`organizations/<id>/members/`, L1-01). Liste blanche stricte : nom abrégé seulement,
+ * jamais de téléphone, d'e-mail, de nom complet, de photo ni d'identifiant de compte (règle 10).
+ * `is_last_effective_owner` : `null` si l'appelant n'a pas `org.manage_members`.
+ */
+export interface OrganizationMember {
+    membership_id: Uuid;
+    display_name: string;
+    role: OrganizationRole;
+    joined_at: string;
+    is_self: boolean;
+    is_last_effective_owner: boolean | null;
+}
+
+/** Corps du PATCH d'un rôle : `confirm` et `password` seulement pour une promotion vers OWNER ou la rétrogradation d'un OWNER. */
+export interface ChangeMemberRoleBody {
+    role: OrganizationRole;
+    confirm?: true;
+    password?: string;
+}
+
+/** Rôles que l'acteur peut prendre après un transfert (jamais OWNER). */
+export type TransferNewRole = Exclude<OrganizationRole, "OWNER">;
+
+export interface TransferOwnershipBody {
+    membership_id: Uuid;
+    my_new_role: TransferNewRole;
+    confirm: true;
+    password: string;
+}
+
+export interface TransferOwnershipResult {
+    new_owner: OrganizationMember;
+    me: OrganizationMember;
+}
+
 /** Corps de création/modification : jamais `status`, `id`, `my_role`, ni `org_type` en modification. */
 export interface OrganizationInput {
     name: string;

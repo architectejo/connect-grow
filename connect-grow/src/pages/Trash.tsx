@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Info, RotateCcw, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { Post } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +23,7 @@ import { formatPrice } from "@/lib/format";
 
 /** Corbeille (CDC 3.10) : restauration ou suppression définitive ; purge automatique à 30 jours. */
 const Trash = () => {
+  const { t } = useTranslation();
   const { data: posts = [], isLoading, isError, refetch } = useTrash();
   const { restore, destroy } = usePostLifecycle();
   const [deleting, setDeleting] = useState<Post | null>(null);
@@ -32,12 +34,12 @@ const Trash = () => {
 
   return (
     <AccountShell>
-      <PageHeader title="Corbeille" description="Les annonces supprimées restent ici 30 jours avant d'être effacées définitivement." />
+      <PageHeader title={t("trash.title")} description={t("trash.description")} />
       <ScopeLine className="-mt-4 mb-5 flex items-center gap-1.5 text-sm text-muted-foreground" />
 
       <div className="mb-5 flex items-start gap-3 rounded-xl bg-info/10 p-4 text-sm text-foreground">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden />
-        Les avis et conversations liés à une annonce supprimée sont conservés.
+        {t("trash.keptNote")}
       </div>
 
       {isLoading ? (
@@ -49,7 +51,7 @@ const Trash = () => {
       ) : isError ? (
         <ErrorState onRetry={() => refetch()} />
       ) : posts.length === 0 ? (
-        <EmptyState icon={Trash2} title="La corbeille est vide" description="Les annonces que vous supprimez apparaîtront ici." />
+        <EmptyState icon={Trash2} title={t("trash.emptyTitle")} description={t("trash.emptyText")} />
       ) : (
         <ul className="space-y-3">
           {posts.map((post) => (
@@ -69,14 +71,14 @@ const Trash = () => {
                   onClick={() => restore.mutate(post.id)}
                   disabled={restore.isPending && restore.variables === post.id}
                 >
-                  <RotateCcw aria-hidden /> Restaurer
+                  <RotateCcw aria-hidden /> {t("common.restore")}
                 </Button>
                 <Button
                   variant="ghost"
                   className="flex-1 text-destructive hover:bg-destructive/10 hover:text-destructive sm:flex-none"
                   onClick={() => setDeleting(post)}
                 >
-                  <Trash2 aria-hidden /> Supprimer
+                  <Trash2 aria-hidden /> {t("common.delete")}
                 </Button>
               </div>
               )}
@@ -88,18 +90,18 @@ const Trash = () => {
       <AlertDialog open={!!deleting} onOpenChange={(open) => !open && setDeleting(null)}>
         <AlertDialogContent className="rounded-2xl">
           <AlertDialogHeader>
-            <AlertDialogTitle>Supprimer définitivement ?</AlertDialogTitle>
+            <AlertDialogTitle>{t("trash.deleteTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              « {deleting?.title} » sera effacée pour de bon, avec ses photos. Cette action est irréversible.
+              {t("trash.deleteText", { title: deleting?.title })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => deleting && destroy.mutate(deleting.id)}
             >
-              Supprimer définitivement
+              {t("trash.deleteConfirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

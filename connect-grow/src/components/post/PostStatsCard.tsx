@@ -1,11 +1,13 @@
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { TrendingUp } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { Uuid } from "@/api/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePostStats } from "@/hooks/use-marketplace";
 
 /** Vues des 30 derniers jours, visibles uniquement par le vendeur de l'annonce. */
 export function PostStatsCard({ postId }: { postId: Uuid }) {
+  const { t } = useTranslation();
   const { data: history = [], isLoading } = usePostStats(postId, true);
   const total = history.reduce((sum, point) => sum + point.views, 0);
 
@@ -14,13 +16,13 @@ export function PostStatsCard({ postId }: { postId: Uuid }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 id="stats-titre" className="flex items-center gap-2 text-lg font-bold">
-            <TrendingUp className="h-5 w-5 text-primary" aria-hidden /> Visibilité de votre annonce
+            <TrendingUp className="h-5 w-5 text-primary" aria-hidden /> {t("dashboardPage.postStats.title")}
           </h2>
-          <p className="text-sm text-muted-foreground">30 derniers jours · visible par vous seul</p>
+          <p className="text-sm text-muted-foreground">{t("dashboardPage.postStats.subtitle")}</p>
         </div>
         <p className="text-right">
           <span className="block font-display text-2xl font-extrabold tabular-nums">{total}</span>
-          <span className="text-xs text-muted-foreground">vues</span>
+          <span className="text-xs text-muted-foreground">{t("dashboardPage.chart.views").toLowerCase()}</span>
         </p>
       </div>
 
@@ -29,7 +31,7 @@ export function PostStatsCard({ postId }: { postId: Uuid }) {
           <Skeleton className="h-full w-full rounded-xl" />
         ) : history.length === 0 ? (
           <p className="flex h-full items-center justify-center rounded-xl bg-muted text-sm text-muted-foreground">
-            Pas encore de vues enregistrées.
+            {t("dashboardPage.postStats.empty")}
           </p>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -51,7 +53,7 @@ export function PostStatsCard({ postId }: { postId: Uuid }) {
                   borderRadius: 12,
                   color: "hsl(var(--popover-foreground))",
                 }}
-                formatter={(value: number) => [`${value} vue${value > 1 ? "s" : ""}`, ""]}
+                formatter={(value: number) => [t("post.views", { count: value }), ""]}
                 separator=""
               />
               <Area type="monotone" dataKey="views" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#viewsFill)" />

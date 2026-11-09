@@ -4,6 +4,8 @@ import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Loader2, Mail, Smartphone } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import i18n from "@/i18n";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +22,7 @@ const schema = z
     method: z.enum(["phone", "email"]),
     phone: z.string(),
     email: z.string(),
-    password: z.string().min(1, "Saisissez votre mot de passe."),
+    password: z.string().min(1, i18n.t("validation.passwordRequired")),
   })
   .superRefine((values, ctx) => {
     const result = values.method === "phone" ? localPhoneSchema.safeParse(values.phone) : emailSchema.safeParse(values.email);
@@ -30,11 +32,12 @@ const schema = z
 type FormValues = z.infer<typeof schema>;
 
 const methods = [
-  { value: "phone" as const, label: "Téléphone", icon: Smartphone },
-  { value: "email" as const, label: "E-mail", icon: Mail },
+  { value: "phone" as const, labelKey: "authForm.phone", icon: Smartphone },
+  { value: "email" as const, labelKey: "authForm.email", icon: Mail },
 ];
 
 const Login = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const next = safeNext(searchParams.get("next"));
@@ -67,44 +70,44 @@ const Login = () => {
           ? { phone: toE164(values.phone), password: values.password }
           : { email: values.email.trim(), password: values.password },
       );
-      toast.success(`Bon retour, ${user.full_name.split(" ")[0]} !`);
+      toast.success(t("authForm.login.welcomeBack", { name: user.full_name.split(" ")[0] }));
       navigate(next, { replace: true });
     } catch (error) {
       const status = (error as { response?: { status?: number } })?.response?.status;
       setGeneralError(
         status === 401
-          ? "Identifiant ou mot de passe incorrect."
-          : parseApiErrors(error).general ?? "Connexion impossible pour le moment. Réessayez.",
+          ? t("authForm.login.invalid")
+          : parseApiErrors(error).general ?? t("authForm.login.failed"),
       );
     }
   };
 
   return (
     <AuthLayout
-      title="Bon retour parmi nous"
-      description="Connectez-vous pour contacter les vendeurs, enregistrer vos favoris et publier."
+      title={t("authForm.login.title")}
+      description={t("authForm.login.description")}
       footer={
         <>
-          Pas encore de compte ?{" "}
+          {t("authForm.login.noAccount")}{" "}
           <Link to={`/register${next !== "/dashboard" ? `?next=${encodeURIComponent(next)}` : ""}`} className="font-semibold text-primary hover:underline">
-            Créer un compte
+            {t("authForm.login.createAccount")}
           </Link>
         </>
       }
     >
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
         <MethodToggle<Method>
-          label="Se connecter avec"
+          label={t("authForm.login.loginWith")}
           value={method}
           onChange={(value) => {
             setValue("method", value);
             setGeneralError(undefined);
           }}
-          options={methods}
+          options={methods.map(({ labelKey, ...rest }) => ({ ...rest, label: t(labelKey) }))}
         />
 
         {method === "phone" ? (
-          <Field label="Numéro de téléphone" htmlFor="phone" error={errors.phone?.message}>
+          <Field label={t("authForm.phoneLabel")} htmlFor="phone" error={errors.phone?.message}>
             <Controller
               control={control}
               name="phone"
@@ -122,12 +125,12 @@ const Login = () => {
             />
           </Field>
         ) : (
-          <Field label="Adresse e-mail" htmlFor="email" error={errors.email?.message}>
+          <Field label={t("authForm.emailLabel")} htmlFor="email" error={errors.email?.message}>
             <Input
               id="email"
               type="email"
               autoComplete="email"
-              placeholder="nom@exemple.com"
+              placeholder={t("authForm.emailPlaceholder")}
               className={fieldInputClass}
               autoFocus
               {...errorProps("email", errors.email?.message)}
@@ -137,12 +140,12 @@ const Login = () => {
         )}
 
         <Field
-          label="Mot de passe"
+          label={t("authForm.passwordLabel")}
           htmlFor="password"
           error={errors.password?.message}
           aside={
             <Link to="/forgot-password" className="text-sm font-semibold text-primary hover:underline">
-              Mot de passe oublié ?
+              {t("authForm.login.forgot")}
             </Link>
           }
         >
@@ -159,7 +162,7 @@ const Login = () => {
 
         <Button type="submit" size="lg" className="w-full shadow-glow" disabled={isSubmitting}>
           {isSubmitting && <Loader2 className="animate-spin" aria-hidden />}
-          Se connecter
+          {t("authForm.login.submit")}
         </Button>
       </form>
     </AuthLayout>

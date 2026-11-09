@@ -5,8 +5,6 @@ import { useFeatures } from "@/hooks/use-features";
 import { useCategories, useCities } from "@/hooks/use-marketplace";
 import type { FilterKey } from "./use-post-filters";
 
-const CONDITION_LABELS: Record<string, string> = { NEUF: "Neuf", OCCASION: "Occasion", RECONDITIONNE: "Reconditionné" };
-
 interface ActiveFiltersProps {
   filters: PostFilters;
   onChange: (patch: Partial<Record<FilterKey, string | undefined>>) => void;
@@ -24,11 +22,11 @@ export function ActiveFilters({ filters, onChange, onReset }: ActiveFiltersProps
 
   if (filters.search) chips.push({ key: "search", label: `« ${filters.search} »`, clear: { search: undefined } });
   if (filters.category) {
-    const name = categories.find((c) => c.id === filters.category)?.name ?? "Catégorie";
+    const name = categories.find((c) => c.id === filters.category)?.name ?? t("marketplace.active.category");
     chips.push({ key: "category", label: name, clear: { category: undefined } });
   }
   if (filters.commune) {
-    const name = cities.flatMap((city) => city.communes).find((c) => c.id === filters.commune)?.name ?? "Commune";
+    const name = cities.flatMap((city) => city.communes).find((c) => c.id === filters.commune)?.name ?? t("marketplace.active.commune");
     chips.push({ key: "commune", label: name, clear: { commune: undefined } });
   }
   if (filters.price_min || filters.price_max) {
@@ -36,13 +34,13 @@ export function ActiveFilters({ filters, onChange, onReset }: ActiveFiltersProps
       filters.price_min && filters.price_max
         ? `${filters.price_min} – ${filters.price_max}`
         : filters.price_min
-          ? `Dès ${filters.price_min}`
-          : `Jusqu'à ${filters.price_max}`;
+          ? t("marketplace.active.from", { value: filters.price_min })
+          : t("marketplace.active.upTo", { value: filters.price_max });
     chips.push({ key: "price", label, clear: { price_min: undefined, price_max: undefined } });
   }
   if (filters.currency) chips.push({ key: "currency", label: filters.currency, clear: { currency: undefined } });
   if (filters.condition)
-    chips.push({ key: "condition", label: CONDITION_LABELS[filters.condition] ?? filters.condition, clear: { condition: undefined } });
+    chips.push({ key: "condition", label: t(`badge.${filters.condition}`, { defaultValue: filters.condition }), clear: { condition: undefined } });
   if (exchangeEnabled && filters.is_exchangeable === "true")
     chips.push({ key: "exchange", label: t("exchange.chip"), clear: { is_exchangeable: undefined } });
 
@@ -56,7 +54,7 @@ export function ActiveFilters({ filters, onChange, onReset }: ActiveFiltersProps
           type="button"
           onClick={() => onChange(chip.clear)}
           className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 py-1.5 pl-3 pr-2 text-sm font-medium text-primary transition-colors hover:bg-primary/15"
-          aria-label={`Retirer le filtre ${chip.label}`}
+          aria-label={t("marketplace.active.remove", { label: chip.label })}
         >
           {chip.label}
           <X className="h-3.5 w-3.5" aria-hidden />
@@ -64,7 +62,7 @@ export function ActiveFilters({ filters, onChange, onReset }: ActiveFiltersProps
       ))}
       {chips.length > 1 && (
         <button type="button" onClick={onReset} className="px-2 text-sm font-semibold text-muted-foreground hover:text-foreground">
-          Tout effacer
+          {t("marketplace.active.clearAll")}
         </button>
       )}
     </div>

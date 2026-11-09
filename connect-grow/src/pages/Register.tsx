@@ -17,18 +17,19 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useRequestOtp } from "@/hooks/use-otp";
 import { safeNext } from "@/lib/auth-paths";
 import { cn } from "@/lib/utils";
+import i18n from "@/i18n";
 import { emailSchema, localPhoneSchema, parseApiErrors, passwordSchema, toE164 } from "@/lib/validation";
 
 type Method = "phone" | "email";
 
 const schema = z
   .object({
-    fullName: z.string().trim().min(2, "Saisissez votre nom complet.").max(255),
+    fullName: z.string().trim().min(2, i18n.t("validation.fullNameRequired")).max(255),
     method: z.enum(["phone", "email"]),
     phone: z.string(),
     email: z.string(),
     password: passwordSchema,
-    acceptTerms: z.boolean().refine(Boolean, "Vous devez accepter les conditions pour continuer."),
+    acceptTerms: z.boolean().refine(Boolean, i18n.t("validation.termsRequired")),
   })
   .superRefine((values, ctx) => {
     const result = values.method === "phone" ? localPhoneSchema.safeParse(values.phone) : emailSchema.safeParse(values.email);
@@ -38,8 +39,8 @@ const schema = z
 type FormValues = z.infer<typeof schema>;
 
 const methods = [
-  { value: "phone" as const, label: "Téléphone", icon: Smartphone },
-  { value: "email" as const, label: "E-mail", icon: Mail },
+  { value: "phone" as const, labelKey: "authForm.phone", icon: Smartphone },
+  { value: "email" as const, labelKey: "authForm.email", icon: Mail },
 ];
 
 // Champs renvoyés par l'API → champs du formulaire
@@ -51,9 +52,10 @@ const API_FIELD_MAP: Record<string, keyof FormValues> = {
 };
 
 function Stepper({ step }: { step: 1 | 2 }) {
-  const steps = ["Votre compte", "Vérification"];
+  const { t } = useTranslation();
+  const steps = [t("authForm.register.stepAccount"), t("authForm.register.stepVerify")];
   return (
-    <ol className="mb-8 flex items-center gap-3" aria-label="Étapes de l'inscription">
+    <ol className="mb-8 flex items-center gap-3" aria-label={t("authForm.register.steps")}>
       {steps.map((label, i) => {
         const index = (i + 1) as 1 | 2;
         const done = index < step;
@@ -146,7 +148,7 @@ const Register = () => {
           mapped = true;
         }
       }
-      setGeneralError(general ?? (mapped ? undefined : "L'inscription a échoué. Vérifiez vos informations."));
+      setGeneralError(general ?? (mapped ? undefined : t("authForm.register.failed")));
       return false;
     }
 
@@ -157,7 +159,7 @@ const Register = () => {
       navigate(next, { replace: true });
     } catch {
       // Compte créé mais connexion automatique impossible : l'utilisateur se connecte lui-même
-      toast.success("Compte créé. Connectez-vous pour continuer.");
+      toast.success(t("authForm.register.createdLogin"));
       navigate("/login", { replace: true });
     } finally {
       setIsCreating(false);
@@ -179,7 +181,7 @@ const Register = () => {
     } catch (error) {
       const { fields, general } = parseApiErrors(error);
       // Réponse neutre côté serveur : aucune indication « numéro déjà utilisé » à ce stade
-      setGeneralError(general ?? fields.phone ?? "L'envoi du code a échoué. Réessayez.");
+      setGeneralError(general ?? fields.phone ?? t("authForm.register.sendFailed"));
     }
   };
 
@@ -190,14 +192,14 @@ const Register = () => {
 
   return (
     <AuthLayout
-      title={step === 1 ? "Créer votre compte" : "Vérifiez votre numéro"}
-      description={step === 1 ? "Gratuit, en moins d'une minute." : undefined}
+      title={step === 1 ? t("authForm.register.title") : t("authForm.register.verifyTitle")}
+      description={step === 1 ? t("authForm.register.description") : undefined}
       footer={
         step === 1 && (
           <>
-            Déjà inscrit ?{" "}
+            {t("authForm.register.alreadyMember")}{" "}
             <Link to="/login" className="font-semibold text-primary hover:underline">
-              Se connecter
+              {t("authForm.register.login")}
             </Link>
           </>
         )
@@ -216,22 +218,22 @@ const Register = () => {
           onSubmit={onOtpSubmit}
           onResend={() =>
             requestOtp.mutateAsync({ phone: toE164(phone), purpose: "REGISTER" }).catch((error) => {
-              setOtpError(parseApiErrors(error).general ?? "L'envoi du code a échoué.");
+              setOtpError(parseApiErrors(error).general ?? t("authForm.register.resendFailed"));
               throw error;
             })
           }
           onChangeNumber={() => setStep(1)}
           isSubmitting={isCreating}
           error={otpError}
-          submitLabel="Vérifier et créer mon compte"
+          submitLabel={t("authForm.register.verifySubmit")}
         />
       ) : (
         <form onSubmit={handleSubmit(onAccountSubmit)} noValidate className="space-y-5">
-          <Field label="Nom complet" htmlFor="fullName" error={errors.fullName?.message}>
+          <Field label={t("authForm.fullName")} htmlFor="fullName" error={errors.fullName?.message}>
             <Input
               id="fullName"
               autoComplete="name"
-              placeholder="Ex. : Grâce Mbuyi"
+              placeholder={t("authForm.fullNamePlaceholder")}
               className={fieldInputClass}
               {...errorProps("fullName", errors.fullName?.message)}
               {...register("fullName")}
@@ -239,12 +241,17 @@ const Register = () => {
           </Field>
 
           <div className="space-y-3">
-            <p className="text-sm font-semibold">S'inscrire avec</p>
-            <MethodToggle<Method> label="S'inscrire avec" value={method} onChange={(value) => setValue("method", value)} options={methods} />
+            <p className="text-sm font-semibold">{t("authForm.register.registerWith")}</p>
+            <MethodToggle<Method>
+              label={t("authForm.register.registerWith")}
+              value={method}
+              onChange={(value) => setValue("method", value)}
+              options={methods.map(({ labelKey, ...rest }) => ({ ...rest, label: t(labelKey) }))}
+            />
           </div>
 
           {method === "phone" ? (
-            <Field label="Numéro de téléphone" htmlFor="phone" error={errors.phone?.message} hint="Nous vous enverrons un code par SMS pour le vérifier.">
+            <Field label={t("authForm.phoneLabel")} htmlFor="phone" error={errors.phone?.message} hint={t("authForm.register.phoneHint")}>
               <Controller
                 control={control}
                 name="phone"
@@ -261,12 +268,12 @@ const Register = () => {
               />
             </Field>
           ) : (
-            <Field label="Adresse e-mail" htmlFor="email" error={errors.email?.message}>
+            <Field label={t("authForm.emailLabel")} htmlFor="email" error={errors.email?.message}>
               <Input
                 id="email"
                 type="email"
                 autoComplete="email"
-                placeholder="nom@exemple.com"
+                placeholder={t("authForm.emailPlaceholder")}
                 className={fieldInputClass}
                 {...errorProps("email", errors.email?.message)}
                 {...register("email")}
@@ -274,7 +281,7 @@ const Register = () => {
             </Field>
           )}
 
-          <Field label="Mot de passe" htmlFor="password" error={errors.password?.message} hint="8 caractères minimum, avec au moins une lettre et un chiffre.">
+          <Field label={t("authForm.passwordLabel")} htmlFor="password" error={errors.password?.message} hint={t("authForm.register.passwordHint")}>
             <PasswordInput
               id="password"
               autoComplete="new-password"
@@ -301,7 +308,7 @@ const Register = () => {
                 )}
               />
               <label htmlFor="acceptTerms" className="text-sm leading-relaxed text-muted-foreground">
-                J'accepte les conditions générales d'utilisation et la politique de confidentialité de Connecte+.
+                {t("authForm.register.acceptTerms")}
               </label>
             </div>
             {errors.acceptTerms && (
@@ -317,7 +324,7 @@ const Register = () => {
 
           <Button type="submit" size="lg" className="w-full shadow-glow" disabled={isSubmitting || isCreating}>
             {(isSubmitting || isCreating) && <Loader2 className="animate-spin" aria-hidden />}
-            {method === "phone" ? "Recevoir le code par SMS" : "Créer mon compte"}
+            {method === "phone" ? t("authForm.register.sendCode") : t("authForm.register.submit")}
           </Button>
         </form>
       )}

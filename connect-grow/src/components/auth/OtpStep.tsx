@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Loader2, MessageSquareText, RotateCcw } from "lucide-react";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { Button } from "@/components/ui/button";
@@ -52,7 +52,7 @@ export function OtpStep({
   onChangeNumber,
   isSubmitting,
   error,
-  submitLabel = "Vérifier",
+  submitLabel,
   children,
   autoSubmit = true,
 }: OtpStepProps) {
@@ -93,7 +93,7 @@ export function OtpStep({
           </span>
           {" "}
           <button type="button" onClick={onChangeNumber} className="font-semibold text-primary hover:underline">
-            Modifier
+            {t("otp.change")}
           </button>
         </p>
       </div>
@@ -109,7 +109,7 @@ export function OtpStep({
           autoComplete="one-time-code"
           inputMode="numeric"
           disabled={isSubmitting || expired}
-          aria-label="Code de vérification"
+          aria-label={t("otp.label")}
           containerClassName="justify-center"
         >
           <InputOTPGroup className="gap-2">
@@ -124,11 +124,13 @@ export function OtpStep({
         </InputOTP>
         <p className="text-center text-sm text-muted-foreground" aria-live="polite">
           {expired ? (
-            <span className="font-medium text-destructive">Le code a expiré. Demandez-en un nouveau.</span>
+            <span className="font-medium text-destructive">{t("otp.expired")}</span>
           ) : (
-            <>
-              Code valable encore <span className="font-semibold tabular-nums text-foreground">{mmss(validity)}</span> · 3 essais maximum
-            </>
+            <Trans
+              i18nKey="otp.validFor"
+              values={{ time: mmss(validity) }}
+              components={{ b: <span className="font-semibold tabular-nums text-foreground" /> }}
+            />
           )}
         </p>
       </div>
@@ -139,13 +141,13 @@ export function OtpStep({
 
       <Button type="submit" size="lg" className="w-full" disabled={isSubmitting || expired || code.length < OTP_LENGTH}>
         {isSubmitting && <Loader2 className="animate-spin" aria-hidden />}
-        {submitLabel}
+        {submitLabel ?? t("otp.verify")}
       </Button>
 
       <div className="text-center">
         <Button type="button" variant="ghost" onClick={resend} disabled={cooldown > 0 || resending}>
           {resending ? <Loader2 className="animate-spin" aria-hidden /> : <RotateCcw aria-hidden />}
-          {cooldown > 0 ? `Renvoyer le code dans ${cooldown} s` : "Renvoyer le code"}
+          {cooldown > 0 ? t("otp.resendIn", { seconds: cooldown }) : t("otp.resend")}
         </Button>
       </div>
     </form>

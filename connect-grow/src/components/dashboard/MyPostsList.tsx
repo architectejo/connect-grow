@@ -52,20 +52,20 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
       <div className="flex flex-col gap-3 border-b p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div>
           <h2 id="mes-annonces-titre" className="text-lg font-bold">
-            Mes annonces
+            {t("dashboardPage.myPosts.title")}
           </h2>
-          <p className="text-sm text-muted-foreground">{posts.length} annonce{posts.length > 1 ? "s" : ""} en ligne</p>
+          <p className="text-sm text-muted-foreground">{t("dashboardPage.myPosts.online", { count: posts.length })}</p>
         </div>
         {!canEdit && !canDelete && posts.length > 0 && <p className="text-xs text-muted-foreground sm:order-last sm:w-full">{t("scope.readOnlyOffers")}</p>}
         {posts.length > 4 && (
           <label className="relative sm:w-64">
-            <span className="sr-only">Rechercher dans mes annonces</span>
+            <span className="sr-only">{t("dashboardPage.myPosts.searchLabel")}</span>
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Rechercher…"
+              placeholder={t("dashboardPage.myPosts.searchPlaceholder")}
               className="h-10 w-full rounded-lg border bg-background pl-9 pr-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>
@@ -89,10 +89,10 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
       ) : posts.length === 0 ? (
         <EmptyState
           className="m-5"
-          title="Vous n'avez encore rien publié"
+          title={t("dashboardPage.myPosts.emptyTitle")}
           description={
             <>
-              Une annonce gratuite, quelques photos, et les acheteurs de votre commune vous trouvent.
+              {t("dashboardPage.myPosts.emptyText")}
               {otherProfiles && <span className="mt-2 block">{t("emptyOffers.otherProfiles")}</span>}
               {unavailableHint && (
                 <span className="mt-2 block">
@@ -106,7 +106,7 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
               {canPublish && (
                 <Button asChild>
                   <Link to="/create-post">
-                    <Plus aria-hidden /> Publier ma première annonce
+                    <Plus aria-hidden /> {t("dashboardPage.myPosts.publishFirst")}
                   </Link>
                 </Button>
               )}
@@ -126,7 +126,7 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
           }
         />
       ) : filtered.length === 0 ? (
-        <p className="p-8 text-center text-sm text-muted-foreground">Aucune de vos annonces ne contient « {query} ».</p>
+        <p className="p-8 text-center text-sm text-muted-foreground">{t("dashboardPage.myPosts.noMatch", { query })}</p>
       ) : (
         <ul className="divide-y">
           {filtered.map((post) => (
@@ -142,13 +142,13 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
                 <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1">
                     <Eye className="h-3.5 w-3.5" aria-hidden /> {formatCount(post.views_count)}
-                    <span className="sr-only">vues</span>
+                    <span className="sr-only">{t("dashboardPage.myPosts.viewsHidden")}</span>
                   </span>
                   <span className="flex items-center gap-1">
                     <Heart className="h-3.5 w-3.5" aria-hidden /> {post.favorites_count ?? 0}
-                    <span className="sr-only">favoris</span>
+                    <span className="sr-only">{t("dashboardPage.myPosts.favoritesHidden")}</span>
                   </span>
-                  <span>Publiée {formatRelativeDate(post.created_at)}</span>
+                  <span>{t("dashboardPage.myPosts.published", { date: formatRelativeDate(post.created_at) })}</span>
                   {post.status && post.status !== "ACTIVE" && (
                     <span className="font-semibold text-foreground">{t(`post.status.${post.status}`)}</span>
                   )}
@@ -157,7 +157,7 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
 
               <div className="hidden shrink-0 gap-1 sm:flex">
                 {canEdit && (
-                  <Button asChild variant="ghost" size="icon" aria-label={`Modifier « ${post.title} »`}>
+                  <Button asChild variant="ghost" size="icon" aria-label={t("dashboardPage.myPosts.editLabel", { title: post.title })}>
                     <Link to={`/edit-post/${post.id}`}>
                       <Pencil />
                     </Link>
@@ -169,7 +169,7 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
                     size="icon"
                     className="hover:bg-destructive/10 hover:text-destructive"
                     onClick={() => setTrashing(post)}
-                    aria-label={`Mettre « ${post.title} » à la corbeille`}
+                    aria-label={t("dashboardPage.myPosts.trashLabel", { title: post.title })}
                   >
                     <Trash2 />
                   </Button>
@@ -178,27 +178,27 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="shrink-0 sm:hidden" aria-label={`Actions pour « ${post.title} »`}>
+                  <Button variant="ghost" size="icon" className="shrink-0 sm:hidden" aria-label={t("dashboardPage.myPosts.actionsLabel", { title: post.title })}>
                     <MoreVertical />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="rounded-xl">
                   <DropdownMenuItem asChild className="gap-2">
                     <Link to={`/post/${post.id}`}>
-                      <ExternalLink className="h-4 w-4" /> Voir l'annonce
+                      <ExternalLink className="h-4 w-4" /> {t("dashboardPage.myPosts.view")}
                     </Link>
                   </DropdownMenuItem>
                   {canEdit && (
                     <DropdownMenuItem asChild className="gap-2">
                       <Link to={`/edit-post/${post.id}`}>
-                        <Pencil className="h-4 w-4" /> Modifier
+                        <Pencil className="h-4 w-4" /> {t("common.edit")}
                       </Link>
                     </DropdownMenuItem>
                   )}
                   {canDelete && <DropdownMenuSeparator />}
                   {canDelete && (
                     <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onSelect={() => setTrashing(post)}>
-                      <Trash2 className="h-4 w-4" /> Mettre à la corbeille
+                      <Trash2 className="h-4 w-4" /> {t("dashboardPage.myPosts.toTrash")}
                     </DropdownMenuItem>
                   )}
                 </DropdownMenuContent>
@@ -211,18 +211,18 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
       <AlertDialog open={!!trashing} onOpenChange={(open) => !open && setTrashing(null)}>
         <AlertDialogContent className="rounded-2xl">
           <AlertDialogHeader>
-            <AlertDialogTitle>Mettre cette annonce à la corbeille ?</AlertDialogTitle>
+            <AlertDialogTitle>{t("dashboardPage.myPosts.trashTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-                « {trashing?.title} » disparaîtra de la marketplace. Vous pourrez la restaurer depuis la corbeille pendant 30 jours.
+              {t("dashboardPage.myPosts.trashText", { title: trashing?.title })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => trashing && moveToTrash.mutate(trashing.id)}
             >
-              Mettre à la corbeille
+              {t("dashboardPage.myPosts.toTrash")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

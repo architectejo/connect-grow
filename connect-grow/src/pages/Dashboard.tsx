@@ -91,14 +91,14 @@ const Dashboard = () => {
     <AccountShell className="space-y-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-muted-foreground">Tableau de bord</p>
-          <h1 className="mt-1 text-2xl font-extrabold md:text-3xl">Bonjour{firstName ? `, ${firstName}` : ""} 👋</h1>
+          <p className="text-sm font-medium text-muted-foreground">{t("dashboardPage.eyebrow")}</p>
+          <h1 className="mt-1 text-2xl font-extrabold md:text-3xl">{firstName ? t("dashboardPage.greetingNamed", { name: firstName }) : t("dashboardPage.greeting")}</h1>
           <ScopeLine />
         </div>
         {canPublish && (
           <Button asChild className="shadow-glow">
             <Link to="/create-post">
-              <Plus aria-hidden /> Nouvelle annonce
+              <Plus aria-hidden /> {t("dashboardPage.newPost")}
             </Link>
           </Button>
         )}
@@ -108,9 +108,9 @@ const Dashboard = () => {
       {active.type === "ORGANIZATION" && <VerificationBanner organizationId={active.id} />}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-        <StatTile icon={Eye} label="Vues totales" value={formatCount(summary?.total_views)} isLoading={stats.isLoading} />
-        <StatTile icon={CalendarDays} label="Vues aujourd'hui" value={formatCount(summary?.today_views)} isLoading={stats.isLoading} />
-        <StatTile icon={Package} label="Annonces actives" value={String(summary?.active_posts ?? 0)} isLoading={stats.isLoading} />
+        <StatTile icon={Eye} label={t("dashboardPage.totalViews")} value={formatCount(summary?.total_views)} isLoading={stats.isLoading} />
+        <StatTile icon={CalendarDays} label={t("dashboardPage.todayViews")} value={formatCount(summary?.today_views)} isLoading={stats.isLoading} />
+        <StatTile icon={Package} label={t("dashboardPage.activePosts")} value={String(summary?.active_posts ?? 0)} isLoading={stats.isLoading} />
         <StatTile
           icon={Star}
           label={t("rating.dashboardLabel")}

@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Heart, Search } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Post } from "@/api/types";
@@ -11,6 +12,7 @@ import { useToggleFavorite } from "@/hooks/use-marketplace";
 
 /** Liste personnelle des favoris (CDC 3.2). */
 const Favorites = () => {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data: favorites = [], isLoading, isError, refetch } = useFavorites();
   const toggleFavorite = useToggleFavorite();
@@ -26,8 +28,8 @@ const Favorites = () => {
   return (
     <AccountShell>
       <PageHeader
-        title="Mes favoris"
-        description={favorites.length ? `${favorites.length} annonce${favorites.length > 1 ? "s" : ""} enregistrée${favorites.length > 1 ? "s" : ""}` : undefined}
+        title={t("favorites.title")}
+        description={favorites.length ? t("favorites.saved", { count: favorites.length }) : undefined}
       />
       <AlwaysPersonalNote className="-mt-4 mb-5" />
 
@@ -38,12 +40,12 @@ const Favorites = () => {
       ) : favorites.length === 0 ? (
         <EmptyState
           icon={Heart}
-          title="Aucun favori pour l'instant"
-          description="Touchez le cœur d'une annonce pour la retrouver ici et suivre son prix."
+          title={t("favorites.emptyTitle")}
+          description={t("favorites.emptyText")}
           action={
             <Button asChild>
               <Link to="/marketplace">
-                <Search aria-hidden /> Parcourir les annonces
+                <Search aria-hidden /> {t("common.browsePosts")}
               </Link>
             </Button>
           }

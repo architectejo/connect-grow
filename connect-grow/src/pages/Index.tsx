@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { ArrowRight, Plus, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppShell } from "@/components/layout/AppShell";
@@ -14,6 +15,7 @@ const RECOMMENDED_COUNT = 8;
 
 /** Annonces les mieux classées par le classement organique (engagement, récence, proximité). */
 const RecommendedPosts = () => {
+  const { t } = useTranslation();
   const { data: posts = [], isLoading, isError, refetch, isRefetching } = usePosts(
     { ordering: "-visibility_score" },
     RECOMMENDED_COUNT,
@@ -25,13 +27,13 @@ const RecommendedPosts = () => {
       <div className="container">
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Sélection du moment</p>
-            <h2 className="mt-1.5 text-2xl font-extrabold md:text-3xl">Annonces recommandées</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Récentes, appréciées, et publiées par des vendeurs bien notés.</p>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">{t("home.eyebrow")}</p>
+            <h2 className="mt-1.5 text-2xl font-extrabold md:text-3xl">{t("home.recommended")}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{t("home.recommendedHint")}</p>
           </div>
           <Button asChild variant="outline" className="hidden shrink-0 sm:inline-flex">
             <Link to="/marketplace">
-              Tout voir <ArrowRight aria-hidden />
+              {t("common.seeAll")} <ArrowRight aria-hidden />
             </Link>
           </Button>
         </div>
@@ -43,12 +45,12 @@ const RecommendedPosts = () => {
         ) : posts.length === 0 ? (
           <EmptyState
             icon={ShoppingBag}
-            title="Aucune annonce pour l'instant"
-            description="Soyez parmi les premiers vendeurs de Connecte+ et profitez de toute la visibilité."
+            title={t("home.emptyTitle")}
+            description={t("home.emptyText")}
             action={
               <Button asChild>
                 <Link to="/create-post">
-                  <Plus aria-hidden /> Publier une annonce
+                  <Plus aria-hidden /> {t("common.publishPost")}
                 </Link>
               </Button>
             }
@@ -62,7 +64,7 @@ const RecommendedPosts = () => {
             </PostGrid>
             <Button asChild variant="outline" className="mt-6 w-full sm:hidden">
               <Link to="/marketplace">
-                Voir toutes les annonces <ArrowRight aria-hidden />
+                {t("home.seeAll")} <ArrowRight aria-hidden />
               </Link>
             </Button>
           </>

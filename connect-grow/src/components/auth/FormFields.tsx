@@ -1,5 +1,6 @@
 import { forwardRef, useId, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { AlertCircle, Eye, EyeOff } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { normalizeLocalPhone, formatLocalPhone, PHONE_PREFIX, passwordStrength } from "@/lib/validation";
@@ -94,10 +95,10 @@ interface PasswordInputProps extends InputHTMLAttributes<HTMLInputElement> {
   showStrength?: boolean;
 }
 
-const strengthLabels = ["", "Faible", "Moyen", "Bon", "Excellent"];
 const strengthColors = ["bg-muted", "bg-destructive", "bg-warning", "bg-info", "bg-success"];
 
 export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(({ showStrength, className, value, ...props }, ref) => {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const strength = passwordStrength(String(value ?? ""));
   const meterId = useId();
@@ -117,7 +118,7 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(({
           type="button"
           onClick={() => setVisible((v) => !v)}
           className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          aria-label={visible ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+          aria-label={visible ? t("authForm.hidePassword") : t("authForm.showPassword")}
           aria-pressed={visible}
         >
           {visible ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
@@ -134,8 +135,8 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(({
             ))}
           </div>
           <span className="w-16 text-right text-xs font-medium text-muted-foreground">
-            <span className="sr-only">Robustesse : </span>
-            {strengthLabels[strength]}
+            <span className="sr-only">{t("authForm.strengthPrefix")}</span>
+            {strength > 0 && t(`authForm.strength.${strength}`)}
           </span>
         </div>
       )}

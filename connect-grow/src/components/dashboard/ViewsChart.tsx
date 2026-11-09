@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatDayMonth } from "@/lib/format";
 import type { ViewStatPoint } from "@/api/types";
@@ -6,8 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 const RANGES = [
-  { days: 7, label: "7 jours" },
-  { days: 30, label: "30 jours" },
+  { days: 7, labelKey: "dashboardPage.chart.range7" },
+  { days: 30, labelKey: "dashboardPage.chart.range30" },
 ] as const;
 
 /**
@@ -32,6 +33,7 @@ interface ViewsChartProps {
 
 /** Évolution des vues de toutes les annonces du vendeur (CDC 3.9). Une seule série : pas de légende. */
 export function ViewsChart({ history, isLoading }: ViewsChartProps) {
+  const { t } = useTranslation();
   const [days, setDays] = useState<7 | 30>(30);
   const [showTable, setShowTable] = useState(false);
   const data = useMemo(() => fillDays(history, days), [history, days]);
@@ -42,14 +44,18 @@ export function ViewsChart({ history, isLoading }: ViewsChartProps) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 id="vues-titre" className="text-lg font-bold">
-            Vues de vos annonces
+            {t("dashboardPage.chart.title")}
           </h2>
           <p className="text-sm text-muted-foreground">
-            <span className="font-semibold tabular-nums text-foreground">{total}</span> vue{total > 1 ? "s" : ""} sur les{" "}
-            {days} derniers jours
+            <Trans
+              i18nKey="dashboardPage.chart.totalOverDays"
+              count={total}
+              values={{ days }}
+              components={{ b: <span className="font-semibold tabular-nums text-foreground" /> }}
+            />
           </p>
         </div>
-        <div role="radiogroup" aria-label="Période" className="flex rounded-lg bg-muted p-1">
+        <div role="radiogroup" aria-label={t("dashboardPage.chart.period")} className="flex rounded-lg bg-muted p-1">
           {RANGES.map((range) => (
             <button
               key={range.days}
@@ -62,7 +68,7 @@ export function ViewsChart({ history, isLoading }: ViewsChartProps) {
                 days === range.days ? "bg-card text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground",
               )}
             >
-              {range.label}
+              {t(range.labelKey)}
             </button>
           ))}
         </div>
@@ -107,7 +113,7 @@ export function ViewsChart({ history, isLoading }: ViewsChartProps) {
                   fontSize: 13,
                 }}
                 labelStyle={{ color: "hsl(var(--muted-foreground))", marginBottom: 2 }}
-                formatter={(value: number) => [`${value} vue${value > 1 ? "s" : ""}`, ""]}
+                formatter={(value: number) => [t("post.views", { count: value }), ""]}
                 separator=""
               />
               <Area
@@ -130,19 +136,19 @@ export function ViewsChart({ history, isLoading }: ViewsChartProps) {
         aria-expanded={showTable}
         className="mt-3 text-xs font-semibold text-primary hover:underline"
       >
-        {showTable ? "Masquer le tableau" : "Afficher sous forme de tableau"}
+        {showTable ? t("dashboardPage.chart.hideTable") : t("dashboardPage.chart.showTable")}
       </button>
       {showTable && (
         <div className="mt-3 max-h-60 overflow-y-auto rounded-xl border">
           <table className="w-full text-sm">
-            <caption className="sr-only">Vues par jour</caption>
+            <caption className="sr-only">{t("dashboardPage.chart.caption")}</caption>
             <thead className="sticky top-0 bg-muted text-left text-xs text-muted-foreground">
               <tr>
                 <th scope="col" className="px-3 py-2 font-semibold">
-                  Jour
+                  {t("dashboardPage.chart.day")}
                 </th>
                 <th scope="col" className="px-3 py-2 text-right font-semibold">
-                  Vues
+                  {t("dashboardPage.chart.views")}
                 </th>
               </tr>
             </thead>

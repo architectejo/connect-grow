@@ -22,19 +22,19 @@ export function formatLocalPhone(digits: string): string {
 
 export const localPhoneSchema = z
   .string()
-  .min(1, "Saisissez votre numéro.")
-  .regex(/^\d{9}$/, "Le numéro doit compter 9 chiffres après +243.");
+  .min(1, i18n.t("validation.phoneRequired"))
+  .regex(/^\d{9}$/, i18n.t("validation.phoneFormat"));
 
-export const emailSchema = z.string().trim().min(1, "Saisissez votre adresse e-mail.").email("Adresse e-mail invalide.");
+export const emailSchema = z.string().trim().min(1, i18n.t("validation.emailRequired")).email(i18n.t("validation.emailInvalid"));
 
 export const PASSWORD_MIN = 8;
 export const passwordSchema = z
   .string()
-  .min(PASSWORD_MIN, `Au moins ${PASSWORD_MIN} caractères.`)
-  .regex(/[A-Za-z]/, "Au moins une lettre.")
-  .regex(/\d/, "Au moins un chiffre.");
+  .min(PASSWORD_MIN, i18n.t("validation.passwordMin", { min: PASSWORD_MIN }))
+  .regex(/[A-Za-z]/, i18n.t("validation.passwordLetter"))
+  .regex(/\d/, i18n.t("validation.passwordDigit"));
 
-export const otpSchema = z.string().regex(/^\d{6}$/, "Le code compte 6 chiffres.");
+export const otpSchema = z.string().regex(/^\d{6}$/, i18n.t("validation.otpFormat"));
 
 /** Robustesse de 0 à 4, pour la jauge sous le champ mot de passe. */
 export function passwordStrength(password: string): 0 | 1 | 2 | 3 | 4 {

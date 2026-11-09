@@ -4,6 +4,8 @@ import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { KeyRound, Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import i18n from "@/i18n";
 import { toast } from "sonner";
 import apiClient from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -18,10 +20,11 @@ const phoneForm = z.object({ phone: localPhoneSchema });
 
 const passwordForm = z
   .object({ password: passwordSchema, confirm: z.string() })
-  .refine((v) => v.password === v.confirm, { path: ["confirm"], message: "Les deux mots de passe ne correspondent pas." });
+  .refine((v) => v.password === v.confirm, { path: ["confirm"], message: i18n.t("validation.passwordMismatch") });
 
 /** Réinitialisation du mot de passe par code SMS (CDC 3.1). */
 const ForgotPassword = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { login } = useAuth();
   const requestOtp = useRequestOtp();
@@ -46,7 +49,7 @@ const ForgotPassword = () => {
       return true;
     } catch (err) {
       const { general, fields } = parseApiErrors(err);
-      setError(general ?? fields.phone ?? "L'envoi du code a échoué. Réessayez.");
+      setError(general ?? fields.phone ?? t("authForm.register.sendFailed"));
       return false;
     }
   };
@@ -59,15 +62,15 @@ const ForgotPassword = () => {
       await apiClient.post("accounts/password-reset/confirm/", { phone: toE164(phone), code, new_password: newPassword });
     } catch (err) {
       setIsResetting(false);
-      setError(parseApiErrors(err).general ?? "La réinitialisation a échoué. Réessayez.");
+      setError(parseApiErrors(err).general ?? t("authForm.forgot.failed"));
       return;
     }
     try {
       await login({ phone: toE164(phone), password: newPassword });
-      toast.success("Mot de passe modifié. Vous êtes connecté.");
+      toast.success(t("authForm.forgot.doneLoggedIn"));
       navigate("/dashboard", { replace: true });
     } catch {
-      toast.success("Mot de passe modifié. Connectez-vous avec le nouveau.");
+      toast.success(t("authForm.forgot.doneLogin"));
       navigate("/login", { replace: true });
     } finally {
       setIsResetting(false);
@@ -76,25 +79,23 @@ const ForgotPassword = () => {
 
   return (
     <AuthLayout
-      title={step === "phone" ? "Mot de passe oublié" : "Choisissez un nouveau mot de passe"}
+      title={step === "phone" ? t("authForm.forgot.title") : t("authForm.forgot.newTitle")}
       description={
-        step === "phone"
-          ? "Saisissez le numéro de votre compte : nous vous enverrons un code de réinitialisation par SMS."
-          : undefined
+        step === "phone" ? t("authForm.forgot.description") : undefined
       }
       footer={
         <Link to="/login" className="font-semibold text-primary hover:underline">
-          Retour à la connexion
+          {t("authForm.forgot.backToLogin")}
         </Link>
       }
     >
       {step === "phone" ? (
         <form onSubmit={phoneFormState.handleSubmit(({ phone: digits }) => sendCode(digits))} noValidate className="space-y-5">
           <Field
-            label="Numéro de téléphone"
+            label={t("authForm.phoneLabel")}
             htmlFor="phone"
             error={phoneFormState.formState.errors.phone?.message}
-            hint="Compte créé avec une adresse e-mail uniquement ? Ajoutez d'abord un numéro depuis votre profil, ou contactez le support."
+            hint={t("authForm.forgot.emailOnlyHint")}
           >
             <Controller
               control={phoneFormState.control}
@@ -115,7 +116,7 @@ const ForgotPassword = () => {
           <FormAlert message={error} />
           <Button type="submit" size="lg" className="w-full" disabled={requestOtp.isPending}>
             {requestOtp.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <KeyRound aria-hidden />}
-            Recevoir le code
+            {t("authForm.forgot.receiveCode")}
           </Button>
         </form>
       ) : (
@@ -128,15 +129,15 @@ const ForgotPassword = () => {
           }}
           onSubmit={resetPassword}
           onResend={async () => {
-            if (!(await sendCode(phone))) throw new Error("Échec du renvoi");
+            if (!(await sendCode(phone))) throw new Error(t("authForm.forgot.resendFailed"));
           }}
           onChangeNumber={() => setStep("phone")}
           isSubmitting={isResetting}
           error={error}
-          submitLabel="Changer mon mot de passe"
+          submitLabel={t("authForm.forgot.submit")}
           autoSubmit={false}
         >
-          <Field label="Nouveau mot de passe" htmlFor="password" error={pwdForm.formState.errors.password?.message}>
+          <Field label={t("authForm.newPassword")} htmlFor="password" error={pwdForm.formState.errors.password?.message}>
             <PasswordInput
               id="password"
               autoComplete="new-password"
@@ -146,7 +147,7 @@ const ForgotPassword = () => {
               {...pwdForm.register("password")}
             />
           </Field>
-          <Field label="Confirmer le mot de passe" htmlFor="confirm" error={pwdForm.formState.errors.confirm?.message}>
+          <Field label={t("authForm.confirmPassword")} htmlFor="confirm" error={pwdForm.formState.errors.confirm?.message}>
             <PasswordInput
               id="confirm"
               autoComplete="new-password"

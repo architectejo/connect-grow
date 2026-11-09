@@ -16,16 +16,16 @@ interface FiltersPanelProps {
 }
 
 const conditions = [
-  { value: "", label: "Tous" },
-  { value: "NEUF", label: "Neuf" },
-  { value: "OCCASION", label: "Occasion" },
-  { value: "RECONDITIONNE", label: "Reconditionné" },
+  { value: "", labelKey: "marketplace.filter.all" },
+  { value: "NEUF", labelKey: "badge.NEUF" },
+  { value: "OCCASION", labelKey: "badge.OCCASION" },
+  { value: "RECONDITIONNE", labelKey: "badge.RECONDITIONNE" },
 ];
 
 const currencies = [
-  { value: "", label: "Toutes" },
-  { value: "USD", label: "USD ($)" },
-  { value: "CDF", label: "CDF (FC)" },
+  { value: "", labelKey: "marketplace.filter.allFeminine" },
+  { value: "USD", labelKey: "marketplace.filter.usd" },
+  { value: "CDF", labelKey: "marketplace.filter.cdf" },
 ];
 
 /** Groupe de boutons à choix unique (état, devise). */
@@ -36,10 +36,11 @@ function ChoiceGroup({
   onSelect,
 }: {
   label: string;
-  options: { value: string; label: string }[];
+  options: { value: string; labelKey: string }[];
   value: string;
   onSelect: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <fieldset className="space-y-2.5">
       <legend className="text-sm font-semibold text-foreground">{label}</legend>
@@ -59,7 +60,7 @@ function ChoiceGroup({
                   : "bg-card text-foreground hover:border-primary/40 hover:bg-primary/5",
               )}
             >
-              {option.label}
+              {t(option.labelKey)}
             </button>
           );
         })}
@@ -91,7 +92,7 @@ export function FiltersPanel({ filters, onChange, className }: FiltersPanelProps
     <div className={cn("space-y-7", className)}>
       <div className="space-y-2.5">
         <Label htmlFor="filter-commune" className="text-sm font-semibold">
-          Commune
+          {t("marketplace.filter.commune")}
         </Label>
         <CommuneSelect
           id="filter-commune"
@@ -102,14 +103,14 @@ export function FiltersPanel({ filters, onChange, className }: FiltersPanelProps
       </div>
 
       <fieldset className="space-y-2.5">
-        <legend className="text-sm font-semibold text-foreground">Prix</legend>
+        <legend className="text-sm font-semibold text-foreground">{t("marketplace.filter.price")}</legend>
         <div className="grid grid-cols-2 gap-2">
           <Input
             type="number"
             inputMode="numeric"
             min={0}
-            placeholder="Min"
-            aria-label="Prix minimum"
+            placeholder={t("marketplace.filter.min")}
+            aria-label={t("marketplace.filter.minLabel")}
             value={priceMin}
             onChange={(e) => setPriceMin(e.target.value)}
             onBlur={applyPrices}
@@ -120,8 +121,8 @@ export function FiltersPanel({ filters, onChange, className }: FiltersPanelProps
             type="number"
             inputMode="numeric"
             min={0}
-            placeholder="Max"
-            aria-label="Prix maximum"
+            placeholder={t("marketplace.filter.max")}
+            aria-label={t("marketplace.filter.maxLabel")}
             value={priceMax}
             onChange={(e) => setPriceMax(e.target.value)}
             onBlur={applyPrices}
@@ -132,14 +133,14 @@ export function FiltersPanel({ filters, onChange, className }: FiltersPanelProps
       </fieldset>
 
       <ChoiceGroup
-        label="Devise"
+        label={t("marketplace.filter.currency")}
         options={currencies}
         value={filters.currency ?? ""}
         onSelect={(currency) => onChange({ currency })}
       />
 
       <ChoiceGroup
-        label="État"
+        label={t("marketplace.filter.condition")}
         options={conditions}
         value={filters.condition ?? ""}
         onSelect={(condition) => onChange({ condition })}

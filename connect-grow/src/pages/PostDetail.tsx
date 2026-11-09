@@ -25,19 +25,14 @@ import { cn } from "@/lib/utils";
 // Graphique réservé au vendeur : Recharts (≈100 Ko) n'est téléchargé que par lui
 const PostStatsCard = lazy(() => import("@/components/post/PostStatsCard").then((m) => ({ default: m.PostStatsCard })));
 
-const CONDITION_LABELS = { NEUF: "Neuf", OCCASION: "Occasion", RECONDITIONNE: "Reconditionné" } as const;
-
-const safetyTips = [
-  "Rencontrez le vendeur dans un lieu public et fréquenté.",
-  "Vérifiez l'article avant de payer.",
-  "Ne payez jamais d'avance un article que vous n'avez pas vu.",
-];
+const safetyTips = ["publicPlace", "checkItem", "noAdvance"] as const;
 
 function DetailSkeleton() {
+  const { t } = useTranslation();
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_380px]" aria-busy>
       <span className="sr-only" role="status">
-        Chargement de l'annonce…
+        {t("postDetail.loading")}
       </span>
       <div className="space-y-4">
         <Skeleton className="aspect-[4/3] w-full rounded-2xl" />
@@ -52,6 +47,7 @@ function DetailSkeleton() {
 }
 
 function SimilarPosts({ post }: { post: Post }) {
+  const { t } = useTranslation();
   const { data = [] } = usePosts({ category: post.category }, 9);
   const toggleFavorite = useToggleFavorite();
   const similar = data.filter((p) => p.id !== post.id).slice(0, 4);
@@ -61,10 +57,10 @@ function SimilarPosts({ post }: { post: Post }) {
     <section aria-labelledby="similaires-titre" className="mt-12 border-t pt-10">
       <div className="mb-5 flex items-end justify-between gap-4">
         <h2 id="similaires-titre" className="text-xl font-extrabold md:text-2xl">
-          Dans la même catégorie
+          {t("postDetail.similar")}
         </h2>
         <Link to={`/marketplace?category=${post.category}`} className="text-sm font-semibold text-primary hover:underline">
-          Tout voir
+          {t("common.seeAll")}
         </Link>
       </div>
       <PostGrid>
@@ -107,11 +103,11 @@ const PostDetail = () => {
         ) : (
           <EmptyState
             icon={SearchX}
-            title="Annonce introuvable"
-            description="Elle a peut-être été vendue, mise en pause ou supprimée par son vendeur."
+            title={t("postDetail.notFoundTitle")}
+            description={t("postDetail.notFoundText")}
             action={
               <Button asChild>
-                <Link to="/marketplace">Voir d'autres annonces</Link>
+                <Link to="/marketplace">{t("common.seeMorePosts")}</Link>
               </Button>
             }
           />
@@ -128,14 +124,14 @@ const PostDetail = () => {
   const sellerName = sellerDisplayName(post.seller);
   const badges = getPostBadges(post);
   const requireAuth = (open: () => void) => () => (isAuthenticated ? open() : navigate(loginPath(`/post/${post.id}`)));
-  const share = () => shareLink({ title: post.title, text: `${post.title} sur Connecte+`, url: window.location.href });
+  const share = () => shareLink({ title: post.title, text: t("postDetail.shareText", { title: post.title }), url: window.location.href });
 
   return (
     <AppShell className="pt-16 md:pt-24">
       {/* Fil d'Ariane (desktop) et retour (mobile) */}
-      <nav aria-label="Fil d'Ariane" className="mb-4 hidden items-center gap-1.5 text-sm text-muted-foreground md:flex">
+      <nav aria-label={t("postDetail.breadcrumb")} className="mb-4 hidden items-center gap-1.5 text-sm text-muted-foreground md:flex">
         <Link to="/marketplace" className="hover:text-foreground">
-          Marketplace
+          {t("marketplace.eyebrow")}
         </Link>
         {post.category_name && (
           <>
@@ -152,10 +148,10 @@ const PostDetail = () => {
       </nav>
       <div className="-mx-4 flex items-center justify-between px-2 py-2 md:hidden">
         <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
-          <ArrowLeft aria-hidden /> Retour
+          <ArrowLeft aria-hidden /> {t("common.back")}
         </Button>
         <div className="flex">
-          <Button variant="ghost" size="icon" onClick={share} aria-label="Partager">
+          <Button variant="ghost" size="icon" onClick={share} aria-label={t("postDetail.share")}>
             <Share2 />
           </Button>
           {!isOwner && (
@@ -164,7 +160,7 @@ const PostDetail = () => {
               size="icon"
               onClick={() => toggleFavorite(post)}
               aria-pressed={!!post.is_favorited}
-              aria-label={post.is_favorited ? "Retirer des favoris" : "Ajouter aux favoris"}
+              aria-label={post.is_favorited ? t("post.removeFavorite") : t("post.addFavorite")}
             >
               <Heart className={cn(post.is_favorited && "fill-destructive text-destructive")} />
             </Button>
@@ -200,13 +196,13 @@ const PostDetail = () => {
 
               <ul className="mt-5 space-y-2 border-t pt-4 text-sm text-muted-foreground">
                 <li className="flex items-center gap-2.5">
-                  <MapPin className="h-4 w-4 text-primary" aria-hidden /> {post.commune_name ?? "Kinshasa"}, Kinshasa
+                  <MapPin className="h-4 w-4 text-primary" aria-hidden /> {t("postDetail.inCommune", { commune: post.commune_name ?? "Kinshasa" })}
                 </li>
                 <li className="flex items-center gap-2.5">
-                  <Clock className="h-4 w-4" aria-hidden /> Publiée {formatRelativeDate(post.created_at)}
+                  <Clock className="h-4 w-4" aria-hidden /> {t("postDetail.publishedAgo", { date: formatRelativeDate(post.created_at) })}
                 </li>
                 <li className="flex items-center gap-2.5">
-                  <Eye className="h-4 w-4" aria-hidden /> {formatCount(post.views_count)} vue{post.views_count > 1 ? "s" : ""}
+                  <Eye className="h-4 w-4" aria-hidden /> {t("postDetail.views", { count: post.views_count, formatted: formatCount(post.views_count) })}
                   {!!post.favorites_count && (
                     <>
                       <span aria-hidden>·</span>
@@ -220,16 +216,16 @@ const PostDetail = () => {
                 {isOwner ? (
                   <Button asChild className="flex-1">
                     <Link to={`/edit-post/${post.id}`}>
-                      <Pencil aria-hidden /> Modifier mon annonce
+                      <Pencil aria-hidden /> {t("postDetail.editMine")}
                     </Link>
                   </Button>
                 ) : (
                   <Button variant="outline" className="flex-1" onClick={() => toggleFavorite(post)} aria-pressed={!!post.is_favorited}>
                     <Heart className={cn(post.is_favorited && "fill-destructive text-destructive")} aria-hidden />
-                    {post.is_favorited ? "Dans vos favoris" : "Favori"}
+                    {post.is_favorited ? t("postDetail.inFavorites") : t("postDetail.favorite")}
                   </Button>
                 )}
-                <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" onClick={share} aria-label="Partager l'annonce">
+                <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" onClick={share} aria-label={t("postDetail.shareLabel")}>
                   <Share2 />
                 </Button>
               </div>
@@ -265,13 +261,13 @@ const PostDetail = () => {
             {!isOwner && (
               <section className="rounded-2xl border border-sun/30 bg-sun/5 p-4">
                 <h2 className="flex items-center gap-2 text-sm font-bold">
-                  <Lightbulb className="h-4 w-4 text-sun" aria-hidden /> Conseils de sécurité
+                  <Lightbulb className="h-4 w-4 text-sun" aria-hidden /> {t("postDetail.safetyTitle")}
                 </h2>
                 <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
                   {safetyTips.map((tip) => (
                     <li key={tip} className="flex gap-2">
                       <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-muted-foreground" aria-hidden />
-                      {tip}
+                      {t(`postDetail.safetyTips.${tip}`)}
                     </li>
                   ))}
                 </ul>
@@ -284,17 +280,17 @@ const PostDetail = () => {
         <div className="min-w-0 space-y-6">
           <section aria-labelledby="description-titre" className="rounded-2xl border bg-card p-5 shadow-soft sm:p-6">
             <h2 id="description-titre" className="text-lg font-bold">
-              Description
+              {t("postDetail.description")}
             </h2>
             <p className="mt-3 whitespace-pre-line leading-relaxed text-foreground/90">{post.description}</p>
 
             <dl className="mt-6 grid grid-cols-2 gap-3 border-t pt-5 text-sm sm:grid-cols-3">
               {[
-                { label: "Type", value: post.post_type === "SERVICE" ? "Service" : "Produit" },
-                post.condition && { label: "État", value: CONDITION_LABELS[post.condition] },
-                post.category_name && { label: "Catégorie", value: post.category_name },
-                post.post_type === "PRODUIT" && post.stock !== undefined && { label: "Quantité", value: String(post.stock) },
-                { label: "Devise", value: post.currency === "CDF" ? "Franc congolais" : "Dollar US" },
+                { label: t("postDetail.details.type"), value: post.post_type === "SERVICE" ? t("postDetail.details.service") : t("postDetail.details.product") },
+                post.condition && { label: t("postDetail.details.condition"), value: t(`badge.${post.condition}`) },
+                post.category_name && { label: t("postDetail.details.category"), value: post.category_name },
+                post.post_type === "PRODUIT" && post.stock !== undefined && { label: t("postDetail.details.quantity"), value: String(post.stock) },
+                { label: t("postDetail.details.currency"), value: post.currency === "CDF" ? t("postDetail.details.cdf") : t("postDetail.details.usd") },
                 exchangeEnabled && { label: t("exchange.summaryLabel"), value: post.is_exchangeable ? t("exchange.accepted") : t("exchange.no") },
               ]
                 .filter((item): item is { label: string; value: string } => !!item)
@@ -329,7 +325,7 @@ const PostDetail = () => {
         {isOwner ? (
           <Button asChild className="h-12 w-full rounded-xl">
             <Link to={`/edit-post/${post.id}`}>
-              <Pencil aria-hidden /> Modifier mon annonce
+              <Pencil aria-hidden /> {t("postDetail.editMine")}
             </Link>
           </Button>
         ) : isSellerMember ? (

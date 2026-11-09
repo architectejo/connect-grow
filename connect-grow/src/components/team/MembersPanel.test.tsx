@@ -437,6 +437,83 @@ describe("transférer la propriété (E6c)", () => {
   });
 });
 
+describe("le mot de passe de ressaisie n'est jamais conservé", () => {
+  const NETWORK = { isAxiosError: true, message: "Network Error" };
+  const noTrace = () => {
+    expect(JSON.stringify({ ...localStorage })).not.toContain(PASSWORD);
+    expect(JSON.stringify({ ...sessionStorage })).not.toContain(PASSWORD);
+    expect(window.location.href).not.toContain(PASSWORD);
+  };
+  const fillRole = async () => {
+    renderPanel("OWNER", MANAGE);
+    await screen.findByText("Luc D.");
+    await pick("Luc D.", "Changer le rôle");
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Administrateur/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enregistrer le rôle" }));
+    fireEvent.click(within(dialog).getByRole("checkbox"));
+    fireEvent.change(within(dialog).getByLabelText("Votre mot de passe"), { target: { value: PASSWORD } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirmer le changement" }));
+    return dialog;
+  };
+  const fillTransfer = async () => {
+    renderPanel("OWNER", MANAGE);
+    await screen.findByText("Paul M.");
+    await pick("Paul M.", /Transférer la propriété/);
+    const dialog = await screen.findByRole("dialog", { name: "Transférer la propriété à Paul M." });
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Je confirme le transfert de propriété" }));
+    fireEvent.change(within(dialog).getByLabelText("Votre mot de passe"), { target: { value: PASSWORD } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer la propriété" }));
+    return dialog;
+  };
+
+  it.each([
+    ["réseau coupé", NETWORK],
+    ["500", apiError(500)],
+    ["400 {role}", apiError(400, undefined, {}, { role: ["Ce rôle n'est pas valide."] })],
+  ])("changement de rôle, %s : champ vidé, rien dans le DOM ni les stockages", async (_label, error) => {
+    const patch = vi.spyOn(apiClient, "patch").mockRejectedValue(error);
+    const dialog = await fillRole();
+    await waitFor(() => expect(patch).toHaveBeenCalled());
+    await waitFor(() => expect(document.body.innerHTML).not.toContain(PASSWORD));
+    const field = within(dialog).queryByLabelText("Votre mot de passe");
+    if (field) expect(field).toHaveValue("");
+    noTrace();
+  });
+
+  it.each([
+    ["réseau coupé", NETWORK],
+    ["500", apiError(500)],
+  ])("transfert, %s : champ vidé et bouton désactivé", async (_label, error) => {
+    const post = vi.spyOn(apiClient, "post").mockRejectedValue(error);
+    const dialog = await fillTransfer();
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    await waitFor(() => expect(within(dialog).getByLabelText("Votre mot de passe")).toHaveValue(""));
+    expect(within(dialog).getByRole("button", { name: "Transférer la propriété" })).toBeDisabled();
+    noTrace();
+  });
+
+  it("une fenêtre rouverte après un échec a un champ de mot de passe vide", async () => {
+    vi.spyOn(apiClient, "post").mockRejectedValue(NETWORK);
+    const dialog = await fillTransfer();
+    await within(dialog).findByText(/Connexion perdue/);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Annuler" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await pick("Paul M.", /Transférer la propriété/);
+    const reopened = await screen.findByRole("dialog", { name: "Transférer la propriété à Paul M." });
+    expect(within(reopened).getByLabelText("Votre mot de passe")).toHaveValue("");
+    expect(within(reopened).getByRole("checkbox", { name: "Je confirme le transfert de propriété" })).not.toBeChecked();
+  });
+
+  it("succès : aucune trace du mot de passe (stockages, DOM, URL, cache de mutations)", async () => {
+    vi.spyOn(apiClient, "post").mockResolvedValue({ data: { new_owner: { ...ADMIN, role: "OWNER" }, me: { ...ME_OWNER, role: "EDITOR" } } });
+    await fillTransfer();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    noTrace();
+    expect(document.body.innerHTML).not.toContain(PASSWORD);
+  });
+});
+
 describe("retirer un membre (E6d)", () => {
   const open = async (members = TEAM) => {
     const view = renderPanel("OWNER", MANAGE, members);

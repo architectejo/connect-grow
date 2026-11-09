@@ -53,10 +53,12 @@ export function TransferOwnershipDialog({ orgId, target, online, onClose, onAnno
       onAnnounce(message);
       onClose();
     } catch (error) {
+      // Quel que soit l'échec (réseau, 5xx, champ, limiteur, mauvais mot de passe) : le mot de passe quitte le champ et la mutation
+      mutation.reset();
+      setSecret((current) => ({ ...current, password: "" }));
       const failure = classifyTeamError(error);
       switch (failure.kind) {
         case "reauth":
-          setSecret((current) => ({ ...current, password: "" }));
           setPasswordError(failure.message);
           requestAnimationFrame(() => passwordRef.current?.focus());
           break;
@@ -69,7 +71,6 @@ export function TransferOwnershipDialog({ orgId, target, online, onClose, onAnno
           onClose();
           break;
         case "rate":
-          setSecret((current) => ({ ...current, password: "" }));
           setFormError(failure.message);
           block(failure.retryAfter);
           break;

@@ -127,7 +127,31 @@ describe("mutations d'équipe", () => {
       await result.current.mutateAsync({ membership_id: M1, my_new_role: "ADMIN", confirm: true, password: "x" }).catch(() => undefined);
     });
     expect(post).toHaveBeenCalledTimes(1);
-    expect(client.getMutationCache().getAll().every((m) => m.gcTime === 0)).toBe(true);
+    const mutations = client.getMutationCache().getAll();
+    expect(mutations.length).toBeGreaterThan(0);
+    expect(mutations.every((m) => m.gcTime === 0)).toBe(true);
+  });
+
+  it("la mutation (et son mot de passe) est purgée du cache au démontage", async () => {
+    vi.spyOn(apiClient, "post").mockResolvedValue({ data: { new_owner: member(M1, "OWNER"), me: member(M2, "ADMIN") } });
+    const { result, unmount } = renderHook(() => useTransferOwnership(ORG), { wrapper: wrapperFor(client) });
+    await act(async () => {
+      await result.current.mutateAsync({ membership_id: M1, my_new_role: "ADMIN", confirm: true, password: "s3cret-Pass" });
+    });
+    unmount();
+    await waitFor(() => expect(client.getMutationCache().getAll()).toHaveLength(0));
+  });
+
+  it("refus DENY_OBJECT_STATE et DENY_SECURITY : liste et organisation rechargées", async () => {
+    for (const code of ["DENY_OBJECT_STATE", "DENY_SECURITY"]) {
+      invalidate.mockClear();
+      vi.spyOn(apiClient, "patch").mockRejectedValueOnce({ response: { status: 403, data: { code } } });
+      const { result } = renderHook(() => useChangeMemberRole(ORG), { wrapper: wrapperFor(client) });
+      await act(async () => {
+        await result.current.mutateAsync({ membershipId: M1, body: { role: "ADMIN" } }).catch(() => undefined);
+      });
+      expect(invalidated()).toEqual(expect.arrayContaining([JSON.stringify(teamKeys.members(ORG)), JSON.stringify(organizationKeys.internal(ORG))]));
+    }
   });
 
   it("refus DENY_PERMISSION : liste et rôle de l'acteur rechargés ; member_not_found : liste rechargée", async () => {

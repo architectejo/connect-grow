@@ -71,10 +71,12 @@ export function ChangeRoleDialog({ orgId, member, actorRole, online, onClose, on
       }
       onClose();
     } catch (error) {
+      // Quel que soit l'échec (réseau, 5xx, champ, limiteur, mauvais mot de passe) : le mot de passe quitte le champ et la mutation
+      mutation.reset();
+      setSecret((current) => ({ ...current, password: "" }));
       const failure = classifyTeamError(error);
       switch (failure.kind) {
         case "reauth":
-          setSecret((current) => ({ ...current, password: "" }));
           setPasswordError(failure.message);
           requestAnimationFrame(() => passwordRef.current?.focus());
           break;
@@ -87,7 +89,6 @@ export function ChangeRoleDialog({ orgId, member, actorRole, online, onClose, on
           onClose();
           break;
         case "rate":
-          setSecret((current) => ({ ...current, password: "" }));
           setFormError(failure.message);
           block(failure.retryAfter);
           break;

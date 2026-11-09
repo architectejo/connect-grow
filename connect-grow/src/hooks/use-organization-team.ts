@@ -57,7 +57,7 @@ function refreshAfterRefusal(queryClient: QueryClient, orgId: Uuid, error: unkno
   const code = getApiErrorCode(error);
   if (code === "member_not_found") {
     void queryClient.invalidateQueries({ queryKey: teamKeys.members(orgId) });
-  } else if (code === "DENY_PERMISSION" || code === "DENY_RELATION") {
+  } else if (code === "DENY_PERMISSION" || code === "DENY_RELATION" || code === "DENY_OBJECT_STATE" || code === "DENY_SECURITY") {
     void queryClient.invalidateQueries({ queryKey: teamKeys.members(orgId) });
     void queryClient.invalidateQueries({ queryKey: organizationKeys.internal(orgId) });
   }

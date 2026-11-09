@@ -14,7 +14,6 @@ export const SRC_ROOT = join(__dirname, "..");
  * Toute nouvelle exception doit être justifiée ici.
  */
 export const EXCLUDED: { path: string; reason: string }[] = [
-  { path: "components/ui/", reason: "composants shadcn génériques : aucun texte métier" },
   { path: "i18n/", reason: "c'est ici que vivent les textes" },
   { path: "test/", reason: "outils de test" },
   { path: "pages/DesignSystem.tsx", reason: "page de démonstration réservée au développement (import.meta.env.DEV), absente du build de production" },
@@ -43,6 +42,11 @@ const VISIBLE_ATTRIBUTES = new Set([
   "placeholder", "aria-label", "aria-description", "aria-valuetext", "aria-roledescription",
   "title", "alt", "label", "description", "hint", "caption", "heading", "helperText",
 ]);
+/** Nom d'attribut JSX dont la valeur est un texte visible : liste fermée, ou suffixe Label / Text / Title. */
+const isVisibleAttribute = (name: string) => VISIBLE_ATTRIBUTES.has(name) || /(Label|Text|Title)$/.test(name);
+/** Propriétés d'objet dont la valeur littérale est un texte visible (libellés de données, options de toast…). */
+const isVisibleProperty = (name: string) =>
+  /^(label|title|name|text|hint|description|placeholder|message|defaultValue)$/.test(name) || /(Label|Text|Title)$/.test(name);
 const BRAND_WORDMARK = "Connecte";
 /** Schéma d'autorisation HTTP : valeur technique, jamais affichée. */
 const AUTH_SCHEME = /^Bearer\s*$/;
@@ -59,18 +63,58 @@ const calleeName = (call: ts.CallExpression | ts.NewExpression): string => {
 
 /** Contextes où une chaîne n'est jamais un texte affiché : style, traduction déjà faite, journal, erreur de développement. */
 function isIgnoredContext(node: ts.Node): boolean {
-  for (let p: ts.Node | undefined = node.parent; p; p = p.parent) {
+  let child: ts.Node = node;
+  for (let p: ts.Node | undefined = node.parent; p; child = p, p = p.parent) {
     if (ts.isImportDeclaration(p) || ts.isExportDeclaration(p) || ts.isLiteralTypeNode(p) || ts.isTypeNode(p)) return true;
     if (ts.isJsxAttribute(p) && ["className", "class", "style", "id", "htmlFor", "to", "href", "src", "d", "viewBox"].includes(p.name.getText())) return true;
     if (ts.isCallExpression(p) || ts.isNewExpression(p)) {
       const name = calleeName(p);
       // Déjà traduit, journal de développement, erreurs techniques, classes CSS, expressions régulières
-      if (/^(t|i18n\.t|console\.\w+|cn|cva|clsx|twMerge|Error|RegExp|import|require)$/.test(name)) return true;
+      // t() : seul le premier argument (la clé) est ignoré ; defaultValue et options sont des textes
+      if (/^(t|i18n\.t)$/.test(name)) {
+        if (ts.isCallExpression(p) && p.arguments[0] === child) return true;
+      } else if (/^(console\.\w+|cn|cva|clsx|twMerge|Error|RegExp|import|require)$/.test(name)) return true;
       if (/^(document\.querySelector(All)?|window\.matchMedia|localStorage\.\w+|sessionStorage\.\w+|JSON\.parse)$/.test(name)) return true;
     }
+    // Tables de classes CSS (classNames: { description: "group-[.toast]:…" })
+    if (ts.isPropertyAssignment(p) && /^(className|classNames|class)$/.test(p.name.getText())) return true;
     if (ts.isThrowStatement(p)) return true;
   }
   return false;
+}
+
+const isTransparent = (n: ts.Node) =>
+  ts.isParenthesizedExpression(n) || ts.isAsExpression(n) || ts.isNonNullExpression(n) || ts.isJsxExpression(n) ||
+  ts.isConditionalExpression(n) || (ts.isBinaryExpression(n) && /^(\?\?|\|\||&&)$/.test(n.operatorToken.getText()));
+
+/**
+ * Où la chaîne est-elle lue ? On remonte à travers les parenthèses, ternaires, `??`, `||`, `&&` et accolades JSX :
+ *  - "attribute" : valeur d'un attribut JSX visible (aria-label={"Fermer"}, title={ok ? "Ouvrir" : "Fermer"}) ;
+ *  - "rendered" : enfant JSX rendu ({ok ? "Oui" : "Non"}) ;
+ *  - "property" : propriété d'objet visible (label, title, text…) ;
+ *  - "toast" : argument d'un toast.*(…) ;
+ *  - null : autre contexte (heuristique de phrase).
+ */
+function visibleUse(node: ts.Node): "attribute" | "rendered" | "property" | "toast" | null {
+  let child: ts.Node = node;
+  let p: ts.Node | undefined = node.parent;
+  while (p && isTransparent(p)) {
+    // La condition d'un ternaire et la partie gauche d'un `&&` ne sont pas rendues
+    if (ts.isConditionalExpression(p) && p.condition === child) return null;
+    if (ts.isBinaryExpression(p) && p.left === child && p.operatorToken.getText() === "&&") return null;
+    child = p;
+    p = p.parent;
+  }
+  if (!p) return null;
+  if (ts.isJsxAttribute(p) && isVisibleAttribute(p.name.getText())) return "attribute";
+  if ((ts.isJsxElement(p) || ts.isJsxFragment(p)) && ts.isJsxExpression(child)) return "rendered";
+  if (ts.isPropertyAssignment(p) && p.initializer === child && isVisibleProperty(p.name.getText())) {
+    // `name` désigne souvent un identifiant technique (name: "is_exchangeable", name: "pending") : seul un texte rédigé compte
+    const technical = p.name.getText() === "name" && ts.isStringLiteralLike(node) && /^[a-z][a-z0-9_]*$/.test(node.text);
+    return technical ? null : "property";
+  }
+  if (ts.isCallExpression(p) && /^toast(\.\w+)?$/.test(calleeName(p))) return "toast";
+  return null;
 }
 
 /** Texte de lecture « phrase française » : accent, ou majuscule suivie de plusieurs mots. */
@@ -85,6 +129,10 @@ function looksLikeSentence(text: string): boolean {
  * Heuristique (volontairement simple, sans faux silence sur les cas courants) :
  *  1. tout texte JSX qui contient au moins deux lettres (hors espaces, ponctuation, chiffres) ;
  *  2. toute valeur littérale d'un attribut visible (placeholder, aria-label, title, alt, label, description, hint…) ;
+ *  2 bis. toute chaîne d'au moins deux lettres qui est : dans un attribut visible écrit en expression
+ *     (aria-label={"Fermer"}, title={ok ? "Ouvrir" : "Fermer"}), enfant JSX rendu ({ok ? "Oui" : "Non"}),
+ *     valeur d'une propriété label|title|name|text|hint|description|placeholder|message|*Label|*Text|*Title,
+ *     ou argument d'un toast.* ;
  *  3. toute autre chaîne littérale qui contient une lettre accentuée ou qui ressemble à une phrase
  *     (majuscule initiale puis plusieurs mots), ainsi que tout modèle de chaîne (`…${x}…`) dont la partie fixe
  *     contient un mot et une espace ;
@@ -102,13 +150,16 @@ export function findHardcodedText(source: string, fileName = "file.tsx"): Findin
       if (text && text !== BRAND_WORDMARK && LETTERS.test(text)) out.push({ line: lineOf(node), kind: "jsx-text", text });
     } else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
       const text = node.text;
-      const attr = ts.isJsxAttribute(node.parent) ? node.parent.name.getText() : undefined;
-      if (attr && VISIBLE_ATTRIBUTES.has(attr) && LETTERS.test(text)) out.push({ line: lineOf(node), kind: "attribute", text });
+      const use = AUTH_SCHEME.test(text) ? null : visibleUse(node);
+      if (use && LETTERS.test(text) && !isIgnoredContext(node)) out.push({ line: lineOf(node), kind: use === "attribute" ? "attribute" : "string", text });
       else if (!AUTH_SCHEME.test(text) && !isIgnoredContext(node) && looksLikeSentence(text)) out.push({ line: lineOf(node), kind: "string", text });
     } else if (ts.isTemplateExpression(node)) {
       const fixed = [node.head.text, ...node.templateSpans.map((s) => s.literal.text)].join("");
-      const pathLike = /[/?&=#]/.test(fixed);
-      if (!AUTH_SCHEME.test(fixed) && !isIgnoredContext(node) && !pathLike && ((/\s/.test(fixed) && /[A-Za-zÀ-ÿ]{3,}/.test(fixed)) || ACCENT.test(fixed))) {
+      // Chemins, paramètres d'URL et déclarations CSS (`--color-${k}: ${v};`) ne sont pas des textes
+      const pathLike = /[/?&=#;]|--/.test(fixed);
+      // Dans un contexte lu (attribut visible, enfant rendu, label…), une seule lettre fixe suffit (`${n} h`)
+      const readAloud = visibleUse(node) !== null && /[A-Za-zÀ-ÿ]/.test(fixed);
+      if (!AUTH_SCHEME.test(fixed) && !isIgnoredContext(node) && !pathLike && (readAloud || (/\s/.test(fixed) && /[A-Za-zÀ-ÿ]{3,}/.test(fixed)) || ACCENT.test(fixed))) {
         out.push({ line: lineOf(node), kind: "string", text: fixed });
       }
     }
@@ -128,6 +179,11 @@ export interface KeyUse {
   key: string;
   /** Vrai quand la clé est un modèle (`a.b.${x}`) : seul le préfixe fixe est vérifié. */
   dynamic: boolean;
+  /**
+   * Faux quand l'appel t("…", options) est sûr de ne pas passer `count` : les formes plurielles (`_one` / `_other`)
+   * ne comptent alors pas comme existence de la clé. Indéfini pour une clé rangée dans des données (inconnu).
+   */
+  hasCount?: boolean;
 }
 
 export function findKeyUses(source: string, topLevelKeys: Set<string>, fileName = "file.tsx"): KeyUse[] {
@@ -136,22 +192,29 @@ export function findKeyUses(source: string, topLevelKeys: Set<string>, fileName 
   const lineOf = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
   const seen = new Set<ts.Node>();
 
-  const record = (arg: ts.Expression | undefined) => {
+  /** Les options passent-elles `count` ? Vrai par prudence si on ne peut pas le savoir (variable, spread). */
+  const passesCount = (options: ts.Expression | undefined): boolean => {
+    if (!options) return false;
+    if (!ts.isObjectLiteralExpression(options)) return true;
+    return options.properties.some((prop) => ts.isSpreadAssignment(prop) || (prop.name !== undefined && prop.name.getText() === "count"));
+  };
+
+  const record = (arg: ts.Expression | undefined, hasCount: boolean) => {
     if (!arg) return;
     if (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) {
       seen.add(arg);
-      out.push({ line: lineOf(arg), key: arg.text, dynamic: false });
+      out.push({ line: lineOf(arg), key: arg.text, dynamic: false, hasCount });
     } else if (ts.isTemplateExpression(arg)) {
       seen.add(arg);
-      out.push({ line: lineOf(arg), key: arg.head.text, dynamic: true });
+      out.push({ line: lineOf(arg), key: arg.head.text, dynamic: true, hasCount });
     } else if (ts.isConditionalExpression(arg)) {
-      record(arg.whenTrue);
-      record(arg.whenFalse);
+      record(arg.whenTrue, hasCount);
+      record(arg.whenFalse, hasCount);
     }
   };
 
   const visit = (node: ts.Node) => {
-    if (ts.isCallExpression(node) && /^(t|i18n\.t)$/.test(calleeName(node))) record(node.arguments[0]);
+    if (ts.isCallExpression(node) && /^(t|i18n\.t)$/.test(calleeName(node))) record(node.arguments[0], passesCount(node.arguments[1]));
     // Clés rangées dans des données (labelKey: "nav.home") : chaîne qui commence par un domaine connu de fr.ts
     if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && !seen.has(node)) {
       const m = /^([a-z][A-Za-z0-9]*)\.[A-Za-z0-9_.]+$/.exec(node.text);

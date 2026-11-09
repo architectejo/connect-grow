@@ -220,14 +220,38 @@ class CreateInvitationTests(InvBase):
         self.assertFalse(Notification.objects.exists())  # rien n'est notifié à la création
 
     def test_creation_throttles(self):
-        rates = {**SimpleRateThrottle.THROTTLE_RATES, 'invitation_create': '2/hour', 'invitation_create_org': '4/day'}
+        rates = {**SimpleRateThrottle.THROTTLE_RATES, 'invitation_create': '2/hour', 'invitation_create_org': '3/day'}
         with mock.patch.object(SimpleRateThrottle, 'THROTTLE_RATES', rates):
             self.assertEqual(self.create(OWNER).status_code, 201)
             self.assertEqual(self.create(OWNER).status_code, 201)
-            self.assertEqual(self.create(OWNER).status_code, 429)  # par compte (la requête refusée compte aussi pour l'organisation)
-            self.assertEqual(self.create(ADMIN).status_code, 201)  # autre compte, organisation à 4/4
+            self.assertEqual(self.create(OWNER).status_code, 429)  # par compte (non compté pour l'organisation)
+            self.assertEqual(self.create(ADMIN).status_code, 201)  # autre compte, organisation à 3/3
             self.assertEqual(self.create(ADMIN).status_code, 429)  # par organisation
         self.assertEqual(OrganizationInvitation.objects.count(), 3)
+
+    def test_a_non_member_never_consumes_the_organization_quota(self):
+        rates = {**SimpleRateThrottle.THROTTLE_RATES, 'invitation_create': '1000/hour', 'invitation_create_org': '3/day'}
+        stranger = team.login(team.make_user('stranger-q'))
+        with mock.patch.object(SimpleRateThrottle, 'THROTTLE_RATES', rates):
+            for _ in range(60):
+                response = stranger.post(url_invitations(self.org), {'role': EDITOR}, format='json')
+                self.assertDenied(response, DENY_RELATION)
+            for _ in range(2):  # un rôle sans capacité ne consomme rien non plus
+                self.assertDenied(self.create(EDITOR), DENY_PERMISSION)
+            for _ in range(3):
+                self.assertEqual(self.create(OWNER).status_code, 201)
+            self.assertEqual(self.create(OWNER).status_code, 429)
+
+    def test_label_charset(self):
+        client = self.as_role(OWNER)
+        for bad in ('a\u200eb', 'a\u200fb', 'a\ufeffb', 'a\u202eb', 'a\u2066b', 'a\u2069b', 'a\u2028b', 'a\nb'):
+            with self.subTest(label=bad):
+                response = client.post(url_invitations(self.org), {'role': EDITOR, 'label': bad}, format='json')
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('label', response.json())
+        family = '\U0001f468\u200d\U0001f469\u200d\U0001f467'  # emoji composé : ZWJ permis
+        response = client.post(url_invitations(self.org), {'role': EDITOR, 'label': family + '\u200c'}, format='json')
+        self.assertEqual(response.status_code, 201, response.content)
 
     def test_x_context_header_is_ignored(self):
         client = self.as_role(OWNER)
@@ -465,11 +489,16 @@ class UniformResponseTests(InvBase):
 
     def test_decline_answers_identically_for_dead_invitations(self):
         scenarios = self.scenarios()
-        for name in ('unknown', 'malformed', 'too_long', 'empty', 'expired', 'revoked', 'accepted', 'declined'):
+        for name in (
+            'unknown', 'malformed', 'too_long', 'empty', 'expired', 'revoked', 'accepted', 'declined', 'org_suspended',
+            'org_archived',
+        ):
             with self.subTest(scenario=name):
                 cache.clear()
+                audits, events = AuditLog.objects.count(), OutboxEvent.objects.count()
                 response = self.decline(scenarios[name])
                 self.assertEqual((response.status_code, response.json()), (404, INVALID))
+                self.assertEqual((AuditLog.objects.count(), OutboxEvent.objects.count()), (audits, events))
 
     def test_only_identified_refusals_are_journaled_and_an_unknown_token_never_is(self):
         scenarios = self.scenarios()
@@ -491,13 +520,45 @@ class UniformResponseTests(InvBase):
             self.assertTrue(entries.first().details.endswith(f'reason={reason}'), (name, entries.first().details))
             self.assertEqual(entries.first().actor, self.invitee)
 
-    def test_failed_attempts_slow_down_the_account_the_same_way_for_every_cause(self):
+    def test_only_malformed_or_unknown_tokens_slow_the_account_down(self):
         scenarios = self.scenarios()
-        for name in ('unknown', 'expired', 'revoked'):
+        for name in ('unknown', 'malformed'):
             with self.subTest(scenario=name):
                 cache.clear()
                 statuses = [self.accept(scenarios[name]).status_code for _ in range(7)]
                 self.assertEqual(statuses, [404] * 5 + [429] * 2)
+        # Invitation connue mais morte : détenir un vrai jeton n'est pas une devinette, aucun verrouillage.
+        for name in ('expired', 'revoked', 'accepted', 'declined', 'org_suspended', 'org_archived', 'inviter_removed'):
+            with self.subTest(scenario=name):
+                cache.clear()
+                for action in ('accept', 'preview'):
+                    statuses = [self.call(action, scenarios[name]).status_code for _ in range(7)]
+                    self.assertEqual(statuses, [404] * 7)
+
+    def test_a_successful_preview_does_not_reset_the_failure_counter(self):
+        scenarios = self.scenarios()
+        _, token = self.make()
+        for _ in range(4):
+            self.assertEqual(self.accept(scenarios['unknown']).status_code, 404)
+        self.assertEqual(self.preview(token).status_code, 200)
+        self.assertEqual(self.accept(scenarios['unknown']).status_code, 404)  # 5e échec
+        self.assertEqual(self.accept(scenarios['unknown']).status_code, 429)
+
+    def test_a_trailing_newline_is_not_a_well_formed_token(self):
+        _, token = self.make()
+        self.assertIsNone(invitations.TOKEN_PATTERN.fullmatch(token + '\n'))
+        self.assertIsNotNone(invitations.TOKEN_PATTERN.fullmatch(token))
+        for action in ('accept', 'preview', 'decline'):
+            self.assertEqual(self.call(action, token + '\n').json(), INVALID)
+
+    def test_a_row_with_a_role_outside_invitable_roles_is_never_accepted(self):
+        token = 'Zz' * 20
+        row = make_invitation(self.org, token, role='ADMIN', created_by=self.owner)
+        self.assertEqual(self.preview(token).json(), INVALID)
+        self.assertEqual(self.accept(token).json(), INVALID)
+        self.assertEqual(self.fresh(row).status, 'PENDING')
+        self.assertFalse(Membership.objects.filter(user=self.invitee).exists())
+        self.assertTrue(self.audit('INVITATION_REFUSED').get().details.endswith('reason=role_not_invitable'))
 
     def test_rate_limited_account_is_refused_even_with_a_valid_token(self):
         scenarios = self.scenarios()

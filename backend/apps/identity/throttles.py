@@ -217,14 +217,21 @@ class InvitationCreateThrottle(UserWriteThrottle):
 
 class InvitationCreateOrgThrottle(SimpleRateThrottle):
     """Création d'invitation : 50/jour par organisation (identifiant du chemin), écritures seulement (ADR 0008, 8.3).
-    Sans identifiant d'organisation dans le chemin, pas de limite ici."""
+    Sans identifiant d'organisation dans le chemin, pas de limite ici.
+
+    NON compté avant l'autorisation (audit S2 M1) : un compte quelconque connaissant l'UUID d'une organisation
+    n'en épuiserait sinon le quota. `allow_request` laisse donc toujours passer ; la vue appelle `enforce` une fois
+    l'autorisation réussie (crochet de `create_invitation`), ce qui compte alors la création."""
 
     scope = 'invitation_create_org'
 
     def allow_request(self, request, view):
-        if request.method in ('GET', 'HEAD', 'OPTIONS'):
-            return True
-        return super().allow_request(request, view)
+        return True
+
+    def enforce(self, request, view):
+        """Compte la création pour l'organisation du chemin ; lève `Throttled` (429) si le quota est atteint."""
+        if not super().allow_request(request, view):
+            raise Throttled(wait=self.wait())
 
     def get_cache_key(self, request, view):
         organization_id = (getattr(view, 'kwargs', None) or {}).get('pk')

@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 
 from .organizations import account_removal_blockers
 from .throttles import AccountBlockersThrottle
+from .views_organizations import EXEMPT_REASON
 
 # Borne de la liste (comme `contexts/`) : jamais plus de 100 organisations, réponse non paginée.
 MAX_BLOCKERS = 100
@@ -27,6 +28,7 @@ BLOCKERS_SCHEMA = inline_serializer('AccountDeletionBlockers', {
 
 
 class AccountDeletionBlockersView(APIView):
+    acting_context_exempt = EXEMPT_REASON
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [AccountBlockersThrottle]
 

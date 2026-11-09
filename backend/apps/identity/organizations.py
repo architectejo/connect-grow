@@ -14,6 +14,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Optional
+from uuid import UUID
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files import File
@@ -1220,7 +1221,7 @@ ACTION_WAIT_FOR_UNSUSPENSION = 'wait_for_unsuspension'
 
 @dataclass(frozen=True)
 class OrganizationBlocker:
-    organization_id: object
+    organization_id: UUID
     name: str
     status: str
     other_members_count: int
@@ -1230,7 +1231,7 @@ class OrganizationBlocker:
 @dataclass(frozen=True)
 class AccountRemovalBlockers:
     organizations: tuple
-    other_code: object  # None, 'blocking_sanction' ou 'open_grave_report' : jamais détaillé
+    other_code: Optional[str]  # None, 'blocking_sanction' ou 'open_grave_report' : jamais détaillé
 
 
 def account_removal_blockers(user, limit=None) -> AccountRemovalBlockers:
@@ -1273,7 +1274,7 @@ def account_removal_blockers(user, limit=None) -> AccountRemovalBlockers:
             or _author_has_grave_evidence(user.pk)
         ):
             other = 'open_grave_report'
-    return AccountRemovalBlockers(tuple(rows[:limit] if limit else rows), other)
+    return AccountRemovalBlockers(tuple(rows[:limit] if limit is not None else rows), other)
 
 
 def assert_provider_removable(profile):

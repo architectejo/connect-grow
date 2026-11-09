@@ -109,7 +109,7 @@ class OrganizationInvitationsView(APIView):
 
     acting_context_exempt = EXEMPT_REASON
     permission_classes = [permissions.IsAuthenticated]
-    throttle_classes = [InvitationCreateThrottle, InvitationCreateOrgThrottle]
+    throttle_classes = [InvitationCreateThrottle]  # le quota par organisation est compté après l'autorisation
     http_method_names = ['get', 'post', 'head', 'options']
 
     @extend_schema(
@@ -134,7 +134,11 @@ class OrganizationInvitationsView(APIView):
     )
     def post(self, request, pk):
         data = _body(request)
-        invitation, token = create_invitation(request.user, pk, data.get('role'), data.get('label', ''))
+        org_quota = InvitationCreateOrgThrottle()
+        invitation, token = create_invitation(
+            request.user, pk, data.get('role'), data.get('label', ''),
+            after_authorization=lambda: org_quota.enforce(request, self),
+        )
         return _private(Response({
             'invitation_id': str(invitation.pk), 'role': invitation.role, 'status': invitation.status,
             'label': invitation.label, 'created_at': _iso(invitation.created_at),

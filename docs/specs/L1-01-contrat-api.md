@@ -102,7 +102,7 @@
 {"role": "EDITOR", "label": "Jean, comptable"}
 ```
 
-- `role` obligatoire, **`EDITOR` ou `ANALYST`**. `label` facultatif, 60 caractères au plus, espaces de bord retirés.
+- `role` obligatoire, **`EDITOR` ou `ANALYST`**. `label` facultatif, 60 caractères au plus, espaces de bord retirés ; caractères de contrôle, séparateurs de ligne ou de paragraphe et marques bidirectionnelles ou BOM refusés (`400 {"label": [...]}`), ZWJ et ZWNJ permis.
 - `201` :
 ```json
 {"invitation_id": "uuid", "role": "EDITOR", "status": "PENDING", "label": "Jean, comptable",
@@ -149,7 +149,7 @@
 `POST ID organization-invitations/decline/` — authentifié. Corps `{"token": "<jeton>"}`.
 
 - `204`. L'invitation passe à `DECLINED`, le jeton est inutilisable, l'inviteur est notifié sans nom.
-- `404 invitation_invalid` (invitation non vivante) ; `400 {"token": [...]}` ; `429`.
+- `404 invitation_invalid` (invitation non vivante, **y compris organisation suspendue ou archivée** : aucune écriture, audit ni événement) ; `400 {"token": [...]}` ; `429`.
 
 ### 2.7 Réponse uniforme `invitation_invalid`
 
@@ -157,7 +157,7 @@
 404 {"detail": "Cette invitation n'est pas valide.", "code": "invitation_invalid"}
 ```
 
-Corps strictement identique pour : jeton de forme incorrecte, jeton inconnu, invitation expirée, révoquée, déjà acceptée ou refusée, organisation suspendue ou archivée, organisation absente, inviteur retiré, parti ou rétrogradé sous l'autorité requise. Throttles `invitation_redeem` (60/h par IP) et `invitation_redeem_user` (30/h par compte), plus un compteur d'échecs par compte (5 échecs puis délai croissant, 429).
+Corps strictement identique pour : jeton de forme incorrecte, jeton inconnu, invitation expirée, révoquée, déjà acceptée ou refusée, organisation suspendue ou archivée, organisation absente, inviteur retiré, parti, rétrogradé sous l'autorité requise ou dont le compte est inactif ou restreint, rôle de l'invitation hors `INVITABLE_ROLES`. Throttles `invitation_redeem` (60/h par IP) et `invitation_redeem_user` (30/h par compte), plus un compteur d'échecs par compte (5 échecs puis délai croissant, 429) qui **ne compte que les jetons mal formés ou inconnus** (jamais une invitation connue mais morte ; un aperçu réussi n'efface pas le compteur). Le quota `invitation_create_org` (2.1) n'est compté qu'après autorisation réussie.
 
 ---
 

@@ -87,6 +87,13 @@ def _publish_invitation_change(organization, invitation, change, actor):
     )
 
 
+# Caractères de format refusés (contrôle de direction et BOM : usurpation visuelle) ; ZWJ et ZWNJ restent permis
+# (emoji composés).
+_FORBIDDEN_LABEL_CHARS = frozenset(
+    ['‎', '‏', '﻿'] + [chr(c) for c in range(0x202a, 0x202f)] + [chr(c) for c in range(0x2066, 0x206a)]
+)
+
+
 def _clean_label(label) -> str:
     if label is None:
         return ''
@@ -97,20 +104,24 @@ def _clean_label(label) -> str:
         raise serializers.ValidationError(
             {'label': [f"L'étiquette ne doit pas dépasser {LABEL_MAX_LENGTH} caractères."]},
         )
-    if any(unicodedata.category(ch) in ('Cc', 'Cf', 'Zl', 'Zp') for ch in label):
+    if any(unicodedata.category(ch) in ('Cc', 'Zl', 'Zp') or ch in _FORBIDDEN_LABEL_CHARS for ch in label):
         raise serializers.ValidationError({'label': ["L'étiquette contient un caractère non autorisé."]})
     return label
 
 
 # --- Côté membre habilité : créer, lister, révoquer ---------------------------------------------------------------
 
-def create_invitation(actor, organization_id, role, label=''):
+def create_invitation(actor, organization_id, role, label='', after_authorization=None):
     """Crée une invitation `PENDING` et renvoie `(invitation, jeton)`. Le jeton clair n'existe qu'ici.
     `org.manage_members` ; rôle `EDITOR` ou `ANALYST` seulement (`INVITABLE_ROLES`) ; plafond d'invitations en attente
-    non échues par organisation (réglage), compté sous verrou. L'autorisation précède la validation du corps."""
+    non échues par organisation (réglage), compté sous verrou. L'autorisation précède la validation du corps.
+    `after_authorization` : crochet appelé juste après l'autorisation réussie (quota par organisation de la vue :
+    un non-membre ne le consomme jamais)."""
     with transaction.atomic():
         organization = _lock_organization(organization_id)
         actor_membership = _authorize_member(actor, organization, 'org.manage_members')
+        if after_authorization is not None:
+            after_authorization()
         if not isinstance(role, str) or role not in capabilities.ROLES:
             raise serializers.ValidationError({'role': ["Rôle inconnu ou manquant."]})
         if role not in INVITABLE_ROLES or not capabilities.can_manage_role_of(actor_membership.role, role):
@@ -192,17 +203,19 @@ class _Refusal(Exception):
     """Refus d'une invitation identifiée : porte la raison journalisée et l'erreur d'API à renvoyer. Levée dans le
     `atomic` pour annuler la prise de l'invitation (elle reste `PENDING`), journalisée et relevée à l'extérieur."""
 
-    def __init__(self, reason, error, counts_as_failure):
+    def __init__(self, reason, error):
         super().__init__(reason)
-        self.reason, self.error, self.counts_as_failure = reason, error, counts_as_failure
+        self.reason, self.error = reason, error
 
 
 def _failure_key(user):
     return str(user.pk)
 
 
-def _reject_invalid(user):
-    """Jeton inutilisable : compte l'échec (même pour une invitation connue mais morte : aucun écart observable)."""
+def _reject_unknown(user):
+    """Jeton mal formé ou inconnu (aucune ligne ne correspond à l'empreinte) : seul cas compté comme échec. Une
+    invitation connue mais morte suppose la détention d'un vrai jeton de 256 bits : aucun oracle de devinette, et
+    un utilisateur qui rouvre un lien expiré ne doit pas se verrouiller. Les réponses restent identiques."""
     INVITATION_FAILURES.failure(_failure_key(user))
     raise invitation_invalid_error()
 
@@ -211,11 +224,11 @@ def _find_invitation(user, token):
     """Vérifie le délai d'échecs du compte, la forme du jeton puis cherche l'invitation par empreinte. Forme
     incorrecte ou inconnu : même 404 uniforme, non journalisé (rien à rattacher), échec compté."""
     INVITATION_FAILURES.check(_failure_key(user))
-    if not isinstance(token, str) or not TOKEN_PATTERN.match(token):
-        _reject_invalid(user)
+    if not isinstance(token, str) or not TOKEN_PATTERN.fullmatch(token):
+        _reject_unknown(user)
     invitation = OrganizationInvitation.objects.filter(token_hash=hash_token(token)).first()
     if invitation is None:
-        _reject_invalid(user)
+        _reject_unknown(user)
     return invitation
 
 
@@ -264,9 +277,9 @@ def preview_invitation(user, token) -> dict:
     if (
         invitation.status != OrganizationInvitation.STATUS_PENDING or invitation.expires_at <= now
         or organization is None or organization.status != Organization.STATUS_ACTIVE
-        or not _inviter_has_authority(invitation, organization)
+        or invitation.role not in INVITABLE_ROLES or not _inviter_has_authority(invitation, organization)
     ):
-        _reject_invalid(user)
+        raise invitation_invalid_error()
     inviter = User.objects.filter(pk=invitation.created_by_id).only('full_name').first()
     return {
         'organization_name': organization.name, 'org_type': organization.org_type, 'role': invitation.role,
@@ -280,7 +293,7 @@ def _accept_locked(user, invitation):
     try:
         organization = _lock_organization(invitation.organization_id)
     except ContextDenied:
-        raise _Refusal('org_inactive', invitation_invalid_error(), True)
+        raise _Refusal('org_inactive', invitation_invalid_error())
     now = timezone.now()
     taken = OrganizationInvitation.objects.filter(
         pk=invitation.pk, status=OrganizationInvitation.STATUS_PENDING, expires_at__gt=now,
@@ -288,26 +301,28 @@ def _accept_locked(user, invitation):
         status=OrganizationInvitation.STATUS_ACCEPTED, closed_at=now, closed_by=user, label='', updated_at=now,
     )
     if not taken:
-        raise _Refusal(_dead_reason(invitation.pk, now), invitation_invalid_error(), True)
+        raise _Refusal(_dead_reason(invitation.pk, now), invitation_invalid_error())
     if organization.status != Organization.STATUS_ACTIVE:
-        raise _Refusal('org_inactive', invitation_invalid_error(), True)
+        raise _Refusal('org_inactive', invitation_invalid_error())
     if not _inviter_has_authority(invitation, organization):
-        raise _Refusal('authority_lost', invitation_invalid_error(), True)
+        raise _Refusal('authority_lost', invitation_invalid_error())
+    if invitation.role not in INVITABLE_ROLES:  # la base n'interdit que OWNER
+        raise _Refusal('role_not_invitable', invitation_invalid_error())
 
     # Contrôles propres à la cible : seulement après validité de l'invitation, et sans effet sur le compteur d'échecs.
     if moderation_services.is_user_restricted(user.pk):
         raise _Refusal(
-            'account_restricted', ContextDenied(DENY_SECURITY, "Votre compte ne permet pas cette action."), False,
+            'account_restricted', ContextDenied(DENY_SECURITY, "Votre compte ne permet pas cette action."),
         )
     if not user.phone_verified:
         raise _Refusal('phone_unverified', OrganizationError(
             "Vérifiez votre numéro de téléphone avant de rejoindre une organisation.",
             'phone_verification_required', status.HTTP_403_FORBIDDEN,
-        ), False)
+        ))
     try:
         _ensure_under_limit(user.pk)
     except OrganizationError as error:
-        raise _Refusal('limit', error, False)
+        raise _Refusal('limit', error)
     inviter = User.objects.get(pk=invitation.created_by_id)
     try:
         membership = _activate_membership(
@@ -315,7 +330,7 @@ def _accept_locked(user, invitation):
             invited_by=invitation.created_by_id,
         )
     except OrganizationError as error:
-        raise _Refusal('already_member', error, False)
+        raise _Refusal('already_member', error)
     _audit_invitation(
         user, 'INVITATION_ACCEPTED', organization, invitation, invited_by=invitation.created_by_id,
     )
@@ -338,8 +353,6 @@ def accept_invitation(user, token) -> Membership:
                 f"organization={invitation.organization_id}; reason={refusal.reason}"
             ), context=(CONTEXT_ORGANIZATION, invitation.organization_id),
         )
-        if refusal.counts_as_failure:
-            INVITATION_FAILURES.failure(_failure_key(user))
         raise refusal.error
     INVITATION_FAILURES.success(_failure_key(user))
     return membership
@@ -355,7 +368,8 @@ def decline_invitation(user, token):
         except ContextDenied:
             organization = None
         now = timezone.now()
-        done = organization is not None and OrganizationInvitation.objects.filter(
+        # Organisation non active : invitation « non prise » (contrat §2.7), ni écriture, ni audit, ni événement.
+        done = organization is not None and organization.status == Organization.STATUS_ACTIVE and OrganizationInvitation.objects.filter(
             pk=invitation.pk, status=OrganizationInvitation.STATUS_PENDING, expires_at__gt=now,
         ).update(
             status=OrganizationInvitation.STATUS_DECLINED, closed_at=now, closed_by=user, label='', updated_at=now,
@@ -364,5 +378,5 @@ def decline_invitation(user, token):
             _audit_invitation(user, 'INVITATION_DECLINED', organization, invitation)
             _publish_invitation_change(organization, invitation, CHANGE_DECLINED, user)
     if not done:
-        _reject_invalid(user)
+        raise invitation_invalid_error()
     INVITATION_FAILURES.success(_failure_key(user))

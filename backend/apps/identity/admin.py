@@ -23,7 +23,7 @@ from . import services
 from .permissions import REVIEW_KYC_PERMISSION
 from .models import (
     ContactConsent, IdentitySettings, KycDocument, Membership, OtpCode,
-    Organization, OrganizationDocumentRequirement, ProviderProfile, User,
+    Organization, OrganizationDocumentRequirement, OrganizationInvitation, ProviderProfile, User,
 )
 
 
@@ -292,6 +292,15 @@ class MembershipAdmin(ReadOnlyAdmin):
     exclude = ('user', 'added_by', 'ended_by')
 
 
+@admin.register(OrganizationInvitation)
+class OrganizationInvitationAdmin(ReadOnlyAdmin):
+    """Lecture seule (ADR 0008, 13) : ni l'empreinte du jeton, ni l'étiquette, ni les comptes ne sont affichés."""
+
+    list_display = ('organization', 'role', 'status', 'expires_at', 'closed_at')
+    list_filter = ('status', 'role')
+    exclude = ('token_hash', 'label', 'created_by', 'closed_by')
+
+
 @admin.register(ProviderProfile)
 class ProviderProfileAdmin(ReadOnlyAdmin):
     list_display = ('display_name', 'status', 'created_at')
@@ -334,5 +343,5 @@ class OrganizationDocumentRequirementAdmin(admin.ModelAdmin):
 class IdentitySettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
     list_display = (
         'max_organizations_per_account', 'max_categories_per_context', 'org_phone_channels_enabled',
-        'kyb_file_retention_days',
+        'kyb_file_retention_days', 'invitation_ttl_days', 'max_pending_invitations', 'invitation_history_days',
     )

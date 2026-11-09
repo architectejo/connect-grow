@@ -209,6 +209,47 @@ class OrganizationSensitiveThrottle(UserWriteThrottle):
         return True  # DELETE de membre et PATCH ordinaire : `org_write` seul
 
 
+class InvitationCreateThrottle(UserWriteThrottle):
+    """Création d'invitation : 20/h par compte, écritures seulement (ADR 0008, 8.3)."""
+
+    scope = 'invitation_create'
+
+
+class InvitationCreateOrgThrottle(SimpleRateThrottle):
+    """Création d'invitation : 50/jour par organisation (identifiant du chemin), écritures seulement (ADR 0008, 8.3).
+    Sans identifiant d'organisation dans le chemin, pas de limite ici."""
+
+    scope = 'invitation_create_org'
+
+    def allow_request(self, request, view):
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return True
+        return super().allow_request(request, view)
+
+    def get_cache_key(self, request, view):
+        organization_id = (getattr(view, 'kwargs', None) or {}).get('pk')
+        if not organization_id:
+            return None
+        return self.cache_format % {'scope': self.scope, 'ident': str(organization_id).lower()}
+
+
+class InvitationRedeemIpThrottle(IpThrottle):
+    """Aperçu, acceptation et refus d'une invitation : 60/h par adresse IP (ADR 0008, 8.3)."""
+
+    scope = 'invitation_redeem'
+
+
+class InvitationRedeemUserThrottle(SimpleRateThrottle):
+    """Aperçu, acceptation et refus d'une invitation : 30/h par compte, toutes requêtes comptées (ADR 0008, 8.3)."""
+
+    scope = 'invitation_redeem_user'
+
+    def get_cache_key(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return None
+        return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
+
+
 class ContextsListThrottle(SimpleRateThrottle):
     """Lecture de la liste des contextes (appelée à chaque chargement du front) : par utilisateur."""
 

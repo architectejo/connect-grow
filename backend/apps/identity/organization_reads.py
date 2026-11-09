@@ -72,6 +72,8 @@ def get_organization_limits() -> dict:
         'name_min_length': organizations.NAME_MIN_LENGTH,
         'name_max_length': organizations.NAME_MAX_LENGTH,
         'description_max_length': organizations.DESCRIPTION_MAX_LENGTH,
+        'invitation_ttl_days': settings_row.invitation_ttl_days,
+        'max_pending_invitations': settings_row.max_pending_invitations,
     }
 
 

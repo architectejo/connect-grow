@@ -32,6 +32,12 @@ _TYPES = (
     # Charge utile : `context_type`, `context_id`, aucune donnée personnelle. Abonnés : `marketplace.purge_seller_context`,
     # `visibility.purge_seller_context`, `reviews.purge_seller_context`.
     EventType('identity.seller_context_removed'),
+    # ADR 0008, section 6 : `organization_id`, `invitation_id`, `change` (created, accepted, declined, revoked), `role`,
+    # `actor_id`, `inviter_id` ; UUID et codes seulement (ni nom, ni jeton, ni étiquette). Déclaré par L1-01-B2a ;
+    # l'émetteur (services d'invitation) et l'abonné `notifications.notify_invitation_outcome` arrivent avec B2b :
+    # retirer alors `emitter_pending` et `no_subscriber`.
+    # Clé additive de `identity.membership_changed` prévue pour B2b : `via` (« invitation » ou absent).
+    EventType('identity.organization_invitation_changed', emitter_pending=True, no_subscriber=True),
     # Identité d'une organisation modifiée (T8) : noms de champs seulement, aucune valeur.
     EventType('identity.organization_updated', no_subscriber=True),
     # Émetteur : `decide_kyc_document` (T4) ; abonné `notifications.notify_kyb_decision` (T6).

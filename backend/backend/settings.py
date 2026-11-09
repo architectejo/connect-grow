@@ -152,6 +152,10 @@ REST_FRAMEWORK = {
         'seller_profile': '600/hour',  # profil public d'un vendeur (marketplace), par IP
         'org_write': '30/hour',     # modification, archivage et sortie d'une organisation, par utilisateur
         'org_sensitive': '10/hour',  # transfert de propriété, promotion ou rétrogradation d'un propriétaire, par utilisateur
+        'invitation_create': '20/hour',        # création d'invitation d'équipe, par utilisateur (ADR 0008, 8.3)
+        'invitation_create_org': '50/day',     # création d'invitation d'équipe, par organisation
+        'invitation_redeem': '60/hour',        # aperçu, acceptation, refus d'invitation, par IP
+        'invitation_redeem_user': '30/hour',   # aperçu, acceptation, refus d'invitation, par utilisateur
         'contexts': '600/hour',    # liste des contextes disponibles, par utilisateur
         'contact_settings': '20/hour',  # réglages de contact vendeur (numéro, code, canaux), par utilisateur
         # Écritures du marketplace et des interactions (par utilisateur ; par IP pour la vue anonyme).

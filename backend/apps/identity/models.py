@@ -16,7 +16,7 @@ from django.utils import timezone
 from apps.common.images import sanitize_uploaded_field, validate_image_pixels, validate_image_upload_size
 from apps.common.models import BaseModel, SingletonSettingsModel
 
-from .capabilities import ROLE_CHOICES
+from .capabilities import ROLE_ANALYST, ROLE_CHOICES, ROLE_EDITOR, ROLE_OWNER
 from .kyc_files import kyc_upload_to
 
 logger = logging.getLogger(__name__)
@@ -400,6 +400,21 @@ class IdentitySettings(SingletonSettingsModel):
                   "(durée à fixer par le client, LEG-PRV). La ligne et le résultat de la décision sont conservés.",
     )
 
+    # Invitations d'équipe (ADR 0008, 4.2). Valeurs provisoires, à confirmer par le client.
+    invitation_ttl_days = models.PositiveSmallIntegerField(
+        default=7, validators=[MinValueValidator(1), MaxValueValidator(30)],
+        help_text="Durée de validité d'un lien d'invitation, en jours (1 à 30). Valeur provisoire, à confirmer.",
+    )
+    max_pending_invitations = models.PositiveSmallIntegerField(
+        default=20, validators=[MinValueValidator(1), MaxValueValidator(200)],
+        help_text="Nombre maximal d'invitations en attente par organisation (1 à 200). Valeur provisoire, à confirmer.",
+    )
+    invitation_history_days = models.PositiveSmallIntegerField(
+        default=30, validators=[MinValueValidator(1), MaxValueValidator(365)],
+        help_text="Jours de conservation d'une invitation close (acceptée, refusée, révoquée, expirée) avant purge "
+                  "(1 à 365). Valeur provisoire, à confirmer.",
+    )
+
     class Meta:
         verbose_name = "Paramètres d'identité"
         verbose_name_plural = "Paramètres d'identité"
@@ -520,6 +535,57 @@ class Membership(BaseModel):
 
     def __str__(self):
         return f"Appartenance {self.role} ({self.status})"
+
+
+# Rôles qu'une invitation peut porter (ADR 0008, 3.2). `OWNER` est de plus interdit en base ; `ADMIN` s'obtient par
+# promotion. L'assouplir ne demande aucune migration.
+INVITABLE_ROLES = (ROLE_EDITOR, ROLE_ANALYST)
+
+
+class OrganizationInvitation(BaseModel):
+    """Invitation à rejoindre une organisation, par lien à usage unique (ADR 0008, 4.1). Le jeton n'est jamais
+    stocké : seule son empreinte SHA-256. Aucune unicité conditionnelle : le plafond d'invitations en attente est
+    garanti en service, sous verrou. L'étiquette est vidée dès que l'invitation quitte `PENDING` (règle 10)."""
+
+    STATUS_PENDING = 'PENDING'
+    STATUS_ACCEPTED = 'ACCEPTED'
+    STATUS_DECLINED = 'DECLINED'
+    STATUS_REVOKED = 'REVOKED'
+    STATUS_EXPIRED = 'EXPIRED'
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "En attente"),
+        (STATUS_ACCEPTED, "Acceptée"),
+        (STATUS_DECLINED, "Refusée"),
+        (STATUS_REVOKED, "Révoquée"),
+        (STATUS_EXPIRED, "Expirée"),
+    )
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='invitations')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    token_hash = models.CharField(max_length=64, unique=True)
+    label = models.CharField(max_length=60, blank=True, default='')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+    )
+    expires_at = models.DateTimeField()
+    closed_at = models.DateTimeField(null=True, blank=True)
+    closed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+    )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(check=~models.Q(role=ROLE_OWNER), name='orginv_role_not_owner'),
+        ]
+        indexes = [
+            models.Index(fields=['organization', 'status'], name='orginv_org_status'),
+            models.Index(fields=['status', 'expires_at'], name='orginv_status_expires'),
+            models.Index(fields=['created_by', 'status'], name='orginv_created_by'),
+        ]
+
+    def __str__(self):
+        return f"Invitation {self.role} ({self.status})"
 
 
 class ProviderProfile(BaseModel):

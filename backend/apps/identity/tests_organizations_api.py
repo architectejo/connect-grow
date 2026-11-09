@@ -815,6 +815,7 @@ class LimitsTests(ApiBase):
         self.assertEqual(response.json(), {
             'max_categories_per_context': 5, 'max_organizations_per_account': 10, 'name_min_length': 2,
             'name_max_length': 255, 'description_max_length': 2000,
+            'invitation_ttl_days': 7, 'max_pending_invitations': 20,
         })
         IdentitySettings.objects.filter(pk=IdentitySettings.get_solo().pk).update(
             max_categories_per_context=8, max_organizations_per_account=3,

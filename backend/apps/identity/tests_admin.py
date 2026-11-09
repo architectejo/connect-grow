@@ -126,6 +126,9 @@ class IdentitySettingsAuditTests(TestCase):
             'max_organizations_per_account': settings_row.max_organizations_per_account,
             'max_categories_per_context': settings_row.max_categories_per_context,
             'kyb_file_retention_days': old + 30,
+            'invitation_ttl_days': settings_row.invitation_ttl_days,
+            'max_pending_invitations': settings_row.max_pending_invitations,
+            'invitation_history_days': settings_row.invitation_history_days,
         }
         if settings_row.org_phone_channels_enabled:
             data['org_phone_channels_enabled'] = 'on'

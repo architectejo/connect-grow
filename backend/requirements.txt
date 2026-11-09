@@ -3,6 +3,7 @@ Django==4.2
 djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
 django-cors-headers==4.9.0
+drf-spectacular==0.30.0
 
 # --- Temps réel (Channels / ASGI) ---
 daphne==4.2.1

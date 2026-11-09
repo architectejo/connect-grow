@@ -16,6 +16,7 @@ from apps.common import boundaries
 # (AllowAny oublié avec le refus par défaut) fait échouer test_every_route_..., qui parcourt
 # TOUTES les routes via get_resolver().
 EXPECTED_PUBLIC = {
+    ('get', 'api/v1/schema/'),  # schéma OpenAPI : structure seule, aucune donnée (ADR 0007)
     ('get', 'api/v1/marketplace/cities/'),
     ('get', 'api/v1/marketplace/cities/<pk>/'),
     ('get', 'api/v1/marketplace/communes/'),

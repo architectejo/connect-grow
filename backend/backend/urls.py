@@ -2,6 +2,8 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from rest_framework.permissions import AllowAny
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -18,7 +20,15 @@ urlpatterns = [
     path('api/v1/interactions/', include('apps.notifications.urls')),
     path('api/v1/moderation/forbidden-items/', include('apps.catalog.urls_forbidden')),
     path('api/v1/moderation/', include('apps.moderation.urls')),
+    # Documentation OpenAPI (ADR 0007) : le schéma est de la structure (aucune donnée), toujours servi.
+    path('api/v1/schema/', SpectacularAPIView.as_view(permission_classes=[AllowAny]), name='schema'),
 ]
+
+# L'interface Swagger charge ses assets depuis un CDN : réservée au développement (DEBUG).
+if settings.DEBUG:
+    urlpatterns += [
+        path('api/v1/docs/', SpectacularSwaggerView.as_view(url_name='schema', permission_classes=[AllowAny]), name='docs'),
+    ]
 
 # Une seule fois suffit, et seulement si DEBUG est True
 if settings.DEBUG:

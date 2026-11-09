@@ -19,6 +19,12 @@ Attention :
 - Toutes les routes REST sont sous `/api/v1/` (ex. `/api/v1/accounts/login/`) ; l'ancien préfixe `/api/` répond 404 (pas de redirection). Les WebSocket `/ws/` sont inchangés.
 - Pagination : `?page_size=` est accepté mais plafonné (`API_MAX_PAGE_SIZE`, 100) ; valeur nulle, négative ou non numérique : taille par défaut (`API_PAGE_SIZE`, 20).
 
+## Documentation OpenAPI (L0-11b, ADR 0007)
+
+- Schéma : `GET /api/v1/schema/` (OpenAPI 3, JSON ou YAML selon `Accept`), public (structure seule).
+- Interface Swagger : `GET /api/v1/docs/`, **uniquement avec `DEBUG=True`** (assets CDN) ; absente en production.
+- Fichier : `python manage.py spectacular --file schema.yml --validate` (base migrée requise ; ne pas pointer vers `db.sqlite3` de travail si l'on veut l'éviter : `DB_NAME` absolu vers un fichier temporaire).
+
 ## Données de départ
 
 Après `migrate` sur une base vierge :

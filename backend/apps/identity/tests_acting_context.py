@@ -24,7 +24,7 @@ from . import capabilities, services
 from .models import Membership, Organization, ProviderProfile, User
 
 OWNER, ADMIN, EDITOR, ANALYST = capabilities.ROLE_OWNER, capabilities.ROLE_ADMIN, capabilities.ROLE_EDITOR, capabilities.ROLE_ANALYST
-CONTEXTS_URL = '/api/accounts/contexts/'
+CONTEXTS_URL = '/api/v1/accounts/contexts/'
 SECRET_ORG_NAME = 'Sentinelle-Secrete-Orga'
 
 
@@ -643,8 +643,8 @@ class CacheHeadersTests(TestCase):
         plain = client.get(CONTEXTS_URL)
         self.assertIn('X-Context', plain['Vary'])
         self.assertIn('Authorization', plain['Vary'])
-        with_header = client.get('/api/accounts/me/', HTTP_X_CONTEXT='USER')
+        with_header = client.get('/api/v1/accounts/me/', HTTP_X_CONTEXT='USER')
         self.assertIn('no-store', with_header['Cache-Control'])
         self.assertIn('X-Context', with_header['Vary'])
-        without_header = client.get('/api/accounts/me/')
+        without_header = client.get('/api/v1/accounts/me/')
         self.assertNotIn('no-store', without_header.get('Cache-Control', ''))

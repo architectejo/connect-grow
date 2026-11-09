@@ -18,7 +18,7 @@ from apps.platform_core.testing import dispatch_outbox_now
 from . import services
 from .models import Notification
 
-URL = '/api/interactions/notifications/'
+URL = '/api/v1/interactions/notifications/'
 
 
 class NotificationContextBase(VerificationBase):

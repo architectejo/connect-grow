@@ -23,7 +23,7 @@ from apps.platform_core.testing import dispatch_outbox_now
 from . import services
 from .models import Review, ReviewSettings
 
-REVIEWS_URL = '/api/interactions/reviews/'
+REVIEWS_URL = '/api/v1/interactions/reviews/'
 GOOD = {'offer_rating': 4, 'seller_rating': 5, 'content': 'Très bon vendeur, je recommande.'}
 
 
@@ -460,7 +460,7 @@ class DecouplingTests(ReviewsTestBase):
 
     def test_old_deals_endpoint_is_gone(self):
         self.client.force_authenticate(self.buyer)
-        self.assertEqual(self.client.get('/api/reputation/deals/').status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(self.client.get('/api/v1/reputation/deals/').status_code, status.HTTP_404_NOT_FOUND)
 
 
 class CrossedReviewsDetectionTests(ReviewsTestBase):

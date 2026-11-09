@@ -20,7 +20,7 @@ from . import services
 from .models import ContactEvent, Favorite, MarketplaceSettings, Offer
 from .tests import MarketplaceTestBase
 
-LIST_URL = '/api/marketplace/posts/'
+LIST_URL = '/api/v1/marketplace/posts/'
 
 
 def ids(response):

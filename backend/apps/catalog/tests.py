@@ -82,36 +82,36 @@ class CatalogApiTests(TestCase):
         self.category = Category.objects.create(name='Électronique', slug='electronique')
 
     def test_public_referentials_keep_url_and_json_keys(self):
-        response = self.client.get('/api/marketplace/cities/')
+        response = self.client.get('/api/v1/marketplace/cities/')
         self.assertEqual(response.status_code, 200)
         city = response.data[0] if isinstance(response.data, list) else response.data['results'][0]
         self.assertEqual(set(city), {'id', 'name', 'communes'})
         self.assertEqual(city['id'], str(self.city.id))
         self.assertEqual(set(city['communes'][0]), {'id', 'name', 'city'})
 
-        response = self.client.get('/api/marketplace/categories/')
+        response = self.client.get('/api/v1/marketplace/categories/')
         self.assertEqual(set(response.data[0]), {'id', 'name', 'icon', 'slug'})
-        self.assertEqual(self.client.get('/api/marketplace/communes/').status_code, 200)
+        self.assertEqual(self.client.get('/api/v1/marketplace/communes/').status_code, 200)
 
     def test_forbidden_items_read_public_write_admin_only(self):
         ForbiddenItem.objects.create(keyword='médicament')
-        self.assertEqual(self.client.get('/api/moderation/forbidden-items/').status_code, 200)
+        self.assertEqual(self.client.get('/api/v1/moderation/forbidden-items/').status_code, 200)
 
         user = User.objects.create_user(email='u@example.com', password='x', full_name='U')
         self.client.force_authenticate(user)
-        denied = self.client.post('/api/moderation/forbidden-items/', {'keyword': 'poison'})
+        denied = self.client.post('/api/v1/moderation/forbidden-items/', {'keyword': 'poison'})
         self.assertEqual(denied.status_code, 403)
 
         admin = User.objects.create_user(email='a@example.com', password='x', full_name='A', is_staff=True)
         self.client.force_authenticate(admin)
-        created = self.client.post('/api/moderation/forbidden-items/', {'keyword': 'poison'})
+        created = self.client.post('/api/v1/moderation/forbidden-items/', {'keyword': 'poison'})
         self.assertEqual(created.status_code, 201)
         self.assertEqual(ForbiddenItem.objects.get(keyword='poison').added_by_id, admin.id)
 
     def test_forbidden_item_invalid_data(self):
         admin = User.objects.create_user(email='a@example.com', password='x', full_name='A', is_staff=True)
         self.client.force_authenticate(admin)
-        self.assertEqual(self.client.post('/api/moderation/forbidden-items/', {}).status_code, 400)
+        self.assertEqual(self.client.post('/api/v1/moderation/forbidden-items/', {}).status_code, 400)
 
 
 class SeedCatalogTests(TestCase):
@@ -210,7 +210,7 @@ class CaseInsensitiveUniquenessTests(TestCase):
         admin = User.objects.create_user(email='a@example.com', password='x', full_name='A', is_staff=True)
         client = APIClient()
         client.force_authenticate(admin)
-        response = client.post('/api/moderation/forbidden-items/', {'keyword': 'POISON'})
+        response = client.post('/api/v1/moderation/forbidden-items/', {'keyword': 'POISON'})
         self.assertEqual(response.status_code, 400)
         self.assertIn('keyword', response.data)
 
@@ -259,12 +259,12 @@ class ForbiddenItemAuditTests(TestCase):
         self.client.force_authenticate(self.admin)
 
     def test_create_update_delete_are_audited(self):
-        created = self.client.post('/api/moderation/forbidden-items/', {'keyword': 'poison'})
+        created = self.client.post('/api/v1/moderation/forbidden-items/', {'keyword': 'poison'})
         self.assertEqual(created.status_code, 201)
         item_id = created.data['id']
-        updated = self.client.patch(f'/api/moderation/forbidden-items/{item_id}/', {'keyword': 'poison fort'})
+        updated = self.client.patch(f'/api/v1/moderation/forbidden-items/{item_id}/', {'keyword': 'poison fort'})
         self.assertEqual(updated.status_code, 200)
-        self.assertEqual(self.client.delete(f'/api/moderation/forbidden-items/{item_id}/').status_code, 204)
+        self.assertEqual(self.client.delete(f'/api/v1/moderation/forbidden-items/{item_id}/').status_code, 204)
         actions = list(self.AuditLog.objects.filter(actor=self.admin).order_by('created_at').values_list('action', flat=True))
         self.assertEqual(actions, ['FORBIDDEN_ITEM_CREATED', 'FORBIDDEN_ITEM_UPDATED', 'FORBIDDEN_ITEM_DELETED'])
 

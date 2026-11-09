@@ -139,7 +139,7 @@ class LockAndDelayTests(RecoursBase):
     def test_overdue_fictitious_reports_are_counted_on_the_dashboard(self):
         self.file_report()
         self.client.force_authenticate(self.moderator)
-        dashboard = '/api/moderation/dashboard/'
+        dashboard = '/api/v1/moderation/dashboard/'
         self.assertEqual(self.client.get(dashboard).data['overdue_contact_fictif_count'], 0)
         Report.objects.update(created_at=timezone.now() - timedelta(hours=73))
         self.assertEqual(self.client.get(dashboard).data['overdue_contact_fictif_count'], 1)
@@ -329,8 +329,8 @@ class BatchAndThrottleTests(EligibilityBase):
     def test_offer_list_is_throttled_but_not_the_detail(self):
         cache.clear()
         with mock.patch.dict(ScopedRateThrottle.THROTTLE_RATES, {'offer_list': '2/hour'}):
-            self.assertEqual(self.client.get('/api/marketplace/posts/').status_code, 200)
-            self.assertEqual(self.client.get('/api/marketplace/posts/').status_code, 200)
-            third = self.client.get('/api/marketplace/posts/')
+            self.assertEqual(self.client.get('/api/v1/marketplace/posts/').status_code, 200)
+            self.assertEqual(self.client.get('/api/v1/marketplace/posts/').status_code, 200)
+            third = self.client.get('/api/v1/marketplace/posts/')
             self.assertEqual((third.status_code, third.data['code']), (status.HTTP_429_TOO_MANY_REQUESTS, 'throttled'))
-            self.assertEqual(self.client.get(f'/api/marketplace/posts/{self.offer.id}/').status_code, 200)
+            self.assertEqual(self.client.get(f'/api/v1/marketplace/posts/{self.offer.id}/').status_code, 200)

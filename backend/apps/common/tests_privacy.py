@@ -27,13 +27,13 @@ from apps.reviews.models import Review, ReviewSettings
 # Seul l'espace personnel d'un utilisateur renvoie ses propres coordonnées. `phone_verified`
 # est interdit partout ailleurs : il révèle qu'un numéro existe sur le compte.
 # Les réglages de contact (ADR 0005, 5.1) renvoient le seul numéro du titulaire, masqué.
-OWN_DATA_ROUTES = ('api/accounts/me/', 'api/accounts/contact-settings/')
+OWN_DATA_ROUTES = ('api/v1/accounts/me/', 'api/v1/accounts/contact-settings/')
 CONTACT_SETTINGS_ROUTES = (
-    'api/accounts/contact-settings/', 'api/accounts/contact-settings/phone/',
-    'api/accounts/contact-settings/phone/verify/', 'api/accounts/contact-settings/channels/<str:channel>/',
+    'api/v1/accounts/contact-settings/', 'api/v1/accounts/contact-settings/phone/',
+    'api/v1/accounts/contact-settings/phone/verify/', 'api/v1/accounts/contact-settings/channels/<str:channel>/',
 )
 # Routes de l'ADR 0005 (5.4 et 5.5) : seule la première renvoie un numéro de contact.
-REVEAL_ROUTES = ('api/interactions/contacts/reveal/', 'api/interactions/contacts/reveals/received/')
+REVEAL_ROUTES = ('api/v1/interactions/contacts/reveal/', 'api/v1/interactions/contacts/reveals/received/')
 LEAKY_KEY_RE = re.compile(r'phone|email|whatsapp|mobile|tel', re.IGNORECASE)
 PARAM_RE = re.compile(r'<(?:\w+:)?\w+>')
 REGEX_PARAM_RE = re.compile(r'\(\?P<(\w+)>[^)]*\)')
@@ -305,33 +305,33 @@ class NoPersonalContactLeakTests(APITestCase):
                 body = response.content.decode('utf-8', errors='ignore')
                 if seller_number in body or seller_number[4:] in body:
                     revealing.append((route, response.status_code))
-        self.assertEqual(sorted(set(revealing)), [('api/interactions/contacts/reveal/', 201)])
+        self.assertEqual(sorted(set(revealing)), [('api/v1/interactions/contacts/reveal/', 201)])
 
     def test_inventory_other_viewers_never_get_the_seller_number_from_any_route(self):
         for viewer in ('third', 'moderator'):
             for route, items in self.post_everywhere(viewer).items():
-                if route == 'api/interactions/contacts/reveal/':
+                if route == 'api/v1/interactions/contacts/reveal/':
                     continue  # un compte quelconque obtient le numéro consenti, comme le visiteur
                 for path, response in items:
                     self.assert_clean(response, '/' + path, viewer)
 
     def test_reveal_is_the_only_response_with_the_number_and_it_is_not_cacheable(self):
         response = self.client_for('buyer').post(
-            '/api/interactions/contacts/reveal/', {'offer': str(self.offer.id), 'channel': 'WHATSAPP'}, format='json',
+            '/api/v1/interactions/contacts/reveal/', {'offer': str(self.offer.id), 'channel': 'WHATSAPP'}, format='json',
         )
         self.assertEqual(response.status_code, 201)
         self.assertIn('no-store', response['Cache-Control'])
         self.assertIn(self.CONTACT_NUMBERS['seller'], response.content.decode())
         # Anonyme : refusé, sans numéro.
         refused = self.client_for(None).post(
-            '/api/interactions/contacts/reveal/', {'offer': str(self.offer.id), 'channel': 'CALL'}, format='json',
+            '/api/v1/interactions/contacts/reveal/', {'offer': str(self.offer.id), 'channel': 'CALL'}, format='json',
         )
         self.assertEqual(refused.status_code, 401)
         self.assertNotIn('891111111', refused.content.decode())
 
     def reveal_as_buyer(self):
         response = self.client_for('buyer').post(
-            '/api/interactions/contacts/reveal/', {'offer': str(self.offer.id), 'channel': 'CALL'}, format='json',
+            '/api/v1/interactions/contacts/reveal/', {'offer': str(self.offer.id), 'channel': 'CALL'}, format='json',
         )
         self.assertIn(response.status_code, (200, 201))
 
@@ -343,7 +343,7 @@ class NoPersonalContactLeakTests(APITestCase):
     def test_the_seller_never_sees_the_visitor_number_or_identifier(self):
         self.reveal_as_buyer()
         self.crawl('seller')
-        response = self.client_for('seller').get('/api/interactions/contacts/reveals/received/')
+        response = self.client_for('seller').get('/api/v1/interactions/contacts/reveals/received/')
         self.assertEqual(response.status_code, 200)
         self.assertIn('no-store', response['Cache-Control'])
         text = response.content.decode()
@@ -357,7 +357,7 @@ class NoPersonalContactLeakTests(APITestCase):
     def test_the_received_list_is_empty_for_moderators_and_administrators(self):
         self.reveal_as_buyer()
         for viewer in ('moderator', 'admin', 'third', 'buyer'):
-            response = self.client_for(viewer).get('/api/interactions/contacts/reveals/received/')
+            response = self.client_for(viewer).get('/api/v1/interactions/contacts/reveals/received/')
             self.assertEqual(response.json()['count'], 0, viewer)
 
     def test_the_number_is_in_no_event_audit_notification_or_stored_message(self):
@@ -391,14 +391,14 @@ class NoPersonalContactLeakTests(APITestCase):
     # --- réglages de contact (ADR 0005, T2) --------------------------------------------
 
     def test_contact_settings_routes_are_exactly_the_four_of_the_adr_and_take_no_user_id(self):
-        routes = [r for r in iter_routes() if r.startswith('api/accounts/contact-settings')]
+        routes = [r for r in iter_routes() if r.startswith('api/v1/accounts/contact-settings')]
         self.assertEqual(sorted(routes), sorted(CONTACT_SETTINGS_ROUTES))
 
     def test_contact_settings_show_only_the_owner_masked_numbers(self):
         for viewer in ('seller', 'buyer', 'moderator', 'admin'):
-            response = self.client_for(viewer).get('/api/accounts/contact-settings/')
+            response = self.client_for(viewer).get('/api/v1/accounts/contact-settings/')
             self.assertEqual(response.status_code, 200)
-            self.assert_clean(response, '/api/accounts/contact-settings/', viewer)
+            self.assert_clean(response, '/api/v1/accounts/contact-settings/', viewer)
             text = response.content.decode()
             # Jamais de numéro complet, même celui du titulaire.
             for number in (*self.CONTACT_NUMBERS.values(), self.PEOPLE[viewer][0]):
@@ -407,7 +407,7 @@ class NoPersonalContactLeakTests(APITestCase):
             for masked in re.findall(r'\+243 [0-9*]{2} \*{3} \*{2} [0-9]{2}', text):
                 self.assertEqual(len(re.findall(r'[0-9]', masked[4:])), 4)  # hors indicatif : 4 chiffres au plus
             self.assertEqual(response['Cache-Control'], 'no-store')
-        seller_body = self.client_for('seller').get('/api/accounts/contact-settings/').json()
+        seller_body = self.client_for('seller').get('/api/v1/accounts/contact-settings/').json()
         self.assertEqual(seller_body['phone']['masked'], '+243 89 *** ** 11')
         self.assertEqual(seller_body['login_phone_masked'], '+243 97 *** ** 01')
 
@@ -423,11 +423,11 @@ class NoPersonalContactLeakTests(APITestCase):
     def test_writes_on_contact_settings_do_not_leak_other_numbers(self):
         client = self.client_for('buyer')
         for response in (
-            client.put('/api/accounts/contact-settings/phone/', {'phone': '+243893333333'}, format='json'),
-            client.put('/api/accounts/contact-settings/channels/CALL/', {'enabled': False}, format='json'),
+            client.put('/api/v1/accounts/contact-settings/phone/', {'phone': '+243893333333'}, format='json'),
+            client.put('/api/v1/accounts/contact-settings/channels/CALL/', {'enabled': False}, format='json'),
         ):
             self.assertEqual(response.status_code, 200)
-            self.assert_clean(response, '/api/accounts/contact-settings/ (écriture)', 'buyer')
+            self.assert_clean(response, '/api/v1/accounts/contact-settings/ (écriture)', 'buyer')
             self.assertNotIn('893333333', response.content.decode())
 
 
@@ -588,7 +588,7 @@ class OrganizationContactPrivacyTests(APITestCase):
             ('owner', True, reverse('conversation-list'), 'Acheteur'),
             ('buyer', False, reverse('conversation-list'), 'Atelier X'),
             ('buyer', False, reverse('message-list') + f'?conversation={self.conversation.id}', 'Atelier X'),
-            ('owner', True, '/api/accounts/contact-settings/', '+243 89 *** ** 11'),
+            ('owner', True, '/api/v1/accounts/contact-settings/', '+243 89 *** ** 11'),
         ]
         for viewer, as_org, url, expected in witnesses:
             response = self.client_for(viewer, as_org).get(url)
@@ -599,7 +599,7 @@ class OrganizationContactPrivacyTests(APITestCase):
 
     def test_organization_contact_settings_show_only_the_masked_organization_number(self):
         for viewer in ('owner', 'admin'):
-            response = self.client_for(viewer, as_organization=True).get('/api/accounts/contact-settings/')
+            response = self.client_for(viewer, as_organization=True).get('/api/v1/accounts/contact-settings/')
             self.assertEqual(response.status_code, 200)
             text = response.content.decode()
             body = response.json()
@@ -618,8 +618,8 @@ class OrganizationContactPrivacyTests(APITestCase):
         self.addCleanup(sms.stop)
         client = self.client_for('owner', as_organization=True)
         responses = [
-            client.put('/api/accounts/contact-settings/phone/', {'phone': '+243894444444'}, format='json'),
-            client.put('/api/accounts/contact-settings/channels/CALL/', {'enabled': False}, format='json'),
+            client.put('/api/v1/accounts/contact-settings/phone/', {'phone': '+243894444444'}, format='json'),
+            client.put('/api/v1/accounts/contact-settings/channels/CALL/', {'enabled': False}, format='json'),
         ]
         for response in responses:
             self.assertEqual(response.status_code, 200)

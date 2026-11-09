@@ -86,7 +86,7 @@ class ProfileImagesAreSanitizedTests(TestCase):
         client = APIClient()
         client.force_authenticate(user)
         response = client.post(
-            '/api/accounts/organizations/',
+            '/api/v1/accounts/organizations/',
             {'name': 'Logo Orga', 'org_type': 'ENTREPRISE', 'logo': upload(jpeg_with_exif())}, format='multipart',
         )
         self.assertEqual(response.status_code, 201, response.content)
@@ -97,7 +97,7 @@ class ProfileImagesAreSanitizedTests(TestCase):
         user = User.objects.create_user(email='api@example.com', password='x', full_name='A')
         client = APIClient()
         client.force_authenticate(user)
-        response = client.patch('/api/accounts/me/', {'photo': upload(jpeg_with_exif())}, format='multipart')
+        response = client.patch('/api/v1/accounts/me/', {'photo': upload(jpeg_with_exif())}, format='multipart')
         self.assertEqual(response.status_code, 200, response.data)
         user.refresh_from_db()
         self.assertEqual(self.stored_exif(user.photo)[0], {})
@@ -106,10 +106,10 @@ class ProfileImagesAreSanitizedTests(TestCase):
         user = User.objects.create_user(email='api@example.com', password='x', full_name='A')
         client = APIClient()
         client.force_authenticate(user)
-        fake = client.patch('/api/accounts/me/', {'photo': upload(b'<script>alert(1)</script>')}, format='multipart')
+        fake = client.patch('/api/v1/accounts/me/', {'photo': upload(b'<script>alert(1)</script>')}, format='multipart')
         self.assertEqual(fake.status_code, 400)
         with self.settings(PROFILE_IMAGE_MAX_BYTES=100):
-            big = client.patch('/api/accounts/me/', {'photo': upload(jpeg_with_exif())}, format='multipart')
+            big = client.patch('/api/v1/accounts/me/', {'photo': upload(jpeg_with_exif())}, format='multipart')
         self.assertEqual(big.status_code, 400)
         self.assertIn('photo', big.data)
 
@@ -134,9 +134,9 @@ class PixelLimitTests(TestCase):
         client = APIClient(raise_request_exception=False)
         client.force_authenticate(owner)
         with self.settings(PROFILE_IMAGE_MAX_PIXELS=1000):
-            photo = client.patch('/api/accounts/me/', {'photo': upload(self.png((50, 50)), 'p.png', 'image/png')}, format='multipart')
+            photo = client.patch('/api/v1/accounts/me/', {'photo': upload(self.png((50, 50)), 'p.png', 'image/png')}, format='multipart')
             logo = client.post(
-                '/api/accounts/organizations/',
+                '/api/v1/accounts/organizations/',
                 {'name': 'Grande boîte', 'org_type': 'ENTREPRISE', 'logo': upload(self.png((50, 50)), 'l.png', 'image/png')},
                 format='multipart',
             )
@@ -149,7 +149,7 @@ class PixelLimitTests(TestCase):
         user = User.objects.create_user(email='ok@example.com', password='x', full_name='O')
         client = APIClient()
         client.force_authenticate(user)
-        response = client.patch('/api/accounts/me/', {'photo': upload(self.png((20, 20)), 'p.png', 'image/png')}, format='multipart')
+        response = client.patch('/api/v1/accounts/me/', {'photo': upload(self.png((20, 20)), 'p.png', 'image/png')}, format='multipart')
         self.assertEqual(response.status_code, 200)
 
     def test_pixel_validator_does_not_decode_and_rewinds_the_file(self):

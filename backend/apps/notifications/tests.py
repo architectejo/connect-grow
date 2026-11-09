@@ -8,7 +8,7 @@ from .models import Notification
 
 
 class NotificationTests(APITestCase):
-    url = '/api/interactions/notifications/'
+    url = '/api/v1/interactions/notifications/'
 
     def setUp(self):
         self.user = User.objects.create_user(email='a@example.com', password='x', full_name='A')

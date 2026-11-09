@@ -336,5 +336,5 @@ class ReviewPostedRecipientsTests(ContextReviewBase):
         dispatch_outbox_now()
         self.assertFalse(Notification.objects.filter(user=editor, context_type='ORGANIZATION').exists())
         self.client.force_authenticate(editor)
-        for item in self.client.get('/api/interactions/notifications/').data:
+        for item in self.client.get('/api/v1/interactions/notifications/').data:
             self.assertIsNone(item['context'])

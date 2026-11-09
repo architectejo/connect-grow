@@ -14,7 +14,7 @@ from . import services
 from .models import Report
 from .tests import ModerationTestBase
 
-REPORTS = '/api/moderation/reports/'
+REPORTS = '/api/v1/moderation/reports/'
 ROLES = ('OWNER', 'ADMIN', 'EDITOR', 'ANALYST')
 
 

@@ -20,10 +20,10 @@ from . import capabilities, services
 from .models import IdentitySettings, ProviderProfile, ProviderProfileCategory, User
 
 LOCMEM_CACHE = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'provider-throttle'}}
-URL = '/api/accounts/provider/'
+URL = '/api/v1/accounts/provider/'
 ACTIVATE = URL + 'activate/'
 ARCHIVE = URL + 'archive/'
-CONTEXTS = '/api/accounts/contexts/'
+CONTEXTS = '/api/v1/accounts/contexts/'
 EXPECTED_KEYS = {'id', 'display_name', 'bio', 'category_ids', 'status', 'created_at'}
 SECRET_PHONE = '+243999000111'
 SECRET_EMAIL = 'secret.prestataire@example.com'

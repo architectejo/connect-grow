@@ -58,7 +58,7 @@ class OfferNumbersTests(RecetteBase):
 
 class EmailCaseTests(RecetteBase):
     def register(self, email):
-        return APIClient().post('/api/accounts/register/', {
+        return APIClient().post('/api/v1/accounts/register/', {
             'full_name': 'Test Casse', 'password': PASSWORD, 'email': email}, format='json')
 
     def test_normalize_email(self):
@@ -72,7 +72,7 @@ class EmailCaseTests(RecetteBase):
         self.assertEqual(response.json()['email'], 'marie.curie@example.com')
         self.assertEqual(User.objects.get(full_name='Test Casse').email, 'marie.curie@example.com')
         for typed in ('MARIE.CURIE@EXAMPLE.COM', 'marie.curie@example.com'):
-            login = APIClient().post('/api/accounts/login/', {'email': typed, 'password': PASSWORD}, format='json')
+            login = APIClient().post('/api/v1/accounts/login/', {'email': typed, 'password': PASSWORD}, format='json')
             self.assertEqual(login.status_code, 200, typed)
 
     def test_duplicate_in_another_case_is_refused(self):
@@ -83,14 +83,14 @@ class EmailCaseTests(RecetteBase):
     def test_legacy_mixed_case_account_can_still_log_in(self):
         User.objects.filter(pk=self.buyer.pk).update(email='Buyer@Example.com')  # donnée antérieure à L0-21
         login = APIClient().post(
-            '/api/accounts/login/', {'email': 'buyer@example.com', 'password': 'x'}, format='json')
+            '/api/v1/accounts/login/', {'email': 'buyer@example.com', 'password': 'x'}, format='json')
         self.assertEqual(login.status_code, 200)
 
     def test_profile_update_refuses_another_users_email_in_any_case_but_keeps_own(self):
         client = self.as_user(self.buyer)
-        refused = client.patch('/api/accounts/me/', {'email': 'SELLER@example.com'}, format='json')
+        refused = client.patch('/api/v1/accounts/me/', {'email': 'SELLER@example.com'}, format='json')
         self.assertEqual(refused.status_code, 400)
-        own = client.patch('/api/accounts/me/', {'email': 'Buyer@Example.com'}, format='json')
+        own = client.patch('/api/v1/accounts/me/', {'email': 'Buyer@Example.com'}, format='json')
         self.assertEqual(own.status_code, 200, own.content)
         self.assertEqual(own.json()['email'], 'buyer@example.com')
 
@@ -105,8 +105,8 @@ class AccountTypeReadOnlyTests(RecetteBase):
 
     def test_user_type_is_neither_exposed_nor_changed_through_me(self):
         client = self.as_user(self.buyer)
-        self.assertNotIn('user_type', client.get('/api/accounts/me/').json())
-        response = client.patch('/api/accounts/me/', {'user_type': 'ENTREPRISE'}, format='json')
+        self.assertNotIn('user_type', client.get('/api/v1/accounts/me/').json())
+        response = client.patch('/api/v1/accounts/me/', {'user_type': 'ENTREPRISE'}, format='json')
         self.assertEqual(response.status_code, 200)
         self.assertNotIn('user_type', response.json())
         self.buyer.refresh_from_db()
@@ -174,7 +174,7 @@ class SuspendedSellerVisibilityTests(RecetteBase):
         self.suspend_seller()
         self.assertEqual(self.contact_via_api(self.buyer).status_code, 400)
         favorite = self.as_user(self.buyer).post(
-            '/api/marketplace/favorites/', {'post_id': str(self.offer.id)}, format='json')
+            '/api/v1/marketplace/favorites/', {'post_id': str(self.offer.id)}, format='json')
         self.assertEqual(favorite.status_code, 400)
 
     def test_author_and_moderators_still_see_the_offer(self):
@@ -223,7 +223,7 @@ class ConversationLastMessageFormatTests(RecetteBase):
 
         self.contact_via_api(self.buyer)
         dispatch_outbox_now()
-        last = self.rows(self.as_user(self.seller).get('/api/interactions/conversations/'))[0]['last_message']
+        last = self.rows(self.as_user(self.seller).get('/api/v1/interactions/conversations/'))[0]['last_message']
         self.assertTrue(UUID_RE.match(last['sender_id']), last['sender_id'])
         self.assertEqual(last['sender_id'], str(self.buyer.id))
         self.assertTrue(last['created_at'].endswith('+01:00'), last['created_at'])

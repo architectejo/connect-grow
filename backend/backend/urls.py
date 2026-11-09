@@ -5,19 +5,19 @@ from django.conf.urls.static import static
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # Référentiels du catalogue : URL historiques conservées jusqu'à L0-11.
-    path('api/marketplace/', include('apps.catalog.urls')),
-    path('api/marketplace/', include('apps.marketplace.urls')),
-    path('api/config/', include('apps.marketplace.urls_config')),
-    path('api/accounts/', include('apps.identity.urls')),
-    path('api/payments/', include('apps.payments.urls')),
-    # Interactions : URL historiques conservées jusqu'à L0-11, servies par plusieurs domaines.
-    path('api/interactions/', include('apps.reviews.urls')),
-    path('api/interactions/', include('apps.marketplace.urls_interactions')),
-    path('api/interactions/', include('apps.messaging.urls')),
-    path('api/interactions/', include('apps.notifications.urls')),
-    path('api/moderation/forbidden-items/', include('apps.catalog.urls_forbidden')),
-    path('api/moderation/', include('apps.moderation.urls')),
+    # Tout l'API est sous `api/v1/` (ADR 0007) ; l'ancien préfixe `api/` n'est plus servi.
+    path('api/v1/marketplace/', include('apps.catalog.urls')),
+    path('api/v1/marketplace/', include('apps.marketplace.urls')),
+    path('api/v1/config/', include('apps.marketplace.urls_config')),
+    path('api/v1/accounts/', include('apps.identity.urls')),
+    path('api/v1/payments/', include('apps.payments.urls')),
+    # Interactions : servies par plusieurs domaines.
+    path('api/v1/interactions/', include('apps.reviews.urls')),
+    path('api/v1/interactions/', include('apps.marketplace.urls_interactions')),
+    path('api/v1/interactions/', include('apps.messaging.urls')),
+    path('api/v1/interactions/', include('apps.notifications.urls')),
+    path('api/v1/moderation/forbidden-items/', include('apps.catalog.urls_forbidden')),
+    path('api/v1/moderation/', include('apps.moderation.urls')),
 ]
 
 # Une seule fois suffit, et seulement si DEBUG est True

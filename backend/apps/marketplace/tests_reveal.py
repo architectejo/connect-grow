@@ -21,9 +21,9 @@ from . import services
 from .models import ContactEvent, MarketplaceSettings, Offer
 from .tests import MarketplaceTestBase
 
-REVEAL_URL = '/api/interactions/contacts/reveal/'
-RECEIVED_URL = '/api/interactions/contacts/reveals/received/'
-CONTACTS_URL = '/api/interactions/contacts/'
+REVEAL_URL = '/api/v1/interactions/contacts/reveal/'
+RECEIVED_URL = '/api/v1/interactions/contacts/reveals/received/'
+CONTACTS_URL = '/api/v1/interactions/contacts/'
 SELLER_NUMBER = '+243891111111'
 LOCMEM_CACHE = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'reveal-throttle-tests'}}
 

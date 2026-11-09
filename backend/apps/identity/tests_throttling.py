@@ -23,7 +23,7 @@ class LoginFailureLimiterTests(TestCase):
 
     def login(self, password='mauvais', ip='10.1.0.1', email='victime@example.com'):
         return APIClient().post(
-            '/api/accounts/login/', {'email': email, 'password': password}, format='json', REMOTE_ADDR=ip,
+            '/api/v1/accounts/login/', {'email': email, 'password': password}, format='json', REMOTE_ADDR=ip,
         )
 
     def test_pair_is_locked_after_five_failures_but_other_ips_are_not(self):
@@ -137,7 +137,7 @@ class IpThrottleScopeTests(TestCase):
         client.force_authenticate(user)
         with mock.patch('apps.identity.views.send_otp_sms'):
             codes = [
-                client.post('/api/accounts/otp/request/', {'phone': f'+24381000000{i}', 'purpose': 'REGISTER'},
+                client.post('/api/v1/accounts/otp/request/', {'phone': f'+24381000000{i}', 'purpose': 'REGISTER'},
                             REMOTE_ADDR='10.5.0.1').status_code
                 for i in range(6)
             ]
@@ -154,17 +154,17 @@ class IpThrottleScopeTests(TestCase):
 
     def test_refresh_has_its_own_scope(self):
         user = User.objects.create_user(email='r@example.com', password=PASSWORD, full_name='R')
-        login = APIClient().post('/api/accounts/login/', {'email': 'r@example.com', 'password': PASSWORD},
+        login = APIClient().post('/api/v1/accounts/login/', {'email': 'r@example.com', 'password': PASSWORD},
                                  format='json', REMOTE_ADDR='10.6.0.1')
         with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'refresh': '2/hour'}):
             codes = [
-                APIClient().post('/api/accounts/token/refresh/', {'refresh': 'invalide'}, format='json',
+                APIClient().post('/api/v1/accounts/token/refresh/', {'refresh': 'invalide'}, format='json',
                                  REMOTE_ADDR='10.6.0.1').status_code
                 for _ in range(3)
             ]
         self.assertEqual(codes, [401, 401, 429])
         # La connexion (autre scope) n'est pas touchée.
-        again = APIClient().post('/api/accounts/login/', {'email': 'r@example.com', 'password': PASSWORD},
+        again = APIClient().post('/api/v1/accounts/login/', {'email': 'r@example.com', 'password': PASSWORD},
                                  format='json', REMOTE_ADDR='10.6.0.1')
         self.assertEqual(again.status_code, 200)
 
@@ -178,7 +178,7 @@ class IpThrottleScopeTests(TestCase):
         client.force_authenticate(user)
         with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'change_password': '2/hour'}):
             codes = [
-                client.post('/api/accounts/change-password/', {'old_password': 'faux', 'new_password': 'x'},
+                client.post('/api/v1/accounts/change-password/', {'old_password': 'faux', 'new_password': 'x'},
                             format='json').status_code
                 for _ in range(3)
             ]
@@ -196,7 +196,7 @@ class ResetConfirmFailureTests(TestCase):
     def confirm(self, code='000000', ip='10.7.0.1', **extra):
         payload = {'phone': self.PHONE, 'code': code, 'new_password': 'cheval-agrafe-pile-47'}
         payload.update(extra)
-        return APIClient().post('/api/accounts/password-reset/confirm/', payload, format='json', REMOTE_ADDR=ip)
+        return APIClient().post('/api/v1/accounts/password-reset/confirm/', payload, format='json', REMOTE_ADDR=ip)
 
     def test_five_wrong_codes_lock_the_pair_only(self):
         OtpCode.issue(self.PHONE, OtpCode.PURPOSE_PASSWORD_RESET)
@@ -257,7 +257,7 @@ class KycWriteThrottleTests(TestCase):
         user = User.objects.create_user(email='k@example.com', password='x', full_name='K', phone_verified=True)
         organization = Organization.objects.create(name='B', org_type='ENTREPRISE')
         Membership.objects.create(organization=organization, user=user, role='OWNER')
-        documents_url = f'/api/accounts/organizations/{organization.pk}/kyc/documents/'
+        documents_url = f'/api/v1/accounts/organizations/{organization.pk}/kyc/documents/'
         client = APIClient()
         client.force_authenticate(user)
         with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'kyc_write': '2/hour'}):
@@ -278,11 +278,11 @@ class RegisterAndProfileThrottleTests(TestCase):
     def test_register_is_throttled_per_ip(self):
         with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'register': '2/hour'}):
             codes = [
-                APIClient().post('/api/accounts/register/', {'email': f'r{i}@example.com'}, format='json',
+                APIClient().post('/api/v1/accounts/register/', {'email': f'r{i}@example.com'}, format='json',
                                  REMOTE_ADDR='10.9.0.1').status_code
                 for i in range(3)
             ]
-            other_ip = APIClient().post('/api/accounts/register/', {'email': 'r9@example.com'}, format='json',
+            other_ip = APIClient().post('/api/v1/accounts/register/', {'email': 'r9@example.com'}, format='json',
                                         REMOTE_ADDR='10.9.0.2').status_code
         self.assertEqual(codes[2], 429)
         self.assertNotEqual(codes[1], 429)
@@ -293,8 +293,8 @@ class RegisterAndProfileThrottleTests(TestCase):
         client = APIClient()
         client.force_authenticate(user)
         with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'profile_write': '2/hour'}):
-            codes = [client.patch('/api/accounts/me/', {'full_name': f'P{i}'}, format='json').status_code
+            codes = [client.patch('/api/v1/accounts/me/', {'full_name': f'P{i}'}, format='json').status_code
                      for i in range(3)]
-            reads = [client.get('/api/accounts/me/').status_code for _ in range(3)]
+            reads = [client.get('/api/v1/accounts/me/').status_code for _ in range(3)]
         self.assertEqual(codes, [200, 200, 429])
         self.assertEqual(reads, [200, 200, 200])

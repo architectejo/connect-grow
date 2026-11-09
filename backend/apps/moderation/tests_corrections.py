@@ -16,8 +16,8 @@ from . import services
 from .models import Report, Sanction
 from .tests import ModerationTestBase
 
-REPORTS = '/api/moderation/reports/'
-SANCTIONS = '/api/moderation/sanctions/'
+REPORTS = '/api/v1/moderation/reports/'
+SANCTIONS = '/api/v1/moderation/sanctions/'
 LOCMEM = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'moderation-throttles'}}
 
 
@@ -115,12 +115,12 @@ class ModerationPermissionTests(ModerationTestBase):
         self.client.force_authenticate(self.bare_staff)
         for method, url in (
             ('get', REPORTS), ('get', f'{REPORTS}{self.report.id}/'), ('post', f'{REPORTS}{self.report.id}/claim/'),
-            ('get', SANCTIONS), ('get', '/api/moderation/dashboard/'), ('post', SANCTIONS),
+            ('get', SANCTIONS), ('get', '/api/v1/moderation/dashboard/'), ('post', SANCTIONS),
         ):
             self.assertEqual(getattr(self.client, method)(url).status_code, 403, url)
 
     def test_anonymous_is_refused(self):
-        self.assertEqual(self.client.get('/api/moderation/dashboard/').status_code, 401)
+        self.assertEqual(self.client.get('/api/v1/moderation/dashboard/').status_code, 401)
         self.assertEqual(self.client.get(SANCTIONS).status_code, 401)
 
     def test_moderator_works_the_queue_and_sees_the_dashboard(self):
@@ -128,7 +128,7 @@ class ModerationPermissionTests(ModerationTestBase):
         self.assertEqual(self.client.get(REPORTS).status_code, 200)
         self.assertEqual(self.client.post(f'{REPORTS}{self.report.id}/claim/').status_code, 200)
         self.assertEqual(self.client.get(SANCTIONS).status_code, 200)
-        self.assertEqual(self.client.get('/api/moderation/dashboard/').status_code, 200)
+        self.assertEqual(self.client.get('/api/v1/moderation/dashboard/').status_code, 200)
 
     def test_only_administrators_lift_a_ban(self):
         ban = Sanction.objects.create(

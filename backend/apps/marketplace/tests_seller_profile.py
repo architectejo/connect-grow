@@ -236,7 +236,7 @@ class UniformNotFoundTests(ProfileBase):
         bodies = set()
         for kind, context_id in candidates:
             with self.subTest(kind=kind, context_id=context_id):
-                response = self.client.get(f'/api/marketplace/sellers/{kind}/{context_id}/')
+                response = self.client.get(f'/api/v1/marketplace/sellers/{kind}/{context_id}/')
                 self.assertEqual(response.status_code, 404)
                 bodies.add(response.content)
         self.assertEqual(len(bodies), 1)

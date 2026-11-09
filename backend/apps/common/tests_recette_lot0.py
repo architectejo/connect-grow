@@ -39,8 +39,8 @@ UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 # Date ISO 8601 avec décalage horaire (jamais de date « naïve »).
 DATE_RE = re.compile(r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)$')
 PASSWORD = 'Recette-mdp-2026!'
-POSTS_URL = '/api/marketplace/posts/'
-REPORTS_URL = '/api/moderation/reports/'
+POSTS_URL = '/api/v1/marketplace/posts/'
+REPORTS_URL = '/api/v1/moderation/reports/'
 LOCMEM = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'recette-lot0'}}
 
 # --- Miroir de connect-grow/src/api/types.ts : {clé: types acceptés} ; `?` = optionnelle côté TS ---
@@ -145,7 +145,7 @@ class RecetteBase(ContractMixin, ReviewsTestBase):
 
     def contact_via_api(self, user, offer=None, message='Bonjour, est-ce toujours disponible ?'):
         return self.as_user(user).post(
-            '/api/interactions/contacts/', {'post': str((offer or self.offer).id), 'message': message}, format='json',
+            '/api/v1/interactions/contacts/', {'post': str((offer or self.offer).id), 'message': message}, format='json',
         )
 
 
@@ -221,7 +221,7 @@ class ContractTests(RecetteBase):
         self.assertEqual(self.as_user(self.seller).get(url, {'post': str(self.offer.id)}).json()['reason'], 'own_offer')
 
     def test_error_bodies_carry_detail_and_code(self):
-        anonymous = APIClient().get('/api/accounts/me/')
+        anonymous = APIClient().get('/api/v1/accounts/me/')
         self.assertEqual((anonymous.status_code, anonymous.json()['code']), (401, 'not_authenticated'))
         unknown = self.as_user(self.buyer).get(REVIEWS_URL + 'eligibility/', {'post': str(uuid.uuid4())})
         self.assertEqual((unknown.status_code, unknown.json()['code']), (404, 'offer_not_found'))
@@ -252,25 +252,25 @@ class ContractTests(RecetteBase):
                         status=KycDocument.STATUS_VALIDE, reviewed_at=timezone.now(),
                     )
         client = APIClient()
-        first = client.get('/api/accounts/organizations/', {'search': 'Zbiz'}).json()
+        first = client.get('/api/v1/accounts/organizations/', {'search': 'Zbiz'}).json()
         self.assertShape(first, SPEC_PAGE, 'Paginated<PublicOrganization>')
         self.assertEqual((first['count'], len(first['results'])), (24, 20))
         self.assertShape(first['results'][0], SPEC_ORGANIZATION, 'PublicOrganization')
-        second = client.get('/api/accounts/organizations/', {'search': 'Zbiz', 'page': 2}).json()
+        second = client.get('/api/v1/accounts/organizations/', {'search': 'Zbiz', 'page': 2}).json()
         self.assertEqual((len(second['results']), second['next']), (4, None))
-        verified = client.get('/api/accounts/organizations/', {'search': 'Zbiz', 'fully_verified': 'true'}).json()
+        verified = client.get('/api/v1/accounts/organizations/', {'search': 'Zbiz', 'fully_verified': 'true'}).json()
         self.assertEqual(verified['count'], 8)
         self.assertTrue(all(o['verification_summary']['complete'] for o in verified['results']))
-        self.assertEqual(client.get('/api/accounts/organizations/', {'fully_verified': 'False'}).json()['count'], 16)
-        self.assertEqual(client.get('/api/accounts/organizations/', {'fully_verified': 'peut-etre'}).status_code, 400)
-        self.assertEqual(client.get('/api/accounts/businesses/').status_code, 404)  # ancienne liste supprimée
+        self.assertEqual(client.get('/api/v1/accounts/organizations/', {'fully_verified': 'False'}).json()['count'], 16)
+        self.assertEqual(client.get('/api/v1/accounts/organizations/', {'fully_verified': 'peut-etre'}).status_code, 400)
+        self.assertEqual(client.get('/api/v1/accounts/businesses/').status_code, 404)  # ancienne liste supprimée
 
     def test_favorite_toggle_and_list_contract(self):
         client = self.as_user(self.buyer)
         self.assertEqual(client.post(f'{POSTS_URL}{self.offer.id}/favorite/').json(), {'favorited': True})
         detail = client.get(f'{POSTS_URL}{self.offer.id}/').json()
         self.assertEqual((detail['is_favorited'], detail['favorites_count']), (True, 1))
-        favorites = client.get('/api/marketplace/favorites/')
+        favorites = client.get('/api/v1/marketplace/favorites/')
         self.assertShape(self.rows(favorites)[0], SPEC_FAVORITE, 'Favorite')
         self.assertEqual(client.post(f'{POSTS_URL}{self.offer.id}/favorite/').json(), {'favorited': False})
         self.assertEqual(APIClient().post(f'{POSTS_URL}{self.offer.id}/favorite/').status_code, 401)
@@ -280,11 +280,11 @@ class ContractTests(RecetteBase):
         pour un compte créé par téléphone (sans e-mail) ou sans localisation (anomalie R0-02, mineure).
         Ce test fige le comportement réel pour que le front ne l'ignore pas."""
         phone_user = User.objects.create_user(phone='+243812345678', password=PASSWORD, full_name='Par Téléphone')
-        body = self.as_user(phone_user).get('/api/accounts/me/').json()
+        body = self.as_user(phone_user).get('/api/v1/accounts/me/').json()
         self.assertIsNone(body['email'])
         self.assertIsNone(body['ville_name'])
         self.assertIsNone(body['commune_name'])
-        email_user = self.as_user(self.buyer).get('/api/accounts/me/').json()
+        email_user = self.as_user(self.buyer).get('/api/v1/accounts/me/').json()
         self.assertIsNone(email_user['phone'])
 
     def test_profile_patch_cannot_grant_verification(self):
@@ -293,14 +293,14 @@ class ContractTests(RecetteBase):
         owner = User.objects.create_user(email='bizz@example.com', password=PASSWORD, full_name='Gérant', phone_verified=True)
         client = self.as_user(owner)
         response = client.patch(
-            '/api/accounts/me/', {'business_profile': {'business_name': 'Ma boîte', 'is_verified': True}}, format='json',
+            '/api/v1/accounts/me/', {'business_profile': {'business_name': 'Ma boîte', 'is_verified': True}}, format='json',
         )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Organization.objects.filter(created_by=owner).exists())
-        created = client.post('/api/accounts/organizations/', {'name': 'Ma boîte', 'org_type': 'ENTREPRISE'}, format='json')
+        created = client.post('/api/v1/accounts/organizations/', {'name': 'Ma boîte', 'org_type': 'ENTREPRISE'}, format='json')
         self.assertEqual(created.status_code, 201, created.content)
         patched = client.patch(
-            f"/api/accounts/organizations/{created.json()['id']}/",
+            f"/api/v1/accounts/organizations/{created.json()['id']}/",
             {'description': 'Ok', 'is_verified': True, 'verified_claims': [{'code': 'RCCM_VERIFIED'}]}, format='json',
         )
         self.assertEqual(patched.status_code, 200, patched.content)
@@ -316,7 +316,7 @@ class ContractTests(RecetteBase):
             with mock.patch('apps.identity.views.send_otp_sms'):
                 for i in range(6):
                     response = client.post(
-                        '/api/accounts/otp/request/', {'phone': f'+24381000000{i}', 'purpose': 'REGISTER'},
+                        '/api/v1/accounts/otp/request/', {'phone': f'+24381000000{i}', 'purpose': 'REGISTER'},
                         format='json', REMOTE_ADDR='10.99.0.1',
                     )
                     statuses.append(response.status_code)
@@ -352,14 +352,14 @@ class ContractTests(RecetteBase):
         insensible à la casse (CLAUDE.md §5)."""
         client = APIClient()
         typed = 'Jean.Dupont@Example.com'
-        self.assertEqual(client.post('/api/accounts/register/', {
+        self.assertEqual(client.post('/api/v1/accounts/register/', {
             'full_name': 'Casse Test', 'password': PASSWORD, 'email': typed}, format='json').status_code, 201)
-        login = client.post('/api/accounts/login/', {'email': typed, 'password': PASSWORD}, format='json')
+        login = client.post('/api/v1/accounts/login/', {'email': typed, 'password': PASSWORD}, format='json')
         self.assertEqual(login.status_code, 200)
 
     def test_R0_05b_same_email_in_another_case_is_a_duplicate(self):
         """ANOMALIE R0-05 (suite) : `BUYER@example.com` est accepté alors que `buyer@example.com` existe."""
-        response = APIClient().post('/api/accounts/register/', {
+        response = APIClient().post('/api/v1/accounts/register/', {
             'full_name': 'Doublon Casse', 'password': PASSWORD, 'email': 'BUYER@example.com'}, format='json')
         self.assertEqual(response.status_code, 400)
 
@@ -386,7 +386,7 @@ class ContractTests(RecetteBase):
         dates le décalage +01:00."""
         self.contact_via_api(self.buyer)
         dispatch_outbox_now()
-        last = self.rows(self.as_user(self.seller).get('/api/interactions/conversations/'))[0]['last_message']
+        last = self.rows(self.as_user(self.seller).get('/api/v1/interactions/conversations/'))[0]['last_message']
         self.assertTrue(UUID_RE.match(last['sender_id']), last['sender_id'])
         self.assertTrue(last['created_at'].endswith('+01:00'), last['created_at'])
 
@@ -399,12 +399,12 @@ class JourneyTests(RecetteBase):
     def register_by_phone(self, phone, name='Nouvel Utilisateur', **extra):
         client = APIClient()
         with mock.patch('apps.identity.views.send_otp_sms') as sms:
-            requested = client.post('/api/accounts/otp/request/', {'phone': phone, 'purpose': 'REGISTER'}, format='json')
+            requested = client.post('/api/v1/accounts/otp/request/', {'phone': phone, 'purpose': 'REGISTER'}, format='json')
         self.assertEqual(requested.status_code, 200)
         self.assertShape(requested.json(), {'message': 'str', 'expires_in_minutes': 'num'}, 'OTP')
         code = sms.call_args[0][1]
         body = {'full_name': name, 'password': PASSWORD, 'phone': phone, 'otp_code': code, **extra}
-        return client.post('/api/accounts/register/', body, format='json'), code
+        return client.post('/api/v1/accounts/register/', body, format='json'), code
 
     def test_register_by_otp_then_login_refresh_logout(self):
         phone = '+243811112233'
@@ -419,43 +419,43 @@ class JourneyTests(RecetteBase):
         self.assertNotIn('otp_code', body)
         self.assertTrue(body['phone_verified'])
         # Un code OTP ne sert qu'une fois.
-        again = APIClient().post('/api/accounts/register/', {
+        again = APIClient().post('/api/v1/accounts/register/', {
             'full_name': 'Rejeu', 'password': PASSWORD, 'phone': phone, 'otp_code': code}, format='json')
         self.assertEqual(again.status_code, 400)
 
         client = APIClient()
-        tokens = client.post('/api/accounts/login/', {'phone': phone, 'password': PASSWORD}, format='json').json()
+        tokens = client.post('/api/v1/accounts/login/', {'phone': phone, 'password': PASSWORD}, format='json').json()
         self.assertEqual(set(tokens), {'access', 'refresh'})
-        me = client.get('/api/accounts/me/', HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+        me = client.get('/api/v1/accounts/me/', HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
         self.assertEqual(me.status_code, 200)
         self.assertIsNone(me.json()['email'])
 
-        rotated = client.post('/api/accounts/token/refresh/', {'refresh': tokens['refresh']}, format='json')
+        rotated = client.post('/api/v1/accounts/token/refresh/', {'refresh': tokens['refresh']}, format='json')
         self.assertEqual(rotated.status_code, 200)
         self.assertEqual(set(rotated.json()), {'access', 'refresh'})
         self.assertEqual(
-            client.post('/api/accounts/token/refresh/', {'refresh': tokens['refresh']}, format='json').status_code, 401,
+            client.post('/api/v1/accounts/token/refresh/', {'refresh': tokens['refresh']}, format='json').status_code, 401,
         )
-        self.assertEqual(client.post('/api/accounts/logout/', {'refresh': rotated.json()['refresh']}, format='json').status_code, 200)
+        self.assertEqual(client.post('/api/v1/accounts/logout/', {'refresh': rotated.json()['refresh']}, format='json').status_code, 200)
         self.assertEqual(
-            client.post('/api/accounts/token/refresh/', {'refresh': rotated.json()['refresh']}, format='json').status_code, 401,
+            client.post('/api/v1/accounts/token/refresh/', {'refresh': rotated.json()['refresh']}, format='json').status_code, 401,
         )
-        self.assertEqual(client.post('/api/accounts/logout/', {}, format='json').status_code, 400)
+        self.assertEqual(client.post('/api/v1/accounts/logout/', {}, format='json').status_code, 400)
 
     def test_logout_all_revokes_every_session(self):
         user = User.objects.create_user(email='multi@example.com', password=PASSWORD, full_name='Multi Appareils')
         client = APIClient()
-        sessions = [client.post('/api/accounts/login/', {'email': 'multi@example.com', 'password': PASSWORD}, format='json').json()
+        sessions = [client.post('/api/v1/accounts/login/', {'email': 'multi@example.com', 'password': PASSWORD}, format='json').json()
                     for _ in range(3)]
         response = client.post(
-            '/api/accounts/logout-all/', {'refresh': sessions[0]['refresh']}, format='json',
+            '/api/v1/accounts/logout-all/', {'refresh': sessions[0]['refresh']}, format='json',
             HTTP_AUTHORIZATION=f"Bearer {sessions[0]['access']}",
         )
         self.assertEqual(response.status_code, 200)
         self.assertShape(response.json(), {'message': 'str', 'revoked': 'num'}, 'logout-all')
         for session in sessions:
             self.assertEqual(
-                client.post('/api/accounts/token/refresh/', {'refresh': session['refresh']}, format='json').status_code, 401,
+                client.post('/api/v1/accounts/token/refresh/', {'refresh': session['refresh']}, format='json').status_code, 401,
             )
         self.assertEqual(user.pk, User.objects.get(email='multi@example.com').pk)
 
@@ -493,10 +493,10 @@ class JourneyTests(RecetteBase):
         dispatch_outbox_now()
         dispatch_outbox_now()  # 2e passe : `messaging.contact_message_delivered` (preuve de remise, ADR 0005)
         seller = self.as_user(self.seller)
-        notifications = self.rows(seller.get('/api/interactions/notifications/'))
+        notifications = self.rows(seller.get('/api/v1/interactions/notifications/'))
         self.assertEqual(len(notifications), 3)
         self.assertShape(notifications[0], SPEC_NOTIFICATION, 'AppNotification')
-        self.assertEqual(len(self.rows(seller.get('/api/interactions/conversations/'))), 3)
+        self.assertEqual(len(self.rows(seller.get('/api/v1/interactions/conversations/'))), 3)
 
         # Avis, modification, suppression, ré-écriture bloquée.
         buyer_client = self.as_user(self.buyer)
@@ -574,10 +574,10 @@ class JourneyTests(RecetteBase):
             email='kyc@example.com', password=PASSWORD, full_name='Gérant', phone_verified=True,
         )
         client = self.as_user(owner)
-        created = client.post('/api/accounts/organizations/', {'name': 'Boîte KYC', 'org_type': 'ENTREPRISE'}, format='json')
+        created = client.post('/api/v1/accounts/organizations/', {'name': 'Boîte KYC', 'org_type': 'ENTREPRISE'}, format='json')
         self.assertEqual(created.status_code, 201, created.content)
         org_id = created.json()['id']
-        docs_url = f'/api/accounts/organizations/{org_id}/kyc/documents/'
+        docs_url = f'/api/v1/accounts/organizations/{org_id}/kyc/documents/'
         pdf = lambda: io.BytesIO(b'%PDF-1.4\n% test\n')  # noqa: E731
 
         def upload(kind):
@@ -604,16 +604,16 @@ class JourneyTests(RecetteBase):
         ids = {}
         for kind in ('RCCM', 'ID_NATIONALE', 'PIECE_GERANT'):
             ids[kind] = upload(kind).json()['id']
-        self.assertEqual(client.get('/api/accounts/kyc/review-queue/').status_code, 403)
-        queue = self.rows(moderator.get('/api/accounts/kyc/review-queue/'))
+        self.assertEqual(client.get('/api/v1/accounts/kyc/review-queue/').status_code, 403)
+        queue = self.rows(moderator.get('/api/v1/accounts/kyc/review-queue/'))
         self.assertEqual(len(queue), 3)
         self.assertTrue(queue[0]['download_url'])
         self.assertShape(queue[0], SPEC_KYC, 'KycDocument')
-        list_url = '/api/accounts/organizations/'
+        list_url = '/api/v1/accounts/organizations/'
         for kind, doc_id in ids.items():
             complete = client.get(f'{list_url}{org_id}/verification/')
             self.assertFalse(complete.json()['summary']['complete'])  # pas vérifiée avant les trois pièces
-            decision = moderator.post(f'/api/accounts/kyc/documents/{doc_id}/decision/', {'decision': 'VALIDE'}, format='json')
+            decision = moderator.post(f'/api/v1/accounts/kyc/documents/{doc_id}/decision/', {'decision': 'VALIDE'}, format='json')
             self.assertEqual(decision.status_code, 200)
         self.assertTrue(client.get(f'{list_url}{org_id}/verification/').json()['summary']['complete'])
         self.assertEqual(client.delete(f"{docs_url}{ids['RCCM']}/").status_code, 409)
@@ -681,9 +681,9 @@ class RatingsDoNotRankTests(RecetteBase):
         payloads = [
             APIClient().get(f'{POSTS_URL}{self.offer.id}/').content.decode(),
             APIClient().get(REVIEWS_URL, {'post': str(self.offer.id)}).content.decode(),
-            self.as_user(self.seller).get('/api/accounts/me/').content.decode(),
-            self.as_user(self.seller).get('/api/marketplace/stats/dashboard/').content.decode(),
-            APIClient().get('/api/accounts/organizations/').content.decode(),
+            self.as_user(self.seller).get('/api/v1/accounts/me/').content.decode(),
+            self.as_user(self.seller).get('/api/v1/marketplace/stats/dashboard/').content.decode(),
+            APIClient().get('/api/v1/accounts/organizations/').content.decode(),
         ]
         for text in payloads:
             self.assertNotRegex(text.lower(), r'trust|confiance|reputation')
@@ -714,10 +714,10 @@ class PrivacyThirdPartyTests(RecetteBase):
 
         secrets = [seller_phone, '243899998877', '899998877', seller_email, nif, 'secret-kyc']
         urls = [
-            POSTS_URL, f'{POSTS_URL}{offer.id}/', f'{POSTS_URL}?seller={owner.id}', '/api/accounts/organizations/',
+            POSTS_URL, f'{POSTS_URL}{offer.id}/', f'{POSTS_URL}?seller={owner.id}', '/api/v1/accounts/organizations/',
             f'{REVIEWS_URL}?post={offer.id}', f'{REVIEWS_URL}?seller={owner.id}',
-            '/api/interactions/conversations/', '/api/interactions/notifications/', '/api/marketplace/favorites/',
-            f'/api/accounts/organizations/{organization.pk}/kyc/documents/', '/api/accounts/me/', '/api/moderation/dashboard/',
+            '/api/v1/interactions/conversations/', '/api/v1/interactions/notifications/', '/api/v1/marketplace/favorites/',
+            f'/api/v1/accounts/organizations/{organization.pk}/kyc/documents/', '/api/v1/accounts/me/', '/api/v1/moderation/dashboard/',
         ]
         for viewer in (None, self.buyer, self.other, self.buyer2):
             client = APIClient() if viewer is None else self.as_user(viewer)
@@ -729,7 +729,7 @@ class PrivacyThirdPartyTests(RecetteBase):
         mine = self.rows(self.as_user(self.buyer).get(f'{REVIEWS_URL}?post={offer.id}'))[0]
         self.assertNotIn('reporter', json.dumps(mine))
         # L'e-mail et le téléphone du propriétaire ne sortent que dans son propre espace.
-        own = self.as_user(owner).get('/api/accounts/me/').json()
+        own = self.as_user(owner).get('/api/v1/accounts/me/').json()
         self.assertEqual((own['email'], own['phone']), (seller_email, seller_phone))
 
     def test_rule10_download_url_is_reserved_to_reviewers(self):
@@ -742,9 +742,9 @@ class PrivacyThirdPartyTests(RecetteBase):
             file=SimpleUploadedFile('x.pdf', b'%PDF-1.4 a', content_type='application/pdf'),
         )
         for viewer in (self.buyer, owner):
-            self.assertEqual(self.as_user(viewer).get(f'/api/accounts/kyc/documents/{doc.pk}/download/').status_code, 403)
-        self.assertEqual(APIClient().get(f'/api/accounts/kyc/documents/{doc.pk}/download/').status_code, 401)
-        self.assertEqual(self.as_user(self.moderator).get(f'/api/accounts/kyc/documents/{doc.pk}/download/').status_code, 200)
+            self.assertEqual(self.as_user(viewer).get(f'/api/v1/accounts/kyc/documents/{doc.pk}/download/').status_code, 403)
+        self.assertEqual(APIClient().get(f'/api/v1/accounts/kyc/documents/{doc.pk}/download/').status_code, 401)
+        self.assertEqual(self.as_user(self.moderator).get(f'/api/v1/accounts/kyc/documents/{doc.pk}/download/').status_code, 200)
 
 
 # =========================================================================================
@@ -755,8 +755,8 @@ class AuditTrailTests(RecetteBase):
     def test_rule12_suspension_ban_lift_and_login_effect(self):
         target = User.objects.create_user(email='cible@example.com', password=PASSWORD, full_name='Cible')
         admin = self.as_user(self.admin)
-        issued = APIClient().post('/api/accounts/login/', {'email': 'cible@example.com', 'password': PASSWORD}, format='json').json()
-        created = admin.post('/api/moderation/sanctions/', {
+        issued = APIClient().post('/api/v1/accounts/login/', {'email': 'cible@example.com', 'password': PASSWORD}, format='json').json()
+        created = admin.post('/api/v1/moderation/sanctions/', {
             'user': str(target.id), 'sanction_type': 'SUSPENSION_TEMPORAIRE', 'reason': 'Faux avis répétés',
         }, format='json')
         self.assertEqual(created.status_code, 201, created.content)
@@ -764,17 +764,17 @@ class AuditTrailTests(RecetteBase):
         self.assertEqual((entry.actor, entry.details), (self.admin, 'Faux avis répétés'))
         target.refresh_from_db()
         self.assertFalse(target.is_active)
-        login = APIClient().post('/api/accounts/login/', {'email': 'cible@example.com', 'password': PASSWORD}, format='json')
+        login = APIClient().post('/api/v1/accounts/login/', {'email': 'cible@example.com', 'password': PASSWORD}, format='json')
         self.assertEqual(login.status_code, 401)
         # Un jeton émis avant la suspension ne vaut plus rien.
-        self.assertEqual(APIClient().get('/api/accounts/me/', HTTP_AUTHORIZATION=f"Bearer {issued['access']}").status_code, 401)
-        self.assertEqual(APIClient().post('/api/accounts/token/refresh/', {'refresh': issued['refresh']}, format='json').status_code, 401)
+        self.assertEqual(APIClient().get('/api/v1/accounts/me/', HTTP_AUTHORIZATION=f"Bearer {issued['access']}").status_code, 401)
+        self.assertEqual(APIClient().post('/api/v1/accounts/token/refresh/', {'refresh': issued['refresh']}, format='json').status_code, 401)
         # Un modérateur ne peut pas suspendre.
-        refused = self.as_user(self.moderator).post('/api/moderation/sanctions/', {
+        refused = self.as_user(self.moderator).post('/api/v1/moderation/sanctions/', {
             'user': str(target.id), 'sanction_type': 'BANNISSEMENT', 'reason': 'Tentative'}, format='json')
         self.assertEqual(refused.status_code, 403)
         self.assertFalse(AuditLog.objects.filter(action='SANCTION_BANNISSEMENT').exists())
-        lifted = admin.post(f"/api/moderation/sanctions/{created.json()['id']}/lift/")
+        lifted = admin.post(f"/api/v1/moderation/sanctions/{created.json()['id']}/lift/")
         self.assertEqual(lifted.status_code, 200)
         self.assertTrue(AuditLog.objects.filter(action='SANCTION_LIFTED', actor=self.admin).exists())
         target.refresh_from_db()
@@ -786,10 +786,10 @@ class AuditTrailTests(RecetteBase):
         le bannissement court toujours (idem `lift_expired_sanctions` à l'échéance de la suspension)."""
         target = User.objects.create_user(email='double@example.com', password=PASSWORD, full_name='Double')
         admin = self.as_user(self.admin)
-        ban = admin.post('/api/moderation/sanctions/', {'user': str(target.id), 'sanction_type': 'BANNISSEMENT', 'reason': 'Fraude'}, format='json')
-        suspension = admin.post('/api/moderation/sanctions/', {'user': str(target.id), 'sanction_type': 'SUSPENSION_TEMPORAIRE', 'reason': 'Doublon'}, format='json')
+        ban = admin.post('/api/v1/moderation/sanctions/', {'user': str(target.id), 'sanction_type': 'BANNISSEMENT', 'reason': 'Fraude'}, format='json')
+        suspension = admin.post('/api/v1/moderation/sanctions/', {'user': str(target.id), 'sanction_type': 'SUSPENSION_TEMPORAIRE', 'reason': 'Doublon'}, format='json')
         self.assertEqual((ban.status_code, suspension.status_code), (201, 201))
-        admin.post(f"/api/moderation/sanctions/{suspension.json()['id']}/lift/")
+        admin.post(f"/api/v1/moderation/sanctions/{suspension.json()['id']}/lift/")
         target.refresh_from_db()
         self.assertTrue(Sanction.objects.get(pk=ban.json()['id']).is_active)
         self.assertFalse(target.is_active, "compte réactivé alors que le bannissement est toujours actif")
@@ -814,7 +814,7 @@ class AuditTrailTests(RecetteBase):
             file=SimpleUploadedFile('x.pdf', b'%PDF-1.4 a', content_type='application/pdf'),
         )
         moderator = self.as_user(self.moderator)
-        url = f'/api/accounts/kyc/documents/{doc.pk}/decision/'
+        url = f'/api/v1/accounts/kyc/documents/{doc.pk}/decision/'
         self.assertEqual(moderator.post(url, {'decision': 'REFUSE'}, format='json').status_code, 400)  # motif requis
         self.assertEqual(moderator.post(url, {'decision': 'REFUSE', 'reason': 'Illisible'}, format='json').status_code, 200)
         entry = AuditLog.objects.get(action='KYC_REFUSE')

@@ -30,8 +30,8 @@ class FrozenModuleTests(TestCase):
 
     def test_every_payments_path_is_a_404_without_side_effect(self):
         for method in ('get', 'post', 'put', 'patch', 'delete'):
-            for path in ('/api/payments/', '/api/payments/transactions/', '/api/payments/webhook/',
-                         '/api/payments/webhooks/laxpaie/', '/api/payments/callback/'):
+            for path in ('/api/v1/payments/', '/api/v1/payments/transactions/', '/api/v1/payments/webhook/',
+                         '/api/v1/payments/webhooks/laxpaie/', '/api/v1/payments/callback/'):
                 response = getattr(self.client, method)(path, data={}, content_type='application/json') \
                     if method != 'get' else self.client.get(path)
                 self.assertEqual(response.status_code, 404, f'{method} {path}')

@@ -19,27 +19,27 @@ WRITE_METHODS = ('post', 'put', 'patch', 'delete')
 
 # Chemin normalisé -> raison. Vues d'écriture existantes sans garde de contexte à la date de T2.
 LEGACY_WRITE_ROUTES = {
-    'api/accounts/change-password/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/accounts/kyc/documents/<uuid:pk>/decision/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/accounts/login/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/accounts/logout-all/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/accounts/logout/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/accounts/me/': 'compte : authentification et réglages toujours personnels',  # PATCH/PUT
-    'api/accounts/otp/request/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/accounts/password-reset/confirm/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/accounts/register/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/accounts/token/refresh/': 'compte : authentification et réglages toujours personnels',  # POST
-    'api/moderation/^reports/$': 'modération : hors contexte vendeur',  # POST
-    'api/moderation/^reports/(?P<pk>[^/.]+)/$': 'modération : hors contexte vendeur',  # DELETE/PATCH/PUT
-    'api/moderation/^reports/(?P<pk>[^/.]+)/author-response/$': 'modération : hors contexte vendeur',  # POST
-    'api/moderation/^reports/(?P<pk>[^/.]+)/claim/$': 'modération : hors contexte vendeur',  # POST
-    'api/moderation/^reports/(?P<pk>[^/.]+)/reject/$': 'modération : hors contexte vendeur',  # POST
-    'api/moderation/^reports/(?P<pk>[^/.]+)/resolve/$': 'modération : hors contexte vendeur',  # POST
-    'api/moderation/^sanctions/$': 'modération : hors contexte vendeur',  # POST
-    'api/moderation/^sanctions/(?P<pk>[^/.]+)/$': 'modération : hors contexte vendeur',  # DELETE/PATCH/PUT
-    'api/moderation/^sanctions/(?P<pk>[^/.]+)/lift/$': 'modération : hors contexte vendeur',  # POST
-    'api/moderation/forbidden-items/^$': 'modération : hors contexte vendeur',  # POST
-    'api/moderation/forbidden-items/^(?P<pk>[^/.]+)/$': 'modération : hors contexte vendeur',  # DELETE/PATCH/PUT
+    'api/v1/accounts/change-password/': 'compte : authentification et réglages toujours personnels',  # POST
+    'api/v1/accounts/kyc/documents/<uuid:pk>/decision/': 'compte : authentification et réglages toujours personnels',  # POST
+    'api/v1/accounts/login/': 'compte : authentification et réglages toujours personnels',  # POST
+    'api/v1/accounts/logout-all/': 'compte : authentification et réglages toujours personnels',  # POST
+    'api/v1/accounts/logout/': 'compte : authentification et réglages toujours personnels',  # POST
+    'api/v1/accounts/me/': 'compte : authentification et réglages toujours personnels',  # PATCH/PUT
+    'api/v1/accounts/otp/request/': 'compte : authentification et réglages toujours personnels',  # POST
+    'api/v1/accounts/password-reset/confirm/': 'compte : authentification et réglages toujours personnels',  # POST
+    'api/v1/accounts/register/': 'compte : authentification et réglages toujours personnels',  # POST
+    'api/v1/accounts/token/refresh/': 'compte : authentification et réglages toujours personnels',  # POST
+    'api/v1/moderation/^reports/$': 'modération : hors contexte vendeur',  # POST
+    'api/v1/moderation/^reports/(?P<pk>[^/.]+)/$': 'modération : hors contexte vendeur',  # DELETE/PATCH/PUT
+    'api/v1/moderation/^reports/(?P<pk>[^/.]+)/author-response/$': 'modération : hors contexte vendeur',  # POST
+    'api/v1/moderation/^reports/(?P<pk>[^/.]+)/claim/$': 'modération : hors contexte vendeur',  # POST
+    'api/v1/moderation/^reports/(?P<pk>[^/.]+)/reject/$': 'modération : hors contexte vendeur',  # POST
+    'api/v1/moderation/^reports/(?P<pk>[^/.]+)/resolve/$': 'modération : hors contexte vendeur',  # POST
+    'api/v1/moderation/^sanctions/$': 'modération : hors contexte vendeur',  # POST
+    'api/v1/moderation/^sanctions/(?P<pk>[^/.]+)/$': 'modération : hors contexte vendeur',  # DELETE/PATCH/PUT
+    'api/v1/moderation/^sanctions/(?P<pk>[^/.]+)/lift/$': 'modération : hors contexte vendeur',  # POST
+    'api/v1/moderation/forbidden-items/^$': 'modération : hors contexte vendeur',  # POST
+    'api/v1/moderation/forbidden-items/^(?P<pk>[^/.]+)/$': 'modération : hors contexte vendeur',  # DELETE/PATCH/PUT
 }
 
 

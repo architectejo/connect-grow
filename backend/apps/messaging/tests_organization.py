@@ -18,8 +18,8 @@ from apps.notifications.models import Notification
 from . import services
 from .models import Conversation, Message
 
-CONVERSATIONS = '/api/interactions/conversations/'
-MESSAGES = '/api/interactions/messages/'
+CONVERSATIONS = '/api/v1/interactions/conversations/'
+MESSAGES = '/api/v1/interactions/messages/'
 SECRET_PHONE = '+243970000001'
 
 

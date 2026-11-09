@@ -1,5 +1,5 @@
-"""Référentiels publics. Montés sous `api/marketplace/` pour conserver les URL
-existantes (`/api/marketplace/cities/`...) jusqu'à L0-11."""
+"""Référentiels publics. Montés sous `api/v1/marketplace/` pour conserver les URL
+(`/api/v1/marketplace/cities/`...)."""
 from rest_framework.routers import SimpleRouter
 
 from .views import CategoryViewSet, CityViewSet, CommuneViewSet

@@ -21,7 +21,7 @@ from .models import (
     ProviderProfile, User,
 )
 
-BASE = '/api/accounts/contact-settings/'
+BASE = '/api/v1/accounts/contact-settings/'
 VERSION = CONTACT_CONSENT_TEXT_VERSION
 ORG_NUMBER = '+243891111111'
 NEW_ORG_NUMBER = '+243892222222'

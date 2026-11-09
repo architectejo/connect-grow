@@ -18,7 +18,7 @@ class TargetResolutionTests(ModerationTestBase):
 
     def test_report_stores_type_and_uuid_and_exposes_the_legacy_keys(self):
         self.client.force_authenticate(self.reporter)
-        response = self.client.post('/api/moderation/reports/', {
+        response = self.client.post('/api/v1/moderation/reports/', {
             'target_type': 'POST', 'object_id': str(self.post.id), 'reason': 'ARNAQUE',
         })
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
@@ -27,21 +27,21 @@ class TargetResolutionTests(ModerationTestBase):
         # L'auteur du signalement ne reçoit que le minimum (voir ReporterPrivacyTests).
         self.assertEqual(set(response.data), {'id', 'status', 'created_at'})
         self.client.force_authenticate(self.moderator)
-        detail = self.client.get(f'/api/moderation/reports/{report.id}/').data
+        detail = self.client.get(f'/api/v1/moderation/reports/{report.id}/').data
         self.assertEqual(detail['object_id'], str(self.post.id))
         self.assertEqual(detail['target_type_display'], 'POST')
         self.assertNotIn('target_type', detail)
 
     def test_unknown_target_type_is_refused(self):
         self.client.force_authenticate(self.reporter)
-        response = self.client.post('/api/moderation/reports/', {
+        response = self.client.post('/api/v1/moderation/reports/', {
             'target_type': 'SANCTION', 'object_id': str(self.post.id), 'reason': 'SPAM',
         })
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_a_uuid_of_another_type_is_not_a_valid_target(self):
         self.client.force_authenticate(self.reporter)
-        response = self.client.post('/api/moderation/reports/', {
+        response = self.client.post('/api/v1/moderation/reports/', {
             'target_type': 'USER', 'object_id': str(self.post.id), 'reason': 'SPAM',
         })
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -52,10 +52,10 @@ class TargetResolutionTests(ModerationTestBase):
             Report.objects.create(target_type='offer', target_id=self.post.id, reporter=self.reporter, reason='SPAM')
         Report.objects.create(target_type='user', target_id=self.seller.id, reporter=self.reporter, reason='SPAM')
         self.client.force_authenticate(self.moderator)
-        plain = self.client.get('/api/moderation/reports/')
+        plain = self.client.get('/api/v1/moderation/reports/')
         self.assertEqual(len(plain.data), 3)
         self.assertTrue(all(row['target_display'] for row in plain.data))
-        paged = self.client.get('/api/moderation/reports/?page_size=2')
+        paged = self.client.get('/api/v1/moderation/reports/?page_size=2')
         self.assertEqual(paged.data['count'], 3)
         self.assertEqual(len(paged.data['results']), 2)
 
@@ -67,11 +67,11 @@ class TargetResolutionTests(ModerationTestBase):
             from django.test.utils import CaptureQueriesContext
 
             with CaptureQueriesContext(connection) as queries:
-                self.client.get('/api/moderation/reports/')
+                self.client.get('/api/v1/moderation/reports/')
             return len(queries)
 
         self.client.force_authenticate(self.moderator)
-        self.client.get('/api/moderation/reports/')  # réchauffe le cache de permissions de l'utilisateur
+        self.client.get('/api/v1/moderation/reports/')  # réchauffe le cache de permissions de l'utilisateur
         few = count_queries(2)
         many = count_queries(5)
         self.assertEqual(few, many)
@@ -82,7 +82,7 @@ class TargetResolutionTests(ModerationTestBase):
         )
         Offer.objects.filter(pk=self.post.pk).delete()
         self.client.force_authenticate(self.moderator)
-        response = self.client.get(f'/api/moderation/reports/{report.id}/')
+        response = self.client.get(f'/api/v1/moderation/reports/{report.id}/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIsNone(response.data['target_display'])
 
@@ -103,7 +103,7 @@ class TargetResolutionTests(ModerationTestBase):
 
     def test_dashboard_counts_users_and_pending_kyc_through_identity(self):
         self.client.force_authenticate(self.admin)
-        data = self.client.get('/api/moderation/dashboard/').data
+        data = self.client.get('/api/v1/moderation/dashboard/').data
         self.assertEqual(data['users_count'], User.objects.count())
         self.assertEqual(data['pending_kyc_count'], 0)
 

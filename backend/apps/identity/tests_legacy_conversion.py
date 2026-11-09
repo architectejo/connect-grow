@@ -435,10 +435,10 @@ class ConvertedWorldTests(SharedStateTestCase):
             # Plus aucune route ne donne accès aux pièces à un ancien propriétaire (anciennes routes retirées : 404).
             client = APIClient()
             client.force_authenticate(reviewer)
-            self.assertEqual(client.get('/api/accounts/kyc/documents/').status_code, 404)
-            self.assertEqual(client.post('/api/accounts/kyc/documents/', {}, format='json').status_code, 404)
-            self.assertEqual(client.delete(f'/api/accounts/kyc/documents/{doc.pk}/').status_code, 404)
-            self.assertIn(client.get(f'/api/accounts/organizations/{org_of(profile).pk}/kyc/documents/').status_code,
+            self.assertEqual(client.get('/api/v1/accounts/kyc/documents/').status_code, 404)
+            self.assertEqual(client.post('/api/v1/accounts/kyc/documents/', {}, format='json').status_code, 404)
+            self.assertEqual(client.delete(f'/api/v1/accounts/kyc/documents/{doc.pk}/').status_code, 404)
+            self.assertIn(client.get(f'/api/v1/accounts/organizations/{org_of(profile).pk}/kyc/documents/').status_code,
                           (403, 404))
         finally:
             membership.status = Membership.STATUS_ACTIVE
@@ -495,18 +495,18 @@ class ConvertedWorldTests(SharedStateTestCase):
         self.assertFalse(ContactConsent.objects.filter(organization__isnull=False).exists())
         self.assertEqual(ContactConsent.objects.filter(user_id=w.owner_id).count(), 2)
         client = APIClient()
-        detail = client.get(f'/api/marketplace/posts/{w.public_offer.pk}/')
+        detail = client.get(f'/api/v1/marketplace/posts/{w.public_offer.pk}/')
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()['allowed_channels'], ['MESSAGE'])
         self.assertEqual(detail.json()['seller']['context_type'], 'ORGANIZATION')
         self.assertEqual(detail.json()['seller']['context_id'], str(org.pk))
-        listing = client.get('/api/accounts/organizations/')
+        listing = client.get('/api/v1/accounts/organizations/')
         self.assertEqual(listing.status_code, 200)
         self.assertEqual(set(listing.json()['results'][0]), {
             'id', 'name', 'org_type', 'description', 'logo', 'city_id', 'commune_id', 'category_ids',
             'verified_claims', 'verification_summary', 'member_since',
         })
-        page = client.get(f'/api/marketplace/sellers/organization/{org.pk}/')
+        page = client.get(f'/api/v1/marketplace/sellers/organization/{org.pk}/')
         self.assertEqual(page.status_code, 200)
         for response in (detail, listing, page):
             text = response.content.decode()
@@ -516,7 +516,7 @@ class ConvertedWorldTests(SharedStateTestCase):
     def test_converted_organization_is_listed_in_the_contexts_of_its_owner(self):
         client = APIClient()
         client.force_authenticate(get_user_model().objects.get(pk=self.w.owner_id))
-        organizations = [r for r in client.get('/api/accounts/contexts/').json()['results'] if r['type'] == 'ORGANIZATION']
+        organizations = [r for r in client.get('/api/v1/accounts/contexts/').json()['results'] if r['type'] == 'ORGANIZATION']
         self.assertEqual(len(organizations), 1)
         self.assertTrue(organizations[0]['migrated_from_business'])
         self.assertEqual(organizations[0]['role'], 'OWNER')

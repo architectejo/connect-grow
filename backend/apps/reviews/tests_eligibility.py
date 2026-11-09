@@ -24,7 +24,7 @@ from .models import Review, ReviewSettings
 from .tests import GOOD, REVIEWS_URL, ReviewsTestBase
 
 ELIGIBILITY_URL = REVIEWS_URL + 'eligibility/'
-REPORTS_URL = '/api/moderation/reports/'
+REPORTS_URL = '/api/v1/moderation/reports/'
 LOCMEM = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'reviews-eligibility'}}
 UNKNOWN_ID = '8f0f5a52-3c6e-4a49-9d44-0d8a3d5f1c11'
 
@@ -267,7 +267,7 @@ class ContactFictitiousReportTests(EligibilityBase):
         self.client.force_authenticate(self.moderator)
         queue = self.client.get(REPORTS_URL, {'status': 'EN_ATTENTE'})
         self.assertEqual([r['reason'] for r in queue.data], ['CONTACT_FICTIF'])
-        self.assertEqual(self.client.get('/api/moderation/dashboard/').data['pending_reports_count'], 1)
+        self.assertEqual(self.client.get('/api/v1/moderation/dashboard/').data['pending_reports_count'], 1)
         # L'avis est gelé pour son auteur le temps de la décision, mais reste visible et compté.
         self.client.force_authenticate(self.buyer)
         gone = self.client.delete(f'{REVIEWS_URL}{self.review.id}/')

@@ -199,7 +199,7 @@ class ReviewQueryCountTests(ReviewsTestBase):
     def test_offer_list_with_ratings_has_a_constant_query_count(self):
         for i in range(1, 6):
             self.make_review(offer=self.make_offer(self.seller, f'Annonce notée numéro {i}'), user=self.buyer)
-        url = '/api/marketplace/posts/'
+        url = '/api/v1/marketplace/posts/'
         few = self.measure(url)
         for i in range(6, 12):
             offer = self.make_offer(self.seller, f'Annonce notée numéro {i}')

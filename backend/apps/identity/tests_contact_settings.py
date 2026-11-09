@@ -18,7 +18,7 @@ from . import services
 from .models import CONTACT_CONSENT_TEXT_VERSION, ContactConsent, ContactPoint, OtpCode, User
 
 LOCMEM_CACHE = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'contact-settings-tests'}}
-BASE = '/api/accounts/contact-settings/'
+BASE = '/api/v1/accounts/contact-settings/'
 VERSION = CONTACT_CONSENT_TEXT_VERSION
 CONTACT = '+243812345678'
 LOGIN = '+243970000001'
@@ -171,7 +171,7 @@ class PhoneTests(Base):
 
     def test_public_otp_endpoint_refuses_the_contact_purpose(self):
         response = APIClient().post(
-            '/api/accounts/otp/request/', {'phone': LOGIN, 'purpose': 'CONTACT_VERIFY'}, format='json',
+            '/api/v1/accounts/otp/request/', {'phone': LOGIN, 'purpose': 'CONTACT_VERIFY'}, format='json',
         )
         self.assertEqual(response.status_code, 400)
         self.assertFalse(OtpCode.objects.exists())
@@ -409,28 +409,28 @@ class OfferAllowedChannelsTests(Base):
     def test_list_and_detail_expose_channels_but_never_a_number(self):
         offer = self.offer_for(self.user)
         anonymous = APIClient()
-        detail = anonymous.get(f'/api/marketplace/posts/{offer.id}/')
+        detail = anonymous.get(f'/api/v1/marketplace/posts/{offer.id}/')
         self.assertEqual(detail.json()['allowed_channels'], ['MESSAGE'])
         self.verified_phone()
         self.enable('CALL')
         self.enable('WHATSAPP')
-        for response in (anonymous.get(f'/api/marketplace/posts/{offer.id}/'), anonymous.get('/api/marketplace/posts/')):
+        for response in (anonymous.get(f'/api/v1/marketplace/posts/{offer.id}/'), anonymous.get('/api/v1/marketplace/posts/')):
             self.assertEqual(response.status_code, 200)
             text = response.content.decode()
             for digits in ('812345678', '5678', '970000001', '0001'):
                 self.assertNotIn(digits, text)
-        listing = anonymous.get('/api/marketplace/posts/').json()
+        listing = anonymous.get('/api/v1/marketplace/posts/').json()
         rows = listing['results'] if isinstance(listing, dict) else listing
         self.assertEqual(rows[0]['allowed_channels'], ['MESSAGE', 'CALL', 'WHATSAPP'])
         self.channel('CALL', enabled=False)
         self.assertEqual(
-            anonymous.get(f'/api/marketplace/posts/{offer.id}/').json()['allowed_channels'], ['MESSAGE', 'WHATSAPP'],
+            anonymous.get(f'/api/v1/marketplace/posts/{offer.id}/').json()['allowed_channels'], ['MESSAGE', 'WHATSAPP'],
         )
 
     def test_message_disabled_hides_the_channel(self):
         offer = self.offer_for(self.user)
         self.channel('MESSAGE', enabled=False)
-        self.assertEqual(APIClient().get(f'/api/marketplace/posts/{offer.id}/').json()['allowed_channels'], [])
+        self.assertEqual(APIClient().get(f'/api/v1/marketplace/posts/{offer.id}/').json()['allowed_channels'], [])
 
     def test_no_n_plus_one_on_the_list(self):
         def sellers_queries(count):
@@ -439,11 +439,11 @@ class OfferAllowedChannelsTests(Base):
                 ContactConsent.objects.create(user=seller, channel='MESSAGE', is_granted=True)
                 self.offer_for(seller)
             with CaptureQueriesContext(connection) as queries:
-                self.assertEqual(APIClient().get('/api/marketplace/posts/').status_code, 200)
+                self.assertEqual(APIClient().get('/api/v1/marketplace/posts/').status_code, 200)
             return len(queries)
 
         self.offer_for(self.user)
-        APIClient().get('/api/marketplace/posts/')  # échauffement : création des réglages singletons
+        APIClient().get('/api/v1/marketplace/posts/')  # échauffement : création des réglages singletons
         few = sellers_queries(2)
         many = sellers_queries(6)
         self.assertEqual(few, many)

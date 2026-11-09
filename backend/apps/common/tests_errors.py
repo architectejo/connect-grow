@@ -12,7 +12,7 @@ from apps.moderation.models import Report
 
 class ErrorFormatTests(APITestCase):
     def test_not_authenticated_has_a_code(self):
-        response = self.client.get('/api/interactions/notifications/')
+        response = self.client.get('/api/v1/interactions/notifications/')
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertEqual(response.data['code'], 'not_authenticated')
         self.assertIn('detail', response.data)
@@ -20,17 +20,17 @@ class ErrorFormatTests(APITestCase):
     def test_permission_denied_and_not_found_have_codes(self):
         user = User.objects.create_user(email='e@example.com', password='x', full_name='E')
         self.client.force_authenticate(user)
-        denied = self.client.get('/api/moderation/dashboard/')
+        denied = self.client.get('/api/v1/moderation/dashboard/')
         self.assertEqual(denied.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(denied.data['code'], 'permission_denied')
-        missing = self.client.get('/api/interactions/reviews/00000000-0000-0000-0000-000000000001/')
+        missing = self.client.get('/api/v1/interactions/reviews/00000000-0000-0000-0000-000000000001/')
         self.assertEqual(missing.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(missing.data['code'], 'not_found')
 
     def test_field_validation_errors_keep_the_drf_shape(self):
         user = User.objects.create_user(email='f@example.com', password='x', full_name='F')
         self.client.force_authenticate(user)
-        response = self.client.post('/api/interactions/reviews/', {'post': 'x'}, format='json')
+        response = self.client.post('/api/v1/interactions/reviews/', {'post': 'x'}, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertNotIn('code', response.data)
         self.assertIsInstance(response.data['post'], list)

@@ -1,5 +1,5 @@
-"""Contacts et propositions d'échange, montés sous `api/interactions/` : URL historiques
-conservées jusqu'à L0-11."""
+"""Contacts et propositions d'échange, montés sous `api/v1/interactions/` : URL historiques
+conservées."""
 from django.urls import include, path
 from rest_framework.routers import SimpleRouter
 

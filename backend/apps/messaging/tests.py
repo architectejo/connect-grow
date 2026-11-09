@@ -60,7 +60,7 @@ class ServiceTests(MessagingTestBase):
 
 
 class ConversationApiTests(MessagingTestBase):
-    url = '/api/interactions/conversations/'
+    url = '/api/v1/interactions/conversations/'
 
     def test_lists_only_own_conversations_with_expected_keys(self):
         services.send_message(conversation=self.conversation, sender=self.buyer, content='Bonjour !', notify=False)
@@ -114,7 +114,7 @@ class ConversationApiTests(MessagingTestBase):
 
 
 class MessageApiTests(MessagingTestBase):
-    url = '/api/interactions/messages/'
+    url = '/api/v1/interactions/messages/'
 
     def test_participant_sends_and_other_is_notified(self):
         self.client.force_authenticate(self.buyer)

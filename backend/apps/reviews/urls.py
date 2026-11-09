@@ -1,4 +1,4 @@
-"""Avis, montés sous `api/interactions/` : URL historique conservée jusqu'à L0-11."""
+"""Avis, montés sous `api/v1/interactions/` : URL historique conservée."""
 from django.urls import include, path
 from rest_framework.routers import SimpleRouter
 

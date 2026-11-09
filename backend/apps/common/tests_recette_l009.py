@@ -28,9 +28,9 @@ from apps.reviews.tests import GOOD
 OWNER, ADMIN, EDITOR, ANALYST = 'OWNER', 'ADMIN', 'EDITOR', 'ANALYST'
 ROLES = (OWNER, ADMIN, EDITOR, ANALYST)
 PASSWORD = 'Recette-l009-2026!'
-CONTEXTS = '/api/accounts/contexts/'
-ORGS = '/api/accounts/organizations/'
-POSTS = '/api/marketplace/posts/'
+CONTEXTS = '/api/v1/accounts/contexts/'
+ORGS = '/api/v1/accounts/organizations/'
+POSTS = '/api/v1/marketplace/posts/'
 SECRET_PHONE = '+243899112233'
 SECRET_EMAIL = 'membre.secret@example.com'
 SECRET_NAME = 'Zacharie Sentinelle-Membre'
@@ -107,15 +107,15 @@ class IamScenarioTests(RecetteBase):
         client = APIClient()
         phone = '+243811119999'
         with mock.patch('apps.identity.views.send_otp_sms') as sms:
-            self.assertEqual(client.post('/api/accounts/otp/request/', {'phone': phone, 'purpose': 'REGISTER'},
+            self.assertEqual(client.post('/api/v1/accounts/otp/request/', {'phone': phone, 'purpose': 'REGISTER'},
                                          format='json').status_code, 200)
         body = {'full_name': 'Nouveau Compte', 'password': PASSWORD, 'phone': phone, 'otp_code': sms.call_args[0][1]}
         before = Organization.objects.count()
-        created = client.post('/api/accounts/register/', body, format='json')
+        created = client.post('/api/v1/accounts/register/', body, format='json')
         self.assertEqual(created.status_code, 201, created.content)
         self.assertTrue(created.json()['phone_verified'])
         self.assertEqual(Organization.objects.count(), before)
-        token = client.post('/api/accounts/login/', {'phone': phone, 'password': PASSWORD}, format='json').json()
+        token = client.post('/api/v1/accounts/login/', {'phone': phone, 'password': PASSWORD}, format='json').json()
         listing = client.get(CONTEXTS, HTTP_AUTHORIZATION=f"Bearer {token['access']}")
         self.assertEqual(listing.status_code, 200)
         types = [c['type'] for c in listing.json()['results' if 'results' in listing.json() else 'contexts']] \
@@ -126,7 +126,7 @@ class IamScenarioTests(RecetteBase):
         user = self.outsider
         profile_id = uuid.uuid4()
         self.assertEqual(self.code(self.publish(user, ctx('PROVIDER', profile_id))), 'DENY_CONTEXT')
-        activated = self.api(user).post('/api/accounts/provider/activate/', {'display_name': 'Marie couture'},
+        activated = self.api(user).post('/api/v1/accounts/provider/activate/', {'display_name': 'Marie couture'},
                                         format='json')
         self.assertIn(activated.status_code, (200, 201), activated.content)
         profile = ProviderProfile.objects.get(user=user)
@@ -162,7 +162,7 @@ class IamScenarioTests(RecetteBase):
         created = client.post(ORGS, {'name': 'Interdite Sarl', 'org_type': 'ENTREPRISE'}, format='json')
         self.assertEqual(created.status_code, 403, created.content)
         self.assertFalse(Organization.objects.filter(name='Interdite Sarl').exists())
-        self.assertEqual(client.post('/api/accounts/provider/activate/', {'display_name': 'X Y'},
+        self.assertEqual(client.post('/api/v1/accounts/provider/activate/', {'display_name': 'X Y'},
                                      format='json').status_code, 403)
 
     def test_IAM05_restriction_does_not_leak_into_the_contexts_of_others(self):
@@ -343,7 +343,7 @@ class VerificationRulesTests(RecetteBase):
         doc = KycDocument.objects.get(organization=self.org)
         # Ni le propriétaire, ni un autre membre, ni un compte sans droit ne décident.
         for user in (owner, self.team[ADMIN], self.outsider, self.staff):
-            response = self.api(user).post(f'/api/accounts/kyc/documents/{doc.pk}/decision/',
+            response = self.api(user).post(f'/api/v1/accounts/kyc/documents/{doc.pk}/decision/',
                                            {'decision': 'VALIDE'}, format='json')
             self.assertEqual(response.status_code, 403, (user.email, response.content))
         doc.refresh_from_db()
@@ -441,15 +441,15 @@ class PrivacySweepTests(RecetteBase):
                 self.assertNotIn(needle, text, f'{path} -> {response.status_code}')
 
     def test_public_surfaces_of_an_organization_expose_no_personal_data(self):
-        paths = [ORGS, POSTS, f'{POSTS}{self.offer.pk}/', f'/api/marketplace/sellers/organization/{self.org.pk}/',
-                 f'/api/interactions/reviews/?offer={self.offer.pk}']
+        paths = [ORGS, POSTS, f'{POSTS}{self.offer.pk}/', f'/api/v1/marketplace/sellers/organization/{self.org.pk}/',
+                 f'/api/v1/interactions/reviews/?offer={self.offer.pk}']
         self.sweep(self.api(), paths)
         self.sweep(self.api(self.buyer), paths)
 
     def test_member_facing_surfaces_expose_no_other_member_identity(self):
         client = self.api(self.team[OWNER])
-        for path in (CONTEXTS, f'{ORGS}{self.org.pk}/internal/', '/api/interactions/conversations/',
-                     '/api/interactions/notifications/'):
+        for path in (CONTEXTS, f'{ORGS}{self.org.pk}/internal/', '/api/v1/interactions/conversations/',
+                     '/api/v1/interactions/notifications/'):
             text = client.get(path, **ctx('ORGANIZATION', self.org.pk)).content.decode()
             for role in (ADMIN, EDITOR, ANALYST):
                 self.assertNotIn(f'secret-{role.lower()}@', text, path)
@@ -651,7 +651,7 @@ class BuyerToOrganizationFlowTests(RecetteBase):
 
     def test_contact_message_review_and_reply_never_expose_a_member(self):
         buyer = self.api(self.buyer)
-        contact = buyer.post('/api/interactions/contacts/', {'post': str(self.offer.pk), 'message': 'Bonjour, disponible ?'},
+        contact = buyer.post('/api/v1/interactions/contacts/', {'post': str(self.offer.pk), 'message': 'Bonjour, disponible ?'},
                              format='json')
         self.assertEqual(contact.status_code, 201, contact.content)
         dispatch_outbox_now()
@@ -661,7 +661,7 @@ class BuyerToOrganizationFlowTests(RecetteBase):
         self.assertNotIn(SECRET_NAME, contact.content.decode())
         # Les membres habilités voient la demande ; l'analyste est refusé (contact.view_requesters).
         for role, allowed in ((OWNER, True), (ADMIN, True), (EDITOR, True), (ANALYST, False)):
-            response = self.api(self.team[role]).get('/api/interactions/contacts/requesters/', {'post': str(self.offer.pk)},
+            response = self.api(self.team[role]).get('/api/v1/interactions/contacts/requesters/', {'post': str(self.offer.pk)},
                                                      **ctx('ORGANIZATION', self.org.pk))
             if response.status_code == 404:
                 break  # route d'un autre nom : couvert par marketplace.tests_contexts
@@ -675,14 +675,14 @@ class BuyerToOrganizationFlowTests(RecetteBase):
         User.objects.filter(pk=self.buyer.pk).update(date_joined=past - timedelta(days=30))
         self.buyer.refresh_from_db()
         buyer = self.api(self.buyer)
-        review = buyer.post('/api/interactions/reviews/', {'post': str(self.offer.pk), **GOOD}, format='json')
+        review = buyer.post('/api/v1/interactions/reviews/', {'post': str(self.offer.pk), **GOOD}, format='json')
         self.assertEqual(review.status_code, 201, review.content)
         review_id = review.json()['id']
         for role, allowed in ((ANALYST, False), (EDITOR, True)):
-            response = self.api(self.team[role]).post(f'/api/interactions/reviews/{review_id}/reply/',
+            response = self.api(self.team[role]).post(f'/api/v1/interactions/reviews/{review_id}/reply/',
                                                       {'reply_content': f'Merci de {role}'}, format='json')
             self.assertEqual(response.status_code == 200, allowed, (role, response.content))
-        public = self.api().get(f'/api/interactions/reviews/?offer={self.offer.pk}')
+        public = self.api().get(f'/api/v1/interactions/reviews/?offer={self.offer.pk}')
         text = public.content.decode()
         self.assertIn('Merci de EDITOR', text)
         self.assertNotIn(SECRET_NAME, text)
@@ -696,19 +696,19 @@ class BuyerToOrganizationFlowTests(RecetteBase):
 
     def test_a_member_cannot_contact_nor_review_the_offer_of_his_own_organization(self):
         member = self.api(self.team[EDITOR])
-        contact = member.post('/api/interactions/contacts/', {'post': str(self.offer.pk), 'message': 'Auto-contact'},
+        contact = member.post('/api/v1/interactions/contacts/', {'post': str(self.offer.pk), 'message': 'Auto-contact'},
                               format='json')
         self.assertGreaterEqual(contact.status_code, 400, contact.content)
-        review = member.post('/api/interactions/reviews/', {'post': str(self.offer.pk), **GOOD}, format='json')
+        review = member.post('/api/v1/interactions/reviews/', {'post': str(self.offer.pk), **GOOD}, format='json')
         self.assertGreaterEqual(review.status_code, 400, review.content)
         self.assertFalse(Review.objects.filter(offer_id=self.offer.pk).exists())
 
     def test_the_buyer_conversation_is_invisible_to_a_stranger_and_to_another_organization(self):
         buyer = self.api(self.buyer)
-        contact = buyer.post('/api/interactions/contacts/', {'post': str(self.offer.pk), 'message': 'Bonjour'}, format='json')
+        contact = buyer.post('/api/v1/interactions/contacts/', {'post': str(self.offer.pk), 'message': 'Bonjour'}, format='json')
         self.assertEqual(contact.status_code, 201, contact.content)
         dispatch_outbox_now()
-        conversations = buyer.get('/api/interactions/conversations/')
+        conversations = buyer.get('/api/v1/interactions/conversations/')
         self.assertEqual(conversations.status_code, 200)
         data = conversations.json()
         data = data['results'] if isinstance(data, dict) else data
@@ -717,12 +717,12 @@ class BuyerToOrganizationFlowTests(RecetteBase):
         Membership.objects.create(organization=self.other_org, user=self.outsider, role=OWNER)
         for headers in ({}, ctx('ORGANIZATION', self.other_org.pk)):
             stranger = self.api(self.outsider)
-            self.assertEqual(stranger.get(f'/api/interactions/conversations/{conversation_id}/', **headers).status_code, 404)
-            written = stranger.post('/api/interactions/messages/', {'conversation': conversation_id, 'content': 'Intrus'},
+            self.assertEqual(stranger.get(f'/api/v1/interactions/conversations/{conversation_id}/', **headers).status_code, 404)
+            written = stranger.post('/api/v1/interactions/messages/', {'conversation': conversation_id, 'content': 'Intrus'},
                                     format='json', **headers)
             self.assertIn(written.status_code, (400, 403, 404))
         # L'analyste (sans `message.reply`) ne lit pas la boîte de l'organisation.
-        analyst = self.api(self.team[ANALYST]).get('/api/interactions/conversations/', **ctx('ORGANIZATION', self.org.pk))
+        analyst = self.api(self.team[ANALYST]).get('/api/v1/interactions/conversations/', **ctx('ORGANIZATION', self.org.pk))
         self.assertIn(analyst.status_code, (200, 403))
         if analyst.status_code == 200:
             body = analyst.json()
@@ -745,7 +745,7 @@ class SanctionedOwnerTests(RecetteBase):
         sanction.apply()
         self.settle()
         self.assertFalse(self.visible(offer))
-        self.assertEqual(self.api().get(f'/api/marketplace/sellers/organization/{self.org.pk}/').status_code, 404)
+        self.assertEqual(self.api().get(f'/api/v1/marketplace/sellers/organization/{self.org.pk}/').status_code, 404)
         # Les autres membres, eux, ne sont pas sanctionnés : l'équipe garde ses données.
         self.assertTrue(Offer.objects.filter(pk=offer.pk).exists())
         sanction.lift()
@@ -758,7 +758,7 @@ class SanctionedOwnerTests(RecetteBase):
         self.org_offer()
         Sanction.objects.create(user=self.team[OWNER], sanction_type=Sanction.TYPE_SUSPENSION_TEMPORAIRE, reason='x').apply()
         self.settle()
-        self.assertEqual(self.api().get(f'/api/marketplace/sellers/organization/{self.org.pk}/').status_code, 404)
+        self.assertEqual(self.api().get(f'/api/v1/marketplace/sellers/organization/{self.org.pk}/').status_code, 404)
         self.assertNotIn(str(self.org.pk), json.dumps(self.api().get(ORGS).json()))
 
     def test_a_second_owner_keeps_the_organization_public_when_one_owner_is_sanctioned(self):
@@ -772,5 +772,5 @@ class SanctionedOwnerTests(RecetteBase):
     def test_a_deactivated_account_cannot_use_any_context_with_its_old_token(self):
         member = self.team[EDITOR]
         User.objects.filter(pk=member.pk).update(is_active=False)
-        login = APIClient().post('/api/accounts/login/', {'email': member.email, 'password': 'x'}, format='json')
+        login = APIClient().post('/api/v1/accounts/login/', {'email': member.email, 'password': 'x'}, format='json')
         self.assertIn(login.status_code, (400, 401, 403))

@@ -89,17 +89,17 @@ class ExchangeEnabledTests(MarketplaceTestBase):
 
 class FeaturesEndpointTests(MarketplaceTestBase):
     def test_public_contract_and_cache(self):
-        response = self.client.get('/api/config/features/')
+        response = self.client.get('/api/v1/config/features/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json(), {'features': {'exchange_enabled': False}})
         self.assertEqual(response['Cache-Control'], 'public, max-age=60')
 
     def test_reflects_the_setting(self):
         set_exchange(True)
-        self.assertEqual(self.client.get('/api/config/features/').json(), {'features': {'exchange_enabled': True}})
+        self.assertEqual(self.client.get('/api/v1/config/features/').json(), {'features': {'exchange_enabled': True}})
 
     def test_read_only(self):
-        self.assertEqual(self.client.post('/api/config/features/', {}).status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        self.assertEqual(self.client.post('/api/v1/config/features/', {}).status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 class ExchangeSettingAuditTests(MarketplaceTestBase):

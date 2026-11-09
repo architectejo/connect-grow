@@ -12,7 +12,7 @@ from . import services
 from .models import Review, ReviewSettings
 from .tests import ReviewsTestBase
 
-POSTS_URL = '/api/marketplace/posts/'
+POSTS_URL = '/api/v1/marketplace/posts/'
 
 FORBIDDEN_KEYS = {
     'trust_score', 'reviews_count', 'is_new_seller', 'is_trusted_seller', 'comments_count', 'rating', 'deal',
@@ -151,9 +151,9 @@ class SellerFlagTests(ReviewsTestBase):
         self.make_contact(offer2)
         self.client.force_authenticate(self.buyer)
         body = {'offer_rating': 4, 'seller_rating': 2, 'content': 'Un avis tout à fait correct.'}
-        first = self.client.post('/api/interactions/reviews/', {'post': str(self.offer.id), **body})
+        first = self.client.post('/api/v1/interactions/reviews/', {'post': str(self.offer.id), **body})
         Review.objects.filter(pk=first.data['id']).update(created_at=timezone.now() - timedelta(minutes=5))
-        second = self.client.post('/api/interactions/reviews/', {'post': str(offer2.id), **body})
+        second = self.client.post('/api/v1/interactions/reviews/', {'post': str(offer2.id), **body})
         self.assertEqual((first.status_code, second.status_code), (201, 201))
         self.assertEqual(self.flags(), {self.offer.id: False, offer2.id: True})
 
@@ -176,7 +176,7 @@ class SellerFlagTests(ReviewsTestBase):
         Review.objects.filter(pk=first.pk).update(created_at=timezone.now() - timedelta(days=1))
         services.reconcile_seller_flag(self.buyer.pk, 'USER', self.seller.pk)
         self.client.force_authenticate(self.buyer)
-        self.assertEqual(self.client.delete(f'/api/interactions/reviews/{second.id}/').status_code, 204)
+        self.assertEqual(self.client.delete(f'/api/v1/interactions/reviews/{second.id}/').status_code, 204)
         self.assertEqual(self.flags(), {self.offer.id: True})
 
     def test_reconcile_is_idempotent_and_hidden_only_leaves_no_flag(self):
@@ -193,7 +193,7 @@ class SellerFlagTests(ReviewsTestBase):
         Review.objects.filter(pk=first.pk).update(created_at=timezone.now() - timedelta(days=1))
         services.reconcile_seller_flag(self.buyer.pk, 'USER', self.seller.pk)
         self.client.force_authenticate(self.buyer)
-        self.client.patch(f'/api/interactions/reviews/{first.id}/', {'seller_rating': 3})
+        self.client.patch(f'/api/v1/interactions/reviews/{first.id}/', {'seller_rating': 3})
         summary = services.get_seller_ratings('USER', [self.seller.id])[self.seller.id]
         self.assertEqual(summary.count, 1)
         self.assertEqual(Review.objects.get(pk=first.pk).seller_rating, 3)
@@ -201,7 +201,7 @@ class SellerFlagTests(ReviewsTestBase):
 
 
 class DashboardRatingTests(ReviewsTestBase):
-    url = '/api/marketplace/stats/dashboard/'
+    url = '/api/v1/marketplace/stats/dashboard/'
 
     def test_without_review_the_average_is_null(self):
         self.client.force_authenticate(self.seller)

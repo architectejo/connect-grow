@@ -133,7 +133,7 @@ class UnavailableContractTests(UnavailableBase):
 
 class LeaveUnavailableTests(UnavailableBase):
     def leave(self, org):
-        return self.client.post(f'/api/accounts/organizations/{org.pk}/leave/')
+        return self.client.post(f'/api/v1/accounts/organizations/{org.pk}/leave/')
 
     def test_leave_is_204_for_every_role_and_status_and_clears_the_entry(self):
         for role in (OWNER, ADMIN, EDITOR, ANALYST):
@@ -168,5 +168,5 @@ class LeaveUnavailableTests(UnavailableBase):
         for org_status, code in ((SUSPENDED, 'DENY_SECURITY'), (ARCHIVED, 'DENY_OBJECT_STATE')):
             org = make_org(status=org_status)
             join(org, self.user, OWNER)
-            response = self.client.get(f'/api/accounts/organizations/{org.pk}/internal/')
+            response = self.client.get(f'/api/v1/accounts/organizations/{org.pk}/internal/')
             self.assertEqual((response.status_code, response.json()['code']), (403, code))

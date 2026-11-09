@@ -1,7 +1,7 @@
 """Recette L0-10a : contact vendeur, consentement par canal et révélation du numéro (ADR 0005).
 
 Scénarios de bout en bout par l'API réelle : authentification par jetons JWT obtenus à la connexion
-(`/api/accounts/login/`), aucune injection d'état en base pour le consentement, le numéro de contact ou
+(`/api/v1/accounts/login/`), aucune injection d'état en base pour le consentement, le numéro de contact ou
 les révélations. Seuls sont simulés : la passerelle SMS (le code est lu à l'envoi) et l'écoulement du
 temps (dates de `ContactEvent`/`AuditLog` reculées, comme le font les autres tests de recette).
 
@@ -40,11 +40,11 @@ from apps.reviews.models import ReviewSettings
 from apps.reviews.tests import GOOD, REVIEWS_URL
 
 PASSWORD = 'Recette-contact-2026!'
-SETTINGS = '/api/accounts/contact-settings/'
-REVEAL = '/api/interactions/contacts/reveal/'
-RECEIVED = '/api/interactions/contacts/reveals/received/'
-CONTACTS = '/api/interactions/contacts/'
-POSTS = '/api/marketplace/posts/'
+SETTINGS = '/api/v1/accounts/contact-settings/'
+REVEAL = '/api/v1/interactions/contacts/reveal/'
+RECEIVED = '/api/v1/interactions/contacts/reveals/received/'
+CONTACTS = '/api/v1/interactions/contacts/'
+POSTS = '/api/v1/marketplace/posts/'
 
 SELLER_LOGIN = '+243970000001'
 SELLER_CONTACT = '+243897654321'
@@ -116,7 +116,7 @@ class RecetteContactBase(APITestCase):
 
     def login(self, user):
         """Client authentifié par un vrai jeton d'accès obtenu à la connexion (pas de force_authenticate)."""
-        response = APIClient().post('/api/accounts/login/', {'email': user.email, 'password': PASSWORD}, format='json')
+        response = APIClient().post('/api/v1/accounts/login/', {'email': user.email, 'password': PASSWORD}, format='json')
         self.assertEqual(response.status_code, 200, response.content)
         client = APIClient()
         client.credentials(HTTP_AUTHORIZATION='Bearer ' + response.json()['access'])
@@ -299,7 +299,7 @@ class Scenario2NoNumberLeakTests(RecetteContactBase):
         client = self.c(viewer)
         reached = 0
         for route in iter_routes():
-            if route.startswith('api/accounts/contact-settings'):
+            if route.startswith('api/v1/accounts/contact-settings'):
                 continue  # espace personnel du titulaire (testé plus bas)
             targets = [route] if not PARAM_RE.search(route) else [PARAM_RE.sub(i, route) for i in self.pool]
             for path in targets:
@@ -326,7 +326,7 @@ class Scenario2NoNumberLeakTests(RecetteContactBase):
 
     def test_search_by_any_part_of_the_number_finds_nothing(self):
         for term in (SELLER_CONTACT, SELLER_CONTACT[4:], '7654321', '4321', SELLER_LOGIN, '970000001'):
-            for url in (POSTS, '/api/accounts/organizations/'):
+            for url in (POSTS, '/api/v1/accounts/organizations/'):
                 for viewer in (None, self.buyer):
                     response = self.c(viewer).get(url, {'search': term})
                     self.assertEqual(response.status_code, 200)
@@ -338,8 +338,8 @@ class Scenario2NoNumberLeakTests(RecetteContactBase):
 
     def test_admin_api_responses_for_sanctions_and_reports_do_not_carry_the_number(self):
         self.reveal()
-        for url in ('/api/moderation/sanctions/', '/api/moderation/reports/', '/api/moderation/dashboard/',
-                    '/api/accounts/kyc/review-queue/'):
+        for url in ('/api/v1/moderation/sanctions/', '/api/v1/moderation/reports/', '/api/v1/moderation/dashboard/',
+                    '/api/v1/accounts/kyc/review-queue/'):
             for viewer in (self.moderator, self.admin):
                 text = self.c(viewer).get(url).content.decode()
                 for needle in needles(SELLER_CONTACT):
@@ -629,7 +629,7 @@ class Scenario6UnavailableTests(RecetteContactBase):
         self.seller_ready()
 
     def sanction(self, user, kind, **extra):
-        response = self.c(self.admin).post('/api/moderation/sanctions/', {
+        response = self.c(self.admin).post('/api/v1/moderation/sanctions/', {
             'user': str(user.pk), 'sanction_type': kind, 'reason': 'Recette', **extra,
         }, format='json')
         self.assertEqual(response.status_code, 201, response.content)
@@ -642,7 +642,7 @@ class Scenario6UnavailableTests(RecetteContactBase):
         self.assert_error(response, 404, 'offer_not_found')
         self.assertEqual(self.c(None).get(f'{POSTS}{self.offer.id}/').status_code, 404)
         self.assertEqual(ContactEvent.objects.count(), 0)
-        lifted = self.c(self.admin).post(f"/api/moderation/sanctions/{sanction['id']}/lift/")
+        lifted = self.c(self.admin).post(f"/api/v1/moderation/sanctions/{sanction['id']}/lift/")
         self.assertEqual(lifted.status_code, 200)
         dispatch_outbox_now()
         self.assertEqual(self.reveal().status_code, 201)

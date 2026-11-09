@@ -24,7 +24,7 @@ from .models import (
 from .tests_route_guard import collect_unguarded_write_routes
 
 LOCMEM_CACHE = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'org-api-throttle'}}
-ORGS = '/api/accounts/organizations/'
+ORGS = '/api/v1/accounts/organizations/'
 LIMITS = ORGS + 'limits/'
 OWNER, ADMIN, EDITOR, ANALYST = capabilities.ROLE_OWNER, capabilities.ROLE_ADMIN, capabilities.ROLE_EDITOR, capabilities.ROLE_ANALYST
 
@@ -671,7 +671,7 @@ class ArchiveAndLeaveTests(ApiBase):
         membership = Membership.objects.get(user=self.members[EDITOR])
         self.assertEqual((membership.status, membership.end_reason), ('REVOKED', 'left'))
         self.assertDenied(client.get(self.base + 'internal/'), DENY_RELATION)
-        listed = client.get('/api/accounts/contexts/').json()['results']
+        listed = client.get('/api/v1/accounts/contexts/').json()['results']
         self.assertEqual([c['type'] for c in listed], ['USER'])
         event = OutboxEvent.objects.get(event_type='identity.membership_changed')
         self.assertEqual((event.payload['change'], event.payload['user_id']), ('revoked', str(self.members[EDITOR].pk)))
@@ -803,7 +803,7 @@ class PublicListTests(TestCase):
             self.assertEqual(self.client.get(ORGS, {'page_size': 12}).status_code, 200)
 
     def test_old_businesses_endpoint_is_gone(self):
-        self.assertEqual(self.client.get('/api/accounts/businesses/').status_code, 404)
+        self.assertEqual(self.client.get('/api/v1/accounts/businesses/').status_code, 404)
 
 
 # --- Limites -------------------------------------------------------------------------------------------------
@@ -836,7 +836,7 @@ class RegistrationAndMeTests(TestCase):
 
     def register(self, **extra):
         body = {'email': 'nouveau@example.com', 'password': 'un-mot-de-passe-solide', 'full_name': 'Nouveau', **extra}
-        return self.client.post('/api/accounts/register/', body, format='json')
+        return self.client.post('/api/v1/accounts/register/', body, format='json')
 
     def test_register_never_exposes_nor_reads_the_account_type_or_business_profile(self):
         response = self.register(user_type='ENTREPRISE', business_profile={'business_name': 'Atelier', 'is_verified': True})
@@ -850,10 +850,10 @@ class RegistrationAndMeTests(TestCase):
     def test_me_has_no_user_type_nor_business_profile_and_ignores_them_on_patch(self):
         user = make_user('moi')
         client = ApiBase.login(user)
-        body = client.get('/api/accounts/me/').json()
+        body = client.get('/api/v1/accounts/me/').json()
         self.assertNotIn('user_type', body)
         self.assertNotIn('business_profile', body)
-        response = client.patch('/api/accounts/me/', {
+        response = client.patch('/api/v1/accounts/me/', {
             'user_type': 'ENTREPRISE', 'business_profile': {'business_name': 'Pirate'}, 'full_name': 'Moi Renommé',
         }, format='json')
         self.assertEqual(response.status_code, 200, response.content)
@@ -869,24 +869,24 @@ class RegistrationAndMeTests(TestCase):
         }
         user = make_user('moi', phone_verified=False)
         client = ApiBase.login(user)
-        body = client.get('/api/accounts/me/').json()
+        body = client.get('/api/v1/accounts/me/').json()
         self.assertEqual(set(body), expected)
         self.assertIs(body['phone_verified'], False)
-        patched = client.patch('/api/accounts/me/', {'phone_verified': True}, format='json')
+        patched = client.patch('/api/v1/accounts/me/', {'phone_verified': True}, format='json')
         self.assertEqual(patched.status_code, 200)
         self.assertIs(patched.json()['phone_verified'], False)
         user.refresh_from_db()
         self.assertFalse(user.phone_verified)
         user.phone_verified = True
         user.save()
-        self.assertIs(client.get('/api/accounts/me/').json()['phone_verified'], True)
+        self.assertIs(client.get('/api/v1/accounts/me/').json()['phone_verified'], True)
 
     def test_registration_by_phone_gives_a_verified_phone_that_allows_creating_an_organization(self):
         from .models import OtpCode
 
         phone = '+243812345600'
         _, code = OtpCode.issue(phone, OtpCode.PURPOSE_REGISTER)
-        registered = self.client.post('/api/accounts/register/', {
+        registered = self.client.post('/api/v1/accounts/register/', {
             'phone': phone, 'otp_code': code, 'password': 'un-mot-de-passe-solide', 'full_name': 'Par Téléphone',
         }, format='json')
         self.assertEqual(registered.status_code, 201, registered.content)
@@ -905,14 +905,14 @@ class GuardAndRulesTests(TestCase):
 
         seen = {}
         for route, callback in _walk(get_resolver()):
-            if route.startswith('api/accounts/organizations/') and '/kyc/' not in route and not route.endswith('/verification/'):
+            if route.startswith('api/v1/accounts/organizations/') and '/kyc/' not in route and not route.endswith('/verification/'):
                 view_class = _view_class(callback)
                 seen[route] = (_write_methods(callback, view_class), getattr(view_class, 'acting_context_exempt', ''))
         self.assertEqual(
             {route for route, (methods, _) in seen.items() if methods},
             {
-                'api/accounts/organizations/', 'api/accounts/organizations/<uuid:pk>/',
-                'api/accounts/organizations/<uuid:pk>/archive/', 'api/accounts/organizations/<uuid:pk>/leave/',
+                'api/v1/accounts/organizations/', 'api/v1/accounts/organizations/<uuid:pk>/',
+                'api/v1/accounts/organizations/<uuid:pk>/archive/', 'api/v1/accounts/organizations/<uuid:pk>/leave/',
             },
         )
         for route, (methods, reason) in seen.items():

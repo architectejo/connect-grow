@@ -101,6 +101,10 @@ TEMPLATES = [
     },
 ]
 
+# --- Pagination de l'API (classe commune apps.common.pagination) ---
+API_PAGE_SIZE = int(os.getenv('API_PAGE_SIZE', '20'))
+API_MAX_PAGE_SIZE = int(os.getenv('API_MAX_PAGE_SIZE', '100'))
+
 # --- CONFIGURATION REST FRAMEWORK & JWT ---
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (

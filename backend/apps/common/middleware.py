@@ -2,7 +2,7 @@ from django.utils.cache import patch_cache_control, patch_vary_headers
 
 
 class ApiCacheHeadersMiddleware:
-    """En-têtes de cache de l'API (L0-10a-a, règle 10) : une réponse d'`/api/` dépend de
+    """En-têtes de cache de l'API (L0-10a-a, règle 10) : une réponse d'`/api/v1/` dépend de
     l'utilisateur (favori, masquage, droits). Aucun cache partagé ne doit la resservir à un tiers.
 
     - `Vary: Authorization, X-Context` sur toute réponse de l'API (fusionné avec le `Vary` existant, CORS
@@ -16,7 +16,7 @@ class ApiCacheHeadersMiddleware:
 
     def __call__(self, request):
         response = self.get_response(request)
-        if request.path.startswith('/api/'):
+        if request.path.startswith('/api/v1/'):
             patch_vary_headers(response, ['Authorization', 'X-Context'])
             if 'HTTP_X_CONTEXT' in request.META:
                 patch_cache_control(response, private=True, no_store=True)

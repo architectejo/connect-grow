@@ -347,7 +347,7 @@ class UuidAndCatalogReferenceTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         # Un identifiant entier ne correspond plus à aucune route.
         self.assertEqual(
-            self.client.post('/api/accounts/kyc/documents/1/decision/', {'decision': 'VALIDE'}).status_code,
+            self.client.post('/api/v1/accounts/kyc/documents/1/decision/', {'decision': 'VALIDE'}).status_code,
             status.HTTP_404_NOT_FOUND,
         )
 

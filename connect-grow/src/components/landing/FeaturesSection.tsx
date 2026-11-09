@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { BadgeCheck, ListFilter, ShieldCheck, TrendingUp } from "lucide-react";
 
 // Les trois réponses de Connecte+ aux problèmes des groupes WhatsApp et Facebook (CDC 1.1),
@@ -5,56 +6,53 @@ import { BadgeCheck, ListFilter, ShieldCheck, TrendingUp } from "lucide-react";
 const pillars = [
   {
     icon: ListFilter,
-    title: "Des annonces qui ne se perdent plus",
-    description: "Chaque annonce a sa catégorie, son prix en USD ou en CDF et sa commune. Filtrez en quelques secondes.",
+    key: "listings",
     tone: "bg-primary/10 text-primary",
   },
   {
     icon: ShieldCheck,
-    title: "Des avis après contact",
-    description:
-      "Seules les personnes qui ont contacté le vendeur peuvent noter l'offre et le vendeur, séparément. Il n'y a pas de score unique.",
+    key: "reviews",
     tone: "bg-success/10 text-success",
   },
   {
     icon: TrendingUp,
-    title: "Un classement transparent",
-    description: "Le classement dépend de l'engagement, de la récence et de la proximité, pas des notes. Une annonce sponsorisée est toujours signalée.",
+    key: "ranking",
     tone: "bg-sun/15 text-sun",
   },
   {
     icon: BadgeCheck,
-    title: "Des vérifications qui disent ce qui est vérifié",
-    description: "Une organisation peut faire examiner ses documents. Chaque mention, par exemple « RCCM vérifié », indique précisément le document examiné ; elle ne s'achète pas et ne garantit pas la qualité.",
+    key: "verification",
     tone: "bg-info/10 text-info",
   },
-];
+] as const;
 
-const FeaturesSection = () => (
+const FeaturesSection = () => {
+  const { t } = useTranslation();
+  return (
   <section id="confiance" className="py-16 md:py-24">
     <div className="container">
       <div className="mx-auto mb-10 max-w-2xl text-center md:mb-14">
-        <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Pourquoi Connecte+</p>
-        <h2 className="mt-2 text-balance text-3xl font-extrabold md:text-4xl">Fini les arnaques et les annonces noyées</h2>
+        <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">{t("landing.features.eyebrow")}</p>
+        <h2 className="mt-2 text-balance text-3xl font-extrabold md:text-4xl">{t("landing.features.title")}</h2>
         <p className="mt-3 text-muted-foreground">
-          Acheter entre particuliers à Kinshasa ne devrait pas être un pari. Connecte+ rend chaque vendeur identifiable et
-          chaque annonce facile à trouver.
+          {t("landing.features.subtitle")}
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {pillars.map(({ icon: Icon, title, description, tone }) => (
-          <article key={title} className="rounded-2xl border bg-card p-6 shadow-soft transition-shadow hover:shadow-card">
+        {pillars.map(({ icon: Icon, key, tone }) => (
+          <article key={key} className="rounded-2xl border bg-card p-6 shadow-soft transition-shadow hover:shadow-card">
             <span className={`flex h-12 w-12 items-center justify-center rounded-xl ${tone}`}>
               <Icon className="h-6 w-6" aria-hidden />
             </span>
-            <h3 className="mt-5 text-lg font-bold">{title}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{description}</p>
+            <h3 className="mt-5 text-lg font-bold">{t(`landing.features.${key}.title`)}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{t(`landing.features.${key}.description`)}</p>
           </article>
         ))}
       </div>
     </div>
   </section>
-);
+  );
+};
 
 export default FeaturesSection;

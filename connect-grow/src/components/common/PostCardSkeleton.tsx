@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
@@ -34,10 +35,11 @@ export function PostGrid({ children, className }: PostGridProps) {
 }
 
 export function PostGridSkeleton({ count = 8, className }: { count?: number; className?: string }) {
+  const { t } = useTranslation();
   return (
     <PostGrid className={className}>
       <span className="sr-only" role="status">
-        Chargement des annonces…
+        {t("states.loadingPosts")}
       </span>
       {Array.from({ length: count }, (_, i) => (
         <PostCardSkeleton key={i} />

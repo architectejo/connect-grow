@@ -3,28 +3,28 @@ import { useTranslation } from "react-i18next";
 import { Logo } from "@/components/layout/Logo";
 import { useFeatures } from "@/hooks/use-features";
 
-type FooterLink = { label: string; to: string; exchangeOnly?: boolean };
-const columns: { title: string; links: FooterLink[] }[] = [
+type FooterLink = { labelKey: string; to: string; exchangeOnly?: boolean };
+const columns: { titleKey: string; links: FooterLink[] }[] = [
   {
-    title: "Marketplace",
+    titleKey: "landing.footer.marketplace",
     links: [
-      { label: "Toutes les annonces", to: "/marketplace" },
-      { label: "Annonces échangeables", to: "/marketplace?is_exchangeable=true", exchangeOnly: true },
-      { label: "Organisations", to: "/businesses" },
-      { label: "Publier une annonce", to: "/create-post" },
+      { labelKey: "landing.footer.allListings", to: "/marketplace" },
+      { labelKey: "landing.footer.exchangeListings", to: "/marketplace?is_exchangeable=true", exchangeOnly: true },
+      { labelKey: "landing.footer.organizations", to: "/businesses" },
+      { labelKey: "landing.footer.publish", to: "/create-post" },
     ],
   },
   {
-    title: "Aide",
+    titleKey: "landing.footer.help",
     links: [
-      { label: "Comment ça marche", to: "/#comment-ca-marche" },
-      { label: "Pourquoi nous faire confiance", to: "/#confiance" },
+      { labelKey: "landing.footer.howItWorks", to: "/#comment-ca-marche" },
+      { labelKey: "landing.footer.whyTrust", to: "/#confiance" },
     ],
   },
 ];
 
 // Documents légaux en cours de rédaction (CDC 11.3) : affichés sans lien tant qu'ils n'existent pas.
-const legal = ["Conditions d'utilisation", "Confidentialité"];
+const legal = ["landing.footer.terms", "landing.footer.privacy"];
 
 const FooterSection = () => {
   const { t } = useTranslation();
@@ -41,13 +41,13 @@ const FooterSection = () => {
         </div>
 
         {columns.map((column) => (
-          <nav key={column.title} aria-label={column.title}>
-            <h2 className="mb-4 text-xs font-bold uppercase tracking-[0.14em] text-foreground">{column.title}</h2>
+          <nav key={column.titleKey} aria-label={t(column.titleKey)}>
+            <h2 className="mb-4 text-xs font-bold uppercase tracking-[0.14em] text-foreground">{t(column.titleKey)}</h2>
             <ul className="space-y-2.5">
               {column.links.filter((link) => exchangeEnabled || !link.exchangeOnly).map((link) => (
-                <li key={link.exchangeOnly ? t("exchange.footerLink") : link.label}>
+                <li key={link.labelKey}>
                   <Link to={link.to} className="text-sm text-muted-foreground transition-colors hover:text-primary">
-                    {link.label}
+                    {link.exchangeOnly ? t("exchange.footerLink") : t(link.labelKey)}
                   </Link>
                 </li>
               ))}
@@ -57,12 +57,12 @@ const FooterSection = () => {
       </div>
 
       <div className="mt-12 flex flex-col gap-3 border-t pt-6 text-xs text-muted-foreground md:flex-row md:items-center md:justify-between">
-        <p>© {new Date().getFullYear()} Connecte+. Tous droits réservés.</p>
+        <p>{t("landing.footer.rights", { year: new Date().getFullYear() })}</p>
         <p className="flex flex-wrap gap-x-4 gap-y-1">
           {legal.map((item) => (
-            <span key={item}>{item}</span>
+            <span key={item}>{t(item)}</span>
           ))}
-          <span>Réalisé par IMARA TECH Group</span>
+          <span>{t("landing.footer.madeBy")}</span>
         </p>
       </div>
     </div>

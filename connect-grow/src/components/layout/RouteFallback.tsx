@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 /**
  * Affiché pendant le téléchargement d'une page. Invisible les 200 premières millisecondes
  * pour ne pas faire clignoter l'écran sur une bonne connexion.
  */
 export function RouteFallback() {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -16,7 +18,7 @@ export function RouteFallback() {
 
   return (
     <div role="status" aria-live="polite" className="fixed inset-x-0 top-0 z-[60]">
-      <span className="sr-only">Chargement de la page…</span>
+      <span className="sr-only">{t("states.loadingPage")}</span>
       <div className="h-1 overflow-hidden bg-primary/15">
         <div className="h-full w-1/3 animate-route-progress rounded-full bg-primary" />
       </div>

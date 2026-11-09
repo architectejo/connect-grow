@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { ArrowRight } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCategories } from "@/hooks/use-marketplace";
@@ -6,6 +7,7 @@ import { categoryIcon } from "@/lib/category-icons";
 
 /** Accès direct aux catégories gérées dans le back-office. */
 const CategoriesSection = () => {
+  const { t } = useTranslation();
   const { data: categories = [], isLoading, isError } = useCategories();
 
   if (isError || (!isLoading && categories.length === 0)) return null;
@@ -15,14 +17,14 @@ const CategoriesSection = () => {
       <div className="container">
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Catégories</p>
-            <h2 className="mt-1.5 text-2xl font-extrabold md:text-3xl">Que cherchez-vous ?</h2>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">{t("landing.categories.eyebrow")}</p>
+            <h2 className="mt-1.5 text-2xl font-extrabold md:text-3xl">{t("landing.categories.title")}</h2>
           </div>
           <Link
             to="/marketplace"
             className="hidden items-center gap-1 text-sm font-semibold text-primary hover:underline sm:inline-flex"
           >
-            Tout voir <ArrowRight className="h-4 w-4" aria-hidden />
+            {t("landing.categories.seeAll")} <ArrowRight className="h-4 w-4" aria-hidden />
           </Link>
         </div>
 

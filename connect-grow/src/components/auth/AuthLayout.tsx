@@ -1,14 +1,15 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { ArrowLeft, BadgeCheck, ShieldCheck, Star } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 import { ModeToggle } from "@/components/mode-toggle";
 
 const reasons = [
-  { icon: Star, text: "Des vendeurs notés par de vrais acheteurs" },
-  { icon: BadgeCheck, text: "Des boutiques aux documents vérifiés" },
-  { icon: ShieldCheck, text: "Votre numéro reste masqué si vous le souhaitez" },
-];
+  { icon: Star, textKey: "authLayout.reasonRated" },
+  { icon: BadgeCheck, textKey: "authLayout.reasonVerified" },
+  { icon: ShieldCheck, textKey: "authLayout.reasonPhone" },
+] as const;
 
 interface AuthLayoutProps {
   title: string;
@@ -20,6 +21,7 @@ interface AuthLayoutProps {
 
 /** Gabarit des écrans d'authentification : visuel de marque à gauche (desktop), formulaire à droite. */
 export function AuthLayout({ title, description, children, footer }: AuthLayoutProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-screen bg-background">
       <aside className="relative hidden w-[44%] max-w-xl flex-col justify-between overflow-hidden gradient-hero p-10 text-white lg:flex xl:p-14">
@@ -39,21 +41,21 @@ export function AuthLayout({ title, description, children, footer }: AuthLayoutP
 
         <div className="relative">
           <h2 className="text-balance font-display text-4xl font-extrabold leading-tight xl:text-5xl">
-            La marketplace où la confiance se <span className="text-sun">vérifie</span>.
+            {t("authLayout.headlineStart")} <span className="text-sun">{t("authLayout.headlineEmphasis")}</span>.
           </h2>
           <ul className="mt-8 space-y-4">
-            {reasons.map(({ icon: Icon, text }) => (
-              <li key={text} className="flex items-center gap-3 text-white/85">
+            {reasons.map(({ icon: Icon, textKey }) => (
+              <li key={textKey} className="flex items-center gap-3 text-white/85">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10">
                   <Icon className="h-4 w-4 text-sun" aria-hidden />
                 </span>
-                {text}
+                {t(textKey)}
               </li>
             ))}
           </ul>
         </div>
 
-        <p className="relative text-sm text-white/50">Kinshasa · 24 communes</p>
+        <p className="relative text-sm text-white/50">{t("brand.location")}</p>
       </aside>
 
       <main id="contenu" className="flex flex-1 flex-col">
@@ -62,7 +64,7 @@ export function AuthLayout({ title, description, children, footer }: AuthLayoutP
             to="/"
             className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
-            <ArrowLeft className="h-4 w-4" aria-hidden /> Accueil
+            <ArrowLeft className="h-4 w-4" aria-hidden /> {t("nav.home")}
           </Link>
           <ModeToggle />
         </div>

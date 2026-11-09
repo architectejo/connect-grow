@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 
 const CHECK_INTERVAL = 60 * 60 * 1000;
 
@@ -9,6 +10,7 @@ const CHECK_INTERVAL = 60 * 60 * 1000;
  * et propose de recharger quand une nouvelle version est publiée.
  */
 export function PwaUpdater() {
+  const { t } = useTranslation();
   const {
     needRefresh: [needRefresh],
     offlineReady: [offlineReady, setOfflineReady],
@@ -22,17 +24,17 @@ export function PwaUpdater() {
 
   useEffect(() => {
     if (!offlineReady) return;
-    toast.success("Connecte+ est prête à fonctionner hors ligne.");
+    toast.success(t("pwa.offlineReady"));
     setOfflineReady(false);
-  }, [offlineReady, setOfflineReady]);
+  }, [offlineReady, setOfflineReady, t]);
 
   useEffect(() => {
     if (!needRefresh) return;
-    toast("Une nouvelle version est disponible.", {
+    toast(t("pwa.updateAvailable"), {
       duration: Infinity,
-      action: { label: "Mettre à jour", onClick: () => updateServiceWorker(true) },
+      action: { label: t("pwa.update"), onClick: () => updateServiceWorker(true) },
     });
-  }, [needRefresh, updateServiceWorker]);
+  }, [needRefresh, updateServiceWorker, t]);
 
   return null;
 }

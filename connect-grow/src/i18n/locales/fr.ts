@@ -4,6 +4,7 @@ const fr = {
   brand: {
     name: "Connecte+",
     tagline: "Marketplace de confiance",
+    location: "Kinshasa · 24 communes",
   },
   nav: {
     home: "Accueil",
@@ -391,6 +392,18 @@ const fr = {
     close: "Fermer",
     back: "Retour",
     save: "Enregistrer",
+    browsePosts: "Parcourir les annonces",
+    seeAll: "Tout voir",
+    seeMorePosts: "Voir d'autres annonces",
+    publishPost: "Publier une annonce",
+    reset: "Réinitialiser",
+    edit: "Modifier",
+    delete: "Supprimer",
+    restore: "Restaurer",
+  },
+  notFound: {
+    title: "Cette page n'existe pas",
+    description: "Le lien est peut-être incorrect, ou la page a été déplacée.",
   },
   auth: {
     logoutAllFailed: "Déconnexion locale uniquement : les autres appareils n'ont pas pu être déconnectés.",
@@ -596,6 +609,8 @@ const fr = {
     offline: "Connexion perdue. Les contenus déjà chargés restent consultables.",
     backOnline: "Connexion rétablie",
     loading: "Chargement…",
+    loadingPage: "Chargement de la page…",
+    loadingPosts: "Chargement des annonces…",
     accessDeniedTitle: "Accès refusé",
   },
   register: {
@@ -951,6 +966,122 @@ const fr = {
     orgMessageOnly: "Cette organisation se contacte par message dans Connecte+.",
     ownOrg: "Vous ne pouvez pas contacter votre propre organisation.",
     orgUnavailable: "Cette organisation ne peut pas être contactée pour le moment.",
+  },
+  landing: {
+    hero: {
+      titleStart: "Achetez et vendez près de chez vous,",
+      titleEnd: "en toute confiance.",
+      subtitle:
+        "Des annonces claires, filtrables par commune et par prix, et des vendeurs dont la réputation se vérifie avant de les contacter.",
+      searchLabel: "Que cherchez-vous ?",
+      searchPlaceholder: "Téléphone, pagne, plombier…",
+      allCity: "Toute la ville",
+      commune: "Commune",
+      search: "Rechercher",
+      popular: "Populaire :",
+      promiseRated: "Vendeurs notés par de vrais acheteurs",
+      promiseVerification: "Mentions de vérification précises",
+      promiseFree: "Publication gratuite",
+      shopName: "Votre boutique",
+      shopLocation: "Gombe, Kinshasa",
+      rccm: "RCCM vérifié",
+      sellerRating: "Note du vendeur",
+      reviewTitle: "Avis après contact",
+      reviewText: "Seules les personnes qui ont contacté le vendeur depuis Connecte+ peuvent noter l'offre et le vendeur.",
+    },
+    categories: {
+      eyebrow: "Catégories",
+      title: "Que cherchez-vous ?",
+      seeAll: "Tout voir",
+    },
+    features: {
+      eyebrow: "Pourquoi Connecte+",
+      title: "Des annonces claires et des vendeurs identifiables",
+      subtitle:
+        "Acheter entre particuliers à Kinshasa demande de la clarté. Connecte+ rend chaque annonce facile à trouver et indique précisément ce qui a été vérifié sur un vendeur.",
+      listings: {
+        title: "Des annonces qui ne se perdent plus",
+        description: "Chaque annonce a sa catégorie, son prix en USD ou en CDF et sa commune. Filtrez en quelques secondes.",
+      },
+      reviews: {
+        title: "Des avis après contact",
+        description:
+          "Seules les personnes qui ont contacté le vendeur peuvent noter l'offre et le vendeur, séparément. Il n'y a pas de score unique.",
+      },
+      ranking: {
+        title: "Un classement transparent",
+        description:
+          "Le classement dépend de l'engagement, de la récence et de la proximité, pas des notes. Une annonce sponsorisée est toujours signalée.",
+      },
+      verification: {
+        title: "Des vérifications qui disent ce qui est vérifié",
+        description:
+          "Une organisation peut faire examiner ses documents. Chaque mention, par exemple « RCCM vérifié », indique précisément le document examiné ; elle ne s'achète pas et ne garantit pas la qualité.",
+      },
+    },
+    how: {
+      eyebrow: "Comment ça marche",
+      title: "Quatre étapes, pas une de plus",
+      journeysLabel: "Parcours",
+      buy: {
+        label: "J'achète",
+        step1Title: "Cherchez dans votre commune",
+        step1Text: "Filtrez par catégorie, prix, état et commune.",
+        step2Title: "Vérifiez le vendeur",
+        step2Text: "Consultez la note de l'offre, la note du vendeur et le nombre d'avis.",
+        step3Title: "Contactez-le",
+        step3Text: "Par message, ou par appel et WhatsApp si le vendeur l'accepte. Son numéro n'est jamais public.",
+        step4Title: "Contactez puis notez",
+        step4Text: "Après votre contact, votre avis aide toute la communauté à choisir.",
+      },
+      sell: {
+        label: "Je vends",
+        step1Title: "Créez votre compte",
+        step1Text: "Un numéro +243 vérifié par SMS suffit.",
+        step2Title: "Publiez gratuitement",
+        step2Text: "Photos, prix en USD ou CDF, commune : c'est prêt.",
+        step3Title: "Soyez trouvé",
+        step3Text: "Les acheteurs de votre ville voient votre annonce.",
+        step4Title: "Construisez votre réputation",
+        step4Text: "Chaque avis s'affiche sur votre annonce et sur votre profil.",
+      },
+    },
+    sellCta: {
+      title: "Vous avez quelque chose à vendre ?",
+      text: "Publiez votre annonce gratuitement en moins de deux minutes et touchez les acheteurs de votre commune.",
+      publish: "Publier une annonce",
+      directory: "Annuaire des organisations",
+    },
+    footer: {
+      marketplace: "Marketplace",
+      help: "Aide",
+      allListings: "Toutes les annonces",
+      exchangeListings: "Annonces échangeables",
+      organizations: "Organisations",
+      publish: "Publier une annonce",
+      howItWorks: "Comment ça marche",
+      whyTrust: "Pourquoi nous faire confiance",
+      terms: "Conditions d'utilisation",
+      privacy: "Confidentialité",
+      madeBy: "Réalisé par IMARA TECH Group",
+      rights: "© {{year}} Connecte+. Tous droits réservés.",
+    },
+  },
+  authLayout: {
+    headlineStart: "La marketplace où la confiance se",
+    headlineEmphasis: "vérifie",
+    reasonRated: "Des vendeurs notés par de vrais acheteurs",
+    reasonVerified: "Des mentions de vérification précises",
+    reasonPhone: "Votre numéro reste masqué si vous le souhaitez",
+  },
+  pwa: {
+    offlineReady: "Connecte+ est prête à fonctionner hors ligne.",
+    updateAvailable: "Une nouvelle version est disponible.",
+    update: "Mettre à jour",
+  },
+  accountNav: {
+    label: "Espace personnel",
+    verification: "Vérification",
   },
 };
 

@@ -12,7 +12,7 @@ import { AppShell } from "./AppShell";
 
 interface NavItem {
   to: string;
-  label: string;
+  labelKey: string;
   icon: LucideIcon;
   /** Capacité du profil actif exigée (le serveur reste le juge : le masquage n'est pas le contrôle). */
   capability?: string;
@@ -22,14 +22,14 @@ interface NavItem {
 }
 
 const items: NavItem[] = [
-  { to: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, capability: "stats.view" },
-  { to: "/favorites", label: "Favoris", icon: Heart },
-  { to: "/notifications", label: "Notifications", icon: Bell, badge: "notifications" },
-  { to: "/messages", label: "Messages", icon: MessageSquare, capability: "message.reply" },
-  { to: "/trash", label: "Corbeille", icon: Trash2, capability: "offer.view_internal" },
-  { to: "/verification", label: "Vérification", icon: BadgeCheck, organizationOnly: true },
-  { to: "/profiles", label: "Mes profils", icon: Users },
-  { to: "/settings", label: "Paramètres", icon: Settings },
+  { to: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard, capability: "stats.view" },
+  { to: "/favorites", labelKey: "nav.favorites", icon: Heart },
+  { to: "/notifications", labelKey: "notifications.title", icon: Bell, badge: "notifications" },
+  { to: "/messages", labelKey: "nav.messages", icon: MessageSquare, capability: "message.reply" },
+  { to: "/trash", labelKey: "nav.trash", icon: Trash2, capability: "offer.view_internal" },
+  { to: "/verification", labelKey: "accountNav.verification", icon: BadgeCheck, organizationOnly: true },
+  { to: "/profiles", labelKey: "profiles.title", icon: Users },
+  { to: "/settings", labelKey: "nav.settings", icon: Settings },
 ];
 
 /** Réserve une page aux utilisateurs connectés ; les autres passent par la connexion puis reviennent. */
@@ -74,7 +74,7 @@ export function AccountShell({ children, className }: AccountShellProps) {
     <RequireAuth>
       <AppShell withFooter={false}>
         <div className="grid gap-6 lg:grid-cols-[240px_1fr] lg:gap-10">
-          <aside className="hidden lg:block" aria-label="Espace personnel">
+          <aside className="hidden lg:block" aria-label={t("accountNav.label")}>
             <div className="sticky top-24 space-y-4">
               <div className="flex items-center gap-3 rounded-2xl border bg-card p-3 shadow-soft">
                 <UserAvatar src={active.type === "USER" ? user?.photo : active.photo} name={displayName} size="md" shape={isOrganization ? "square" : "circle"} />
@@ -96,7 +96,7 @@ export function AccountShell({ children, className }: AccountShellProps) {
                     }
                   >
                     <item.icon className="h-[18px] w-[18px]" aria-hidden />
-                    {item.label}
+                    {t(item.labelKey)}
                     {renderBadge(item)}
                   </NavLink>
                 ))}
@@ -105,7 +105,7 @@ export function AccountShell({ children, className }: AccountShellProps) {
           </aside>
 
           <div className="min-w-0">
-            <nav aria-label="Espace personnel" className="-mx-4 mb-6 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-none lg:hidden">
+            <nav aria-label={t("accountNav.label")} className="-mx-4 mb-6 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-none lg:hidden">
               {visibleItems.map((item) => (
                 <NavLink
                   key={item.to}
@@ -118,7 +118,7 @@ export function AccountShell({ children, className }: AccountShellProps) {
                   }
                 >
                   <item.icon className="h-4 w-4" aria-hidden />
-                  {item.label}
+                  {t(item.labelKey)}
                   {item.badge === "notifications" && unread > 0 && (
                     <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-[11px] text-destructive-foreground">
                       {unread}
@@ -130,7 +130,7 @@ export function AccountShell({ children, className }: AccountShellProps) {
             <div className={className}>
               {isLoading ? (
                 <div className="flex justify-center py-20">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" aria-label="Chargement" />
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" aria-label={t("states.loading")} />
                 </div>
               ) : (
                 children

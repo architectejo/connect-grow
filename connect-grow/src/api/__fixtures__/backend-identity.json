@@ -1,5 +1,5 @@
 {
-  "_note": "Réponses réelles du backend (main, après T5b, T6 et T7 de L0-09), enregistrées le 24/10/2026 par un script jetable hors dépôt dans une base de test en mémoire (client API de test, données fictives, aucun secret). Contact : `context` et `available_channels` (organisation avec l'interrupteur des canaux téléphoniques fermé puis ouvert), erreurs `channel_not_available` et `login_phone_not_allowed`. Messagerie : `seller_context`, `sender_context`, `sender_name`, `is_me`, vues acheteur et équipe, organisation suspendue. Notifications : `context`. Profil public vendeur : `marketplace/sellers/organization/<id>/`. Le backend ne renvoie pas encore `is_owner` sur les offres ni `name` dans `seller_context` des conversations.",
+  "_note": "Réponses réelles du backend (main, après T5b, T6 et T7 de L0-09), enregistrées le 24/10/2026 par un script jetable hors dépôt dans une base de test en mémoire (client API de test, données fictives, aucun secret). Contact : `context` et `available_channels` (organisation avec l'interrupteur des canaux téléphoniques fermé puis ouvert), erreurs `channel_not_available` et `login_phone_not_allowed`. Messagerie : `seller_context`, `sender_context`, `sender_name`, `is_me`, vues acheteur et équipe, organisation suspendue. Notifications : `context`. Profil public vendeur : `marketplace/sellers/organization/<id>/`. Le backend ne renvoie pas encore `is_owner` sur les offres ni `name` dans `seller_context` des conversations. Mise a jour B-SUSP (commit 6e3822a, 09/11/2026) : `contexts_with_unavailable` (profils personnel, prestataire, organisation active, plus une organisation suspendue convertie et une archivee dans `unavailable`), `contexts_after_leave_archived`, `leave_archived_last_owner` (204), `leave_suspended_last_owner_error` (409 last_owner), `leave_suspended_editor` (204) sont enregistres par un script jetable hors depot ; `status` et `unavailable` des anciennes entrees `contexts` et `contexts_after_leave` sont alignes sur le contrat verifie par les tests du backend (tests_contexts_unavailable).",
   "provider_not_found_error": {
     "status": 404,
     "body": {
@@ -87,7 +87,8 @@
           "review.reply",
           "stats.view"
         ],
-        "migrated_from_business": false
+        "migrated_from_business": false,
+        "status": "ACTIVE"
       },
       {
         "type": "PROVIDER",
@@ -107,7 +108,8 @@
           "review.reply",
           "stats.view"
         ],
-        "migrated_from_business": false
+        "migrated_from_business": false,
+        "status": "ACTIVE"
       },
       {
         "type": "ORGANIZATION",
@@ -134,9 +136,11 @@
           "review.reply",
           "stats.view"
         ],
-        "migrated_from_business": false
+        "migrated_from_business": false,
+        "status": "ACTIVE"
       }
-    ]
+    ],
+    "unavailable": []
   },
   "limits": {
     "max_categories_per_context": 5,
@@ -518,9 +522,11 @@
           "review.reply",
           "stats.view"
         ],
-        "migrated_from_business": false
+        "migrated_from_business": false,
+        "status": "ACTIVE"
       }
-    ]
+    ],
+    "unavailable": []
   },
   "verification_empty": {
     "verified_claims": [],
@@ -1810,5 +1816,153 @@
       "detail": "Votre rôle ne permet pas cette action dans ce contexte.",
       "code": "DENY_PERMISSION"
     }
+  },
+  "contexts_with_unavailable": {
+    "count": 3,
+    "next": null,
+    "previous": null,
+    "results": [
+      {
+        "type": "USER",
+        "id": "09992e15-fb64-4850-8157-5b7d0c967ba1",
+        "name": "Nom owner",
+        "role": null,
+        "org_type": null,
+        "photo": null,
+        "capabilities": [
+          "contact.manage_channels",
+          "contact.view_requesters",
+          "message.reply",
+          "offer.delete",
+          "offer.edit",
+          "offer.publish",
+          "offer.view_internal",
+          "review.reply",
+          "stats.view"
+        ],
+        "migrated_from_business": false,
+        "status": "ACTIVE"
+      },
+      {
+        "type": "PROVIDER",
+        "id": "89f8aa5b-74b1-48d8-b07c-4b4dfc769e9b",
+        "name": "Marie couture",
+        "role": null,
+        "org_type": null,
+        "photo": null,
+        "capabilities": [
+          "contact.manage_channels",
+          "contact.view_requesters",
+          "message.reply",
+          "offer.delete",
+          "offer.edit",
+          "offer.publish",
+          "offer.view_internal",
+          "review.reply",
+          "stats.view"
+        ],
+        "migrated_from_business": false,
+        "status": "ACTIVE"
+      },
+      {
+        "type": "ORGANIZATION",
+        "id": "ba55e2b0-3e3d-4c62-8034-b0e606ddd1bf",
+        "name": "Boutique active",
+        "role": "ADMIN",
+        "org_type": "BOUTIQUE",
+        "photo": null,
+        "capabilities": [
+          "contact.manage_channels",
+          "contact.view_requesters",
+          "message.reply",
+          "offer.delete",
+          "offer.edit",
+          "offer.publish",
+          "offer.view_internal",
+          "org.edit_profile",
+          "org.leave",
+          "org.manage_members",
+          "org.manage_roles",
+          "org.verification_submit",
+          "org.view_internal",
+          "review.reply",
+          "stats.view"
+        ],
+        "migrated_from_business": false,
+        "status": "ACTIVE"
+      }
+    ],
+    "unavailable": [
+      {
+        "type": "ORGANIZATION",
+        "id": "66f33e1c-332b-4bc7-8553-a3b34177cffc",
+        "name": "Association archivee",
+        "role": "EDITOR",
+        "org_type": "ONG",
+        "photo": null,
+        "capabilities": [
+          "org.leave"
+        ],
+        "migrated_from_business": false,
+        "status": "ARCHIVED"
+      },
+      {
+        "type": "ORGANIZATION",
+        "id": "7dac183c-678e-4569-a203-fae8440dc40a",
+        "name": "Atelier suspendu",
+        "role": "OWNER",
+        "org_type": "ENTREPRISE",
+        "photo": null,
+        "capabilities": [
+          "org.leave"
+        ],
+        "migrated_from_business": true,
+        "status": "SUSPENDED"
+      }
+    ]
+  },
+  "contexts_after_leave_archived": {
+    "count": 1,
+    "next": null,
+    "previous": null,
+    "results": [
+      {
+        "type": "USER",
+        "id": "10c506d4-1f1f-4e61-ab78-2e743a82364f",
+        "name": "Nom arch",
+        "role": null,
+        "org_type": null,
+        "photo": null,
+        "capabilities": [
+          "contact.manage_channels",
+          "contact.view_requesters",
+          "message.reply",
+          "offer.delete",
+          "offer.edit",
+          "offer.publish",
+          "offer.view_internal",
+          "review.reply",
+          "stats.view"
+        ],
+        "migrated_from_business": false,
+        "status": "ACTIVE"
+      }
+    ],
+    "unavailable": []
+  },
+  "leave_archived_last_owner": {
+    "status": 204,
+    "body": null
+  },
+  "leave_suspended_last_owner_error": {
+    "status": 409,
+    "body": {
+      "detail": "Une organisation doit garder au moins un propriétaire.",
+      "code": "last_owner"
+    }
+  },
+  "leave_suspended_editor": {
+    "status": 204,
+    "body": null
   }
 }

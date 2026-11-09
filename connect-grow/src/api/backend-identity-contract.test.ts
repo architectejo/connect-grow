@@ -3,8 +3,9 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import "@/i18n";
 import i18n from "@/i18n";
-import type { AvailableContext, OrganizationInternal, OrganizationKycDocument, OrganizationLimits, Post } from "@/api/types";
+import type { AvailableContext, ContextsResponse, OrganizationInternal, OrganizationKycDocument, OrganizationLimits, Post } from "@/api/types";
 import { describeApiError, organizationDeniedKey } from "@/lib/api-errors";
+import { parseContexts } from "@/hooks/use-contexts";
 import { availableChannels } from "@/lib/contact-settings";
 import { latestByType } from "@/lib/kyc-files";
 import { capabilityLabelKeys, lockedFields, organizationSchema } from "@/lib/organization-form";
@@ -51,7 +52,7 @@ const errorOf = (name: string) => ({ response: { status: f[name].status, data: f
 const t = (key: string, options?: Record<string, unknown>) => i18n.t(key, options) as string;
 
 const CONTEXT = {
-  type: "str", id: "uuid", name: "str", role: "str|null", org_type: "str|null", photo: "str|null", capabilities: "list", migrated_from_business: "bool",
+  type: "str", id: "uuid", name: "str", role: "str|null", org_type: "str|null", photo: "str|null", capabilities: "list", migrated_from_business: "bool", status: "str",
 };
 const ORGANIZATION = {
   id: "uuid", name: "str", org_type: "str", description: "str", logo: "str|null", nif: "str|null", city_id: "uuid|null", commune_id: "uuid|null",
@@ -62,17 +63,55 @@ const PUBLIC_ORGANIZATION = {
   category_ids: "list", verified_claims: "list", verification_summary: "obj", member_since: "date",
 };
 const PAGE = { count: "num", next: "str|null", previous: "str|null", results: "list" };
+const CONTEXTS_PAGE = { ...PAGE, unavailable: "list" };
 
 describe("contextes (GET accounts/contexts/)", () => {
   const results = (f.contexts as unknown as { results: Row[] }).results;
 
   it("ordre USER, PROVIDER, ORGANIZATION et clés exactes de chaque profil", () => {
-    expect(mismatches(f.contexts as Row, PAGE)).toEqual([]);
+    expect(mismatches(f.contexts as Row, CONTEXTS_PAGE)).toEqual([]);
     expect(results.map((row) => row.type)).toEqual(["USER", "PROVIDER", "ORGANIZATION"]);
     for (const row of results) {
       expect(mismatches(row, CONTEXT)).toEqual([]);
       expect(Object.keys(row).sort()).toEqual(Object.keys(CONTEXT).sort());
+      expect(row.status).toBe("ACTIVE");
     }
+  });
+
+  describe("organisations indisponibles (B-SUSP, clé `unavailable`)", () => {
+    const body = f.contexts_with_unavailable as unknown as { results: Row[]; unavailable: Row[] };
+
+    it("`status` ACTIVE sur chaque `results`, clé `unavailable` présente, ni suspendue ni archivée dans `results`", () => {
+      expect(mismatches(body as Row, CONTEXTS_PAGE)).toEqual([]);
+      expect(body.results.map((row) => row.type)).toEqual(["USER", "PROVIDER", "ORGANIZATION"]);
+      expect(body.results.every((row) => row.status === "ACTIVE")).toBe(true);
+    });
+
+    it("9 clés exactes par élément, rôle et capacité `org.leave` seule, aucun champ sensible", () => {
+      expect(body.unavailable.map((row) => [row.status, row.role])).toEqual([["ARCHIVED", "EDITOR"], ["SUSPENDED", "OWNER"]]);
+      for (const row of body.unavailable) {
+        expect(mismatches(row, CONTEXT)).toEqual([]);
+        expect(Object.keys(row).sort()).toEqual(Object.keys(CONTEXT).sort());
+        expect(row.type).toBe("ORGANIZATION");
+        expect(row.capabilities).toEqual(["org.leave"]);
+      }
+      expect(body.unavailable.map((row) => row.migrated_from_business)).toEqual([false, true]);
+    });
+
+    it("le parseur du front lit la vraie réponse : unavailable typé, status conservé", () => {
+      const data = parseContexts(body as unknown as ContextsResponse);
+      expect(data.results).toHaveLength(3);
+      expect(data.unavailable.map((org) => org.status)).toEqual(["ARCHIVED", "SUSPENDED"]);
+    });
+
+    it("quitter : dernier propriétaire d'une organisation archivée = 204 ; suspendue = 409 `last_owner` avec le message existant ; autre membre = 204", () => {
+      expect(f.leave_archived_last_owner.status).toBe(204);
+      expect(f.leave_suspended_last_owner_error.status).toBe(409);
+      expect((f.leave_suspended_last_owner_error.body as Row).code).toBe("last_owner");
+      expect(describeApiError(errorOf("leave_suspended_last_owner_error"))).toBe(t("errors.code.last_owner"));
+      expect(f.leave_suspended_editor.status).toBe(204);
+      expect((f.contexts_after_leave_archived as unknown as { unavailable: Row[] }).unavailable).toEqual([]);
+    });
   });
 
   it("les capacités `org.*` n'existent que pour une organisation (le personnel et le prestataire n'ont que des capacités de contenu)", () => {

@@ -25,7 +25,7 @@ from rest_framework.test import APIClient
 from apps.identity import legacy_conversion as rules
 from apps.identity import services as identity_services
 from apps.identity.models import (
-    ContactConsent, ContactPoint, KycDocument, LegacyAccountMapping, Membership, Organization, OrganizationCategory,
+    ContactConsent, ContactPoint, IdentitySettings, KycDocument, LegacyAccountMapping, Membership, Organization, OrganizationCategory,
 )
 from apps.identity.verification import get_verification_summaries
 from apps.moderation.services import get_restricted_user_ids
@@ -488,6 +488,14 @@ class ConvertedWorldTests(SharedStateTestCase):
             self.assertNotIn(secret, blob)
 
     # -- non-fuite ---------------------------------------------------------------------------------------
+    @staticmethod
+    def read_public_api(client, w, org):
+        return (
+            client.get(f'/api/v1/marketplace/posts/{w.public_offer.pk}/'),
+            client.get('/api/v1/accounts/organizations/'),
+            client.get(f'/api/v1/marketplace/sellers/organization/{org.pk}/'),
+        )
+
     def test_no_contact_data_is_copied_and_the_public_api_leaks_nothing(self):
         w = self.w
         org = org_of(w.full)
@@ -495,18 +503,19 @@ class ConvertedWorldTests(SharedStateTestCase):
         self.assertFalse(ContactConsent.objects.filter(organization__isnull=False).exists())
         self.assertEqual(ContactConsent.objects.filter(user_id=w.owner_id).count(), 2)
         client = APIClient()
-        detail = client.get(f'/api/v1/marketplace/posts/{w.public_offer.pk}/')
+        # Schéma historique (identity 0011) : les colonnes de réglages ajoutées par identity 0016 n'existent pas ;
+        # des réglages par défaut non enregistrés suffisent à ces lectures.
+        with mock.patch.object(IdentitySettings, 'get_solo', return_value=IdentitySettings()):
+            detail, listing, page = self.read_public_api(client, w, org)
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()['allowed_channels'], ['MESSAGE'])
         self.assertEqual(detail.json()['seller']['context_type'], 'ORGANIZATION')
         self.assertEqual(detail.json()['seller']['context_id'], str(org.pk))
-        listing = client.get('/api/v1/accounts/organizations/')
         self.assertEqual(listing.status_code, 200)
         self.assertEqual(set(listing.json()['results'][0]), {
             'id', 'name', 'org_type', 'description', 'logo', 'city_id', 'commune_id', 'category_ids',
             'verified_claims', 'verification_summary', 'member_since',
         })
-        page = client.get(f'/api/v1/marketplace/sellers/organization/{org.pk}/')
         self.assertEqual(page.status_code, 200)
         for response in (detail, listing, page):
             text = response.content.decode()
@@ -642,7 +651,8 @@ class RollbackAndReplayTests(TransactionTestCase):
         new = forward()
         LegacyAccountMapping.objects.all().delete()
         Membership.objects.all().delete()
-        Organization.objects.all().delete()
+        # Modèle historique : à ce schéma, la table des invitations (identity 0015) n'existe pas encore.
+        new.get_model('identity', 'Organization').objects.all().delete()
         Mapping = new.get_model('identity', 'LegacyAccountMapping')
         with mock.patch.object(Mapping.objects, 'create', return_value=None):  # la correspondance n'est pas écrite
             with self.assertRaises(RuntimeError) as ctx:

@@ -192,6 +192,21 @@ class OrganizationWriteThrottle(UserWriteThrottle):
     scope = 'org_write'
 
 
+class OrganizationSensitiveThrottle(UserWriteThrottle):
+    """Opérations sensibles d'équipe (transfert de propriété, promotion ou rétrogradation d'un propriétaire) :
+    10/h par compte (ADR 0008 §8.3). Un PATCH de rôle n'est compté que s'il porte une ressaisie de mot de passe ou
+    vise OWNER ; un changement de rôle ordinaire ne relève que de `org_write`."""
+
+    scope = 'org_sensitive'
+
+    def allow_request(self, request, view):
+        if request.method == 'PATCH':
+            data = request.data if hasattr(request.data, 'get') else {}
+            if 'password' not in data and data.get('role') != 'OWNER':
+                return True
+        return super().allow_request(request, view)
+
+
 class ContextsListThrottle(SimpleRateThrottle):
     """Lecture de la liste des contextes (appelée à chaque chargement du front) : par utilisateur."""
 

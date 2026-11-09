@@ -11,6 +11,9 @@ L'en-tête `X-Context` est IGNORÉ ici (ADR 6.4) :
 Données personnelles (règle 10) : jamais de téléphone, d'e-mail ni de nom complet de membre ; le NIF n'est dans
 aucune réponse publique (seulement dans le détail interne, réservé aux membres).
 """
+from django.utils.decorators import method_decorator
+from django.views.decorators.debug import sensitive_post_parameters
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.fields import DateTimeField
 from rest_framework.response import Response
@@ -22,11 +25,14 @@ from apps.common.utils import parse_uuid
 
 from . import capabilities
 from .services import (
-    archive_organization, create_organization, get_active_role, get_category_ids_by_organization,
-    get_internal_verification, get_organization_for_member, get_organization_limits, get_verification_data, leave_organization, public_organizations_queryset,
-    update_organization,
+    archive_organization, change_role, create_organization, get_active_role, get_category_ids_by_organization,
+    get_internal_verification, get_organization_for_member, get_organization_limits, get_verification_data,
+    leave_organization, list_members, public_display_name, public_organizations_queryset, remove_member,
+    sole_effective_owner_id, transfer_ownership_to, update_organization,
 )
-from .throttles import OrganizationCreateThrottle, OrganizationListThrottle, OrganizationWriteThrottle
+from .throttles import (
+    OrganizationCreateThrottle, OrganizationListThrottle, OrganizationSensitiveThrottle, OrganizationWriteThrottle,
+)
 
 EXEMPT_REASON = (
     "organisation : création par le compte et autorisation par objet dans le service ; "
@@ -217,3 +223,137 @@ class OrganizationLeaveView(APIView):
     def post(self, request, pk):
         leave_organization(request.user, pk)
         return _private(Response(status=status.HTTP_204_NO_CONTENT))
+
+
+# --- Équipe (ADR 0008, contrat L1-01 §1) ----------------------------------------------------------------------
+
+def _member_schema(**kwargs):
+    return inline_serializer('Member', {
+        'membership_id': serializers.UUIDField(),
+        'display_name': serializers.CharField(),
+        'role': serializers.ChoiceField(choices=capabilities.ROLES),
+        'joined_at': serializers.DateTimeField(),
+        'is_self': serializers.BooleanField(),
+        'is_last_effective_owner': serializers.BooleanField(allow_null=True),
+    }, **kwargs)
+
+
+MEMBER_SCHEMA = _member_schema()
+MEMBER_PAGE_SCHEMA = inline_serializer('MemberPage', {
+    'count': serializers.IntegerField(),
+    'next': serializers.URLField(allow_null=True),
+    'previous': serializers.URLField(allow_null=True),
+    'results': _member_schema(many=True),
+})
+ROLE_CHANGE_SCHEMA = inline_serializer('MemberRoleChange', {
+    'role': serializers.ChoiceField(choices=capabilities.ROLES),
+    'confirm': serializers.BooleanField(required=False),
+    'password': serializers.CharField(required=False, write_only=True),
+})
+TRANSFER_SCHEMA = inline_serializer('OwnershipTransfer', {
+    'membership_id': serializers.UUIDField(),
+    'my_new_role': serializers.ChoiceField(
+        choices=('ADMIN', 'EDITOR', 'ANALYST'), required=False, default='ADMIN',
+    ),
+    'confirm': serializers.BooleanField(),
+    'password': serializers.CharField(write_only=True),
+})
+TRANSFER_RESULT_SCHEMA = inline_serializer('OwnershipTransferResult', {
+    'new_owner': _member_schema(), 'me': _member_schema(),
+})
+
+
+def serialize_member(membership, actor, can_manage, sole_owner_id):
+    """`Member` (contrat §0, clés exactes). Jamais de téléphone, e-mail, nom complet, photo ni identifiant de
+    compte. `is_last_effective_owner` n'est révélé qu'aux appelants `org.manage_members` (sinon `null`)."""
+    return {
+        'membership_id': str(membership.pk),
+        'display_name': public_display_name(membership.user.full_name),
+        'role': membership.role,
+        'joined_at': _iso(membership.joined_at),
+        'is_self': membership.user_id == actor.pk,
+        'is_last_effective_owner': (membership.user_id == sole_owner_id) if can_manage else None,
+    }
+
+
+def _body(request):
+    data = request.data
+    if not hasattr(data, 'get'):
+        raise serializers.ValidationError({'non_field_errors': ["Corps de requête invalide."]})
+    return data
+
+
+class OrganizationMembersView(APIView):
+    """`GET organizations/<uuid>/members/` : membres actifs, paginé (`org.view_internal`, tout rôle).
+    `POST` n'existe pas (405) : l'ajout direct est remplacé par les invitations (ADR 0008)."""
+
+    acting_context_exempt = EXEMPT_REASON
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ['get', 'head', 'options']
+
+    @extend_schema(
+        operation_id='organizations_members_list', responses=MEMBER_PAGE_SCHEMA,
+        parameters=[OpenApiParameter('page', int, required=False), OpenApiParameter('page_size', int, required=False)],
+    )
+    def get(self, request, pk):
+        team = list_members(request.user, pk)
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(team.queryset, request, view=self)
+        results = [
+            serialize_member(member, request.user, team.can_manage, team.sole_effective_owner_id) for member in page
+        ]
+        return _private(paginator.get_paginated_response(results))
+
+
+@method_decorator(sensitive_post_parameters('password'), name='dispatch')
+class OrganizationMemberDetailView(APIView):
+    """`PATCH` (rôle) et `DELETE` (retrait) d'un membre, par `membership_id`. Le mot de passe n'est exigé que pour
+    un siège de propriétaire (ADR 0008 §8.2)."""
+
+    acting_context_exempt = EXEMPT_REASON
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [OrganizationWriteThrottle, OrganizationSensitiveThrottle]
+    http_method_names = ['patch', 'delete', 'options']
+
+    @extend_schema(operation_id='organizations_members_change_role', request=ROLE_CHANGE_SCHEMA, responses=MEMBER_SCHEMA)
+    def patch(self, request, pk, membership_id):
+        data = _body(request)
+        membership = change_role(
+            request.user, pk, membership_id, data.get('role'),
+            confirm=data.get('confirm') is True, password=data.get('password'),
+        )
+        sole = sole_effective_owner_id(pk)
+        return _private(Response(serialize_member(membership, request.user, True, sole)))
+
+    @extend_schema(operation_id='organizations_members_remove', request=None, responses={204: None})
+    def delete(self, request, pk, membership_id):
+        remove_member(request.user, pk, membership_id)
+        return _private(Response(status=status.HTTP_204_NO_CONTENT))
+
+
+@method_decorator(sensitive_post_parameters('password'), name='dispatch')
+class OrganizationTransferOwnershipView(APIView):
+    """`POST organizations/<uuid>/transfer-ownership/` : transfert atomique de la propriété (`confirm` et
+    ressaisie du mot de passe obligatoires)."""
+
+    acting_context_exempt = EXEMPT_REASON
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [OrganizationSensitiveThrottle]
+
+    @extend_schema(operation_id='organizations_transfer_ownership', request=TRANSFER_SCHEMA, responses=TRANSFER_RESULT_SCHEMA)
+    def post(self, request, pk):
+        data = _body(request)
+        membership_id = parse_uuid(data.get('membership_id'))
+        if membership_id is None:
+            raise serializers.ValidationError({'membership_id': ["Identifiant de membre invalide ou manquant."]})
+        extra = {'my_new_role': data['my_new_role']} if 'my_new_role' in data else {}
+        target, me = transfer_ownership_to(
+            request.user, pk, membership_id, confirm=data.get('confirm') is True, password=data.get('password'),
+            **extra,
+        )
+        sole = sole_effective_owner_id(pk)
+        can_manage = capabilities.role_has_capability(me.role, 'org.manage_members')
+        return _private(Response({
+            'new_owner': serialize_member(target, request.user, True, sole),
+            'me': serialize_member(me, request.user, can_manage, sole),
+        }))

@@ -21,7 +21,8 @@ from .views import (
 )
 from .views_organizations import (
     OrganizationArchiveView, OrganizationDetailView, OrganizationInternalView, OrganizationLeaveView,
-    OrganizationLimitsView, OrganizationViewSet,
+    OrganizationLimitsView, OrganizationMemberDetailView, OrganizationMembersView,
+    OrganizationTransferOwnershipView, OrganizationViewSet,
 )
 from .views_verification import (
     OrganizationKycDocumentDeleteView, OrganizationKycDocumentListCreateView, OrganizationVerificationView,
@@ -58,6 +59,11 @@ urlpatterns = [
     path('organizations/<uuid:pk>/internal/', OrganizationInternalView.as_view(), name='organization_internal'),
     path('organizations/<uuid:pk>/archive/', OrganizationArchiveView.as_view(), name='organization_archive'),
     path('organizations/<uuid:pk>/leave/', OrganizationLeaveView.as_view(), name='organization_leave'),
+    path('organizations/<uuid:pk>/members/', OrganizationMembersView.as_view(), name='organization_members'),
+    path('organizations/<uuid:pk>/members/<uuid:membership_id>/', OrganizationMemberDetailView.as_view(),
+         name='organization_member_detail'),
+    path('organizations/<uuid:pk>/transfer-ownership/', OrganizationTransferOwnershipView.as_view(),
+         name='organization_transfer_ownership'),
 
     # Prestataire individuel (ADR 0006, 9.3)
     path('provider/', ProviderDetailView.as_view(), name='provider_detail'),

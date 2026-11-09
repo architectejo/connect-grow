@@ -151,7 +151,8 @@ REST_FRAMEWORK = {
         'org_list': '600/hour',     # liste publique des organisations, par IP
         'seller_profile': '600/hour',  # profil public d'un vendeur (marketplace), par IP
         'org_write': '30/hour',     # modification, archivage et sortie d'une organisation, par utilisateur
-        'contexts': '600/hour',     # liste des contextes disponibles, par utilisateur
+        'org_sensitive': '10/hour',  # transfert de propriété, promotion ou rétrogradation d'un propriétaire, par utilisateur
+        'contexts': '600/hour',    # liste des contextes disponibles, par utilisateur
         'contact_settings': '20/hour',  # réglages de contact vendeur (numéro, code, canaux), par utilisateur
         # Écritures du marketplace et des interactions (par utilisateur ; par IP pour la vue anonyme).
         'contact': '20/hour',

@@ -16,8 +16,8 @@ describe("parseApiErrors", () => {
     expect(fields.photo).toBe("Image trop grande.");
   });
 
-  it("aplatit les erreurs du profil entreprise imbriqué", () => {
-    const { fields } = parseApiErrors(failure(400, { business_profile: { logo: ["Image trop grande."] } }));
+  it("aplatit les erreurs d'un objet imbriqué (ex. verification, profile)", () => {
+    const { fields } = parseApiErrors(failure(400, { profile: { logo: ["Image trop grande."] } }));
     expect(fields.logo).toBe("Image trop grande.");
   });
 

@@ -2,7 +2,6 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
-vi.mock("./components/layout/PwaUpdater", () => ({ PwaUpdater: () => null }));
 vi.mock("./pages/Index.tsx", () => ({
   default: () => {
     throw new Error("page cassée");

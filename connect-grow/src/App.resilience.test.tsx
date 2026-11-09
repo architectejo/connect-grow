@@ -5,8 +5,6 @@ import apiClient from "@/api/client";
 import { tokenStorage } from "@/lib/tokens";
 import App from "./App";
 
-vi.mock("./components/layout/PwaUpdater", () => ({ PwaUpdater: () => null }));
-
 const original = apiClient.defaults.adapter;
 
 const failWith = (status: number | null): AxiosAdapter => (config: InternalAxiosRequestConfig) => {

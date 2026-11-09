@@ -67,6 +67,9 @@ Aucune de ces questions ne bloque le développement. Elles doivent être closes 
 | Q-CLI4 | Combien d'organisations par compte (créées et rejointes) ? Une seule suffit-elle au lancement ? Le plafond doit-il être affiché dans l'écran ? | 10 appartenances actives, réglable ; chiffre non affiché | |
 | Q-L1-3 | Une invitation peut-elle conférer le rôle administrateur ? (Doc 02 UF-04 : « invitation comme simple membre sans droit d'administration ».) | Éditeur et analyste par invitation ; administrateur seulement par promotion ; propriétaire jamais par invitation | |
 | Q-L1-10 | La suppression libre-service du compte est-elle voulue en V1 ? Le CDC n'en parle pas. | Hors périmètre ; seuls les blocages côté équipe sont livrés | |
+| LEG-PRV-invit-1 | Invitations d'équipe : durée de conservation des invitations closes (elles gardent l'identifiant de l'inviteur et de la personne qui a accepté) et durée de validité d'un lien. | 7 jours de validité, 30 jours de conservation après clôture, valeurs provisoires | |
+| LEG-PRV-invit-2 | Invitation : l'inviteur peut saisir une étiquette libre (60 caractères), lisible par les membres habilités pendant la vie de l'invitation, effacée à la clôture. Quelle finalité et quelle mention d'aide faut-il afficher (« ne saisissez pas de coordonnées ») ? | Texte d'aide à poser par le front | |
+| LEG-PRV-invit-3 | Un lien d'invitation transmis à un tiers permet de rejoindre l'équipe sans vérifier l'identité de la personne visée (seul le téléphone du compte qui accepte est vérifié). Est-ce acceptable pour les rôles éditeur et analyste ? | Accepté en V1, atténué par rôles limités, usage unique, expiration, révocation et notification de l'inviteur | |
 
 ### 2.2. Nom, usurpation et revendication (**bloquantes**)
 

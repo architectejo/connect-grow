@@ -261,6 +261,17 @@ class ContextsListThrottle(SimpleRateThrottle):
         return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
 
 
+class AccountBlockersThrottle(SimpleRateThrottle):
+    """Lecture des blocages de suppression de compte (ADR 0008, 8.3) : 120/h par compte."""
+
+    scope = 'account_blockers'
+
+    def get_cache_key(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return None
+        return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
+
+
 class FailureLimiter:
     """Compteur d'ÉCHECS par clé (couple identifiant+IP), avec délai croissant.
 

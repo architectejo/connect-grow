@@ -157,6 +157,7 @@ REST_FRAMEWORK = {
         'invitation_redeem': '60/hour',        # aperçu, acceptation, refus d'invitation, par IP
         'invitation_redeem_user': '30/hour',   # aperçu, acceptation, refus d'invitation, par utilisateur
         'contexts': '600/hour',    # liste des contextes disponibles, par utilisateur
+        'account_blockers': '120/hour',  # blocages de suppression de compte, par utilisateur (ADR 0008, 8.3)
         'contact_settings': '20/hour',  # réglages de contact vendeur (numéro, code, canaux), par utilisateur
         # Écritures du marketplace et des interactions (par utilisateur ; par IP pour la vue anonyme).
         'contact': '20/hour',

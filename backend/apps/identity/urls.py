@@ -19,6 +19,7 @@ from .views import (
     RegisterView,
     UserDetailView,
 )
+from .views_account_blockers import AccountDeletionBlockersView
 from .views_organizations import (
     OrganizationArchiveView, OrganizationDetailView, OrganizationInternalView, OrganizationLeaveView,
     OrganizationLimitsView, OrganizationMemberDetailView, OrganizationMembersView,
@@ -55,6 +56,7 @@ urlpatterns = [
     # Organisations (ADR 0006, 9.2 et 17.2) ; remplace `businesses/`
     path('organizations/', OrganizationViewSet.as_view({'get': 'list', 'post': 'create'}), name='organizations'),
     path('organizations/limits/', OrganizationLimitsView.as_view(), name='organization_limits'),
+    path('me/account-deletion-blockers/', AccountDeletionBlockersView.as_view(), name='account_deletion_blockers'),
     path('organizations/<uuid:pk>/', OrganizationDetailView.as_view(), name='organization_detail'),
     path('organizations/<uuid:pk>/internal/', OrganizationInternalView.as_view(), name='organization_internal'),
     path('organizations/<uuid:pk>/archive/', OrganizationArchiveView.as_view(), name='organization_archive'),

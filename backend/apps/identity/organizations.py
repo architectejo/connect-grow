@@ -19,6 +19,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files import File
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, Value, When
+from django.db.models.functions import Lower
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.exceptions import ErrorDetail
@@ -1128,36 +1129,19 @@ def assert_account_removable(user):
     Ne bloque PAS la désactivation (`is_active`). Dette (ADR 0006, section 15) : chemin de secours audité du
     personnel et sort des organisations orphelines, à livrer avec L1-01 / la suppression de compte. Garde sans
     verrou (TOCTOU possible entre le contrôle et la suppression, voir ADR §20)."""
-    # Une seule requête : organisations (active ou suspendue) dont ce compte est propriétaire actif, avec leur nombre
-    # de propriétaires actifs.
-    owned = Membership.objects.filter(
-        user_id=user.pk, role=ROLE_OWNER, status=Membership.STATUS_ACTIVE,
-    ).values('organization_id')
-    sole = Organization.objects.filter(
-        status__in=(Organization.STATUS_ACTIVE, Organization.STATUS_SUSPENDED), pk__in=owned,
-    ).annotate(
-        owners=Count(
-            'memberships', filter=Q(memberships__role=ROLE_OWNER, memberships__status=Membership.STATUS_ACTIVE),
-        ),
-    )
-    if any(organization.owners <= 1 for organization in sole):
+    blockers = account_removal_blockers(user)
+    if blockers.organizations:
         raise OrganizationError(
             "Ce compte est le seul propriétaire d'une organisation active ou suspendue : transférez la propriété "
             "d'abord.",
             'last_owner_account',
         )
-    if moderation_services.is_user_restricted(user.pk):
+    if blockers.other_code == 'blocking_sanction':
         raise OrganizationError(
             "Ce compte fait l'objet d'une sanction en cours : désactivez-le plutôt que de le supprimer.",
             'blocking_sanction',
         )
-    provider_id = ProviderProfile.objects.filter(user_id=user.pk).values_list('pk', flat=True).first()
-    if (
-        moderation_services.has_open_grave_report('user', [user.pk])
-        or _context_has_grave_evidence(CONTEXT_USER, user.pk)
-        or (provider_id is not None and _context_has_grave_evidence(CONTEXT_PROVIDER, provider_id))
-        or _author_has_grave_evidence(user.pk)
-    ):
+    if blockers.other_code == 'open_grave_report':
         raise _open_report_error()
 
 
@@ -1196,3 +1180,67 @@ def _author_has_grave_evidence(user_id) -> bool:
         reviews_services.has_open_grave_report_on_author(user_id)
         or messaging_services.has_open_grave_report_on_sender(user_id)
     )
+# `suggested_action` d'un blocage d'organisation (contrat d'API L1-01, section 3).
+ACTION_TRANSFER_OWNERSHIP = 'transfer_ownership'
+ACTION_ARCHIVE = 'archive'
+ACTION_WAIT_FOR_UNSUSPENSION = 'wait_for_unsuspension'
+
+
+@dataclass(frozen=True)
+class OrganizationBlocker:
+    organization_id: object
+    name: str
+    status: str
+    other_members_count: int
+    suggested_action: str
+
+
+@dataclass(frozen=True)
+class AccountRemovalBlockers:
+    organizations: tuple
+    other_code: object  # None, 'blocking_sanction' ou 'open_grave_report' : jamais détaillé
+
+
+def account_removal_blockers(user, limit=None) -> AccountRemovalBlockers:
+    """Décision UNIQUE de suppression d'un compte (lue par `assert_account_removable` et par
+    `GET me/account-deletion-blockers/`) : organisations dont le compte est le seul propriétaire actif (active ou
+    suspendue), puis premier blocage « autre » (sanction bloquante, puis signalement grave). `limit` ne borne que
+    la liste renvoyée (affichage), jamais la décision. Comptage seulement des autres membres, aucune identité."""
+    owned = Membership.objects.filter(
+        user_id=user.pk, role=ROLE_OWNER, status=Membership.STATUS_ACTIVE,
+    ).values('organization_id')
+    sole = Organization.objects.filter(
+        status__in=(Organization.STATUS_ACTIVE, Organization.STATUS_SUSPENDED), pk__in=owned,
+    ).annotate(
+        owners=Count(
+            'memberships', filter=Q(memberships__role=ROLE_OWNER, memberships__status=Membership.STATUS_ACTIVE),
+        ),
+        active_members=Count('memberships', filter=Q(memberships__status=Membership.STATUS_ACTIVE)),
+    ).order_by(Lower('name'), 'pk')
+    rows = []
+    for organization in sole:
+        if organization.owners > 1:
+            continue
+        others = max(organization.active_members - 1, 0)
+        if organization.status == Organization.STATUS_SUSPENDED:
+            action = ACTION_WAIT_FOR_UNSUSPENSION
+        elif others > 0:
+            action = ACTION_TRANSFER_OWNERSHIP
+        else:
+            action = ACTION_ARCHIVE
+        rows.append(OrganizationBlocker(organization.pk, organization.name, organization.status, others, action))
+    other = None
+    if moderation_services.is_user_restricted(user.pk):
+        other = 'blocking_sanction'
+    else:
+        provider_id = ProviderProfile.objects.filter(user_id=user.pk).values_list('pk', flat=True).first()
+        if (
+            moderation_services.has_open_grave_report('user', [user.pk])
+            or _context_has_grave_evidence(CONTEXT_USER, user.pk)
+            or (provider_id is not None and _context_has_grave_evidence(CONTEXT_PROVIDER, provider_id))
+            or _author_has_grave_evidence(user.pk)
+        ):
+            other = 'open_grave_report'
+    return AccountRemovalBlockers(tuple(rows[:limit] if limit else rows), other)
+
+

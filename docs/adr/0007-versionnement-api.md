@@ -15,4 +15,14 @@
 
 - Le front utilise `VITE_API_URL=http://localhost:8000/api/v1/`.
 - Le middleware de cache d'API, les tests, le script `scripts/recette_contrat_http.py` et le README suivent le nouveau préfixe.
-- La documentation OpenAPI n'existe pas encore (aucune dépendance de génération installée) ; elle sera servie sous `/api/v1/` quand la dépendance sera validée.
+- Le Service Worker (PWA) met en cache l'ancien préfixe : au déploiement, forcer la mise à jour du Service Worker (`registerType: 'prompt'`) et l'inscrire dans le runbook de déploiement.
+- La pagination est validée au démarrage : `API_PAGE_SIZE` et `API_MAX_PAGE_SIZE` doivent être des entiers >= 1 avec taille <= plafond, sinon `ImproperlyConfigured` (`backend/api_limits.py`).
+
+## Documentation OpenAPI (L0-11b)
+
+- Outil : `drf-spectacular` 0.30.0 (épinglé dans `requirements.txt`), schéma OpenAPI 3 généré depuis les vues DRF.
+- `GET /api/v1/schema/` : schéma (JSON ou YAML selon `Accept`), public car il ne contient que de la structure, aucune donnée. Hors `/api/v1/` (admin, schéma, docs), rien n'est documenté.
+- `GET /api/v1/docs/` (Swagger UI) : routé **seulement si `DEBUG=True`** (l'interface charge ses assets depuis un CDN) ; absent en production.
+- Schéma de sécurité `jwtAuth` (Bearer JWT, fourni par simplejwt) et en-tête optionnel `X-Context` (`TYPE:uuid`) ajouté à chaque opération (`apps/common/openapi.py`).
+- Les `APIView` sans serializer sont documentées comme « objet libre » (`PayloadLibre`) : dette, à décrire avec `extend_schema` au fil des stories.
+- Commande : `python manage.py spectacular --file schema.yml --validate` (base migrée requise).

@@ -9,6 +9,7 @@ from datetime import timedelta
 
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
+from backend.api_limits import parse_page_limits
 from corsheaders.defaults import default_headers
 
 # Charger les variables d'environnement depuis le fichier .env
@@ -53,6 +54,7 @@ INSTALLED_APPS = [
     # Bibliothèques tierces
     'rest_framework',
     'rest_framework_simplejwt',
+    'drf_spectacular',  # schéma OpenAPI de l'API (ADR 0007)
     'rest_framework_simplejwt.token_blacklist',  # déconnexion et révocation des refresh tokens
     'corsheaders',
     
@@ -102,11 +104,12 @@ TEMPLATES = [
 ]
 
 # --- Pagination de l'API (classe commune apps.common.pagination) ---
-API_PAGE_SIZE = int(os.getenv('API_PAGE_SIZE', '20'))
-API_MAX_PAGE_SIZE = int(os.getenv('API_MAX_PAGE_SIZE', '100'))
+# Valeurs invalides (non numérique, < 1, taille > plafond) : arrêt explicite au démarrage.
+API_PAGE_SIZE, API_MAX_PAGE_SIZE = parse_page_limits(os.getenv('API_PAGE_SIZE', '20'), os.getenv('API_MAX_PAGE_SIZE', '100'))
 
 # --- CONFIGURATION REST FRAMEWORK & JWT ---
 REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'apps.common.openapi.ConnecteAutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
@@ -362,3 +365,22 @@ OUTBOX_MAX_PAYLOAD_BYTES = 16 * 1024
 # Rétention courte : certaines charges utiles contiennent des données personnelles (message de contact).
 OUTBOX_RETENTION_DAYS = int(os.getenv('OUTBOX_RETENTION_DAYS', '7'))
 OUTBOX_DEAD_RETENTION_DAYS = int(os.getenv('OUTBOX_DEAD_RETENTION_DAYS', '30'))
+
+
+# --- Documentation OpenAPI (drf-spectacular, ADR 0007) ---
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Connecte+ API',
+    'VERSION': '1.0.0',
+    'DESCRIPTION': (
+        "API REST de Connecte+ (plateforme de visibilité de Kinshasa), versionnée sous `/api/v1/`.\n\n"
+        "Authentification : jeton JWT dans `Authorization: Bearer <jeton>`. Le contexte actif "
+        "(personnel, prestataire, organisation) se choisit avec l'en-tête optionnel `X-Context: TYPE:uuid`. "
+        "Les erreurs hors champ ont la forme `{\"detail\", \"code\"}`."
+    ),
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SCHEMA_PATH_PREFIX': '/api/v1',
+    'SCHEMA_PATH_PREFIX_TRIM': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'PREPROCESSING_HOOKS': ['apps.common.openapi.only_v1_endpoints'],
+    'POSTPROCESSING_HOOKS': ['apps.common.openapi.add_context_header'],
+}

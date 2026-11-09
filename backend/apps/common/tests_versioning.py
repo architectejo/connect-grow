@@ -1,9 +1,12 @@
 """Versionnement de l'API sous `/api/v1/` et plafond de pagination (L0-11, ADR 0007)."""
+from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, override_settings
 from django.urls import get_resolver
 from rest_framework.test import APIRequestFactory, APITestCase
 
-from apps.common.pagination import StandardPagination
+from backend.api_limits import parse_page_limits
+from apps.common.pagination import OptionalPagination, StandardPagination
+from apps.notifications import services as notification_services
 from apps.identity.models import User
 
 
@@ -47,11 +50,71 @@ class PaginationCapTests(SimpleTestCase):
 
 
 class PaginationEndToEndTests(APITestCase):
+    URL = '/api/v1/interactions/notifications/'
+
+    def setUp(self):
+        self.user = User.objects.create_user(email='p@example.com', password='x', full_name='P')
+        for n in range(5):
+            notification_services.notify(user_id=self.user.pk, notification_type='SYSTEM', title=f'N{n}', content='c')
+        self.client.force_authenticate(self.user)
+
+    def test_page_size_paginates_with_links(self):
+        first = self.client.get(self.URL + '?page_size=2').data
+        self.assertEqual(first['count'], 5)
+        self.assertEqual(len(first['results']), 2)
+        self.assertIsNotNone(first['next'])
+        self.assertIn('page_size=2', first['next'])
+        self.assertIsNone(first['previous'])
+        second = self.client.get(self.URL + '?page_size=2&page=2').data
+        self.assertEqual(len(second['results']), 2)
+        self.assertIsNotNone(second['previous'])
+        last = self.client.get(self.URL + '?page_size=2&page=3').data
+        self.assertEqual(len(last['results']), 1)
+        self.assertIsNone(last['next'])
+
     @override_settings(API_MAX_PAGE_SIZE=2)
     def test_list_endpoint_is_capped(self):
-        user = User.objects.create_user(email='p@example.com', password='x', full_name='P')
-        self.client.force_authenticate(user)
-        response = self.client.get('/api/v1/interactions/notifications/?page_size=1000')
+        response = self.client.get(self.URL + '?page_size=1000')
         self.assertEqual(response.status_code, 200)
-        self.assertIn('results', response.data)
-        self.assertLessEqual(len(response.data['results']), 2)
+        self.assertEqual(len(response.data['results']), 2)
+        self.assertEqual(response.data['count'], 5)
+
+
+class OptionalPaginationTests(SimpleTestCase):
+    """Comportement de `OptionalPagination` sur une liste de 5 éléments (sans base de données)."""
+
+    def paginate(self, query):
+        from rest_framework.request import Request
+        request = Request(APIRequestFactory().get('/x/' + query))
+        paginator = OptionalPagination()
+        page = paginator.paginate_queryset(list(range(5)), request)
+        return paginator, page
+
+    def test_bare_array_without_page_params(self):
+        _, page = self.paginate('')
+        self.assertIsNone(page)  # la vue renvoie alors le tableau nu
+
+    def test_envelope_with_page_or_page_size(self):
+        for query in ('?page=1', '?page_size=2'):
+            paginator, page = self.paginate(query)
+            self.assertIsNotNone(page, query)
+            body = paginator.get_paginated_response(page).data
+            self.assertEqual(set(body), {'count', 'next', 'previous', 'results'})
+            self.assertEqual(body['count'], 5)
+
+    @override_settings(API_MAX_PAGE_SIZE=2)
+    def test_cap_applies(self):
+        _, page = self.paginate('?page_size=50')
+        self.assertEqual(page, [0, 1])
+
+
+class PageLimitSettingsTests(SimpleTestCase):
+    def test_valid_values(self):
+        self.assertEqual(parse_page_limits('20', '100'), (20, 100))
+        self.assertEqual(parse_page_limits(' 5 ', '5'), (5, 5))
+
+    def test_invalid_values_fail_explicitly(self):
+        for size, maximum in (('abc', '100'), ('0', '100'), ('-3', '100'), ('20', 'x'), ('20', '0'), ('20', '-1'),
+                              ('', '100'), ('200', '100')):
+            with self.assertRaises(ImproperlyConfigured, msg=(size, maximum)):
+                parse_page_limits(size, maximum)

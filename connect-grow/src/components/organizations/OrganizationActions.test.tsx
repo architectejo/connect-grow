@@ -72,6 +72,16 @@ describe("Quitter l'organisation (E4/E6)", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
   });
 
+  it("409 last_effective_owner (L1-01) : message persistant « offres actives », aucune sortie du profil", async () => {
+    vi.spyOn(apiClient, "post").mockRejectedValue({ response: { status: 409, data: { detail: "x", code: "last_effective_owner" } } });
+    renderCard(<LeaveOrganizationCard org={owner} />);
+    fireEvent.click(screen.getByRole("button", { name: "Quitter l'organisation" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Quitter l'organisation" }));
+    expect(await screen.findByText(/Cette organisation a des offres actives : elle doit garder au moins un propriétaire disponible/)).toBeInTheDocument();
+    expect(screen.queryByText("Mes profils (page)")).not.toBeInTheDocument();
+    expect(leaveActive).not.toHaveBeenCalled();
+  });
+
   it("déjà retiré (DENY_RELATION) : traité comme un départ, sans erreur", async () => {
     vi.spyOn(apiClient, "post").mockRejectedValue({ response: { status: 403, data: { detail: "x", code: "DENY_RELATION" } } });
     renderCard(<LeaveOrganizationCard org={analyst} />);

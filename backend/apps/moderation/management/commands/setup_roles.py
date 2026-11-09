@@ -26,7 +26,12 @@ MODERATOR_PERMISSIONS = {
 ADMINISTRATOR_EXTRA_PERMISSIONS = {
     'moderation.sanction': ['change', 'delete'],
     'catalog.forbiddenitem': ['add', 'change', 'delete'],
-    'identity.businessprofile': ['view'],
+    # ADR 0006, 11.4 : organisations en lecture et suspension/réactivation (dont celles converties en SUSPENDED),
+    # exigences de pièces et réglages modifiables ; appartenances en lecture seule (ni téléphone ni e-mail).
+    'identity.organization': ['view', 'suspend'],
+    'identity.membership': ['view'],
+    'identity.organizationdocumentrequirement': ['view', 'add', 'change', 'delete'],
+    'identity.identitysettings': ['view', 'change'],
     'catalog.category': ['add', 'change', 'delete'],
     'catalog.city': ['add', 'change', 'delete'],
     'catalog.commune': ['add', 'change', 'delete'],

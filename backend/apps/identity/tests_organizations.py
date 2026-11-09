@@ -598,10 +598,15 @@ class SchemaTests(TestCase):
         ContactConsent.objects.create(user=owner, channel='MESSAGE')
         ContactConsent.objects.create(user=make_user('autre'), channel='MESSAGE')
 
-    def test_legacy_models_are_untouched(self):
-        # T1 est additif : rien n'est retiré (T9).
-        self.assertTrue(hasattr(User, 'user_type'))
-        from .models import BusinessProfile  # noqa: F401
+    def test_legacy_company_model_is_gone_but_the_conversion_traces_remain(self):
+        # T9-2 (contraction) : plus de type de compte ni de profil entreprise ; seules les traces de la conversion
+        # (table de correspondance, colonne `legacy_business_profile_id`) sont conservées jusqu'à la réinitialisation.
+        from django.apps import apps
+        self.assertNotIn('user_type', {f.name for f in User._meta.get_fields()})
+        self.assertRaises(LookupError, apps.get_model, 'identity', 'BusinessProfile')
+        self.assertRaises(LookupError, apps.get_model, 'identity', 'BusinessProfileCategory')
+        self.assertIn('legacy_business_profile_id', {f.name for f in Organization._meta.get_fields()})
+        self.assertTrue(apps.get_model('identity', 'LegacyAccountMapping'))
 
     def test_audit_log_context_is_optional(self):
         entry = AuditLog.record(None, 'SOMETHING')

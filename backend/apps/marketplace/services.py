@@ -341,10 +341,7 @@ def create_offer(*, actor, context_type, context_id, data: dict) -> Offer:
     """Publie une offre au nom d'un contexte vendeur. `actor` doit avoir `offer.publish` dans ce contexte
     (profil prestataire actif, organisation active, rôle propriétaire/administrateur/éditeur) ; l'autorisation
     est refaite dans la transaction. `created_by` est l'utilisateur ; `seller_is_public` est calculé depuis
-    `identity`. Le corps de la requête ne peut jamais imposer le propriétaire. Journalisé (règle 12).
-
-    Contexte personnel : l'ancien champ `seller` est aussi écrit (cascade à la suppression du compte conservée
-    tant que T9 n'a pas contracté). Prestataire et organisation : `seller` reste nul."""
+    `identity`. Le corps de la requête ne peut jamais imposer le propriétaire. Journalisé (règle 12)."""
     forbidden = PROTECTED_FIELDS & set(data)
     if forbidden:
         raise ValueError(f"Champs réservés au serveur : {sorted(forbidden)}")
@@ -354,8 +351,6 @@ def create_offer(*, actor, context_type, context_id, data: dict) -> Offer:
             **data, seller_context_type=context_type, seller_context_id=context_id, created_by=actor,
             seller_is_public=identity_services.is_seller_context_public(context_type, context_id),
         )
-        if context_type == CONTEXT_USER:
-            offer.seller = actor
         offer.save()
         _audit(actor, 'OFFER_CREATED', offer, 'offer created')
     return offer
@@ -499,8 +494,7 @@ def sync_all_seller_visibility() -> int:
     ayant des offres, par lots, pour rattraper un événement perdu ou en échec. Idempotent. Renvoie le nombre
     d'offres modifiées."""
     contexts = list(
-        Offer.objects.filter(seller_context_type__isnull=False, seller_context_id__isnull=False)
-        .order_by().values_list('seller_context_type', 'seller_context_id').distinct()
+        Offer.objects.order_by().values_list('seller_context_type', 'seller_context_id').distinct()
     )
     changed = 0
     for start in range(0, len(contexts), SYNC_BATCH_SIZE):

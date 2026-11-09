@@ -94,7 +94,6 @@ class SubmissionTests(VerificationBase):
             self.assertEqual(response.status_code, 201, response.data)
             doc = KycDocument.objects.get(pk=response.data['id'])
             self.assertEqual((doc.organization_id, doc.uploaded_by_id), (self.org.pk, who.pk))
-            self.assertIsNone(doc.business_profile_id)
             self.assertEqual(doc.status, 'EN_ATTENTE')
             path = os.path.abspath(doc.file.path)
             self.assertTrue(path.startswith(os.path.abspath(str(settings.KYC_PRIVATE_ROOT))))

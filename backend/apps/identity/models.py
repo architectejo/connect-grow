@@ -69,11 +69,6 @@ class UserManager(BaseUserManager):
 
 
 class User(BaseModel, AbstractBaseUser, PermissionsMixin):
-    USER_TYPE_CHOICES = (
-        ('PARTICULIER', 'Particulier'),
-        ('ENTREPRISE', 'Entreprise / Artisan'),
-    )
-
     # CDC 3.1 : inscription par téléphone OU par e-mail. Les deux sont donc
     # facultatifs individuellement (contrainte "au moins un des deux" gérée par
     # UserManager.create_user), mais chacun reste unique quand il est renseigné.
@@ -92,7 +87,6 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
         validators=[validate_image_upload_size, validate_image_pixels],
     )
     full_name = models.CharField(max_length=255)
-    user_type = models.CharField(max_length=20, choices=USER_TYPE_CHOICES, default='PARTICULIER')
 
     # Localisation : références par UUID vers le domaine `catalog` (CDC §5.4, pas de
     # clé étrangère entre domaines). L'existence est vérifiée par apps.catalog.services
@@ -132,58 +126,6 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.email or self.phone or f"Utilisateur #{self.pk}"
-
-
-class BusinessProfile(BaseModel):
-    """Transitoire : remplacé par Organization (L0-09)."""
-
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='business_profile')
-    business_name = models.CharField(max_length=255)
-    # Les catégories (domaine `catalog`) sont portées par BusinessProfileCategory,
-    # par UUID : pas de relation Many-to-Many entre domaines.
-    bio = models.TextField(blank=True)
-    logo = models.ImageField(
-        upload_to='business_logos/', null=True, blank=True,
-        validators=[validate_image_upload_size, validate_image_pixels],
-    )
-    is_verified = models.BooleanField(default=False)
-    nif = models.CharField(max_length=50, blank=True) # Pour le côté pro client
-
-    def save(self, *args, **kwargs):
-        # Logo ré-encodé (sans EXIF/GPS, taille plafonnée) avant stockage.
-        self.logo = sanitize_uploaded_field(self.logo)
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return self.business_name
-
-    @property
-    def category_ids(self):
-        """UUID des catégories. Utilise le préchargement `category_links` s'il existe."""
-        return [link.category_id for link in self.category_links.all()]
-
-    def set_category_ids(self, category_ids):
-        """Remplace les catégories ; l'existence des UUID est vérifiée par l'appelant
-        via apps.catalog.services."""
-        wanted = list(dict.fromkeys(category_ids))
-        self.category_links.exclude(category_id__in=wanted).delete()
-        already = set(self.category_links.values_list('category_id', flat=True))
-        BusinessProfileCategory.objects.bulk_create([
-            BusinessProfileCategory(business_profile=self, category_id=cid)
-            for cid in wanted if cid not in already
-        ])
-
-
-class BusinessProfileCategory(BaseModel):
-    """Table de liaison interne : catégories d'un profil business, par UUID."""
-
-    business_profile = models.ForeignKey(
-        BusinessProfile, on_delete=models.CASCADE, related_name='category_links',
-    )
-    category_id = models.UUIDField(db_index=True)
-
-    class Meta:
-        unique_together = ('business_profile', 'category_id')
 
 
 class OtpCode(BaseModel):
@@ -260,7 +202,7 @@ class OtpCode(BaseModel):
 
 
 class KycDocument(BaseModel):
-    """CDC 3.1 / 3.11 : pièces justificatives KYC d'un Profil Business,
+    """CDC 3.1 / 3.11 : pièces justificatives KYC d'une organisation,
     en file d'attente de validation par la modération."""
 
     DOC_RCCM = 'RCCM'
@@ -274,8 +216,6 @@ class KycDocument(BaseModel):
         (DOC_ARRETE_ONG, "Arrêté d'enregistrement de l'ONG"),
     )
 
-    # Types de pièces dont la validation conjointe vaut « entreprise vérifiée » (CDC 3.1).
-    REQUIRED_TYPES = (DOC_RCCM, DOC_ID_NATIONALE, DOC_PIECE_GERANT)
     REASON_MAX_LENGTH = 500
 
     STATUS_EN_ATTENTE = 'EN_ATTENTE'
@@ -287,14 +227,8 @@ class KycDocument(BaseModel):
         (STATUS_REFUSE, "Refusé"),
     )
 
-    business_profile = models.ForeignKey(
-        BusinessProfile, on_delete=models.CASCADE, related_name='kyc_documents', null=True, blank=True,
-    )
-    # ADR 0006, section 4.4 : pièce rattachée à une organisation (nul pendant l'étape « étendre » ;
-    # NOT NULL à la contraction, T9). `uploaded_by` : trace de l'auteur du dépôt.
-    organization = models.ForeignKey(
-        'Organization', on_delete=models.CASCADE, null=True, blank=True, related_name='kyc_documents',
-    )
+    # ADR 0006, section 4.4 : pièce rattachée à une organisation. `uploaded_by` : trace de l'auteur du dépôt.
+    organization = models.ForeignKey('Organization', on_delete=models.CASCADE, related_name='kyc_documents')
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='kyc_uploads',
     )
@@ -313,8 +247,7 @@ class KycDocument(BaseModel):
         permissions = [('review_kycdocument', "Peut examiner, décider et télécharger les pièces KYC")]
 
     def __str__(self):
-        owner = self.business_profile.business_name if self.business_profile_id else f"organisation {self.organization_id}"
-        return f"{self.get_document_type_display()} — {owner} ({self.status})"
+        return f"{self.get_document_type_display()} — organisation {self.organization_id} ({self.status})"
 
 
 @receiver(post_delete, sender=KycDocument)

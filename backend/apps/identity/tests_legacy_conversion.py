@@ -8,7 +8,6 @@ par classe, `_fixture_teardown` neutralisé) ; seuls les scénarios qui modifien
 garde, base vierge, volume) reconstruisent le leur.
 """
 import importlib
-import io
 import uuid
 from datetime import timedelta
 from unittest import mock
@@ -291,7 +290,8 @@ class ConvertedWorldTests(SharedStateTestCase):
         self.assertEqual(docs.count(), 3)
         for doc in docs:
             self.assertEqual(doc.uploaded_by_id, w.owner_id)
-            self.assertEqual(doc.business_profile_id, w.full.pk)  # l'ancien lien reste jusqu'à la contraction
+            historical = self.new_apps.get_model('identity', 'KycDocument').objects.get(pk=doc.pk)
+            self.assertEqual(historical.business_profile_id, w.full.pk)  # l'ancien lien reste jusqu'à la contraction
             self.assertEqual(
                 (doc.document_type, doc.status, doc.rejection_reason, doc.reviewed_by_id, doc.reviewed_at, doc.file.name),
                 w.docs_before[doc.pk])
@@ -521,12 +521,6 @@ class ConvertedWorldTests(SharedStateTestCase):
         self.assertTrue(organizations[0]['migrated_from_business'])
         self.assertEqual(organizations[0]['role'], 'OWNER')
 
-    def test_preflight_after_conversion_has_nothing_left_to_convert(self):
-        out = io.StringIO()
-        call_command('check_legacy_conversion', stdout=out)
-        self.assertIn('profils à convertir: 0', out.getvalue())
-        self.assertIn(f'profils déjà convertis (correspondance): {self.w.profile_count}', out.getvalue())
-
 
 class RulesTests(SimpleTestCase):
     def test_clean_name(self):
@@ -539,83 +533,6 @@ class RulesTests(SimpleTestCase):
         self.assertFalse(rules.mixes_scripts('Banque'))
 
 
-class PreflightCommandTests(SharedStateTestCase):
-    """Pré-vol lancé AVANT la conversion (les modèles courants lisent le même schéma qu'`identity 0010`)."""
-
-    @classmethod
-    def build(cls, b):
-        w = cls.w = type('World', (), {})()
-        w.full = b.complete_profile()
-        w.banned = b.profile('Banni', user=b.user(is_active=False))
-        w.sanctioned = b.profile('Sanctionne')
-        b.sanction(w.sanctioned.user)
-        w.twin_1, w.twin_2 = b.profile('Doublon Zorglub', nif='NIF-DOUBLE'), b.profile('DOUBLON zorglub', nif='NIF-DOUBLE')
-        w.empty = b.profile('​')
-        w.manual = b.profile('Drapeau', is_verified=True)
-        b.doc(w.manual, 'RCCM')
-        w.orphan_user = b.user('ENTREPRISE')
-        # Collision avec une organisation DÉJÀ existante
-        existing = b.apps.get_model('identity', 'Organization').objects.create(name='Chez CAFÉ', org_type='ONG')
-        w.existing_org = existing
-        w.collider = b.profile('chez cafe')
-        # Pièce déjà rattachée aux deux
-        w.both = b.doc(b.profile('Double lien'), 'RCCM')
-        b.Doc.objects.filter(pk=w.both.pk).update(organization=existing)
-        w.n = b.Profile.objects.count()
-        cls.before = cls.snapshot()
-        out = io.StringIO()
-        call_command('check_legacy_conversion', stdout=out)
-        cls.output = out.getvalue()
-        cls.after = cls.snapshot()
-
-    @staticmethod
-    def snapshot():
-        from apps.identity.models import BusinessProfile, User
-
-        return (
-            list(BusinessProfile.objects.order_by('pk').values()), list(KycDocument.objects.order_by('pk').values()),
-            list(User.objects.order_by('pk').values_list('pk', 'is_active', 'user_type')),
-            Organization.objects.count(), LegacyAccountMapping.objects.count(), Membership.objects.count(),
-        )
-
-    def test_changes_nothing(self):
-        self.assertEqual(self.before, self.after)
-
-    def test_counts_and_identifiers(self):
-        w, out = self.w, self.output
-        self.assertIn(f'profils: {w.n}', out)
-        self.assertIn(f'profils à convertir: {w.n}', out)
-        for profile in (w.banned, w.empty, w.manual, w.twin_1, w.sanctioned):
-            self.assertIn(str(profile.pk), out)
-        self.assertIn(str(w.orphan_user.pk), out)
-        self.assertIn('propriétaires désactivés (organisation sera SUSPENDED): 1', out)
-        self.assertIn('propriétaires sous sanction bloquante en cours (organisation sera SUSPENDED): 1', out)
-        self.assertIn('organisations qui seront SUSPENDED à la conversion (total): 2', out)
-        self.assertIn('noms vides ou trop courts après nettoyage (nom neutre): 1', out)
-        self.assertIn('profils partageant un NIF non vide: 2', out)
-        self.assertIn("is_verified diffère du calcul dérivé des pièces (le drapeau n'est pas recopié): 1", out)
-        self.assertIn('pièces déjà rattachées à une organisation ET à un profil (non réaffectées): 1', out)
-
-    def test_name_collisions_between_profiles_and_with_existing_organizations(self):
-        w = self.w
-        flat = self.output.replace(' ', '')
-        pair = '~'.join(sorted((str(w.twin_1.pk), str(w.twin_2.pk))))
-        self.assertIn(pair, flat)
-        self.assertIn(f'{w.collider.pk}~{w.existing_org.pk}', flat)
-
-    def test_output_has_no_personal_data(self):
-        for secret in (SECRET_NIF, 'NIF-DOUBLE', SECRET_EMAIL, SECRET_PHONE, SECRET_FULL_NAME, 'Zorglub', 'Banni',
-                       'Drapeau', 'Doublon', 'u1@example.com', SECRET_BIO_MARK, 'Sanctionne', 'CAF'):
-            self.assertNotIn(secret, self.output)
-        self.assertNotIn('@', self.output)
-
-    def test_missing_table_gives_exit_code_1(self):
-        with mock.patch('django.db.backends.base.introspection.BaseDatabaseIntrospection.table_names', return_value=[]):
-            with self.assertRaises(SystemExit) as ctx:
-                call_command('check_legacy_conversion', stdout=io.StringIO(), stderr=io.StringIO())
-        self.assertEqual(ctx.exception.code, 1)
-
-
 class RollbackAndReplayTests(TransactionTestCase):
     """Scénarios qui modifient l'état : chacun reconstruit son monde à l'ancien schéma."""
 
@@ -623,6 +540,12 @@ class RollbackAndReplayTests(TransactionTestCase):
         cache.clear()
         migrate_to(OLD)
         self.b = Builder(state(OLD))
+
+    def tearDown(self):
+        # Les profils historiques ne sont plus un modèle courant : le `flush` de Django ne les vide pas (clés
+        # étrangères vers les comptes). On les vide ici, à l'état historique.
+        migrate_to(NEW)
+        state(NEW).get_model('identity', 'BusinessProfile').objects.all().delete()
 
     @classmethod
     def tearDownClass(cls):

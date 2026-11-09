@@ -24,7 +24,7 @@ from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
 from apps.common.factories import make_test_image
-from apps.identity.models import BusinessProfile, KycDocument, Membership, Organization, OtpCode, User
+from apps.identity.models import KycDocument, Membership, Organization, OtpCode, User
 from apps.marketplace import services as marketplace_services
 from apps.marketplace.models import ContactEvent, Offer
 from apps.messaging.models import Conversation, Message
@@ -292,7 +292,7 @@ class ContractTests(RecetteBase):
             '/api/accounts/me/', {'business_profile': {'business_name': 'Ma boîte', 'is_verified': True}}, format='json',
         )
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(BusinessProfile.objects.filter(user=owner).exists())
+        self.assertFalse(Organization.objects.filter(created_by=owner).exists())
         created = client.post('/api/accounts/organizations/', {'name': 'Ma boîte', 'org_type': 'ENTREPRISE'}, format='json')
         self.assertEqual(created.status_code, 201, created.content)
         patched = client.patch(
@@ -411,7 +411,6 @@ class JourneyTests(RecetteBase):
         self.assertNotIn('user_type', body)
         self.assertNotIn('business_profile', body)
         self.assertFalse(Organization.objects.exists())
-        self.assertFalse(BusinessProfile.objects.exists())
         self.assertNotIn('password', body)
         self.assertNotIn('otp_code', body)
         self.assertTrue(body['phone_verified'])

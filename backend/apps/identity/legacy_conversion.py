@@ -1,8 +1,8 @@
 """Règles pures de la conversion des comptes entreprise en organisations (L0-09 T9-1, ADR 0006 §20).
 
-Aucun modèle ni accès base : ce module est partagé par la migration `identity 0011` et par la commande de
-pré-vol `check_legacy_conversion`, pour que les deux appliquent exactement le même nettoyage. Il disparaît avec
-les migrations de conversion à la réinitialisation de fin de projet (spec T9, section 3.3).
+Aucun modèle ni accès base : ce module est lu par la migration `identity 0011` (et ses tests). La commande de
+pré-vol `check_legacy_conversion`, qui le partageait, a été retirée avec les modèles historiques à la contraction
+(T9-2). Il disparaît avec les migrations de conversion à la réinitialisation de fin de projet (spec T9, section 3.3).
 """
 import unicodedata
 

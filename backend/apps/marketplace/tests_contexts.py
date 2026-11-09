@@ -818,12 +818,18 @@ class AuditTrailTests(ContextBase):
         entry = AuditLog.objects.get(action='OFFER_DELETED')
         self.assertEqual((entry.context_type, entry.context_id), ('ORGANIZATION', self.org.pk))
 
-    def test_a_personal_offer_also_writes_the_legacy_seller(self):
+    def test_an_offer_carries_only_its_owner_context_and_its_author(self):
+        # Contraction (T9-2) : plus de rattachement direct au compte (`seller`), seul le contexte propriétaire fait foi.
         response = self.create(self.seller)
-        self.assertEqual(Offer.objects.get(pk=response.data['id']).seller, self.seller)
+        offer = Offer.objects.get(pk=response.data['id'])
+        self.assertEqual((offer.seller_context_type, offer.seller_context_id, offer.created_by_id),
+                         ('USER', self.seller.pk, self.seller.pk))
+        self.assertFalse(hasattr(offer, 'seller'))
         profile = self.provider()
         response = self.create(self.seller, ctx_header('PROVIDER', profile.pk), title='Offre du prestataire')
-        self.assertIsNone(Offer.objects.get(pk=response.data['id']).seller)
+        offer = Offer.objects.get(pk=response.data['id'])
+        self.assertEqual((offer.seller_context_type, offer.seller_context_id, offer.created_by_id),
+                         ('PROVIDER', profile.pk, self.seller.pk))
 
 
 class SynchronousVisibilityTests(ContextBase):
@@ -937,7 +943,7 @@ class AuditAndAdminTests(ContextBase):
         from .models import Offer as OfferModel
 
         admin = site._registry[OfferModel]
-        for field in ('seller', 'seller_context_type', 'seller_context_id', 'created_by', 'seller_is_public'):
+        for field in ('seller_context_type', 'seller_context_id', 'created_by', 'seller_is_public'):
             self.assertIn(field, admin.readonly_fields)
 
 

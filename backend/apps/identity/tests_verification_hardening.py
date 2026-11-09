@@ -154,12 +154,14 @@ class HardeningTests(VerificationBase):
         self.assertEqual(caught.exception.status_code, 400)
         self.decide(doc, reviewer('r2'), 'REFUSE', 'x' * 500)
 
-    def test_document_without_profile_nor_organization_is_a_conflict(self):
-        orphan = KycDocument.objects.create(document_type=RCCM, file=upload())
-        self.addCleanup(self._remove_file, orphan.pk)
-        with self.assertRaises(services.KycError) as caught:
-            self.decide(orphan, reviewer())
-        self.assertEqual(caught.exception.status_code, 409)
+    def test_document_without_organization_cannot_exist(self):
+        # Contraction (T9-2) : l'ancien cas « pièce sans profil ni organisation » (409) est devenu impossible, la
+        # base refuse la ligne (`organization` NOT NULL).
+        from django.db import IntegrityError, transaction
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            KycDocument.objects.create(document_type=RCCM, file=upload())
+        self.assertEqual(KycDocument.objects.filter(organization__isnull=True).count(), 0)
 
     def test_only_currently_required_types_give_claims(self):
         self.decide(self.make_doc(RCCM), reviewer())

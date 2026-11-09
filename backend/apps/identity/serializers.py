@@ -183,8 +183,8 @@ class UserSerializer(CityCommuneNamesMixin, serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Crée le compte. Un compte est unique (ADR 0006, règle 1) : il n'y a plus de type de compte ni de profil
-        entreprise à l'inscription. Compatibilité transitoire : `user_type` et `business_profile`, s'ils sont
-        encore envoyés par un ancien client, ne sont pas lus (aucun effet, aucune organisation créée) ; une
+        entreprise à l'inscription. Les anciens champs de type de compte et de profil, s'ils sont encore envoyés
+        par un ancien client, sont ignorés (champs inconnus de DRF) : aucun effet, aucune organisation créée. Une
         organisation se crée ensuite par `POST organizations/`."""
         # Utilise create_user du UserManager pour hacher le mot de passe
         try:
@@ -263,8 +263,6 @@ class KycDocumentSerializer(serializers.ModelSerializer):
 
     def get_organization(self, obj):
         """Organisation concernée (file de vérification) : identifiant, nom, type. Aucune coordonnée de membre."""
-        if obj.organization_id is None:
-            return None
         organization = obj.organization
         return {'id': str(organization.pk), 'name': organization.name, 'org_type': organization.org_type}
 

@@ -13,7 +13,7 @@ from django.core.validators import MaxLengthValidator, MaxValueValidator, MinLen
 from django.db import models
 from django.utils import timezone
 
-from apps.common.contexts import ALL_CONTEXT_CHOICES, CONTEXT_USER
+from apps.common.contexts import ALL_CONTEXT_CHOICES
 from apps.common.images import sanitize_uploaded_field, validate_image_pixels, validate_image_upload_size
 from apps.common.models import BaseModel, SingletonSettingsModel
 
@@ -107,10 +107,9 @@ class Offer(BaseModel):
 
     # Contexte vendeur (ADR 0006, A3) : à qui appartient l'offre. `USER` (compte), `PROVIDER` (profil
     # prestataire) ou `ORGANIZATION`. Pas de clé étrangère entre domaines : l'identifiant désigne une ligne
-    # d'`identity` lue par ses services. Nuls seulement le temps de l'étape « étendre » (remplis par la
-    # migration de données, NOT NULL à la contraction T9).
-    seller_context_type = models.CharField(max_length=20, choices=ALL_CONTEXT_CHOICES, null=True, blank=True)
-    seller_context_id = models.UUIDField(null=True, blank=True)
+    # d'`identity` lue par ses services. Obligatoire : une offre sans propriétaire est refusée en base.
+    seller_context_type = models.CharField(max_length=20, choices=ALL_CONTEXT_CHOICES)
+    seller_context_id = models.UUIDField()
     # Trace de l'auteur : l'offre reste à son propriétaire quand l'auteur part (Q-CP7).
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='offers_created',
@@ -119,11 +118,6 @@ class Offer(BaseModel):
     # prestataire actif, organisation active) : recalculé par l'abonné de
     # `identity.seller_context_status_changed` et par la commande `sync_seller_visibility` (ADR 0006, A7).
     seller_is_public = models.BooleanField(default=True, db_index=True)
-    # Ancien rattachement au compte, conservé jusqu'à la contraction (T9). Plus jamais lu par le code
-    # métier : seul le contexte vendeur fait foi.
-    seller = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name='offers',
-    )
     # Références par UUID vers le domaine `catalog` (CDC §5.4, pas de clé étrangère entre
     # domaines) ; l'existence est vérifiée par apps.catalog.services.
     category_id = models.UUIDField(db_index=True)
@@ -198,7 +192,6 @@ class Offer(BaseModel):
     class Meta:
         indexes = [
             models.Index(fields=['is_active', 'is_deleted', '-visibility_score'], name='offer_public_ranking'),
-            models.Index(fields=['seller', 'is_deleted'], name='offer_seller_deleted'),
             models.Index(
                 fields=['seller_context_type', 'seller_context_id', 'is_deleted'], name='offer_seller_ctx_deleted',
             ),
@@ -206,14 +199,6 @@ class Offer(BaseModel):
 
     def save(self, *args, **kwargs):
         self.main_image = sanitize_uploaded_field(self.main_image)
-        # TODO(T9) : passerelle de l'étape « étendre », à retirer avec `seller` à la contraction. Un appelant qui
-        # ne connaît que l'ancien rattachement au compte (`seller`) obtient un contexte personnel ; `seller_is_public`
-        # garde son défaut (vrai) : la réconciliation horaire `sync_seller_visibility` le corrige si besoin.
-        if self.seller_context_type is None and self.seller_id is not None:
-            self.seller_context_type = CONTEXT_USER
-            self.seller_context_id = self.seller_id
-            if self.created_by_id is None:
-                self.created_by_id = self.seller_id
         if self.expires_at is None:
             expiration_days = MarketplaceSettings.get_solo().expiration_days
             self.expires_at = timezone.now() + timedelta(days=expiration_days)

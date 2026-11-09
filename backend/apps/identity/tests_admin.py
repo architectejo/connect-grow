@@ -6,8 +6,8 @@ from django.urls import reverse
 
 from apps.moderation.models import AuditLog
 
-from .admin import BusinessProfileAdmin, KycDocumentAdmin, UserAdmin
-from .models import BusinessProfile, KycDocument, Membership, Organization, User
+from .admin import KycDocumentAdmin, OrganizationAdmin, UserAdmin
+from .models import KycDocument, Membership, Organization, User
 
 
 def make_admin_user(email, *, superuser=False, perms=()):
@@ -49,7 +49,7 @@ class UserAdminHardeningTests(TestCase):
         staff = make_admin_user('adm@example.com', perms=['view_user', 'change_user'])
         self.client.force_login(staff)
         self.client.post(reverse('admin:identity_user_change', args=[staff.pk]), {
-            'full_name': 'Admin', 'email': 'adm@example.com', 'user_type': 'PARTICULIER',
+            'full_name': 'Admin', 'email': 'adm@example.com',
             'is_active': 'on', 'is_superuser': 'on', 'is_staff': 'on', 'password': 'pbkdf2_sha256$x',
         })
         staff.refresh_from_db()
@@ -61,7 +61,7 @@ class UserAdminHardeningTests(TestCase):
         target = User.objects.create_user(email='t@example.com', password='x', full_name='T')
         self.client.force_login(staff)
         self.client.post(reverse('admin:identity_user_change', args=[target.pk]), {
-            'full_name': 'Renommé', 'email': 't@example.com', 'user_type': 'PARTICULIER', 'is_active': 'on',
+            'full_name': 'Renommé', 'email': 't@example.com', 'is_active': 'on',
         })
         target.refresh_from_db()
         self.assertEqual(target.full_name, 'Renommé')
@@ -86,8 +86,32 @@ class UserAdminHardeningTests(TestCase):
             codenames = set(Group.objects.get(name=name).permissions.values_list('codename', flat=True))
             self.assertNotIn('change_user', codenames, name)
             self.assertNotIn('change_kycdocument', codenames, name)
-            self.assertNotIn('change_businessprofile', codenames, name)
+            self.assertNotIn('change_organization', codenames, name)
             self.assertIn('review_kycdocument', codenames, name)
+
+    def test_roles_have_the_organization_permissions_of_the_adr_and_nothing_of_the_old_model(self):
+        """ADR 0006, 11.4 : l'administrateur voit les organisations et peut les suspendre/réactiver (dont celles
+        converties en SUSPENDED) ; le modérateur n'a aucune permission sur les organisations ; aucune permission de
+        l'ancien profil entreprise n'existe plus."""
+        call_command('setup_roles', verbosity=0)
+        admin_codes = set(Group.objects.get(name='Administrateur').permissions.values_list('codename', flat=True))
+        moderator_codes = set(Group.objects.get(name='Modérateur').permissions.values_list('codename', flat=True))
+        for codename in ('view_organization', 'suspend_organization', 'view_membership', 'view_identitysettings',
+                         'change_identitysettings', 'change_organizationdocumentrequirement'):
+            self.assertIn(codename, admin_codes, codename)
+        for codename in ('change_organization', 'add_organization', 'delete_organization', 'change_membership',
+                         'add_membership', 'delete_membership'):
+            self.assertNotIn(codename, admin_codes, codename)
+        self.assertFalse({c for c in moderator_codes if c.endswith(('_organization', '_membership', '_identitysettings'))})
+        staff = make_admin_user('chef@example.com')
+        staff.groups.add(Group.objects.get(name='Administrateur'))
+        staff = User.objects.get(pk=staff.pk)
+        self.assertTrue(staff.has_perm('identity.suspend_organization'))
+        moderator = make_admin_user('modo@example.com')
+        moderator.groups.add(Group.objects.get(name='Modérateur'))
+        self.assertFalse(User.objects.get(pk=moderator.pk).has_perm('identity.suspend_organization'))
+        self.assertFalse(Permission.objects.filter(codename__endswith='businessprofile').exists())
+        self.assertFalse(Permission.objects.filter(codename__endswith='businessprofilecategory').exists())
 
 
 class KycAdminHardeningTests(TestCase):
@@ -98,7 +122,7 @@ class KycAdminHardeningTests(TestCase):
         self.doc = KycDocument.objects.create(organization=self.organization, uploaded_by=owner, document_type='RCCM')
         self.staff = make_admin_user(
             'adm@example.com', perms=['view_kycdocument', 'change_kycdocument', 'delete_kycdocument',
-                                      'add_kycdocument', 'review_kycdocument', 'view_businessprofile', 'change_businessprofile'],
+                                      'add_kycdocument', 'review_kycdocument', 'view_organization', 'change_organization'],
         )
 
     def request(self):
@@ -127,16 +151,15 @@ class KycAdminHardeningTests(TestCase):
         self.doc.refresh_from_db()
         self.assertEqual(self.doc.status, KycDocument.STATUS_EN_ATTENTE)
 
-    def test_is_verified_cannot_be_set_by_hand(self):
-        # Passerelle : teste l'admin de l'ancien profil d'entreprise (retiré à la contraction, T9-2).
-        self.profile = BusinessProfile.objects.create(
-            user=User.objects.get(email='biz@example.com'), business_name='Ma Boutique',
-        )
-        self.assertIn('is_verified', BusinessProfileAdmin(BusinessProfile, admin.site).readonly_fields)
+    def test_verification_cannot_be_set_by_hand_through_the_organization_admin(self):
+        """Règle 3 : l'admin d'une organisation est en lecture seule ; la vérification découle des pièces `VALIDE`."""
+        model_admin = OrganizationAdmin(Organization, admin.site)
+        self.assertFalse(model_admin.has_change_permission(self.request(), self.organization))
         self.client.force_login(self.staff)
-        self.client.post(reverse('admin:identity_businessprofile_change', args=[self.profile.pk]), {
-            'business_name': 'Ma Boutique', 'is_verified': 'on', 'bio': '', 'nif': '',
-            'category_links-TOTAL_FORMS': '0', 'category_links-INITIAL_FORMS': '0',
+        self.client.post(reverse('admin:identity_organization_change', args=[self.organization.pk]), {
+            'name': 'Renommée', 'is_verified': 'on', 'status': 'ACTIVE', 'verified': 'on',
         })
-        self.profile.refresh_from_db()
-        self.assertFalse(self.profile.is_verified)
+        self.organization.refresh_from_db()
+        self.assertEqual(self.organization.name, 'Ma Boutique')
+        from .services import get_verified_claims
+        self.assertFalse(get_verified_claims([self.organization.pk]).get(self.organization.pk))

@@ -156,8 +156,9 @@ SPEC_USER = {
     'commune_name?': 'str', 'date_joined?': 'date', 'phone_verified': 'bool',
 }
 SPEC_SELLER = {
-    'id': 'uuid', 'full_name': 'str', 'photo?': 'str|null', 'user_type': 'str',
-    'business_profile?': 'obj|null', 'date_joined?': 'date',
+    # Fiche publique d'un contexte vendeur (ADR 0006, 9.6) : ni téléphone, ni e-mail, ni NIF, ni membres.
+    'context_type': 'str', 'context_id': 'uuid', 'display_name': 'str', 'photo': 'str|null',
+    'org_type': 'str|null', 'verified_claims': 'list', 'verification_summary': 'obj', 'member_since': 'date',
 }
 SPEC_RATING = {'average': 'num|null', 'count': 'num'}
 SPEC_POST = {
@@ -181,9 +182,13 @@ SPEC_NOTIF = {
     'id': 'uuid', 'notification_type': 'str', 'title': 'str', 'content': 'str', 'link?': 'str|null',
     'is_read': 'bool', 'created_at': 'date',
 }
-SPEC_KYC = {
+SPEC_KYC = {  # file de vérification du personnel
     'id': 'uuid', 'document_type': 'str', 'download_url?': 'str|null', 'status': 'str',
-    'rejection_reason?': 'str', 'created_at': 'date', 'reviewed_at?': 'date|null',
+    'rejection_reason?': 'str', 'created_at': 'date', 'reviewed_at?': 'date|null', 'organization?': 'obj|null',
+}
+SPEC_KYB_DOC = {  # pièce vue par les membres de l'organisation : jamais d'URL ni de fichier
+    'id': 'uuid', 'document_type': 'str', 'document_type_label': 'str', 'status': 'str',
+    'rejection_reason': 'str', 'uploaded_at': 'date', 'reviewed_at': 'date|null',
 }
 SPEC_ORGANIZATION = {
     'id': 'uuid', 'name': 'str', 'org_type': 'str', 'description': 'str', 'logo': 'str|null',
@@ -219,13 +224,67 @@ def jpeg(color=(200, 30, 30)):
     return buf.getvalue()
 
 
+def run_kyb(org_id, s_access, b_access, mod):
+    """Pièces d'une organisation : dépôt, remplacement, refus d'un tiers, file du personnel, décision, claims.
+    Les anciennes routes `accounts/kyc/documents/` (liste, dépôt, suppression) n'existent plus : 404."""
+    pdf = b'%PDF-1.4\n% fichier de test\n'
+    docs = f'accounts/organizations/{org_id}/kyc/documents/'
+    r = call('POST', docs, form={'document_type': 'RCCM'}, files={'file': ('rccm.pdf', pdf, 'application/pdf')}, token=s_access)
+    expect('KYB dépôt RCCM', r, 201)
+    if r.status != 201:
+        return
+    check_shape("Pièce d'organisation", r.json, SPEC_KYB_DOC)
+    if 'download_url' in r.json or 'file' in r.json:
+        finding("règle 10 : URL ou chemin de fichier renvoyé aux membres de l'organisation")
+    r = call('POST', docs, form={'document_type': 'RCCM'}, files={'file': ('r.pdf', pdf, 'application/pdf')}, token=s_access)
+    expect("KYB remplacement d'une pièce en attente", r, 201)
+    kyc1 = r.json['id']
+    expect('KYB fichier invalide', call('POST', docs, form={'document_type': 'ID_NATIONALE'}, files={'file': ('id.pdf', b'MZ-exe', 'application/pdf')}, token=s_access), 400)
+    expect('KYB par un non-membre', call('POST', docs, form={'document_type': 'RCCM'}, files={'file': ('r.pdf', pdf, 'application/pdf')}, token=b_access), 403, 'DENY_RELATION')
+    r = call('GET', docs, token=s_access)
+    expect('KYB liste', r, 200)
+    check_shape("Pièce d'organisation (liste)", (r.json['results'] if isinstance(r.json, dict) else r.json)[0], SPEC_KYB_DOC)
+    expect('KYB liste anonyme', call('GET', docs), 401)
+    expect('KYB suppression par un non-membre', call('DELETE', docs + f'{kyc1}/', token=b_access), 403, 'DENY_RELATION')
+    for method, path in (('GET', 'accounts/kyc/documents/'), ('POST', 'accounts/kyc/documents/'),
+                         ('DELETE', f'accounts/kyc/documents/{kyc1}/')):
+        expect(f'ancienne route {method} {path}', call(method, path, token=s_access), 404)
+    expect('KYC file de revue (simple utilisateur)', call('GET', 'accounts/kyc/review-queue/', token=s_access), 403)
+    expect('KYC téléchargement (simple utilisateur)', call('GET', f'accounts/kyc/documents/{kyc1}/download/', token=s_access), 403)
+    r = call('GET', 'accounts/kyc/review-queue/', token=mod)
+    expect('KYC file de revue (personnel)', r, 200)
+    queue = r.json['results'] if isinstance(r.json, dict) else r.json
+    if queue:
+        check_shape('Pièce (personnel)', queue[0], {**SPEC_KYC, 'download_url?': 'str'})
+    expect('KYC téléchargement (personnel)', call('GET', f'accounts/kyc/documents/{kyc1}/download/', token=mod), 200)
+    expect("KYB suppression d'une pièce en attente", call('DELETE', docs + f'{kyc1}/', token=s_access), 204)
+    r = call('POST', docs, form={'document_type': 'RCCM'}, files={'file': ('rccm.pdf', pdf, 'application/pdf')}, token=s_access)
+    kyc2 = r.json['id']
+    expect('KYC décision VALIDE', call('POST', f'accounts/kyc/documents/{kyc2}/decision/', {'decision': 'VALIDE'}, token=mod), 200)
+    r = call('DELETE', docs + f'{kyc2}/', token=s_access)
+    if r.status not in (400, 409):
+        finding(f"KYB suppression d'une pièce validée : attendu 400/409, obtenu {r!r}")
+    state = call('GET', f'accounts/organizations/{org_id}/verification/', token=s_access).json
+    if state['summary']['complete'] or len(state['verified_claims']) != 1:
+        finding("règle 3 : organisation vérifiée avec une seule pièce validée")
+    for doc_type in ('ID_NATIONALE', 'PIECE_GERANT'):
+        r = call('POST', docs, form={'document_type': doc_type}, files={'file': ('p.jpg', jpeg(), 'image/jpeg')}, token=s_access)
+        expect(f'KYB dépôt {doc_type}', r, 201)
+        expect(f'KYC décision {doc_type}', call('POST', f"accounts/kyc/documents/{r.json['id']}/decision/", {'decision': 'VALIDE'}, token=mod), 200)
+    state = call('GET', f'accounts/organizations/{org_id}/verification/', token=s_access).json
+    if not state['summary']['complete']:
+        finding("synthèse de vérification incomplète après validation des trois pièces")
+    else:
+        ok('verification.summary.complete vrai après les décisions du personnel')
+
+
 # --- Parcours --------------------------------------------------------------------------
 
 def main():
     pw = 'Recette-mdp-2026!'
     ip_reg = fresh_ip()
 
-    # 1. Inscription par OTP (téléphone) d'un vendeur ENTREPRISE
+    # 1. Inscription par OTP (téléphone) d'un vendeur (compte unique, ADR 0006)
     phone = '+2438' + RUN.translate(str.maketrans('abcdef', '123456')).ljust(8, '0')[:8]
     r = call('POST', 'accounts/otp/request/', {'phone': phone, 'purpose': 'REGISTER'}, ip=ip_reg)
     expect('OTP request', r, 200)
@@ -237,7 +296,7 @@ def main():
         return
     r = call('POST', 'accounts/register/', {
         'full_name': 'Sandrine Mbala', 'password': pw, 'phone': phone, 'otp_code': code,
-        # Anciens champs : ignorés par le serveur (compatibilité transitoire), aucune organisation créée.
+        # Anciens champs : ignorés par le serveur (champs inconnus), aucune organisation créée.
         'user_type': 'ENTREPRISE', 'business_profile': {'business_name': f'Atelier {RUN}'},
     }, ip=ip_reg)
     expect('register téléphone+OTP', r, 201)
@@ -248,11 +307,7 @@ def main():
         finding('register expose password/otp_code')
     if 'user_type' in r.json or 'business_profile' in r.json:
         finding('register expose encore user_type/business_profile')
-    seller_id = r.json['id']
-    # Les routes KYC historiques (`accounts/kyc/documents/`, retirées en T9) exigent encore un BusinessProfile,
-    # que l'inscription ne crée plus : le support de test est créé directement en base.
-    db("from apps.identity.models import User, BusinessProfile\n"
-       f"BusinessProfile.objects.create(user=User.objects.get(pk='{seller_id}'), business_name='Atelier {RUN}')")
+    org_id = None  # organisation du vendeur, créée par l'API à l'étape 9
 
     # Mauvais OTP, rejeu du même code
     r = call('POST', 'accounts/register/', {'full_name': 'X', 'password': pw, 'phone': phone, 'otp_code': code})
@@ -661,50 +716,11 @@ def main():
         expect('organisation : détail interne par un tiers', call('GET', f'accounts/organizations/{org_id}/internal/', token=b_access), 403, 'DENY_RELATION')
     expect('organisation : limites', call('GET', 'accounts/organizations/limits/', token=s_access), 200)
 
-    # 10. KYC
-    pdf = b'%PDF-1.4\n% fichier de test\n'
-    r = call('POST', 'accounts/kyc/documents/', form={'document_type': 'RCCM'}, files={'file': ('rccm.pdf', pdf, 'application/pdf')}, token=s_access)
-    expect('KYC dépôt RCCM', r, 201)
-    check_shape('KycDocument', r.json, SPEC_KYC)
-    kyc1 = r.json['id']
-    if r.json.get('download_url'):
-        finding("règle 10 : download_url renvoyé au déposant")
-    if 'file' in r.json:
-        finding("règle 10 : `file` (chemin) renvoyé dans la réponse KYC")
-    expect('KYC doublon de type', call('POST', 'accounts/kyc/documents/', form={'document_type': 'RCCM'}, files={'file': ('r.pdf', pdf, 'application/pdf')}, token=s_access), 400)
-    expect('KYC fichier invalide', call('POST', 'accounts/kyc/documents/', form={'document_type': 'ID_NATIONALE'}, files={'file': ('id.pdf', b'MZ-exe', 'application/pdf')}, token=s_access), 400)
-    expect('KYC par un particulier', call('POST', 'accounts/kyc/documents/', form={'document_type': 'RCCM'}, files={'file': ('r.pdf', pdf, 'application/pdf')}, token=b_access), 400)
-    r = call('GET', 'accounts/kyc/documents/', token=s_access)
-    expect('KYC liste', r, 200)
-    check_shape('KycDocument (liste)', (r.json['results'] if isinstance(r.json, dict) else r.json)[0], SPEC_KYC)
-    expect('KYC liste anonyme', call('GET', 'accounts/kyc/documents/'), 401)
-    expect('KYC suppression par un tiers', call('DELETE', f'accounts/kyc/documents/{kyc1}/', token=b_access), 404)
-    expect('KYC file de revue (simple utilisateur)', call('GET', 'accounts/kyc/review-queue/', token=s_access), 403)
-    expect('KYC téléchargement (simple utilisateur)', call('GET', f'accounts/kyc/documents/{kyc1}/download/', token=s_access), 403)
-    r = call('GET', 'accounts/kyc/review-queue/', token=mod)
-    expect('KYC file de revue (modérateur)', r, 200)
-    q = r.json['results'] if isinstance(r.json, dict) else r.json
-    if q:
-        check_shape('KycDocument (modérateur)', q[0], {**SPEC_KYC, 'download_url?': 'str'})
-    expect('KYC téléchargement (modérateur)', call('GET', f'accounts/kyc/documents/{kyc1}/download/', token=mod), 200)
-    expect('KYC suppression', call('DELETE', f'accounts/kyc/documents/{kyc1}/', token=s_access), 204)
-    r = call('POST', 'accounts/kyc/documents/', form={'document_type': 'RCCM'}, files={'file': ('rccm.pdf', pdf, 'application/pdf')}, token=s_access)
-    kyc2 = r.json['id']
-    r = call('POST', f'accounts/kyc/documents/{kyc2}/decision/', {'decision': 'VALIDE'}, token=mod)
-    expect('KYC décision VALIDE', r, 200)
-    expect('KYC suppression pièce validée', call('DELETE', f'accounts/kyc/documents/{kyc2}/', token=s_access), 400)
-    seller_pub = call('GET', f'marketplace/posts/{offer_id}/').json['seller']
-    if seller_pub['business_profile']['is_verified']:
-        finding("règle 3 : entreprise vérifiée avec une seule pièce validée sur trois")
-    for doc_type in ('ID_NATIONALE', 'PIECE_GERANT'):
-        r = call('POST', 'accounts/kyc/documents/', form={'document_type': doc_type}, files={'file': ('p.jpg', jpeg(), 'image/jpeg')}, token=s_access)
-        expect(f'KYC dépôt {doc_type}', r, 201)
-        expect(f'KYC décision {doc_type}', call('POST', f"accounts/kyc/documents/{r.json['id']}/decision/", {'decision': 'VALIDE'}, token=mod), 200)
-    seller_pub = call('GET', f'marketplace/posts/{offer_id}/').json['seller']
-    if not seller_pub['business_profile']['is_verified']:
-        finding("is_verified faux dans seller après validation KYC")
+    # 10. Vérification (KYB) : pièces déposées par les membres via l'API d'organisation, décidées par le personnel
+    if org_id is None:
+        finding("KYB : l'organisation n'a pas été créée, étape ignorée")
     else:
-        ok('seller.business_profile.is_verified vrai après décision KYC')
+        run_kyb(org_id, s_access, b_access, mod)
 
     # 11. Dispatch outbox puis notifications
     out = subprocess.run([sys.executable, 'manage.py', 'dispatch_outbox'], cwd=BACKEND_DIR, capture_output=True, text=True)

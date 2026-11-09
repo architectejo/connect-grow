@@ -18,7 +18,7 @@ from apps.platform_core.models import OutboxEvent
 
 from . import capabilities, services
 from .models import (
-    BusinessProfile, IdentitySettings, KycDocument, Membership, Organization, OrganizationCategory,
+    IdentitySettings, KycDocument, Membership, Organization, OrganizationCategory,
     OrganizationDocumentRequirement, User,
 )
 from .tests_route_guard import collect_unguarded_write_routes
@@ -837,8 +837,7 @@ class RegistrationAndMeTests(TestCase):
         self.assertNotIn('user_type', body)
         self.assertNotIn('business_profile', body)
         self.assertEqual(Organization.objects.count(), 0)
-        self.assertEqual(BusinessProfile.objects.count(), 0)
-        self.assertEqual(User.objects.get(email='nouveau@example.com').user_type, 'PARTICULIER')
+        self.assertFalse(hasattr(User.objects.get(email='nouveau@example.com'), 'user_type'))
 
     def test_me_has_no_user_type_nor_business_profile_and_ignores_them_on_patch(self):
         user = make_user('moi')
@@ -851,9 +850,9 @@ class RegistrationAndMeTests(TestCase):
         }, format='json')
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['full_name'], 'Moi Renommé')
-        self.assertFalse(BusinessProfile.objects.exists())
+        self.assertFalse(Organization.objects.exists())
         user.refresh_from_db()
-        self.assertEqual(user.user_type, 'PARTICULIER')
+        self.assertFalse(hasattr(user, 'user_type'))
 
     def test_me_contract_exposes_phone_verified_read_only(self):
         expected = {

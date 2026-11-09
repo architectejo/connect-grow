@@ -21,15 +21,15 @@ from apps.moderation.services import record_audit
 from . import services
 from .permissions import REVIEW_KYC_PERMISSION
 from .models import (
-    BusinessProfile, BusinessProfileCategory, ContactConsent, IdentitySettings, KycDocument, Membership, OtpCode,
+    ContactConsent, IdentitySettings, KycDocument, Membership, OtpCode,
     Organization, OrganizationDocumentRequirement, ProviderProfile, User,
 )
 
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ('email', 'phone', 'phone_verified', 'full_name', 'user_type', 'is_staff')
-    list_filter = ('user_type', 'is_staff', 'phone_verified')
+    list_display = ('email', 'phone', 'phone_verified', 'full_name', 'is_staff')
+    list_filter = ('is_staff', 'phone_verified')
     search_fields = ('email', 'phone', 'full_name')
 
     ALWAYS_READONLY = (
@@ -101,20 +101,6 @@ class UserAdmin(admin.ModelAdmin):
         super().delete_queryset(request, queryset.filter(pk__in=removable))
 
 
-class BusinessProfileCategoryInline(admin.TabularInline):
-    model = BusinessProfileCategory
-    extra = 0
-
-
-@admin.register(BusinessProfile)
-class BusinessProfileAdmin(admin.ModelAdmin):
-    list_display = ('business_name', 'user', 'is_verified')
-    list_filter = ('is_verified',)
-    inlines = [BusinessProfileCategoryInline]
-    # La vérification ne s'achète ni ne se saisit : elle résulte des décisions KYC (règle 3).
-    readonly_fields = ('is_verified', 'user', 'created_at', 'updated_at')
-
-
 @admin.register(KycDocument)
 class KycDocumentAdmin(admin.ModelAdmin):
     """Consultation seule : ni fichier, ni saisie des décisions (voir KycDecisionView).
@@ -123,13 +109,13 @@ class KycDocumentAdmin(admin.ModelAdmin):
     (liste et fiche), et chaque consultation d'une fiche est journalisée (règle 12). Aucun contact de membre
     n'est affiché."""
 
-    list_display = ('business_profile', 'organization', 'document_type', 'status', 'reviewed_by', 'created_at')
+    list_display = ('organization', 'document_type', 'status', 'reviewed_by', 'created_at')
     list_filter = ('status', 'document_type')
-    search_fields = ('business_profile__business_name', 'organization__name')
+    search_fields = ('organization__name',)
     exclude = ('file', 'uploaded_by')
-    list_select_related = ('business_profile', 'organization', 'reviewed_by')
+    list_select_related = ('organization', 'reviewed_by')
     readonly_fields = (
-        'business_profile', 'organization', 'document_type', 'status', 'rejection_reason',
+        'organization', 'document_type', 'status', 'rejection_reason',
         'reviewed_by', 'reviewed_at', 'created_at', 'updated_at',
     )
 

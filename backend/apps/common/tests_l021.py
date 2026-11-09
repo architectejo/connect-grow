@@ -101,7 +101,7 @@ class EmailCaseTests(RecetteBase):
 
 class AccountTypeReadOnlyTests(RecetteBase):
     """ADR 0006, règle 1 : le compte est unique ; il n'a plus de type. `user_type` n'est ni exposé ni accepté
-    (compatibilité transitoire : un ancien client qui l'envoie encore n'a aucun effet)."""
+    (un ancien client qui l'envoie encore n'a aucun effet ; le champ n'existe plus sur le modèle)."""
 
     def test_user_type_is_neither_exposed_nor_changed_through_me(self):
         client = self.as_user(self.buyer)
@@ -110,7 +110,7 @@ class AccountTypeReadOnlyTests(RecetteBase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn('user_type', response.json())
         self.buyer.refresh_from_db()
-        self.assertEqual(self.buyer.user_type, 'PARTICULIER')
+        self.assertFalse(hasattr(self.buyer, 'user_type'))
 
 
 class SanctionLiftTests(RecetteBase):

@@ -1,6 +1,6 @@
 # L0-09 T9 (L0-09h) — Conversion des comptes entreprise puis contraction du modèle
 
-- **Statut :** plan proposé (architecte-technique), à valider par le chef de projet ; les points de la section 9 exigent l'accord de l'utilisateur.
+- **Statut :** T9-1 (conversion) et T9-2 (contraction) livrées le 09/11/2026 (voir ADR 0006 §20, « Livraison de T9-2 ») ; T9-3 et F-T9 restent à faire. Plan proposé par architecte-technique ; les points de la section 9 ont été validés par le chef de projet (délégation du client).
 - **Date :** 24/10/2026. **Base de départ :** `main` a85a453 (1568 tests backend verts).
 - **Références :** ADR 0006 §2 (D1, D2), §3 (A3, A11), §10 (migrations), §11.4, §15, §17.3, §19.2 à 19.6 ; ADR 0001 (SQLite seul), ADR 0002 (réinitialisation d'octobre), ADR 0003 (outbox) ; CLAUDE.md §4 (règles 1, 3, 10, 12) et §5, §9 (migrations).
 - **Résumé :** la conversion est une **migration de données** (une par domaine, un seul `migrate`), précédée d'un contrôle de pré-vol en lecture seule et suivie d'une **contraction** livrée à part, après accord. Aucune réinitialisation de migrations maintenant (recommandée une seule fois, en fin de projet, avec le passage à MySQL).
@@ -397,3 +397,12 @@ Points à fournir à `auditeur-securite` :
 - **Q8 : étiquette et sauvegarde** : le chef de projet crée l'étiquette `pre-L0-09-conversion` et fait faire la copie de la base ; l'utilisateur fait la copie de **sa** base de développement avant d'appliquer les migrations.
 
 Aucune règle verrouillée n'est contredite : la conversion ne donne aucune vérification (règle 3), ne crée aucun score (règle 4), n'expose aucune donnée privée (règle 10), journalise (règle 12) et ne configure rien en dur hors le type `ENTREPRISE` par défaut, à valider (Q6, règle 11).
+
+---
+
+## 10. Livraison de T9-2 (09/11/2026) : écarts avec le plan
+
+- Numérotation conforme (B1 à B7 : `identity 0012` à `0014`, `marketplace 0011` et `0012`, `visibility 0007` et `0008`). Les gardes comptent les lignes à contexte nul avec une seule requête (`Q`), et celle de `identity 0013` refait le contrôle de `0012`.
+- `check_legacy_conversion` : **retirée** plutôt que réécrite (les modèles qu'elle lit n'existent plus). Ses 6 tests sont remplacés par les tests de gardes et de retour arrière de `identity/tests_contraction.py` (14 tests).
+- Tests migrés : `tests_admin` (admin d'organisation en lecture seule à la place de celui du profil, matrice de `setup_roles`), `tests_organizations` (disparition du modèle, conservation des traces de conversion), `tests_l021`, `tests_recette_lot0`, `tests_organizations_api` (champs hérités ignorés, vérifiés sur le nouveau modèle), `tests_verification` et `tests_verification_hardening` (une pièce sans organisation est refusée par la base), `marketplace/tests_contexts` (une offre ne porte que son contexte et son auteur).
+- `KYC_MAX_DOCUMENTS_PER_PROFILE` conservé (Q7). `Offer.save()` n'a plus de passerelle : une offre sans contexte lève `IntegrityError`.

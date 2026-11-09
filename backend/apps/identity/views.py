@@ -316,7 +316,7 @@ class KycReviewQueueView(generics.ListAPIView):
     serializer_class = KycDocumentSerializer
     permission_classes = [CanReviewKyc]
     queryset = KycDocument.objects.filter(status=KycDocument.STATUS_EN_ATTENTE).select_related(
-        'business_profile', 'organization',
+        'organization',
     )
 
 
@@ -357,7 +357,7 @@ class KycDocumentDownloadView(APIView):
         record_audit(
             request.user, 'KYC_DOWNLOADED', target=doc,
             details=f"Pièce {doc.get_document_type_display()} consultée.",
-            context=(CONTEXT_ORGANIZATION, doc.organization_id) if doc.organization_id else None,
+            context=(CONTEXT_ORGANIZATION, doc.organization_id),
         )
         extension = doc.file.name.rsplit('.', 1)[-1].lower() if '.' in doc.file.name else 'bin'
         response = FileResponse(

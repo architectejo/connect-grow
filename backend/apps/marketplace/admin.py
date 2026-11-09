@@ -22,7 +22,7 @@ class OfferAdmin(admin.ModelAdmin):
     search_fields = ('title', 'description')
     # Le propriétaire d'une offre ne se change pas depuis l'administration (ADR 0006) ; la visibilité du vendeur
     # est recalculée depuis `identity`.
-    readonly_fields = ('seller', 'seller_context_type', 'seller_context_id', 'created_by', 'seller_is_public')
+    readonly_fields = ('seller_context_type', 'seller_context_id', 'created_by', 'seller_is_public')
     inlines = [OfferImageInline]
 
     def save_model(self, request, obj, form, change):

@@ -98,29 +98,6 @@ class KycError(Exception):
         self.status_code = status_code
 
 
-def recompute_verification(business_profile):
-    """Recalcule `is_verified` : vrai seulement si chaque type de pièce requis a une
-    pièce validée. Révoque la vérification si ce n'est plus le cas. La vérification
-    ne vient que de décisions de la modération, jamais d'un achat (règle 3).
-
-    À appeler DANS un `transaction.atomic()` : le `select_for_update` ci-dessous n'a d'effet
-    (et n'est autorisé hors autocommit) que dans une transaction."""
-    from .models import BusinessProfile, KycDocument
-
-    # Verrou de ligne sur le profil (à appeler dans une transaction) : deux décisions
-    # simultanées sur des pièces du même profil se recalculent l'une après l'autre.
-    locked = BusinessProfile.objects.select_for_update().get(pk=business_profile.pk)
-    validated_types = set(
-        locked.kyc_documents.filter(status=KycDocument.STATUS_VALIDE).values_list('document_type', flat=True)
-    )
-    verified = set(KycDocument.REQUIRED_TYPES).issubset(validated_types)
-    if locked.is_verified != verified:
-        locked.is_verified = verified
-        locked.save(update_fields=['is_verified', 'updated_at'])
-    business_profile.is_verified = verified
-    return verified
-
-
 INTEREST_CONFLICT_MESSAGE = (
     "Vous ne pouvez pas traiter une pièce d'une organisation dont vous êtes ou avez été membre, ni une pièce que "
     "vous avez déposée."
@@ -140,24 +117,20 @@ def has_interest_conflict(doc, organization, reviewer) -> bool:
 
 def get_document_for_download(document_id, reviewer):
     """Pièce que `reviewer` peut télécharger. Même règle de conflit d'intérêts que la décision : le refus est
-    journalisé (`KYC_DOWNLOAD_DENIED`) puis renvoyé en 403. Pièce de l'ancien profil : jamais la sienne."""
+    journalisé (`KYC_DOWNLOAD_DENIED`) puis renvoyé en 403."""
     from apps.common.contexts import CONTEXT_ORGANIZATION
     from .models import KycDocument
 
     try:
-        doc = KycDocument.objects.select_related('organization', 'business_profile').get(pk=document_id)
+        doc = KycDocument.objects.select_related('organization').get(pk=document_id)
     except KycDocument.DoesNotExist:
         raise KycError("Document introuvable.", 404)
     organization = doc.organization
-    if organization is not None:
-        denied = has_interest_conflict(doc, organization, reviewer)
-    else:
-        denied = doc.business_profile is not None and doc.business_profile.user_id == reviewer.pk
-    if denied:
+    if has_interest_conflict(doc, organization, reviewer):
         record_audit(
             reviewer, 'KYC_DOWNLOAD_DENIED', target=doc,
-            details=f"organization={organization.pk}; reason=interest_conflict" if organization else "reason=own_document",
-            context=(CONTEXT_ORGANIZATION, organization.pk) if organization else None,
+            details=f"organization={organization.pk}; reason=interest_conflict",
+            context=(CONTEXT_ORGANIZATION, organization.pk),
         )
         raise KycError(INTEREST_CONFLICT_MESSAGE, 403)
     return doc
@@ -185,20 +158,14 @@ def decide_kyc_document(document_id, reviewer, decision, reason=''):
 
     with transaction.atomic():
         try:
-            doc = KycDocument.objects.select_related('business_profile').get(pk=document_id)
+            doc = KycDocument.objects.get(pk=document_id)
         except KycDocument.DoesNotExist:
             raise KycError("Document introuvable.", 404)
 
-        organization = None
-        if doc.organization_id is not None:
-            # Verrou de l'organisation : deux décisions sur ses pièces se suivent l'une après l'autre.
-            organization = Organization.objects.select_for_update().get(pk=doc.organization_id)
-            if has_interest_conflict(doc, organization, reviewer):
-                raise KycError(INTEREST_CONFLICT_MESSAGE, 403)
-        elif doc.business_profile_id is None:
-            raise KycError("Cette pièce n'est rattachée à aucun profil ni aucune organisation.", 409)
-        elif doc.business_profile.user_id == reviewer.pk:
-            raise KycError("Vous ne pouvez pas décider sur votre propre pièce.", 403)
+        # Verrou de l'organisation : deux décisions sur ses pièces se suivent l'une après l'autre.
+        organization = Organization.objects.select_for_update().get(pk=doc.organization_id)
+        if has_interest_conflict(doc, organization, reviewer):
+            raise KycError(INTEREST_CONFLICT_MESSAGE, 403)
 
         previous = doc.status
         revoking = previous == KycDocument.STATUS_VALIDE and decision == KycDocument.STATUS_REFUSE
@@ -219,26 +186,19 @@ def decide_kyc_document(document_id, reviewer, decision, reason=''):
         doc.refresh_from_db()
 
         action = 'KYC_REVOKED' if revoking else f'KYC_{decision}'
-        if organization is not None:
-            record_audit(
-                reviewer, action, target=doc,
-                details=f"organization={organization.pk}; document_type={doc.document_type}; decision={decision}",
-                context=(CONTEXT_ORGANIZATION, organization.pk),
-            )
-            publish_event(
-                'identity.organization_verification_changed', aggregate_type='organization',
-                aggregate_id=organization.pk,
-                payload={
-                    'organization_id': str(organization.pk), 'document_type': doc.document_type,
-                    'decision': 'REVOKED' if revoking else decision,
-                },
-            )
-        else:
-            recompute_verification(doc.business_profile)
-            record_audit(
-                reviewer, action, target=doc,
-                details=doc.rejection_reason or f"Document {doc.get_document_type_display()} validé.",
-            )
+        record_audit(
+            reviewer, action, target=doc,
+            details=f"organization={organization.pk}; document_type={doc.document_type}; decision={decision}",
+            context=(CONTEXT_ORGANIZATION, organization.pk),
+        )
+        publish_event(
+            'identity.organization_verification_changed', aggregate_type='organization',
+            aggregate_id=organization.pk,
+            payload={
+                'organization_id': str(organization.pk), 'document_type': doc.document_type,
+                'decision': 'REVOKED' if revoking else decision,
+            },
+        )
     return doc
 
 

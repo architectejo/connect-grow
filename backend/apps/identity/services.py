@@ -27,6 +27,12 @@ from .organizations import (  # noqa: F401
     update_organization,
 )
 
+# Invitations d'équipe (ADR 0008) : façade publique.
+from .invitations import (  # noqa: F401
+    accept_invitation, create_invitation, decline_invitation, effective_status, list_invitations, preview_invitation,
+    revoke_invitation,
+)
+
 # Lectures des organisations : état de vérification dérivé, liste publique, limites (ADR 0006, 9.2 et 17.2).
 from .organization_reads import (  # noqa: F401
     get_category_ids_by_organization, get_internal_verification, get_organization_limits, get_verification_data,

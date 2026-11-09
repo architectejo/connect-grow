@@ -1,5 +1,6 @@
 """Socle des invitations d'organisation (L1-01-B2a, ADR 0008 §4, §6, §8.3, §10) : modèle, contraintes, migrations,
-réglages, commande `expire_invitations`, catalogue d'événements, throttles. Les services et les vues arrivent avec B2b."""
+réglages, commande `expire_invitations`, catalogue d'événements, throttles. Les services et les vues (B2b) sont
+testés dans `tests_invitations.py`."""
 import hashlib
 import io
 from datetime import timedelta
@@ -20,7 +21,7 @@ from django.utils import timezone
 from rest_framework.throttling import SimpleRateThrottle
 
 from apps.moderation.models import AuditLog
-from apps.platform_core import catalog
+from apps.platform_core import catalog, registry
 from apps.platform_core.models import OutboxEvent
 
 from . import throttles
@@ -164,6 +165,28 @@ class InvitationAdminTests(TestCase):
         self.assertNotContains(listing, SENTINEL_LABEL)
         self.assertEqual(self.client.get(reverse('admin:identity_organizationinvitation_add')).status_code, 403)
 
+    def test_change_and_delete_posts_are_refused_and_change_nothing(self):
+        organization = Organization.objects.create(name='Org', org_type='ENTREPRISE')
+        invitation = make_invitation(organization, label=SENTINEL_LABEL)
+        staff = make_admin_user(
+            'inv-adm4@example.com',
+            perms=['view_organizationinvitation', 'change_organizationinvitation', 'delete_organizationinvitation'],
+        )
+        self.client.force_login(staff)
+        change_url = reverse('admin:identity_organizationinvitation_change', args=[invitation.pk])
+        response = self.client.post(change_url, {'role': 'ANALYST', 'status': 'REVOKED'})
+        self.assertIn(response.status_code, (302, 403))
+        delete_url = reverse('admin:identity_organizationinvitation_delete', args=[invitation.pk])
+        self.assertEqual(self.client.post(delete_url, {'post': 'yes'}).status_code, 403)
+        invitation.refresh_from_db()
+        self.assertEqual((invitation.role, invitation.status, invitation.label), ('EDITOR', 'PENDING', SENTINEL_LABEL))
+        # Action de masse « supprimer » : refusée aussi.
+        self.client.post(
+            reverse('admin:identity_organizationinvitation_changelist'),
+            {'action': 'delete_selected', '_selected_action': [str(invitation.pk)], 'post': 'yes'},
+        )
+        self.assertTrue(OrganizationInvitation.objects.filter(pk=invitation.pk).exists())
+
 
 class ExpireInvitationsCommandTests(TestCase):
     def setUp(self):
@@ -184,6 +207,13 @@ class ExpireInvitationsCommandTests(TestCase):
         self.assertIsNotNone(due.closed_at)
         self.assertIsNone(due.closed_by)
         self.assertEqual((alive.status, alive.label), ('PENDING', 'garde'))
+
+    def test_expiry_bumps_updated_at(self):
+        due = make_invitation(self.organization, 'due', expires_at=timezone.now() - timedelta(minutes=1))
+        before = due.updated_at
+        self.run_command()
+        due.refresh_from_db()
+        self.assertGreater(due.updated_at, before)
 
     def test_other_closed_statuses_are_left_untouched_before_retention(self):
         past = timezone.now() - timedelta(days=1)
@@ -244,10 +274,13 @@ class ExpireInvitationsCommandTests(TestCase):
 
 
 class InvitationEventCatalogTests(TestCase):
-    def test_type_is_declared_in_v1_with_the_pending_flags(self):
+    def test_type_is_declared_in_v1_without_provisional_flags(self):
         spec = catalog.EVENT_TYPES['identity.organization_invitation_changed']
         self.assertEqual((spec.version, spec.domain), (1, 'identity'))
-        self.assertTrue(spec.emitter_pending)
+        # B2b : l'émetteur (services d'invitation) et l'abonné existent, les drapeaux provisoires sont retirés.
+        self.assertFalse(spec.emitter_pending)
+        self.assertFalse(spec.no_subscriber)
+        self.assertTrue(registry.subscribers_for('identity.organization_invitation_changed'))
 
     def test_django_checks_stay_green(self):
         self.assertEqual([e for e in run_checks() if e.id.startswith('platform_core.')], [])

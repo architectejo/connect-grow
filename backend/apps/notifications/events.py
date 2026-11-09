@@ -227,9 +227,10 @@ def notify_membership_change(event):
         context = None
     else:
         return
+    # D11 : la notification d'ajout ou de changement de rôle mène à l'équipe ; celle de retrait reste personnelle.
+    link = '/dashboard' if change == 'revoked' else f'/organizations/{organization}/team'
     services.notify(
-        user_id=target, notification_type=services.SYSTEM, title=title, content=content, link='/dashboard',
-        context=context,
+        user_id=target, notification_type=services.SYSTEM, title=title, content=content, link=link, context=context,
     )
 
 
@@ -257,6 +258,37 @@ def purge_context_notifications(event):
         ]
         if lost:
             services.purge_context_notifications(user, CONTEXT_ORGANIZATION, organization, notification_types=lost)
+
+
+_INVITATION_OUTCOMES = {
+    'accepted': ("Invitation acceptée", "acceptée"),
+    'declined': ("Invitation refusée", "refusée"),
+}
+
+
+@subscribe('identity.organization_invitation_changed', name='notifications.notify_invitation_outcome')
+def notify_invitation_outcome(event):
+    """Prévient l'INVITEUR SEUL (s'il est toujours destinataire de `org.manage_members`) qu'une invitation a été
+    acceptée ou refusée. Texte neutre : jamais le nom de la personne, ni l'étiquette, ni le jeton. Rien n'est
+    notifié pour une création ou une révocation (ADR 0008 §6)."""
+    payload = event.payload
+    organization_id, change = _require(payload, 'organization_id', 'change')
+    if change not in _INVITATION_OUTCOMES:
+        return
+    organization = _user_id(organization_id)
+    inviter = payload.get('inviter_id')
+    if not inviter:
+        return
+    inviter = _user_id(inviter)
+    if inviter not in identity_services.get_organization_recipients(organization, 'org.manage_members'):
+        return
+    title, outcome = _INVITATION_OUTCOMES[change]
+    role = identity_services.get_role_label(payload.get('role'))
+    services.notify(
+        user_id=inviter, notification_type=services.SYSTEM, title=title,
+        content=f"Une invitation à rejoindre « {_organization_name(organization)} » avec le rôle {role} a été {outcome}.",
+        link=f'/organizations/{organization}/team', context=(CONTEXT_ORGANIZATION, organization),
+    )
 
 
 _STATUS_MESSAGES = {

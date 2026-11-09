@@ -22,7 +22,10 @@ def expire_invitations(now=None) -> int:
     with transaction.atomic():
         count = OrganizationInvitation.objects.filter(
             status=OrganizationInvitation.STATUS_PENDING, expires_at__lte=now,
-        ).update(status=OrganizationInvitation.STATUS_EXPIRED, closed_at=now, closed_by=None, label='')
+        ).update(
+            status=OrganizationInvitation.STATUS_EXPIRED, closed_at=now, closed_by=None, label='',
+            updated_at=now,
+        )
         if count:
             record_audit(None, 'INVITATION_EXPIRED', details=f"count={count}")
     return count

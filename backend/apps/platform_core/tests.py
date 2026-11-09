@@ -585,11 +585,17 @@ class BoundaryTests(SimpleTestCase):
         published = self.published_types()
         for name, spec in catalog.EVENT_TYPES.items():
             emitters = published.get(name, [])
-            if spec.emitter_pending and not emitters:
+            if spec.emitter_pending:
+                # Drapeau provisoire : il doit disparaître dès que l'émetteur existe.
+                self.assertFalse(emitters, f'{name} : un émetteur existe, retirer le drapeau emitter_pending')
                 continue
             self.assertTrue(emitters, f'{name} : aucun émetteur')
             self.assertEqual({label for label, _ in emitters}, {spec.domain}, name)
-            if not spec.no_subscriber:
+            if spec.no_subscriber:
+                self.assertFalse(
+                    registry.subscribers_for(name), f'{name} : un abonné existe, retirer le drapeau no_subscriber',
+                )
+            else:
                 self.assertTrue(registry.subscribers_for(name), f'{name} : aucun abonné')
         self.assertEqual(set(published) - set(catalog.EVENT_TYPES), set(), 'type publié absent du catalogue')
 

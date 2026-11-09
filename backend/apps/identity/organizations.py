@@ -38,7 +38,8 @@ from apps.platform_core.services import publish_event
 from . import capabilities
 from .capabilities import ROLE_OWNER, ROLES
 from .models import (
-    IdentitySettings, KycDocument, Membership, Organization, OrganizationCategory, ORG_TYPES, ProviderProfile, User,
+    IdentitySettings, KycDocument, Membership, Organization, OrganizationCategory, OrganizationInvitation, ORG_TYPES,
+    ProviderProfile, User,
 )
 from .throttles import FailureLimiter
 
@@ -227,22 +228,29 @@ def _get_membership(organization, user_id) -> Membership:
     return membership
 
 
-def _event_payload(organization, membership, change, old_role, new_role, actor):
-    return {
+def _event_payload(organization, membership, change, old_role, new_role, actor, via=None):
+    """Charge utile de `identity.membership_changed` (v1). `via` (clé additive, ADR 0008 §6) n'est présente que
+    pour une appartenance obtenue par invitation."""
+    payload = {
         'organization_id': str(organization.pk), 'user_id': str(membership.user_id), 'change': change,
         'old_role': old_role or None, 'new_role': new_role or None,
         'actor_id': str(actor.pk) if actor is not None else None,
     }
+    if via:
+        payload['via'] = via
+    return payload
 
 
-def _publish_membership_change(organization, membership, change, old_role, new_role, actor):
+def _publish_membership_change(organization, membership, change, old_role, new_role, actor, via=None):
     publish_event(
         'identity.membership_changed', aggregate_type='organization', aggregate_id=organization.pk,
-        payload=_event_payload(organization, membership, change, old_role, new_role, actor),
+        payload=_event_payload(organization, membership, change, old_role, new_role, actor, via=via),
     )
 
 
-def _audit_membership(actor, action, organization, membership, old_role, new_role, reauth=False, orphaned=False):
+def _audit_membership(
+    actor, action, organization, membership, old_role, new_role, reauth=False, orphaned=False, extra='',
+):
     details = (
         f"organization={organization.pk}; user={membership.user_id}; "
         f"old_role={old_role or '-'}; new_role={new_role or '-'}"
@@ -251,6 +259,8 @@ def _audit_membership(actor, action, organization, membership, old_role, new_rol
         details += "; reauth=true"
     if orphaned:
         details += "; orphaned=true"
+    if extra:
+        details += f"; {extra}"
     record_audit(
         actor, action, target=membership, details=details, context=(CONTEXT_ORGANIZATION, organization.pk),
     )
@@ -740,14 +750,43 @@ def _publish_status_change(organization, reason, actor):
 
 # --- Équipe -------------------------------------------------------------------------------
 
+def _activate_membership(actor, organization, target, role, added_by=None, via=None, invited_by=None):
+    """Noyau interne, JAMAIS exposé : crée l'appartenance `ACTIVE` ou réactive la même ligne (R12), puis audit
+    `MEMBERSHIP_ADDED` (acteur = `actor`) et événement `identity.membership_changed` (acteur = `added_by`, par défaut
+    `actor`). Aucune autorisation ici : l'appelant l'a faite sous verrou. Déjà membre actif : 409 `already_member`.
+    `via='invitation'` et `invited_by` tracent l'origine dans l'audit et l'événement (ADR 0008 §5.1, §6)."""
+    added_by = added_by or actor
+    membership = Membership.objects.filter(organization=organization, user=target).first()
+    if membership is not None and membership.status == Membership.STATUS_ACTIVE:
+        raise OrganizationError("Ce compte est déjà membre de l'organisation.", 'already_member')
+    now = timezone.now()
+    if membership is None:
+        membership = Membership.objects.create(
+            organization=organization, user=target, role=role, status=Membership.STATUS_ACTIVE,
+            added_by=added_by, joined_at=now,
+        )
+        change = CHANGE_ADDED
+    else:
+        membership.role, membership.status = role, Membership.STATUS_ACTIVE
+        membership.end_reason, membership.ended_at, membership.ended_by = '', None, None
+        membership.added_by, membership.joined_at = added_by, now
+        membership.save()
+        change = CHANGE_REACTIVATED
+    extra = f"via={via}; invited_by={invited_by}" if via else ''
+    _audit_membership(actor, 'MEMBERSHIP_ADDED', organization, membership, None, role, extra=extra)
+    _publish_membership_change(organization, membership, change, None, role, added_by, via=via)
+    return membership
+
+
 def add_member(actor, organization_id, user_id, role) -> Membership:
     """Ajoute (ou réactive) un membre actif. `org.manage_members` ; un administrateur n'attribue jamais
     OWNER (R9) ni un rôle supérieur au sien (R10). Réactive la même ligne pour un ancien membre (R12).
 
-    NON EXPOSABLE TEL QUEL : cet ajout direct se fait sans le consentement de la cible. Aucun endpoint ne doit
-    l'appeler en l'état ; L1-01 doit implémenter invitation + acceptation par la cible (plafond vérifié à
-    l'acceptation), avec revue de `auditeur-securite` (ADR 0006, sections 15 et 17). Les refus portant sur la
-    cible (inconnue, inactive, restreinte, au plafond) partagent une réponse unique et neutre."""
+    NON EXPOSABLE : cet ajout direct se fait sans le consentement de la cible. Aucun endpoint n'appelle cette
+    fonction (ADR 0008 : l'entrée dans une équipe passe par une invitation acceptée par la cible, voir
+    `invitations.accept_invitation`) ; un test de garde de routes vérifie qu'aucune vue ne l'importe. Elle ne
+    subsiste que pour les tests et les usages internes. Les refus portant sur la cible (inconnue, inactive,
+    restreinte, au plafond) partagent une réponse unique et neutre."""
     _validate_role(role)
     with transaction.atomic():
         organization = _lock_organization(organization_id)
@@ -762,25 +801,46 @@ def add_member(actor, organization_id, user_id, role) -> Membership:
             _ensure_under_limit(target.pk)
         except OrganizationError:
             raise _unavailable_user_error()
-        membership = Membership.objects.filter(organization=organization, user=target).first()
-        if membership is not None and membership.status == Membership.STATUS_ACTIVE:
-            raise OrganizationError("Ce compte est déjà membre de l'organisation.", 'already_member')
-        now = timezone.now()
-        if membership is None:
-            membership = Membership.objects.create(
-                organization=organization, user=target, role=role, status=Membership.STATUS_ACTIVE,
-                added_by=actor, joined_at=now,
-            )
-            change = CHANGE_ADDED
-        else:
-            membership.role, membership.status = role, Membership.STATUS_ACTIVE
-            membership.end_reason, membership.ended_at, membership.ended_by = '', None, None
-            membership.added_by, membership.joined_at = actor, now
-            membership.save()
-            change = CHANGE_REACTIVATED
-        _audit_membership(actor, 'MEMBERSHIP_ADDED', organization, membership, None, role)
-        _publish_membership_change(organization, membership, change, None, role, actor)
-    return membership
+        return _activate_membership(actor, organization, target, role)
+
+
+# --- Invitations : trace et balayage (le cycle de vie complet est dans `invitations.py`) ------------------------
+
+def _audit_invitation(actor, action, organization, invitation, **extra):
+    """Trace d'une invitation : UUID et codes seulement (jamais jeton, étiquette, nom, téléphone, e-mail)."""
+    details = f"organization={organization.pk}; role={invitation.role}"
+    for key, value in extra.items():
+        details += f"; {key}={value}"
+    record_audit(
+        actor, action, target=invitation, details=details, context=(CONTEXT_ORGANIZATION, organization.pk),
+    )
+
+
+def sweep_invitations_of_inviter(actor, organization, inviter_id, new_role=None):
+    """Révoque (`authority_lost`) les invitations `PENDING` d'un inviteur qui perd son autorité : retiré ou parti
+    (`new_role=None` : toutes), ou rétrogradé (`new_role` : seules celles qu'il ne peut plus gérer). Dans la
+    transaction de l'appelant ; mise à jour conditionnelle `PENDING -> REVOKED`, étiquette vidée, une trace par
+    invitation, aucun événement. C'est du nettoyage : la garantie de sécurité reste la revérification de l'autorité
+    à l'acceptation (ADR 0008 §5.1). Renvoie le nombre d'invitations révoquées."""
+    now = timezone.now()
+    revoked = 0
+    for invitation in OrganizationInvitation.objects.filter(
+        organization=organization, created_by_id=inviter_id, status=OrganizationInvitation.STATUS_PENDING,
+    ).only('id', 'role'):
+        if (
+            new_role is not None and capabilities.role_has_capability(new_role, 'org.manage_members')
+            and capabilities.can_manage_role_of(new_role, invitation.role)
+        ):
+            continue
+        done = OrganizationInvitation.objects.filter(
+            pk=invitation.pk, status=OrganizationInvitation.STATUS_PENDING,
+        ).update(
+            status=OrganizationInvitation.STATUS_REVOKED, closed_at=now, closed_by=actor, label='', updated_at=now,
+        )
+        if done:
+            revoked += 1
+            _audit_invitation(actor, 'INVITATION_REVOKED', organization, invitation, reason='authority_lost')
+    return revoked
 
 
 def _publish_owners_changed(organization, actor):
@@ -834,6 +894,9 @@ def _apply_role_change(
         orphaned = _ensure_not_orphaned(organization, effective_before)
     _audit_membership(actor, audit_action, organization, membership, old_role, new_role, reauth, orphaned)
     _publish_membership_change(organization, membership, CHANGE_ROLE_CHANGED, old_role, new_role, actor)
+    if capabilities.role_has_capability(old_role, 'org.manage_members'):
+        # Il a pu inviter : ses invitations en attente sont revues dans la même transaction (ADR 0008 §5.1).
+        sweep_invitations_of_inviter(actor, organization, membership.user_id, new_role=new_role)
     if publish_owners and ROLE_OWNER in (old_role, new_role):
         _publish_owners_changed(organization, actor)
     return membership
@@ -911,6 +974,9 @@ def _end_membership(actor, organization, membership, end_reason, audit_action):
     membership.status, membership.end_reason, membership.ended_at = Membership.STATUS_REVOKED, end_reason, now
     _audit_membership(actor, audit_action, organization, membership, old_role, None, orphaned=orphaned)
     _publish_membership_change(organization, membership, CHANGE_REVOKED, old_role, None, actor)
+    if capabilities.role_has_capability(old_role, 'org.manage_members'):
+        # Retiré ou parti : ses invitations en attente sont révoquées dans la même transaction (ADR 0008 §5.1).
+        sweep_invitations_of_inviter(actor, organization, membership.user_id)
     if old_role == ROLE_OWNER:
         _publish_owners_changed(organization, actor)
     return membership
@@ -1069,7 +1135,8 @@ def change_role(actor, organization_id, membership_id, new_role, confirm=False, 
 def remove_member(actor, organization_id, membership_id) -> Membership:
     """Retire un membre (`org.manage_members`). Soi-même : 400 `use_leave`. Un propriétaire ne se retire jamais
     directement (409 `owner_must_be_demoted` : le rétrograder d'abord, ce qui exige la ressaisie du mot de
-    passe). Effet immédiat ; les invitations de la personne retirée seront balayées par L1-01 B2b."""
+    passe). Effet immédiat ; les invitations en attente créées par la personne retirée sont révoquées dans la même
+    transaction (`sweep_invitations_of_inviter`)."""
     with transaction.atomic():
         organization = _lock_organization(organization_id)
         actor_membership = _authorize_member(actor, organization, 'org.manage_members')
@@ -1145,41 +1212,6 @@ def assert_account_removable(user):
         raise _open_report_error()
 
 
-def assert_provider_removable(profile):
-    """Refuse la suppression définitive d'un profil prestataire tant qu'un signalement ouvert pour motif grave vise
-    une de ses offres ou un de ses avis reçus (409 `open_grave_report`). Il n'existe pas de signalement du profil
-    lui-même : la cible « utilisateur » est contrôlée avec le compte."""
-    if _context_has_grave_evidence(CONTEXT_PROVIDER, profile.pk):
-        raise _open_report_error()
-
-
-def _open_report_error():
-    return OrganizationError(
-        "Un signalement grave est en cours : la suppression est impossible tant qu'il n'est pas clos.",
-        'open_grave_report',
-    )
-
-
-def _context_has_grave_evidence(context_type, context_id) -> bool:
-    """Offres et avis reçus d'un contexte sous signalement grave ouvert. Imports locaux : `marketplace` et `reviews`
-    importent `identity.services` (cycle) ; l'appel reste par leurs `services.py`."""
-    from apps.marketplace import services as marketplace_services
-    from apps.reviews import services as reviews_services
-    return (
-        marketplace_services.has_open_grave_report_on_seller(context_type, context_id)
-        or reviews_services.has_open_grave_report_on_seller(context_type, context_id)
-    )
-
-
-def _author_has_grave_evidence(user_id) -> bool:
-    """Avis écrits et messages envoyés par le compte sous signalement grave ouvert (ils partent avec lui par cascade
-    de clé étrangère : preuves à conserver)."""
-    from apps.messaging import services as messaging_services
-    from apps.reviews import services as reviews_services
-    return (
-        reviews_services.has_open_grave_report_on_author(user_id)
-        or messaging_services.has_open_grave_report_on_sender(user_id)
-    )
 # `suggested_action` d'un blocage d'organisation (contrat d'API L1-01, section 3).
 ACTION_TRANSFER_OWNERSHIP = 'transfer_ownership'
 ACTION_ARCHIVE = 'archive'
@@ -1244,3 +1276,38 @@ def account_removal_blockers(user, limit=None) -> AccountRemovalBlockers:
     return AccountRemovalBlockers(tuple(rows[:limit] if limit else rows), other)
 
 
+def assert_provider_removable(profile):
+    """Refuse la suppression définitive d'un profil prestataire tant qu'un signalement ouvert pour motif grave vise
+    une de ses offres ou un de ses avis reçus (409 `open_grave_report`). Il n'existe pas de signalement du profil
+    lui-même : la cible « utilisateur » est contrôlée avec le compte."""
+    if _context_has_grave_evidence(CONTEXT_PROVIDER, profile.pk):
+        raise _open_report_error()
+
+
+def _open_report_error():
+    return OrganizationError(
+        "Un signalement grave est en cours : la suppression est impossible tant qu'il n'est pas clos.",
+        'open_grave_report',
+    )
+
+
+def _context_has_grave_evidence(context_type, context_id) -> bool:
+    """Offres et avis reçus d'un contexte sous signalement grave ouvert. Imports locaux : `marketplace` et `reviews`
+    importent `identity.services` (cycle) ; l'appel reste par leurs `services.py`."""
+    from apps.marketplace import services as marketplace_services
+    from apps.reviews import services as reviews_services
+    return (
+        marketplace_services.has_open_grave_report_on_seller(context_type, context_id)
+        or reviews_services.has_open_grave_report_on_seller(context_type, context_id)
+    )
+
+
+def _author_has_grave_evidence(user_id) -> bool:
+    """Avis écrits et messages envoyés par le compte sous signalement grave ouvert (ils partent avec lui par cascade
+    de clé étrangère : preuves à conserver)."""
+    from apps.messaging import services as messaging_services
+    from apps.reviews import services as reviews_services
+    return (
+        reviews_services.has_open_grave_report_on_author(user_id)
+        or messaging_services.has_open_grave_report_on_sender(user_id)
+    )

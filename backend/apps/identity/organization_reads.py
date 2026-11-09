@@ -14,8 +14,10 @@ from django.db.models.functions import Lower
 from rest_framework import serializers
 from rest_framework.exceptions import ErrorDetail
 
-from . import organizations, verification
-from .models import KycDocument, Organization, OrganizationCategory, OrganizationDocumentRequirement
+from apps.moderation import services as moderation_services
+
+from . import capabilities, organizations, verification
+from .models import KycDocument, Membership, Organization, OrganizationCategory, OrganizationDocumentRequirement
 
 SEARCH_MAX_LENGTH = 100
 STATE_NONE = 'NONE'
@@ -87,7 +89,13 @@ def public_organizations_queryset(params):
     `fully_verified` ; tri par nom (casse ignorée) puis identifiant. Toute valeur de filtre invalide est
     refusée (400) plutôt qu'ignorée : un filtre perdu afficherait des organisations non vérifiées sous
     une étiquette « vérifiée »."""
-    queryset = Organization.objects.filter(status=Organization.STATUS_ACTIVE)
+    # Même règle que `is_seller_context_public` (A7) : au moins un propriétaire actif, compte actif et sans sanction
+    # bloquante ; sinon l'organisation n'est pas listée (ses offres sont masquées et sa fiche répond 404).
+    led = Membership.objects.filter(
+        organization_id=OuterRef('pk'), role=capabilities.ROLE_OWNER, status=Membership.STATUS_ACTIVE,
+        user__is_active=True,
+    ).filter(~Exists(moderation_services.blocking_sanctions_for(OuterRef('user_id'))))
+    queryset = Organization.objects.filter(status=Organization.STATUS_ACTIVE).filter(Exists(led))
 
     search = params.get('search')
     if search and len(search.strip()) > SEARCH_MAX_LENGTH:

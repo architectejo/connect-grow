@@ -328,6 +328,10 @@ class UuidAndCatalogReferenceTests(APITestCase):
                 name=f'Boutique {i}', org_type='ENTREPRISE', city_id=self.city.id, commune_id=self.commune.id,
             )
             OrganizationCategory.objects.create(organization=organization, category_id=self.category.id)
+            Membership.objects.create(
+                organization=organization, role='OWNER',
+                user=User.objects.create_user(email=f'b{i}@example.com', password='x', full_name='Propriétaire'),
+            )
         # total, organisations, catégories, exigences, pièces : indépendant du nombre d'organisations
         with self.assertNumQueries(6):
             response = self.client.get(reverse('organizations'))

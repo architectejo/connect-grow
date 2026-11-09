@@ -176,6 +176,16 @@ def get_restricted_user_ids(user_ids) -> set:
     )
 
 
+def blocking_sanctions_for(user_ref):
+    """Sous-requête (à utiliser dans `Exists`) des sanctions bloquantes en cours du compte désigné par `user_ref` (un
+    `OuterRef`) : même règle que `get_restricted_user_ids`, exprimée pour un filtrage par lot côté base (liste
+    publique des organisations, ADR 0006, A7)."""
+    now = timezone.now()
+    return Sanction.objects.filter(
+        user_id=user_ref, is_active=True, sanction_type__in=Sanction.ACCOUNT_BLOCKING_TYPES,
+    ).filter(Q(ends_at__isnull=True) | Q(ends_at__gt=now))
+
+
 def record_settings_change(actor, obj, old_values: dict, new_values: dict):
     """Journalise la modification d'un réglage du back-office (règle 12) avec l'ancienne et la
     nouvelle valeur de chaque champ modifié."""

@@ -54,6 +54,14 @@ def make_org(name='Atelier', org_type='ENTREPRISE', **extra):
     return Organization.objects.create(name=name, org_type=org_type, **extra)
 
 
+def make_led_org(name='Atelier', org_type='ENTREPRISE', **extra):
+    """Organisation listable publiquement : elle a un propriétaire actif non sanctionné (ADR 0006, A7)."""
+    organization = make_org(name, org_type, **extra)
+    owner = User.objects.create_user(email=f'owner-{uuid.uuid4().hex[:10]}@example.com', password='x', full_name='Propriétaire')
+    Membership.objects.create(organization=organization, user=owner, role=OWNER, status=Membership.STATUS_ACTIVE)
+    return organization
+
+
 def join(org, user, role=OWNER, status=Membership.STATUS_ACTIVE):
     return Membership.objects.create(organization=org, user=user, role=role, status=status)
 
@@ -710,7 +718,7 @@ class PublicListTests(TestCase):
         member.email = MEMBER_EMAIL
         member.save()
         city = City.objects.create(name='Kinshasa')
-        org = make_org('Boutique A', description='Pagnes', nif=NIF, city_id=city.id, created_by=member)
+        org = make_led_org('Boutique A', description='Pagnes', nif=NIF, city_id=city.id, created_by=member)
         join(org, member, OWNER)
         add_document(org, 'RCCM')
         response = self.client.get(ORGS)
@@ -729,22 +737,22 @@ class PublicListTests(TestCase):
         self.assertNotIn('nif', item)
 
     def test_only_active_organizations_are_listed(self):
-        make_org('Active')
-        make_org('Suspendue', status='SUSPENDED')
-        make_org('Archivée', status='ARCHIVED')
+        make_led_org('Active')
+        make_led_org('Suspendue', status='SUSPENDED')
+        make_led_org('Archivée', status='ARCHIVED')
         self.assertEqual(self.names(), ['Active'])
 
     def test_order_is_by_name_ignoring_case_then_id_and_paginated(self):
         for name in ('banane', 'Zèbre', 'Abricot', 'cerise'):
-            make_org(name)
+            make_led_org(name)
         self.assertEqual(self.names(), ['Abricot', 'banane', 'cerise', 'Zèbre'])
         page = self.client.get(ORGS, {'page_size': 2}).json()
         self.assertEqual((page['count'], len(page['results']), bool(page['next'])), (4, 2, True))
         self.assertEqual(self.client.get(ORGS, {'page': 3, 'page_size': 2}).status_code, 404)
 
     def test_search_covers_name_and_description_only(self):
-        make_org('Alpha', description='vente de pagnes')
-        make_org('Beta', description='autre')
+        make_led_org('Alpha', description='vente de pagnes')
+        make_led_org('Beta', description='autre')
         member = make_user('pers', full_name='Personne Privée')
         join(Organization.objects.get(name='Beta'), member, OWNER)
         self.assertEqual(self.names(search='alpha'), ['Alpha'])
@@ -759,13 +767,13 @@ class PublicListTests(TestCase):
         self.assertIn('search', response.json())
 
     def test_org_type_filter(self):
-        make_org('E1')
-        make_org('O1', org_type='ONG')
+        make_led_org('E1')
+        make_led_org('O1', org_type='ONG')
         self.assertEqual(self.names(org_type='ONG'), ['O1'])
         self.assertEqual(self.client.get(ORGS, {'org_type': 'AUTRE'}).status_code, 400)
 
     def test_claim_and_fully_verified_filters(self):
-        full, partial, none = make_org('Complete'), make_org('Partielle'), make_org('Aucune')
+        full, partial, none = make_led_org('Complete'), make_led_org('Partielle'), make_led_org('Aucune')
         for document_type in ('RCCM', 'ID_NATIONALE', 'PIECE_GERANT'):
             add_document(full, document_type)
         add_document(partial, 'RCCM')
@@ -783,13 +791,13 @@ class PublicListTests(TestCase):
 
     def test_an_organization_without_requirements_is_never_fully_verified(self):
         OrganizationDocumentRequirement.objects.filter(org_type='BOUTIQUE').delete()
-        make_org('Sans exigence', org_type='BOUTIQUE')
+        make_led_org('Sans exigence', org_type='BOUTIQUE')
         self.assertEqual(self.names(fully_verified='true'), [])
         self.assertEqual(self.names(fully_verified='false'), ['Sans exigence'])
 
     def test_query_count_does_not_depend_on_the_number_of_organizations(self):
         for i in range(12):
-            org = make_org(f'Org {i:02d}')
+            org = make_led_org(f'Org {i:02d}')
             add_document(org, 'RCCM')
         with self.assertNumQueries(6):
             self.assertEqual(self.client.get(ORGS, {'page_size': 12}).status_code, 200)
@@ -944,7 +952,7 @@ class FiltersMatchSharedDerivationTests(TestCase):
 
         orgs = []
         for i, types in enumerate([(), ('RCCM',), ('RCCM', 'ID_NATIONALE'), ('RCCM', 'ID_NATIONALE', 'PIECE_GERANT')]):
-            org = make_org(f'Cohérence {i}')
+            org = make_led_org(f'Cohérence {i}')
             for document_type in types:
                 add_document(org, document_type)
             orgs.append(org)

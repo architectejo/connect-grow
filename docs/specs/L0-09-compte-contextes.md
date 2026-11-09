@@ -106,7 +106,7 @@ Matrice **proposée** pour validation (la source donne les noms des rôles, pas 
 
 Règles associées :
 
-- **R8.** Une organisation a au moins un propriétaire actif en permanence. Rétrograder, révoquer ou voir partir le dernier propriétaire est refusé (`LAST_OWNER`).
+- **R8.** Une organisation a au moins un propriétaire actif en permanence. Rétrograder, révoquer ou voir partir le dernier propriétaire est refusé (`last_owner`).
 - **R9.** Un administrateur ne peut ni attribuer, ni retirer, ni modifier le rôle de propriétaire, ni agir sur un propriétaire (doc 06 §7 : « ne peut déléguer au-delà de son autorité »).
 - **R10.** Un propriétaire ou un administrateur ne s'attribue pas un rôle supérieur à lui-même.
 - **R11.** Le départ ou la révocation d'un membre met son `Membership` à `REVOKED` : ses permissions cessent **immédiatement** (doc 06 §19, AC-07 ; doc 10 IAM-06). Le compte personnel, ses offres personnelles, ses avis restent intacts (CDC §3.1).
@@ -174,7 +174,7 @@ Critères d'acceptation (testables) :
 - [ ] Étant donné la création réussie, alors une entrée `AuditLog` `ORG_CREATED` existe avec l'acteur et l'organisation ; ses `details` ne contiennent ni nom ni téléphone ni e-mail.
 - [ ] Étant donné la matrice du §3.2, alors un test paramétré (rôle x capacité) vérifie chaque case ; une capacité non accordée renvoie `DENY_PERMISSION`.
 - [ ] Étant donné un utilisateur sans `Membership` actif, quand il demande une capacité interne de l'organisation, alors il reçoit `DENY_RELATION`, quel que soit son plan ou son statut `is_staff`.
-- [ ] Étant donné une organisation avec un seul propriétaire actif, quand on tente de le rétrograder, de le révoquer ou qu'il quitte l'organisation, alors l'opération est refusée avec le code `LAST_OWNER` et l'état est inchangé.
+- [ ] Étant donné une organisation avec un seul propriétaire actif, quand on tente de le rétrograder, de le révoquer ou qu'il quitte l'organisation, alors l'opération est refusée avec le code `last_owner` et l'état est inchangé.
 - [ ] Étant donné un administrateur, quand il tente d'attribuer ou de retirer le rôle `OWNER`, ou de modifier un propriétaire, alors `DENY_PERMISSION`.
 - [ ] Étant donné un membre révoqué (`REVOKED`), quand il tente l'une des capacités qu'il avait un instant avant, alors la requête suivante est refusée (`DENY_RELATION`) sans délai de cache ; son compte personnel se connecte toujours et ses offres personnelles restent actives.
 - [ ] Étant donné un ancien membre réinvité, alors la même ligne `Membership` repasse à `ACTIVE` (aucune seconde ligne pour le couple organisation-utilisateur).

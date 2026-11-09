@@ -151,9 +151,9 @@ def check_shape(label, obj, spec):
 
 SPEC_USER = {
     # L0-09g : le compte est unique, plus de `user_type` ni de `business_profile` ; `phone_verified` en lecture seule.
-    'id': 'uuid', 'email': 'str', 'full_name': 'str', 'photo?': 'str|null',
-    'phone?': 'str', 'ville?': 'uuid|null', 'ville_name?': 'str', 'commune?': 'uuid|null',
-    'commune_name?': 'str', 'date_joined?': 'date', 'phone_verified': 'bool',
+    'id': 'uuid', 'email': 'str|null', 'full_name': 'str', 'photo?': 'str|null',
+    'phone?': 'str|null', 'ville?': 'uuid|null', 'ville_name?': 'str|null', 'commune?': 'uuid|null',
+    'commune_name?': 'str|null', 'date_joined?': 'date', 'phone_verified': 'bool',
 }
 SPEC_SELLER = {
     # Fiche publique d'un contexte vendeur (ADR 0006, 9.6) : ni téléphone, ni e-mail, ni NIF, ni membres.
@@ -421,7 +421,7 @@ def main():
     expect('galerie : ajout', r, 201)
     check_shape('PostImage', r.json[0], {'id': 'uuid', 'image': 'str', 'order?': 'num'})
     r = call('POST', f'marketplace/posts/{offer_id}/images/', files={'image': ('g.jpg', jpeg(), 'image/jpeg')}, token=b_access)
-    expect('galerie : ajout par un tiers', r, 404)
+    expect('galerie : ajout par un tiers (offre publique)', r, 403, 'DENY_RELATION')
     img_id = call('GET', f'marketplace/posts/{offer_id}/').json['images'][0]['id']
     r = call('DELETE', f'marketplace/posts/{offer_id}/images/', params={'image_id': img_id}, token=s_access)
     expect('galerie : suppression', r, 204)
@@ -518,7 +518,7 @@ def main():
        "s.min_account_age_hours=24; s.min_reviews_to_display=2; s.save(); "
        "from apps.marketplace.models import ContactEvent as C; "
        "from django.utils import timezone as t; from datetime import timedelta as d; "
-       "C.objects.update(created_at=t.now()-d(hours=2))")
+       "C.objects.update(created_at=t.now()-d(hours=2), delivered_at=t.now()-d(hours=2))")  # preuve = max(created_at, delivered_at) (ADR 0005)
     r = call('GET', 'interactions/reviews/eligibility/', params={'post': offer_id}, token=b_access)
     print('INFO  éligibilité contact ancien, compte récent :', r.json)
     if r.json.get('reason') != 'account_too_new':
@@ -680,9 +680,11 @@ def main():
     expect('modif avis masqué par son auteur', call('PATCH', f"interactions/reviews/{r2['id']}/", {'content': 'Modification après masquage'}, token=b2_access), 403, 'review_locked')
 
     # 9. Organisations : liste publique (pagination, filtres) et ancienne liste supprimée
-    db("from apps.identity.models import Organization\n"
+    # Chaque organisation a un propriétaire actif : sans lui, elle n'est pas listée (ADR 0006, A7).
+    db("from apps.identity.models import Membership, Organization, User\n"
        f"for i in range(24):\n"
-       f"    Organization.objects.create(name='Zbiz {RUN} %02d' % i, org_type='ENTREPRISE', nif='NIF-SECRET-%d' % i)")
+       f"    org = Organization.objects.create(name='Zbiz {RUN} %02d' % i, org_type='ENTREPRISE', nif='NIF-SECRET-%d' % i)\n"
+       f"    Membership.objects.create(organization=org, role='OWNER', user=User.objects.create_user(email='zbiz{RUN}-%d@example.com' % i, password='x', full_name='Propriétaire'))")
     r = call('GET', 'accounts/organizations/', params={'search': f'Zbiz+{RUN}'})
     expect('organisations page 1', r, 200)
     check_shape('Paginated<PublicOrganization>', r.json, SPEC_PAGE)

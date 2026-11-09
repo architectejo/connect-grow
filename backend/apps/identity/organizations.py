@@ -11,6 +11,7 @@ Ce module est exposé par `identity.services` ; les autres domaines n'importent 
 """
 import re
 import unicodedata
+from datetime import timedelta
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files import File
@@ -363,6 +364,21 @@ def _validate_creation_input(name, org_type, description, nif, category_ids, cit
 
 # --- Cycle de vie -------------------------------------------------------------------------
 
+# Protection contre le double clic (L009-02) : même créateur, même nom (casse ignorée) et même type dans cette
+# fenêtre => la création est idempotente (l'organisation existante est renvoyée, aucune autre n'est créée). Des
+# homonymes espacés dans le temps restent autorisés (ADR 0006, A12). Limite : sans verrou, deux requêtes
+# strictement simultanées peuvent encore passer ensemble (SQLite sérialise les écritures).
+DUPLICATE_SUBMISSION_WINDOW_SECONDS = 10
+
+
+def _recent_duplicate(creator, name, org_type):
+    since = timezone.now() - timedelta(seconds=DUPLICATE_SUBMISSION_WINDOW_SECONDS)
+    return Organization.objects.filter(
+        created_by=creator, name__iexact=name, org_type=org_type, status=Organization.STATUS_ACTIVE,
+        created_at__gte=since,
+    ).order_by('created_at').first()
+
+
 def create_organization(
     creator, name, org_type, description='', nif='', category_ids=(), city_id=None, commune_id=None, logo=None,
 ) -> Organization:
@@ -385,6 +401,9 @@ def create_organization(
     organization = None
     try:
         with transaction.atomic():
+            duplicate = _recent_duplicate(creator, name, org_type)
+            if duplicate is not None:
+                return duplicate  # double soumission : réponse idempotente, rien n'est recréé
             _ensure_under_limit(creator.pk)
             organization = Organization(
                 name=name, org_type=org_type, description=description, nif=nif,

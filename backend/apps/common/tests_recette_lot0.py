@@ -241,6 +241,10 @@ class ContractTests(RecetteBase):
     def test_organizations_are_paginated_by_20_and_filter_on_fully_verified(self):
         for i in range(24):
             organization = Organization.objects.create(name=f'Zbiz {i:02d}', org_type='ENTREPRISE')
+            Membership.objects.create(
+                organization=organization, role='OWNER',
+                user=User.objects.create_user(email=f'zbiz{i}@example.com', password='x', full_name='Propriétaire'),
+            )
             if i % 3 == 0:  # les trois pièces exigées du type ENTREPRISE, toutes validées
                 for document_type in ('RCCM', 'ID_NATIONALE', 'PIECE_GERANT'):
                     KycDocument.objects.create(

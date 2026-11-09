@@ -6,7 +6,6 @@ de rôle, retrait : aucun endpoint avant L1-01) passent par `identity.services`,
 Complète sans les modifier les tests de chaque domaine (`tests_contexts.py`, `tests_organizations_api.py`...).
 """
 import json
-import unittest
 import uuid
 from unittest import mock
 
@@ -593,7 +592,10 @@ class SettingsTests(RecetteBase):
         first = client.post(ORGS, body, format='json')
         second = client.post(ORGS, body, format='json')
         self.assertEqual(first.status_code, 201)
-        self.assertEqual(Organization.objects.filter(name='Meme Nom Sarl').count(), 1 if second.status_code >= 400 else 2)
+        # L009-02 : le double envoi est idempotent (même organisation renvoyée, rien n'est recréé).
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(first.json()['id'], second.json()['id'])
+        self.assertEqual(Organization.objects.filter(name='Meme Nom Sarl').count(), 1)
         # Le nom d'une organisation n'est pas unique (collision de noms, spec T9 : jamais fusionnées) : deux
         # propriétaires différents peuvent donc porter le même nom.
         other = self.api(self.outsider).post(ORGS, body, format='json')
@@ -750,11 +752,9 @@ class SanctionedOwnerTests(RecetteBase):
         self.settle()
         self.assertTrue(self.visible(offer))
 
-    @unittest.expectedFailure
     def test_ANOMALIE_L009_01_directory_still_lists_an_organization_whose_sole_owner_is_sanctioned(self):
-        """ANOMALIE (mineure) : l'annuaire `GET organizations/` liste encore l'organisation (statut ACTIVE) alors que
-        ses offres sont masquées et que `sellers/organization/<id>/` répond 404 (aucun propriétaire actif, ADR A7).
-        À retirer de `expectedFailure` une fois `public_organizations_queryset` aligné sur `is_seller_context_public`."""
+        """L009-01 (corrigée) : l'annuaire `GET organizations/` ne liste plus une organisation dont aucun propriétaire
+        n'est actif et sans sanction (offres masquées, fiche vendeur 404 : ADR A7)."""
         self.org_offer()
         Sanction.objects.create(user=self.team[OWNER], sanction_type=Sanction.TYPE_SUSPENSION_TEMPORAIRE, reason='x').apply()
         self.settle()

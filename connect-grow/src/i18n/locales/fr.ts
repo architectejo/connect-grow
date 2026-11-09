@@ -111,6 +111,7 @@ const fr = {
     addFavorite: "Ajouter aux favoris",
     removeFavorite: "Retirer des favoris",
     noImage: "Pas de photo",
+    defaultCommune: "Kinshasa",
     gallery: {
       previous: "Photo précédente",
       next: "Photo suivante",

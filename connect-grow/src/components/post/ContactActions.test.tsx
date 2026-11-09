@@ -152,7 +152,7 @@ describe("ContactActions", () => {
     expect(JSON.stringify({ ...sessionStorage })).not.toContain("243");
     expect(JSON.stringify(client.getQueryCache().getAll().map((q) => q.state.data))).not.toContain("243");
 
-    fireEvent.click(screen.getByRole("button", { name: "Fermer" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Fermer" })[0]);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(document.body.innerHTML).not.toContain("243812345678");
     // Après réouverture, le numéro n'est plus là : il faut redemander

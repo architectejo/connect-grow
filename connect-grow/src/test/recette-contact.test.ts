@@ -127,7 +127,7 @@ describe("recette contact : scénario 9 (aucun numéro dans le DOM avant le clic
     expect(JSON.stringify(client.getQueryCache().getAll().map((q) => q.state.data))).not.toContain("243");
     expect(document.cookie).not.toContain("243");
 
-    fireEvent.click(screen.getByRole("button", { name: "Fermer" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Fermer" })[0]);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     noPhoneInPage();
     expect(JSON.stringify(client.getMutationCache().getAll().map((m) => m.state.data ?? null))).not.toContain("243");

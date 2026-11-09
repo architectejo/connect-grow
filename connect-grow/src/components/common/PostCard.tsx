@@ -94,7 +94,7 @@ export function PostCard({ post, isFavorite, onToggleFavorite, hideSeller, class
 
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
           <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span className="truncate">{post.commune_name ?? "Kinshasa"}</span>
+          <span className="truncate">{post.commune_name ?? t("post.defaultCommune")}</span>
           <span aria-hidden>·</span>
           {/* Âge court : sur une carte de 160 px, la commune doit rester lisible */}
           <time dateTime={post.created_at} title={formatRelativeDate(post.created_at)} className="shrink-0">

@@ -12,7 +12,7 @@
 - **Format d'erreur :** erreur non liée à un champ : `{"detail": "<message en français>", "code": "<code>"}`. Erreur de champ : `{"<champ>": ["<message>"]}` (format DRF). Refus de contexte : 403 avec `code` parmi `DENY_RELATION`, `DENY_SECURITY`, `DENY_OBJECT_STATE`, `DENY_PERMISSION`. Dépassement de débit : 429 + `Retry-After`.
 - **Ordre des contrôles d'une route d'organisation :** non-membre (`403 DENY_RELATION`, **aussi pour une organisation inexistante**) ; état de l'organisation (suspendue `DENY_SECURITY`, archivée `DENY_OBJECT_STATE`, sauf mention) ; état du compte (désactivé ou restreint : `DENY_SECURITY`) ; capacité (`DENY_PERMISSION`) ; règles métier (400, 404, 409).
 - **Réponses** `Cache-Control: private, no-store`. Dates en ISO 8601 UTC. Identifiants en UUID.
-- **Données personnelles :** aucune réponse ni aucun journal (audit, outbox, notification) ne contient de téléphone, d'e-mail, de nom complet, d'identifiant de compte d'un tiers (hors `membership_id`), de jeton ni d'étiquette en dehors des réponses expressément listées.
+- **Données personnelles :** aucune réponse ni aucun journal (audit, outbox, notification) ne contient de téléphone, d'e-mail, de nom complet, de jeton ni d'étiquette en dehors des réponses expressément listées. Les réponses d'API n'exposent aucun identifiant de compte d'un tiers (hors `membership_id`). **Décision du chef de projet (L1-01-B1) :** les identifiants internes de compte (UUID) sont autorisés dans l'audit et l'outbox, pour la traçabilité (règle 12) ; jamais de nom, de téléphone, d'e-mail ni de jeton.
 
 ### Objet `Member` (clés exactes, ni plus ni moins)
 
@@ -65,7 +65,7 @@
 {"role": "ADMIN", "confirm": true, "password": "..."}
 ```
 
-- `role` obligatoire parmi `OWNER`, `ADMIN`, `EDITOR`, `ANALYST`. `confirm` et `password` **obligatoires seulement** si le nouveau rôle est `OWNER` **ou** si le rôle actuel de la cible est `OWNER` ; ignorés sinon.
+- `role` obligatoire parmi `OWNER`, `ADMIN`, `EDITOR`, `ANALYST`. `confirm` et `password` **obligatoires seulement** si le nouveau rôle est `OWNER` **ou** si le rôle actuel de la cible est `OWNER` ; ignorés sinon. **Exception :** si le nouveau rôle est identique au rôle actuel, le cas est traité AVANT la ressaisie (200 sans mot de passe, sans quota `org_sensitive`, sans compteur d'échecs, sans trace ni événement), après les contrôles d'autorisation habituels.
 - `200` + `Member` (même clés). Même rôle : `200` sans trace ni événement. Effet sur les capacités dès la requête suivante de la cible.
 - Règles : un administrateur ne touche jamais un propriétaire et n'attribue jamais `OWNER` (`403 DENY_PERMISSION`) ; éditeur et analyste : `403 DENY_PERMISSION`.
 - Erreurs : `400 {"role": [...]}` (rôle absent ou inconnu) ; `400 confirmation_required` ; `400 password_required` ; `403 reauthentication_failed` ; `404 member_not_found` (membre inexistant, révoqué ou d'une autre organisation) ; `400 user_unavailable` (compte de la cible inactif ou restreint, neutre) ; `409 last_owner` ; `409 last_effective_owner` (voir ADR 0008 §9) ; `429`.
@@ -79,14 +79,14 @@
 
 ### 1.4 Transférer la propriété (L1-01h)
 
-`POST ID organizations/<uuid:pk>/transfer-ownership/` — capacité `org.manage_roles`, acteur `OWNER` uniquement. Throttle `org_sensitive`.
+`POST ID organizations/<uuid:pk>/transfer-ownership/` — capacité `org.manage_roles`, acteur `OWNER` uniquement. Throttle `org_sensitive` (compté seulement pour ce POST et pour les PATCH de rôle portant `password` ou `role=OWNER` ; jamais pour DELETE).
 
 ```json
 {"membership_id": "uuid", "my_new_role": "ADMIN", "confirm": true, "password": "..."}
 ```
 
 - `my_new_role` facultatif parmi `ADMIN` (défaut), `EDITOR`, `ANALYST` (jamais `OWNER`). `confirm` doit valoir `true` et `password` est obligatoire.
-- `200 {"new_owner": Member, "me": Member}`. Une seule transaction : la cible devient `OWNER`, l'acteur prend `my_new_role` ; deux `MEMBERSHIP_ROLE_CHANGED` et un `ORG_OWNERSHIP_TRANSFERRED` ; événement de visibilité. Toute erreur laisse l'état inchangé.
+- `200 {"new_owner": Member, "me": Member}`. Une seule transaction : la cible devient `OWNER`, l'acteur prend `my_new_role` ; deux `MEMBERSHIP_ROLE_CHANGED` au plus (un seul si la cible est déjà `OWNER` : transfert vers un co-propriétaire) et un `ORG_OWNERSHIP_TRANSFERRED` ; un seul événement de visibilité `owners_changed`. `is_last_effective_owner` des deux `Member` suit le rôle effectif de l'appelant après transfert (`null` s'il est devenu éditeur ou analyste). Toute erreur laisse l'état inchangé.
 - Autorisé sur organisation archivée, refusé sur suspendue (`DENY_SECURITY`).
 - Erreurs : `403 DENY_PERMISSION` (administrateur, éditeur, analyste) ; `400 confirmation_required` ; `400 password_required` ; `403 reauthentication_failed` ; `404 member_not_found` ; `400 invalid_transfer` (soi-même) ; `400 user_unavailable` ; `400 {"my_new_role": [...]}` ; `429`. Aucun paramètre de plan ou de paiement.
 

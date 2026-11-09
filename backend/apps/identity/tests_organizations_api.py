@@ -916,6 +916,8 @@ class GuardAndRulesTests(TestCase):
                 'api/v1/accounts/organizations/<uuid:pk>/archive/', 'api/v1/accounts/organizations/<uuid:pk>/leave/',
                 'api/v1/accounts/organizations/<uuid:pk>/members/<uuid:membership_id>/',
                 'api/v1/accounts/organizations/<uuid:pk>/transfer-ownership/',
+                'api/v1/accounts/organizations/<uuid:pk>/invitations/',
+                'api/v1/accounts/organizations/<uuid:pk>/invitations/<uuid:invitation_id>/',
             },
         )
         for route, (methods, reason) in seen.items():

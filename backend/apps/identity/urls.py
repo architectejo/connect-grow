@@ -25,6 +25,10 @@ from .views_organizations import (
     OrganizationLimitsView, OrganizationMemberDetailView, OrganizationMembersView,
     OrganizationTransferOwnershipView, OrganizationViewSet,
 )
+from .views_invitations import (
+    InvitationAcceptView, InvitationDeclineView, InvitationPreviewView, OrganizationInvitationDetailView,
+    OrganizationInvitationsView,
+)
 from .views_verification import (
     OrganizationKycDocumentDeleteView, OrganizationKycDocumentListCreateView, OrganizationVerificationView,
 )
@@ -52,11 +56,11 @@ urlpatterns = [
 
     # Contextes disponibles pour le compte (ADR 0006, 9.1)
     path('contexts/', ContextListView.as_view(), name='contexts'),
+    path('me/account-deletion-blockers/', AccountDeletionBlockersView.as_view(), name='account_deletion_blockers'),
 
     # Organisations (ADR 0006, 9.2 et 17.2) ; remplace `businesses/`
     path('organizations/', OrganizationViewSet.as_view({'get': 'list', 'post': 'create'}), name='organizations'),
     path('organizations/limits/', OrganizationLimitsView.as_view(), name='organization_limits'),
-    path('me/account-deletion-blockers/', AccountDeletionBlockersView.as_view(), name='account_deletion_blockers'),
     path('organizations/<uuid:pk>/', OrganizationDetailView.as_view(), name='organization_detail'),
     path('organizations/<uuid:pk>/internal/', OrganizationInternalView.as_view(), name='organization_internal'),
     path('organizations/<uuid:pk>/archive/', OrganizationArchiveView.as_view(), name='organization_archive'),
@@ -66,6 +70,14 @@ urlpatterns = [
          name='organization_member_detail'),
     path('organizations/<uuid:pk>/transfer-ownership/', OrganizationTransferOwnershipView.as_view(),
          name='organization_transfer_ownership'),
+    # Invitations d'équipe (ADR 0008, contrat L1-01 §2) : le jeton voyage dans le corps, jamais dans l'URL
+    path('organizations/<uuid:pk>/invitations/', OrganizationInvitationsView.as_view(),
+         name='organization_invitations'),
+    path('organizations/<uuid:pk>/invitations/<uuid:invitation_id>/', OrganizationInvitationDetailView.as_view(),
+         name='organization_invitation_detail'),
+    path('organization-invitations/preview/', InvitationPreviewView.as_view(), name='organization_invitation_preview'),
+    path('organization-invitations/accept/', InvitationAcceptView.as_view(), name='organization_invitation_accept'),
+    path('organization-invitations/decline/', InvitationDeclineView.as_view(), name='organization_invitation_decline'),
 
     # Prestataire individuel (ADR 0006, 9.3)
     path('provider/', ProviderDetailView.as_view(), name='provider_detail'),

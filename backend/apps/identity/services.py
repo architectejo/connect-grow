@@ -20,7 +20,8 @@ from .acting import (  # noqa: F401
 # Organisations et équipes (ADR 0006) : façade publique, les autres domaines n'importent jamais le sous-module.
 from .organizations import (  # noqa: F401
     OrganizationError, SUSPENSION_REASONS, add_member, assert_account_removable, assert_provider_removable,
-    archive_organization, change_member_role,
+    archive_organization, change_member_role, change_role, count_effective_owners, list_members, remove_member,
+    sole_effective_owner_id, transfer_ownership_to, TeamList,
     count_active_owners, create_organization, get_active_role, get_identity_settings, get_organization_for_member,
     leave_organization, reactivate_organization, revoke_member, suspend_organization, transfer_ownership,
     update_organization,

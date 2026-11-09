@@ -15,7 +15,7 @@ from typing import Iterable, Optional
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import OperationalError, transaction
-from django.db.models import Case, Count, ExpressionWrapper, F, FloatField, Value, When
+from django.db.models import Case, Count, ExpressionWrapper, F, FloatField, Q, Value, When
 from django.utils import timezone
 from rest_framework.exceptions import NotFound
 
@@ -579,6 +579,15 @@ def has_open_grave_report_on_seller(context_type, context_id) -> bool:
     effacer : suppression de compte refusée par `identity`)."""
     offers = Offer.objects.filter(seller_context_type=context_type, seller_context_id=context_id)
     return moderation_services.has_open_grave_report('offer', offers.values('id'))
+
+
+def seller_has_active_offers(context_type, context_id) -> bool:
+    """Vrai si le contexte vendeur a au moins une offre active : non supprimée, statut `ACTIVE`, non échue
+    (`expires_at` nul ou futur). Une requête `exists`. Sert la règle `last_effective_owner` d'`identity` (ADR 0008 §9)."""
+    now = timezone.now()
+    return Offer.objects.filter(
+        seller_context_type=context_type, seller_context_id=context_id, is_deleted=False, status=Offer.STATUS_ACTIVE,
+    ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
 
 
 def purge_expired_trash(retention_days: Optional[int] = None) -> int:

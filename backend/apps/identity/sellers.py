@@ -9,7 +9,6 @@ d'e-mail, de liste de membres ni d'adresse exacte (règle 10).
 Ce module est exposé par `identity.services` ; les autres domaines n'importent jamais ce sous-module.
 """
 import uuid
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
@@ -24,6 +23,7 @@ from apps.platform_core.services import publish_event
 
 from . import capabilities, verification
 from .models import Membership, Organization, ProviderProfile, User
+from .organizations import effective_owner_ids_by_organization
 
 NO_CLAIMS_SUMMARY = {'complete': False, 'label': None}
 
@@ -142,17 +142,8 @@ def get_seller_context_public_flags(contexts: Iterable) -> dict:
         )
         # Une organisation dont tous les propriétaires actifs sont désactivés ou sous sanction bloquante n'est pas
         # publique (T9-1, audit M3) : le statut stocké de l'organisation n'est pas modifié.
-        led_orgs = set()
-        if active_orgs:
-            owners = defaultdict(set)
-            for org_id, user_id in Membership.objects.filter(
-                organization_id__in=active_orgs, role=capabilities.ROLE_OWNER, status=Membership.STATUS_ACTIVE,
-                user__is_active=True,
-            ).values_list('organization_id', 'user_id'):
-                owners[org_id].add(user_id)
-            all_owners = set().union(*owners.values()) if owners else set()
-            restricted = get_restricted_user_ids(all_owners) if all_owners else set()
-            led_orgs = {org_id for org_id, users in owners.items() if users - restricted}
+        # Définition unique du « propriétaire effectif » (partagée avec la règle `last_effective_owner`, ADR 0008 §9).
+        led_orgs = set(effective_owner_ids_by_organization(active_orgs)) if active_orgs else set()
         for org_id in grouped[CONTEXT_ORGANIZATION]:
             flags[(CONTEXT_ORGANIZATION, org_id)] = org_id in led_orgs
     return flags

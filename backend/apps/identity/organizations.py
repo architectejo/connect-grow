@@ -11,12 +11,14 @@ Ce module est exposé par `identity.services` ; les autres domaines n'importent 
 """
 import re
 import unicodedata
+from dataclasses import dataclass
 from datetime import timedelta
+from typing import Optional
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files import File
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Case, Count, IntegerField, Q, Value, When
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.exceptions import ErrorDetail
@@ -37,6 +39,7 @@ from .capabilities import ROLE_OWNER, ROLES
 from .models import (
     IdentitySettings, KycDocument, Membership, Organization, OrganizationCategory, ORG_TYPES, ProviderProfile, User,
 )
+from .throttles import FailureLimiter
 
 # Motifs de suspension normalisés (jamais de texte libre, ADR 0006 §4.2).
 SUSPENSION_REASONS = ('moderation', 'verification', 'legal', 'other')
@@ -56,6 +59,17 @@ CHANGE_REACTIVATED = 'reactivated'
 STATUS_REASON_SUSPENDED = 'suspended'
 STATUS_REASON_REACTIVATED = 'reactivated'
 STATUS_REASON_ARCHIVED = 'archived'
+STATUS_REASON_OWNERS_CHANGED = 'owners_changed'
+
+# Opérations qui touchent un siège de propriétaire : ressaisie du mot de passe (ADR 0008 §8.2).
+REAUTH_TRANSFER = 'transfer'
+REAUTH_PROMOTE_OWNER = 'promote_owner'
+REAUTH_DEMOTE_OWNER = 'demote_owner'
+# Compteur d'échecs de ressaisie, par compte appelant (le compteur est celui de l'attaquant, pas d'une victime).
+REAUTH_FAILURES = FailureLimiter('org_reauth', threshold=5)
+
+# Rôles que le propriétaire sortant peut prendre lors d'un transfert (jamais OWNER).
+TRANSFER_SELF_ROLES = (capabilities.ROLE_ADMIN, capabilities.ROLE_EDITOR, capabilities.ROLE_ANALYST)
 
 
 class OrganizationError(CodedAPIException):
@@ -78,6 +92,14 @@ def _last_owner_error(organization=None):
     return OrganizationError("Une organisation doit garder au moins un propriétaire.", 'last_owner')
 
 
+def _last_effective_owner_error():
+    return OrganizationError(
+        "Cette opération laisserait l'organisation sans propriétaire actif alors qu'elle a des offres actives. "
+        "Désignez d'abord un autre propriétaire.",
+        'last_effective_owner',
+    )
+
+
 # --- Réglages ---------------------------------------------------------------------
 
 def get_identity_settings() -> IdentitySettings:
@@ -90,6 +112,35 @@ def count_active_owners(organization_id) -> int:
     return Membership.objects.filter(
         organization_id=organization_id, role=ROLE_OWNER, status=Membership.STATUS_ACTIVE,
     ).count()
+
+
+def effective_owner_ids_by_organization(organization_ids) -> dict:
+    """`{organisation: {comptes}}` : propriétaires EFFECTIFS (ADR 0008 §9, R-L8) = appartenance `OWNER` `ACTIVE`
+    dont le compte est actif et sans sanction bloquante. Définition UNIQUE, partagée avec la visibilité publique
+    (`sellers.get_seller_context_public_flags`). Deux requêtes, quel que soit le nombre d'organisations ; une
+    organisation sans propriétaire effectif est absente du résultat."""
+    owners = {}
+    for organization_id, user_id in Membership.objects.filter(
+        organization_id__in=list(organization_ids), role=ROLE_OWNER, status=Membership.STATUS_ACTIVE,
+        user__is_active=True,
+    ).values_list('organization_id', 'user_id'):
+        owners.setdefault(organization_id, set()).add(user_id)
+    everyone = set().union(*owners.values()) if owners else set()
+    restricted = moderation_services.get_restricted_user_ids(everyone) if everyone else set()
+    result = {}
+    for organization_id, users in owners.items():
+        effective = users - restricted
+        if effective:
+            result[organization_id] = effective
+    return result
+
+
+def _effective_owner_ids(organization_id) -> set:
+    return effective_owner_ids_by_organization([organization_id]).get(organization_id, set())
+
+
+def count_effective_owners(organization_id) -> int:
+    return len(_effective_owner_ids(organization_id))
 
 
 def count_active_memberships(user_id) -> int:
@@ -190,12 +241,17 @@ def _publish_membership_change(organization, membership, change, old_role, new_r
     )
 
 
-def _audit_membership(actor, action, organization, membership, old_role, new_role):
+def _audit_membership(actor, action, organization, membership, old_role, new_role, reauth=False, orphaned=False):
+    details = (
+        f"organization={organization.pk}; user={membership.user_id}; "
+        f"old_role={old_role or '-'}; new_role={new_role or '-'}"
+    )
+    if reauth:
+        details += "; reauth=true"
+    if orphaned:
+        details += "; orphaned=true"
     record_audit(
-        actor, action, target=membership,
-        details=f"organization={organization.pk}; user={membership.user_id}; "
-                f"old_role={old_role or '-'}; new_role={new_role or '-'}",
-        context=(CONTEXT_ORGANIZATION, organization.pk),
+        actor, action, target=membership, details=details, context=(CONTEXT_ORGANIZATION, organization.pk),
     )
 
 
@@ -726,20 +782,58 @@ def add_member(actor, organization_id, user_id, role) -> Membership:
     return membership
 
 
-def _apply_role_change(actor, organization, membership, new_role, audit_action='MEMBERSHIP_ROLE_CHANGED'):
-    """Écrit un changement de rôle (verrou déjà posé, autorisation déjà faite) et vérifie l'invariant
-    LAST_OWNER après l'écriture : une transition qui laisserait zéro propriétaire annule la transaction."""
+def _publish_owners_changed(organization, actor):
+    """Un siège de propriétaire a bougé : la visibilité publique dépend des propriétaires EFFECTIFS (ADR 0008 §6)."""
+    _publish_status_change(organization, STATUS_REASON_OWNERS_CHANGED, actor)
+
+
+def _effective_owners_before(organization, old_role):
+    """Nombre de propriétaires effectifs AVANT une opération qui retire un siège de propriétaire. Sans objet
+    (0) si l'organisation n'est pas active : la règle `last_effective_owner` ne la concerne pas."""
+    if old_role != ROLE_OWNER or organization.status != Organization.STATUS_ACTIVE:
+        return 0
+    return count_effective_owners(organization.pk)
+
+
+def _ensure_not_orphaned(organization, effective_before) -> bool:
+    """Règle `last_effective_owner` (ADR 0008 §9), appelée APRÈS l'écriture et sous verrou. Refuse (409) si
+    l'organisation active n'a plus aucun propriétaire effectif à cause de l'opération (il y en avait un avant)
+    ET a au moins une offre active. Sans offre active, l'opération est permise : renvoie vrai (organisation
+    devenue orpheline, tracé `orphaned=true`). Lecture des offres par `marketplace.services` (import local :
+    `marketplace` importe `identity.services`)."""
+    if organization.status != Organization.STATUS_ACTIVE or effective_before < 1:
+        return False
+    if count_effective_owners(organization.pk) > 0:
+        return False
+    from apps.marketplace import services as marketplace_services
+    if marketplace_services.seller_has_active_offers(CONTEXT_ORGANIZATION, organization.pk):
+        raise _last_effective_owner_error()
+    return True
+
+
+def _apply_role_change(
+    actor, organization, membership, new_role, audit_action='MEMBERSHIP_ROLE_CHANGED', reauth=False,
+):
+    """Écrit un changement de rôle (verrou déjà posé, autorisation déjà faite) et vérifie les invariants
+    après l'écriture : `last_owner` (zéro propriétaire) puis `last_effective_owner` (ADR 0008 §9) ; une
+    transition qui les viole annule la transaction. Un mouvement de propriétaire publie `owners_changed`."""
     old_role = membership.role
     if old_role == new_role:
         return membership
+    effective_before = _effective_owners_before(organization, old_role)
     Membership.objects.filter(pk=membership.pk, status=Membership.STATUS_ACTIVE).update(
         role=new_role, updated_at=timezone.now(),
     )
     membership.role = new_role
-    if old_role == ROLE_OWNER and count_active_owners(organization.pk) < 1:
-        raise _last_owner_error(organization)
-    _audit_membership(actor, audit_action, organization, membership, old_role, new_role)
+    orphaned = False
+    if old_role == ROLE_OWNER:
+        if count_active_owners(organization.pk) < 1:
+            raise _last_owner_error(organization)
+        orphaned = _ensure_not_orphaned(organization, effective_before)
+    _audit_membership(actor, audit_action, organization, membership, old_role, new_role, reauth, orphaned)
     _publish_membership_change(organization, membership, CHANGE_ROLE_CHANGED, old_role, new_role, actor)
+    if ROLE_OWNER in (old_role, new_role):
+        _publish_owners_changed(organization, actor)
     return membership
 
 
@@ -778,32 +872,43 @@ def transfer_ownership(actor, organization_id, new_owner_user_id, actor_new_role
         if target.status != Membership.STATUS_ACTIVE:
             raise OrganizationError("Ce compte n'est pas membre de l'organisation.", 'member_not_found', 404)
         _ensure_target_available(target.user_id)
-        _apply_role_change(actor, organization, target, ROLE_OWNER)
-        _apply_role_change(actor, organization, actor_membership, actor_new_role)
-        record_audit(
-            actor, 'ORG_OWNERSHIP_TRANSFERRED', target=organization,
-            details=f"from_user={actor.pk}; to_user={target.user_id}",
-            context=(CONTEXT_ORGANIZATION, organization.pk),
-        )
+        _transfer_core(actor, organization, actor_membership, target, actor_new_role)
     return target
 
 
+def _transfer_core(actor, organization, actor_membership, target, actor_new_role, reauth=False):
+    """Deux changements de rôle et la trace `ORG_OWNERSHIP_TRANSFERRED` (verrou et autorisation déjà faits)."""
+    _apply_role_change(actor, organization, target, ROLE_OWNER, reauth=reauth)
+    _apply_role_change(actor, organization, actor_membership, actor_new_role, reauth=reauth)
+    record_audit(
+        actor, 'ORG_OWNERSHIP_TRANSFERRED', target=organization,
+        details=f"from_user={actor.pk}; to_user={target.user_id}" + ("; reauth=true" if reauth else ""),
+        context=(CONTEXT_ORGANIZATION, organization.pk),
+    )
+
+
 def _end_membership(actor, organization, membership, end_reason, audit_action):
-    """Passe l'appartenance à REVOKED (mise à jour conditionnelle) et vérifie LAST_OWNER après coup."""
+    """Passe l'appartenance à REVOKED (mise à jour conditionnelle) et vérifie après coup `last_owner` puis
+    `last_effective_owner` (ADR 0008 §9)."""
     old_role = membership.role
+    effective_before = _effective_owners_before(organization, old_role)
     now = timezone.now()
     done = Membership.objects.filter(pk=membership.pk, status=Membership.STATUS_ACTIVE).update(
         status=Membership.STATUS_REVOKED, end_reason=end_reason, ended_at=now, ended_by=actor, updated_at=now,
     )
     if not done:
         raise OrganizationError("Ce compte n'est pas membre de l'organisation.", 'member_not_found', 404)
-    # Une organisation archivée n'a plus de vie active : son dernier propriétaire peut la quitter (tracé).
-    if (old_role == ROLE_OWNER and organization.status != Organization.STATUS_ARCHIVED
-            and count_active_owners(organization.pk) < 1):
-        raise _last_owner_error(organization)
+    orphaned = False
+    if old_role == ROLE_OWNER:
+        # Une organisation archivée n'a plus de vie active : son dernier propriétaire peut la quitter (tracé).
+        if organization.status != Organization.STATUS_ARCHIVED and count_active_owners(organization.pk) < 1:
+            raise _last_owner_error(organization)
+        orphaned = _ensure_not_orphaned(organization, effective_before)
     membership.status, membership.end_reason, membership.ended_at = Membership.STATUS_REVOKED, end_reason, now
-    _audit_membership(actor, audit_action, organization, membership, old_role, None)
+    _audit_membership(actor, audit_action, organization, membership, old_role, None, orphaned=orphaned)
     _publish_membership_change(organization, membership, CHANGE_REVOKED, old_role, None, actor)
+    if old_role == ROLE_OWNER:
+        _publish_owners_changed(organization, actor)
     return membership
 
 
@@ -830,6 +935,181 @@ def leave_organization(user, organization_id) -> Membership:
         organization = _lock_organization(organization_id)
         membership = _authorize_member(user, organization, 'org.leave', allow_inactive=True)
         return _end_membership(user, organization, membership, Membership.END_LEFT, 'MEMBERSHIP_REVOKED')
+
+
+# --- Équipe : opérations par `membership_id` (ADR 0008 §5.2, contrat d'API 1.x) ---------------------------------
+# Elles résolvent le membre DANS l'organisation du chemin (autre organisation ou inexistant : 404 identique) et
+# réutilisent les mêmes noyaux privés que les fonctions par `user_id` ci-dessus.
+
+_ROLE_ORDER = Case(
+    *[When(role=role, then=Value(rank)) for rank, role in enumerate(ROLES)], default=Value(len(ROLES)),
+    output_field=IntegerField(),
+)
+
+
+@dataclass(frozen=True)
+class TeamList:
+    """Liste des membres actifs et ce qu'il faut pour la présenter sans requête par ligne."""
+
+    queryset: object
+    can_manage: bool  # l'appelant a `org.manage_members` : `is_last_effective_owner` lui est révélé
+    sole_effective_owner_id: Optional[object]  # compte du seul propriétaire effectif (None si zéro, ou plusieurs)
+
+
+def sole_effective_owner_id(organization_id):
+    """Compte du seul propriétaire effectif de l'organisation, sinon None."""
+    owners = _effective_owner_ids(organization_id)
+    return next(iter(owners)) if len(owners) == 1 else None
+
+
+def list_members(actor, organization_id) -> TeamList:
+    """Membres ACTIFS (`org.view_internal`, tout rôle). Ordre : propriétaires, administrateurs, éditeurs,
+    analystes, puis `joined_at`, puis identifiant. Seul `full_name` du compte est lu (abrégé à l'affichage)."""
+    organization, role = get_organization_for_member(actor, organization_id, 'org.view_internal')
+    queryset = Membership.objects.filter(
+        organization=organization, status=Membership.STATUS_ACTIVE,
+    ).select_related('user').only(
+        'id', 'organization', 'user', 'role', 'status', 'joined_at', 'user__full_name',
+    ).annotate(role_rank=_ROLE_ORDER).order_by('role_rank', 'joined_at', 'id')
+    can_manage = capabilities.role_has_capability(role, 'org.manage_members')
+    return TeamList(queryset, can_manage, sole_effective_owner_id(organization.pk) if can_manage else None)
+
+
+def _get_organization(organization_id) -> Organization:
+    """Organisation sans verrou ; inexistante = même refus qu'un non-membre."""
+    try:
+        return Organization.objects.get(pk=organization_id)
+    except (Organization.DoesNotExist, ValueError, TypeError, DjangoValidationError):
+        raise ContextDenied(DENY_RELATION, "Vous n'êtes pas membre de cette organisation.")
+
+
+def _get_member(organization, membership_id) -> Membership:
+    """Appartenance ACTIVE de CETTE organisation (IDOR : une autre organisation répond comme l'inexistant)."""
+    membership = Membership.objects.filter(
+        pk=membership_id, organization=organization, status=Membership.STATUS_ACTIVE,
+    ).select_related('user').first()
+    if membership is None:
+        raise OrganizationError("Ce membre est introuvable.", 'member_not_found', status.HTTP_404_NOT_FOUND)
+    return membership
+
+
+def _require_reauthentication(actor, organization, confirm, password, action):
+    """Ressaisie du mot de passe (ADR 0008 §8.2) : `confirm` vrai ET `password` (400), puis vérification AVANT
+    le verrou (le hachage est lent). Échec : 403 `reauthentication_failed`, compteur d'échecs par compte (429
+    au-delà du seuil) et trace `ORG_SENSITIVE_REAUTH_FAILED` hors transaction. Le mot de passe n'est jamais
+    journalisé. Pas de fenêtre de confiance."""
+    if confirm is not True:
+        raise OrganizationError(
+            "Confirmez l'opération pour continuer.", 'confirmation_required', status.HTTP_400_BAD_REQUEST,
+        )
+    if not isinstance(password, str) or not password:
+        raise OrganizationError(
+            "Saisissez votre mot de passe pour confirmer.", 'password_required', status.HTTP_400_BAD_REQUEST,
+        )
+    key = str(actor.pk)
+    REAUTH_FAILURES.check(key)
+    if not actor.check_password(password):
+        REAUTH_FAILURES.failure(key)
+        record_audit(
+            actor, 'ORG_SENSITIVE_REAUTH_FAILED', target=organization,
+            details=f"organization={organization.pk}; action={action}",
+            context=(CONTEXT_ORGANIZATION, organization.pk),
+        )
+        raise OrganizationError(
+            "Mot de passe incorrect.", 'reauthentication_failed', status.HTTP_403_FORBIDDEN,
+        )
+    REAUTH_FAILURES.success(key)
+
+
+def _resolve_role_change(actor, organization, membership_id, new_role):
+    actor_membership = _authorize_member(actor, organization, 'org.manage_roles')
+    membership = _get_member(organization, membership_id)
+    if not (capabilities.can_manage_role_of(actor_membership.role, membership.role)
+            and capabilities.can_manage_role_of(actor_membership.role, new_role)):
+        raise ContextDenied(DENY_PERMISSION, "Vous ne pouvez pas modifier ce rôle.")
+    _ensure_target_available(membership.user_id)
+    return membership
+
+
+def _role_change_needs_reauth(membership, new_role) -> bool:
+    return new_role == ROLE_OWNER or membership.role == ROLE_OWNER
+
+
+def change_role(actor, organization_id, membership_id, new_role, confirm=False, password=None) -> Membership:
+    """Change le rôle d'un membre actif de l'organisation (`org.manage_roles`). L'administrateur ne touche jamais
+    un propriétaire et n'attribue jamais OWNER. Promotion vers OWNER ou rétrogradation d'un OWNER : `confirm` et
+    ressaisie du mot de passe. Invariants `last_owner` et `last_effective_owner` vérifiés sous verrou. Même
+    rôle : aucun effet, aucune trace."""
+    _validate_role(new_role)
+    organization = _get_organization(organization_id)
+    membership = _resolve_role_change(actor, organization, membership_id, new_role)
+    reauth = _role_change_needs_reauth(membership, new_role)
+    if reauth:
+        _require_reauthentication(
+            actor, organization, confirm, password,
+            REAUTH_PROMOTE_OWNER if new_role == ROLE_OWNER else REAUTH_DEMOTE_OWNER,
+        )
+    with transaction.atomic():
+        organization = _lock_organization(organization_id)
+        membership = _resolve_role_change(actor, organization, membership_id, new_role)
+        if _role_change_needs_reauth(membership, new_role) and not reauth:
+            # Le rôle de la cible a changé entre la lecture et le verrou : la ressaisie n'a pas eu lieu.
+            raise OrganizationError(
+                "Mot de passe incorrect.", 'reauthentication_failed', status.HTTP_403_FORBIDDEN,
+            )
+        _apply_role_change(actor, organization, membership, new_role, reauth=reauth)
+    return membership
+
+
+def remove_member(actor, organization_id, membership_id) -> Membership:
+    """Retire un membre (`org.manage_members`). Soi-même : 400 `use_leave`. Un propriétaire ne se retire jamais
+    directement (409 `owner_must_be_demoted` : le rétrograder d'abord, ce qui exige la ressaisie du mot de
+    passe). Effet immédiat ; les invitations de la personne retirée seront balayées par L1-01 B2b."""
+    with transaction.atomic():
+        organization = _lock_organization(organization_id)
+        actor_membership = _authorize_member(actor, organization, 'org.manage_members')
+        membership = _get_member(organization, membership_id)
+        if membership.user_id == actor.pk:
+            raise OrganizationError("Utilisez « quitter l'organisation ».", 'use_leave', status.HTTP_400_BAD_REQUEST)
+        if not capabilities.can_manage_role_of(actor_membership.role, membership.role):
+            raise ContextDenied(DENY_PERMISSION, "Vous ne pouvez pas retirer ce membre.")
+        if membership.role == ROLE_OWNER:
+            raise OrganizationError(
+                "Un propriétaire ne peut pas être retiré directement : rétrogradez-le d'abord.",
+                'owner_must_be_demoted',
+            )
+        return _end_membership(actor, organization, membership, Membership.END_REMOVED, 'MEMBERSHIP_REVOKED')
+
+
+def _resolve_transfer(actor, organization, membership_id):
+    actor_membership = _authorize_member(actor, organization, 'org.manage_roles', allow_archived=True)
+    if actor_membership.role != ROLE_OWNER:
+        raise ContextDenied(DENY_PERMISSION, "Seul un propriétaire peut transférer la propriété.")
+    target = _get_member(organization, membership_id)
+    if target.user_id == actor.pk:
+        raise OrganizationError("Vous êtes déjà propriétaire.", 'invalid_transfer', status.HTTP_400_BAD_REQUEST)
+    _ensure_target_available(target.user_id)
+    return actor_membership, target
+
+
+def transfer_ownership_to(
+    actor, organization_id, membership_id, my_new_role=capabilities.ROLE_ADMIN, confirm=False, password=None,
+):
+    """Transfert de propriété vers un membre actif, par `membership_id` (acteur `OWNER`). `confirm` vrai et
+    ressaisie du mot de passe obligatoires. Une transaction : la cible devient OWNER, l'acteur prend
+    `my_new_role` (jamais OWNER). Autorisé sur une organisation archivée, refusé sur une suspendue. Renvoie
+    `(appartenance de la cible, appartenance de l'acteur)`, rôles à jour."""
+    if my_new_role not in TRANSFER_SELF_ROLES:
+        raise serializers.ValidationError({'my_new_role': ["Rôle inconnu ou non permis pour le propriétaire sortant."]})
+    organization = _get_organization(organization_id)
+    _resolve_transfer(actor, organization, membership_id)
+    _require_reauthentication(actor, organization, confirm, password, REAUTH_TRANSFER)
+    with transaction.atomic():
+        organization = _lock_organization(organization_id)
+        actor_membership, target = _resolve_transfer(actor, organization, membership_id)
+        _transfer_core(actor, organization, actor_membership, target, my_new_role, reauth=True)
+    actor_membership.user = actor
+    return target, actor_membership
 
 
 def assert_account_removable(user):

@@ -32,7 +32,8 @@ function VerificationContent({ org }: { org: OrganizationInternal }) {
     body = <ErrorState description={t("org.loadError")} onRetry={() => verification.refetch()} isRetrying={verification.isFetching} />;
   } else {
     const { requirements, verified_claims: claims, summary } = verification.data;
-    const latest = latestByType(documents.data ?? []);
+    // Après une rétrogradation, ne pas réutiliser des pièces restées en cache.
+    const latest = latestByType(canSubmit ? (documents.data ?? []) : []);
     const validated = requirements.filter((item) => item.status === "VALIDE").length;
     body = (
       <>

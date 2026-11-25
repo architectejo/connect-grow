@@ -21,12 +21,23 @@ let internal: unknown;
 let verification: unknown;
 let failVerification = false;
 
-/** Éditeur : mêmes capacités que l'analyste plus l'édition, jamais `org.verification_submit`. */
+/** Éditeur et membre : capacités de la matrice du backend (L1-01-B6), sans `org.verification_submit`. */
 const editor = {
   ...identity.organization_internal_analyst,
   my_role: "EDITOR",
-  capabilities: ["offer.create", "offer.edit", "offer.view_internal", "org.edit_profile", "org.leave", "org.view_internal", "stats.view"],
+  capabilities: [
+    "contact.view_requesters",
+    "offer.delete",
+    "offer.edit",
+    "offer.publish",
+    "offer.view_internal",
+    "org.leave",
+    "org.view_internal",
+    "review.reply",
+    "stats.view",
+  ],
 };
+const member = { ...identity.organization_internal_analyst, my_role: "MEMBER", capabilities: ["org.leave", "org.view_internal"] };
 
 beforeEach(() => {
   online.value = true;
@@ -96,6 +107,7 @@ describe("Vérification de l'organisation (E7)", () => {
   it.each([
     ["analyste", identity.organization_internal_analyst],
     ["éditeur", editor],
+    ["membre", member],
   ])("%s : lecture seule, aucun bouton, aucune requête vers les pièces, motif remplacé (L1-01-B6)", async (_role, org) => {
     internal = org;
     verification = identity.verification_mixed_restricted; // le serveur vide le motif pour ces rôles
@@ -123,6 +135,16 @@ describe("Vérification de l'organisation (E7)", () => {
     expect(identite.getByText(/Document illisible/)).toBeInTheDocument();
     expect(identite.queryByText("Le motif est visible par les administrateurs.")).not.toBeInTheDocument();
     await waitFor(() => expect(get).toHaveBeenCalledWith(`accounts/organizations/${ORG}/kyc/documents/`));
+  });
+
+  it("administrateur, pièce refusée sans motif (donnée ancienne) : pas de texte « visible par les administrateurs »", async () => {
+    verification = identity.verification_mixed_restricted;
+    renderPage();
+    const identite = await row("Identification nationale");
+    expect(identite.getByText("Refusée")).toBeInTheDocument();
+    expect(identite.queryByText("Le motif est visible par les administrateurs.")).not.toBeInTheDocument();
+    expect(identite.queryByText(/Motif du refus/)).not.toBeInTheDocument();
+    expect(identite.getByRole("button", { name: /Envoyer : Identification nationale/ })).toBeInTheDocument();
   });
 
   it("format refusé localement : message, aucune requête", async () => {

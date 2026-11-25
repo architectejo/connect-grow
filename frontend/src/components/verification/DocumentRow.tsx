@@ -110,7 +110,8 @@ export function DocumentRow({ organizationId, requirement, latest, canSubmit, on
             </p>
           ) : (
             // Motif masqué par le serveur pour les rôles sans `org.verification_submit` (L1-01-B6).
-            <p className="mt-2 text-sm text-muted-foreground">{t("verif.rejectionReasonHidden")}</p>
+            // Un administrateur peut aussi voir une pièce refusée sans motif (donnée ancienne) : rien de plus.
+            !canSubmit && <p className="mt-2 text-sm text-muted-foreground">{t("verif.rejectionReasonHidden")}</p>
           ))}
         {upload.isPending && (
           <p role="status" className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">

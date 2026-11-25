@@ -1,4 +1,4 @@
-# Connecte+ : front (connect-grow)
+# Connecte+ : front (dossier `frontend/`)
 
 React 18, TypeScript, Vite, Tailwind, shadcn/ui, React Query, react-i18next, PWA.
 

@@ -899,8 +899,8 @@ class Scenario8bVisitorNameTests(RecetteContactBase):
 # =========================================================================================
 
 class Scenario10FrontBackContractTests(RecetteContactBase):
-    FRONT = Path(__file__).resolve().parents[3] / 'connect-grow' / 'src'
-    # Regex du front (connect-grow/src/lib/contact-reveal.ts) : liens rendus seulement s'ils y correspondent.
+    FRONT = Path(__file__).resolve().parents[3] / 'frontend' / 'src'
+    # Regex du front (frontend/src/lib/contact-reveal.ts) : liens rendus seulement s'ils y correspondent.
     TEL_URL = re.compile(r'^tel:\+?\d{6,15}$')
     WHATSAPP_URL = re.compile(r'^https://wa\.me/\d{6,15}(\?text=[A-Za-z0-9%._~-]*)?$')
     REVEAL_CODES = ['channel_invalid', 'channel_not_allowed', 'own_offer', 'contact_restricted', 'offer_not_found',

@@ -1,5 +1,5 @@
 """Recette du contrat front <-> backend (lot 0) : rejoue en HTTP les parcours clés contre un
-serveur réel et compare chaque réponse aux types de `connect-grow/src/api/types.ts`.
+serveur réel et compare chaque réponse aux types de `frontend/src/api/types.ts`.
 
 Outil de recette, jamais lancé par `manage.py test`. Prérequis : un serveur lancé sur une base
 SQLite jetable (migrate, setup_roles, seed_catalog), avec DEBUG=True, NUM_PROXIES=1 et la

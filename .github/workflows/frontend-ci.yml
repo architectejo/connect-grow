@@ -3,10 +3,10 @@ name: CI frontend
 on:
   push:
     branches: [main, backend, frontend]
-    paths: ["connect-grow/**", ".github/workflows/frontend-ci.yml"]
+    paths: ["frontend/**", ".github/workflows/frontend-ci.yml"]
   pull_request:
     branches: [main, backend, frontend]
-    paths: ["connect-grow/**", ".github/workflows/frontend-ci.yml"]
+    paths: ["frontend/**", ".github/workflows/frontend-ci.yml"]
 
 concurrency:
   group: ci-frontend-${{ github.ref }}
@@ -14,18 +14,18 @@ concurrency:
 
 jobs:
   frontend:
-    name: Frontend (connect-grow)
+    name: Frontend (frontend/)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: connect-grow
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: connect-grow/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       # Pas de continue-on-error : un échec de lint fait échouer la CI.
       - run: npm run lint

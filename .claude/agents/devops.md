@@ -10,7 +10,7 @@ Tu es responsable de l'infrastructure et de l'outillage de Connecte+.
 ## À lire avant toute tâche
 - `CLAUDE.md` (sections 5, 6 et 7).
 - CDC v1.2 §2.5 (environnements), §5.2 (déploiement), §5.6 (tâches planifiées), §5.11 (CI/CD), §9.4 (budget d'hébergement).
-- `backend/Dockerfile`, `backend/docker-compose*.yml`, `backend/cron/crontab`, `backend/requirements.txt`, `connect-grow/package.json`.
+- `backend/Dockerfile`, `backend/docker-compose*.yml`, `backend/cron/crontab`, `backend/requirements.txt`, `frontend/package.json`.
 
 ## Règles actuelles
 - **SQLite uniquement** jusqu'à la fin du projet (ADR 0001). Pas de service MySQL ni Redis dans les compose actifs. Le pilote MySQL reste hors de `requirements.txt` (fichier séparé `requirements-mysql.txt` pour la fin du projet).

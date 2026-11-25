@@ -35,7 +35,7 @@ Tu es le **chef de projet technique** de Connecte+. Tu ne développes pas toi-m�
 | `dev-backend` | Modèles, services, API DRF, migrations, commandes cron, tests Django | Oui |
 | `dev-paiements` | Agrégateur Mobile Money, webhooks, idempotence, remboursements, rapprochement, billets QR | Oui |
 | `dev-temps-reel` | Django Channels, Daphne, consumers WebSocket, messagerie, notifications temps réel | Oui |
-| `dev-frontend` | Pages et composants React de `connect-grow`, React Query, i18n, PWA | Oui |
+| `dev-frontend` | Pages et composants React de `frontend`, React Query, i18n, PWA | Oui |
 | `designer-ux` | Parcours, spécification d'écran, états d'interface, accessibilité, design system | Non (specs) |
 | `devops` | Docker, CI GitHub Actions, scripts, cron, déploiement (en fin de projet) | Oui (infra) |
 | `qa-testeur` | Plans de test, tests d'intégration et de recette, rapport d'anomalies | Oui (tests) |
@@ -151,7 +151,7 @@ Si une demande contredit l'une de ces règles, signale-le à l'utilisateur avant
 | Tâches différées | Commandes de gestion Django lancées par cron. **Pas de Celery.** |
 | Architecture | Monolithe modulaire : une app Django par domaine ; un module n'importe pas les modèles d'un autre (il passe par son `services.py`) ; communication par événements de domaine (outbox) ; pas de transaction couvrant deux domaines. |
 | API | REST DRF, versionnée sous `/api/v1/`, documentée en OpenAPI. Authentification JWT (accès 15 min, rafraîchissement 7 jours). |
-| Front | React 18, TypeScript, Vite, Tailwind, shadcn/ui, React Query, react-i18next (français), PWA. Dossier `connect-grow/`. |
+| Front | React 18, TypeScript, Vite, Tailwind, shadcn/ui, React Query, react-i18next (français), PWA. Dossier `frontend/`. |
 | Médias | API de stockage de Django ; pièces KYC dans un stockage privé hors `MEDIA_ROOT`. |
 | Hébergement cible | AWS Lightsail + Nginx + Daphne (fin de projet). Rien n'est déployé avant accord. |
 
@@ -171,7 +171,7 @@ Si une demande contredit l'une de ces règles, signale-le à l'utilisateur avant
 │       ├── BACKLOG.md            ← tâches, statut, agent, lot
 │       └── JOURNAL.md            ← journal des livraisons et décisions
 ├── backend/                      ← Django (projet « backend », apps dans backend/apps/)
-└── connect-grow/                 ← frontend React (actif)
+└── frontend/                     ← frontend React (actif)
 ```
 
 `connecte-plus-hub/` est un ancien prototype : ne pas le modifier (suppression prévue au lot 0, tâche L0-03).
@@ -193,7 +193,7 @@ python manage.py test apps                              # 98 tests au 06/10/2026
 python manage.py makemigrations --check --dry-run       # aucune migration oubliée
 ```
 
-**Frontend** (depuis `connect-grow/`) :
+**Frontend** (depuis `frontend/`) :
 
 ```bash
 npm install
@@ -217,7 +217,7 @@ Ne jamais afficher, copier ni committer le contenu de `backend/.env`, `db.sqlite
 - `moderation` : signalements, sanctions, produits interdits, journal d'audit, rôles (`setup_roles`).
 - `payments` : `Transaction` d'achat d'une annonce via « Laxpaie ». **Hors V1 en l'état.**
 - 5 commandes cron : purge de la corbeille, expiration, levée des sanctions, OTP, agrégats du dashboard.
-- Front `connect-grow` : 17 pages (accueil, connexion, inscription avec OTP, marketplace, fiche, éditeur, dashboard, corbeille, favoris, notifications, paramètres, vérification, messages, profils vendeur et entreprises).
+- Front `frontend` : 17 pages (accueil, connexion, inscription avec OTP, marketplace, fiche, éditeur, dashboard, corbeille, favoris, notifications, paramètres, vérification, messages, profils vendeur et entreprises).
 
 **Écarts avec le CDC v1.2** : voir le lot 0 dans `docs/suivi/BACKLOG.md`.
 

@@ -13,13 +13,13 @@ Tu es le testeur QA de Connecte+. Tu cherches ce qui casse, pas ce qui marche.
 - CDC v1.2 §10 (recette) et, pour les scénarios, le plan de tests du client (`docs/client/`, document 10).
 
 ## Ce que tu fais
-1. Pour chaque critère d'acceptation, au moins un test automatisé (Django `TestCase`/`APITestCase` dans le module ou Vitest dans `connect-grow/src`), nommé d'après l'ID de la story.
+1. Pour chaque critère d'acceptation, au moins un test automatisé (Django `TestCase`/`APITestCase` dans le module ou Vitest dans `frontend/src`), nommé d'après l'ID de la story.
 2. Cas limites systématiques : données invalides, permission refusée, utilisateur d'un autre contexte ou d'une autre organisation, double soumission, coupure réseau simulée, liste vide, pagination.
 3. Vérification des règles verrouillées touchées par la story (badge « Sponsorisé », pas de score de confiance, paiement confirmé par le serveur, données privées non exposées dans les réponses API).
 4. Exécution complète :
    ```bash
    cd backend && python manage.py test apps
-   cd connect-grow && npm run lint && npm run test && npm run build
+   cd frontend && npm run lint && npm run test && npm run build
    ```
 
 ## Règles

@@ -11,7 +11,7 @@ Tu es le designer UX/UI de Connecte+. Les utilisateurs sont surtout sur smartpho
 - `CLAUDE.md` (section 4).
 - CDC v1.2 §3 (fonction concernée) et §6 (design et parcours).
 - `docs/client/` : guide fonctionnel des écrans et catalogue des parcours du client, pour rester cohérent avec sa direction visuelle.
-- Le design system existant : `connect-grow/src/components/ui/`, `components/common/`, `src/index.css`, `tailwind.config.ts`, page `src/pages/DesignSystem.tsx`.
+- Le design system existant : `frontend/src/components/ui/`, `components/common/`, `src/index.css`, `tailwind.config.ts`, page `src/pages/DesignSystem.tsx`.
 
 ## Ce que tu produis : une spécification d'écran
 Dans `docs/specs/<ID>-<ecran>.md` :

@@ -1,7 +1,7 @@
 """Recette du lot 0 (L0-05 à L0-20) : tests d'intégration de bout en bout, par l'API.
 
 Trois familles :
-- contrat front <-> backend : clés, nullabilité et formats attendus par `connect-grow/src/api/types.ts` ;
+- contrat front <-> backend : clés, nullabilité et formats attendus par `frontend/src/api/types.ts` ;
 - règles verrouillées du client (CLAUDE.md §4) : 4 (notes hors classement), 10 (données privées),
   12 (journal d'audit) ;
 - outbox (ADR 0003) : diffusion, idempotence, panne d'un abonné, relance, purge.
@@ -43,7 +43,7 @@ POSTS_URL = '/api/v1/marketplace/posts/'
 REPORTS_URL = '/api/v1/moderation/reports/'
 LOCMEM = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'recette-lot0'}}
 
-# --- Miroir de connect-grow/src/api/types.ts : {clé: types acceptés} ; `?` = optionnelle côté TS ---
+# --- Miroir de frontend/src/api/types.ts : {clé: types acceptés} ; `?` = optionnelle côté TS ---
 SPEC_RATING = {'average': 'num|null', 'count': 'num'}
 SPEC_SELLER = {
     'context_type': 'str', 'context_id': 'uuid', 'display_name': 'str', 'photo?': 'str|null', 'org_type?': 'str|null',

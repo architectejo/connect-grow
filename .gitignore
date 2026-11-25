@@ -9,10 +9,10 @@ backend/staticfiles/
 # --- Environnement virtuel local (dossier ".env" à la racine, pas des secrets) ---
 /.env/
 
-# --- Node / React (connect-grow) ---
-connect-grow/node_modules/
-connect-grow/dist/
-connect-grow/.env
+# --- Node / React (frontend) ---
+frontend/node_modules/
+frontend/dist/
+frontend/.env
 
 # --- Divers ---
 .DS_Store
@@ -35,7 +35,7 @@ backend/private_media/
 .coverage
 htmlcov/
 *.log
-connect-grow/dist-ssr/
-connect-grow/coverage/
+frontend/dist-ssr/
+frontend/coverage/
 connecte-plus-kit.zip
 *.zip

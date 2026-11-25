@@ -48,6 +48,18 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 | ID | Tâche | Agents | Statut | Réf. CDC / client |
 |---|---|---|---|---|
 | L1-01 | Organisations : création, revendication, invitation, membres et rôles | dev-backend, dev-frontend | En cours (backend livré : B1 équipe, B2a/B2b invitations, B4 blocages de suppression, relus et audités, 1998 tests backend ; front : F1 équipe fait, F2 invitations en cours, F3 blocages à faire ; restent S front, recette ; revendication L1-01i/j/l bloquée par les questions client, voir `questions.md`) | §3.1 — IAM-005/006 |
+| L1-01-R | Gouvernance après réponses du client : ADR 0010 (Administrateur principal, rôle Membre, périmètre, invitation Administrateur avec confirmation, nomination, anti-abus, organisation sans administrateur principal) | architecte-technique | Fait (ADR 0010 proposé, contrat v2) | Q2, Q3, Q17, Q21-Q26, Q30 |
+| L1-01-B5 | Libellé « Administrateur principal » côté backend | dev-backend | En cours | ADR 0010 |
+| L1-01-D2 | Spécifications d'écran de la gouvernance | designer-ux | En cours | ADR 0010 |
+| L1-01-B6 | Rôle Membre et périmètre sur l'appartenance | dev-backend | À faire | ADR 0010 |
+| L1-01-B7 | Invitations v2 (Administrateur avec confirmation, aperçu enrichi) + revue sécurité S3 | dev-backend, auditeur-securite | À faire | ADR 0010, Q23 |
+| L1-01-B8 | Anti-abus de création d'organisations (fin du plafond de 10) + S5 | dev-backend, auditeur-securite | À faire | ADR 0010, Q22 |
+| L1-01-B9 | Nominations d'Administrateur principal, niveau d'assurance, groupe Vérification + S4 | dev-backend, auditeur-securite | À faire | ADR 0010, Q21, Q26, Q30 |
+| L1-01-B10 | État « administration à régulariser » et commande `sync_organization_governance` | dev-backend | À faire | ADR 0010, Q17 |
+| L1-01-F1bis / F2bis / F4 / F5 / F6 | Front de la gouvernance (libellés, invitations v2, confirmation, nominations, création sans plafond, bannière) | dev-frontend | À faire (après D2 et chaque tâche backend) | ADR 0010 |
+| L1-01-F3 | Blocages de suppression dans Paramètres | dev-frontend | En pause (re-spécification avec la fermeture de compte, ADR 0012) | Q24 |
+| L1-17 à L1-24 | Cycle de vie et restrictions d'organisation (ADR 0011), fermeture de compte en V1 (ADR 0012), Aide et Support minimal, contacts (Q5-Q14), avis (Q15, Q16, Q31), vérification L1-02a à g, passes du particulier (amendement ADR 0009) | analyste, architecte, dev-* | À faire (voir `docs/specs/impact-reponses-client-Q1-Q36.md` §3) | réponses du client |
+| TROC-01 | Proposition troc demandée par le client (options A, B, C) | analyste-fonctionnel, architecte-technique | À faire | Q36 |
 | L1-02 | Vérification KYB des organisations avec badge précis | dev-backend, dev-frontend, auditeur-securite | À faire | §3.1 — TRU-003 |
 | L1-03 | Page publique d'organisation façon Facebook (onglets, couverture, abonnés) | designer-ux, dev-backend, dev-frontend | À faire | §3.2 — ORG-001 |
 | L1-04 | Profil public prestataire individuel | designer-ux, dev-frontend | À faire | §3.2 — ORG-002 |

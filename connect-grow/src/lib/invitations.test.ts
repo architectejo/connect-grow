@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import "@/i18n";
 import { classifyCreateInvitationError, classifyInvitationError, clearsTokenOnFailure, isInvitationExpired } from "./invitations";
 import { describeApiError } from "./api-errors";
+import { InvitationTokenMissingError } from "./invitation-token";
 
 const apiError = (status: number, code?: string, data: Record<string, unknown> = {}, headers: Record<string, string> = {}) => ({
   isAxiosError: true,
@@ -42,6 +43,10 @@ describe("classifyCreateInvitationError", () => {
     expect(classifyCreateInvitationError(apiError(400, undefined, { role: ["Invalide."] }))).toMatchObject({ kind: "field", field: "role", message: "Ce rôle ne peut pas être donné par invitation." });
     expect(classifyCreateInvitationError(apiError(400, "invitation_role_not_allowed"))).toMatchObject({ kind: "field", field: "role" });
   });
+  it("400 {label} sans message exploitable : texte de la spec « Cette étiquette est trop longue. »", () => {
+    expect(classifyCreateInvitationError(apiError(400, undefined, { label: [] }))).toMatchObject({ field: "label", message: "Cette étiquette est trop longue." });
+    expect(classifyCreateInvitationError(apiError(400, undefined, { label: [""] }))).toMatchObject({ message: "Cette étiquette est trop longue." });
+  });
   it("403 DENY_PERMISSION : refus ; autres DENY : texte existant", () => {
     expect(classifyCreateInvitationError(apiError(403, "DENY_PERMISSION")).kind).toBe("denied");
     expect(classifyCreateInvitationError(apiError(403, "DENY_SECURITY"))).toMatchObject({ kind: "form", message: expect.stringContaining("temporairement impossible") });
@@ -62,6 +67,11 @@ describe("classifyInvitationError (échange du jeton)", () => {
     ["500", apiError(500), "generic"],
   ])("%s -> %s", (_label, error, kind) => {
     expect(classifyInvitationError(error).kind).toBe(kind);
+  });
+
+  it("jeton absent ou inutilisable au moment de l'appel : « missing » (aucun appel n'a eu lieu)", () => {
+    expect(classifyInvitationError(new InvitationTokenMissingError()).kind).toBe("missing");
+    expect(clearsTokenOnFailure("missing")).toBe(false);
   });
 
   it("429 : lit Retry-After", () => {

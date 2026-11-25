@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@/i18n";
 import apiClient from "@/api/client";
-import { INVITATION_TOKEN_KEY, clearInvitationToken } from "@/lib/invitation-token";
+import { clearInvitationToken, readInvitationToken, storeInvitationToken } from "@/lib/invitation-token";
 import { contextsKeys } from "./use-contexts";
 import {
   INVITATION_PREVIEW_KEY,
@@ -17,7 +17,8 @@ import {
   useRevokeInvitation,
 } from "./use-organization-team";
 
-vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ isAuthenticated: true }) }));
+const auth = vi.hoisted(() => ({ isAuthenticated: true, user: null as { id: string } | null }));
+vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => auth }));
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const M1 = "22222222-2222-4222-8222-222222222222";
@@ -133,7 +134,7 @@ describe("création et révocation d'invitation", () => {
 describe("échange du jeton (aperçu, acceptation, refus)", () => {
   beforeEach(() => {
     sessionStorage.clear();
-    sessionStorage.setItem(INVITATION_TOKEN_KEY, TOKEN);
+    storeInvitationToken(TOKEN);
   });
   afterEach(() => clearInvitationToken());
 
@@ -180,7 +181,7 @@ describe("échange du jeton (aperçu, acceptation, refus)", () => {
     expect(post).toHaveBeenCalledWith("accounts/organization-invitations/accept/", { token: TOKEN });
     expect(post.mock.calls[0][0]).not.toContain(TOKEN);
     expect(client.getMutationCache().getAll().every((m) => m.state.variables === undefined)).toBe(true);
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBeNull();
+    expect(readInvitationToken()).toBeNull();
     expect(keysOf(invalidate)).toContain(JSON.stringify(contextsKeys.all));
   });
 
@@ -191,7 +192,7 @@ describe("échange du jeton (aperçu, acceptation, refus)", () => {
       await result.current.mutateAsync().catch(() => undefined);
     });
     expect(post).toHaveBeenCalledTimes(1);
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN);
+    expect(readInvitationToken()).toBe(TOKEN);
   });
 
   it("refus : POST du jeton dans le corps, jeton effacé au succès", async () => {
@@ -201,7 +202,7 @@ describe("échange du jeton (aperçu, acceptation, refus)", () => {
       await result.current.mutateAsync();
     });
     expect(post).toHaveBeenCalledWith("accounts/organization-invitations/decline/", { token: TOKEN });
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBeNull();
+    expect(readInvitationToken()).toBeNull();
   });
 
   it("sans jeton rangé, aucun appel réseau n'est fait", async () => {
@@ -212,5 +213,54 @@ describe("échange du jeton (aperçu, acceptation, refus)", () => {
       await result.current.mutateAsync().catch(() => undefined);
     });
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it("acceptation : la promesse ne se résout qu'après le rechargement des profils (nouveau profil sélectionnable)", async () => {
+    vi.spyOn(apiClient, "post").mockResolvedValue({ data: { organization_id: ORG, organization_name: "B", role: "EDITOR", membership_id: M1 } });
+    const client = newClient();
+    let release: () => void = () => undefined;
+    vi.spyOn(client, "invalidateQueries").mockReturnValue(new Promise<void>((resolve) => (release = resolve)));
+    const { result } = renderHook(() => useAcceptInvitation(), { wrapper: wrapperFor(client) });
+    let done = false;
+    const pending = act(async () => {
+      await result.current.mutateAsync();
+      done = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(done).toBe(false);
+    release();
+    await pending;
+    expect(done).toBe(true);
+  });
+
+  describe("jeton lié au compte (audit S2)", () => {
+    afterEach(() => {
+      auth.user = null;
+    });
+
+    it("l'aperçu réussi lie le jeton au compte : un autre compte ne peut plus s'en servir, il est effacé", async () => {
+      auth.user = { id: "compte-A" };
+      const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: PREVIEW });
+      const { result } = renderHook(() => useInvitationPreview(true), { wrapper: wrapperFor(newClient()) });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(readInvitationToken("compte-A")).toBe(TOKEN);
+
+      auth.user = { id: "compte-B" };
+      post.mockClear();
+      const accept = renderHook(() => useAcceptInvitation(), { wrapper: wrapperFor(newClient()) });
+      await act(async () => {
+        await accept.result.current.mutateAsync().catch(() => undefined);
+      });
+      expect(post).not.toHaveBeenCalled();
+      expect(readInvitationToken()).toBeNull();
+    });
+
+    it("le même compte garde son jeton après l'aperçu", async () => {
+      auth.user = { id: "compte-A" };
+      vi.spyOn(apiClient, "post").mockResolvedValue({ data: PREVIEW });
+      const { result } = renderHook(() => useInvitationPreview(true), { wrapper: wrapperFor(newClient()) });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(readInvitationToken("compte-A")).toBe(TOKEN);
+    });
   });
 });

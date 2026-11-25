@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import apiClient, { resetRefreshState } from "@/api/client";
 import { POST_DRAFT_KEY } from "@/lib/tokens";
-import { tokenStorage } from "@/lib/tokens";
+import { AUTH_EXPIRED_EVENT, tokenStorage } from "@/lib/tokens";
+import { readInvitationToken, storeInvitationToken } from "@/lib/invitation-token";
 import { AuthProvider, useAuth } from "./AuthContext";
 
 const wrapper = ({ children }: { children: ReactNode }) => (
@@ -129,5 +130,41 @@ describe("déconnexion", () => {
 
     await waitFor(() => expect(result.current.isAuthenticated).toBe(false));
     expect(tokenStorage.getRefresh()).toBeNull();
+  });
+
+  describe("jeton d'invitation rangé dans l'onglet (L1-01-F2)", () => {
+    const TOKEN = "tok_ABC-123_secretsecretsecretsecretsecret00";
+    beforeEach(() => storeInvitationToken(TOKEN));
+
+    it("effacé à la déconnexion volontaire", async () => {
+      vi.spyOn(apiClient, "post").mockResolvedValue({ data: {} });
+      const { result } = renderHook(() => useAuth(), { wrapper });
+      await waitFor(() => expect(result.current.user).not.toBeNull());
+      expect(readInvitationToken()).toBe(TOKEN);
+      await act(async () => result.current.logout());
+      expect(readInvitationToken()).toBeNull();
+    });
+
+    it("effacé à l'expiration de la session : le compte suivant ne le retrouve pas", async () => {
+      const { result } = renderHook(() => useAuth(), { wrapper });
+      await waitFor(() => expect(result.current.user).not.toBeNull());
+      act(() => {
+        window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+      });
+      await waitFor(() => expect(result.current.isAuthenticated).toBe(false));
+      expect(readInvitationToken()).toBeNull();
+      expect(readInvitationToken("u-2")).toBeNull();
+    });
+
+    it("effacé par une déconnexion depuis un autre onglet", async () => {
+      const { result } = renderHook(() => useAuth(), { wrapper });
+      await waitFor(() => expect(result.current.user).not.toBeNull());
+      localStorage.removeItem("access_token");
+      act(() => {
+        window.dispatchEvent(new StorageEvent("storage", { key: "access_token", newValue: null }));
+      });
+      await waitFor(() => expect(result.current.isAuthenticated).toBe(false));
+      expect(readInvitationToken()).toBeNull();
+    });
   });
 });

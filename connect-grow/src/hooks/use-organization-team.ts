@@ -18,7 +18,7 @@ import { invalidateContexts } from "@/hooks/use-contexts";
 import { organizationKeys } from "@/hooks/use-organizations";
 import { getApiErrorCode } from "@/lib/api-errors";
 import { shouldRetryQuery } from "@/lib/errors";
-import { clearInvitationToken, readInvitationToken } from "@/lib/invitation-token";
+import { InvitationTokenMissingError, bindInvitationToken, clearInvitationToken, readInvitationToken } from "@/lib/invitation-token";
 
 // Équipe d'une organisation (L1-01, contrat `docs/specs/L1-01-contrat-api.md` §1). Les réponses sont `private, no-store`
 // et contiennent des noms de personnes : elles ne vivent qu'en mémoire de l'onglet (aucun cache persistant, service
@@ -195,21 +195,31 @@ export function useRevokeInvitation(orgId: Uuid) {
   });
 }
 
-/** Le jeton est relu dans `sessionStorage` au moment de l'appel : il n'est ni une variable de mutation, ni une clé de requête. */
-function tokenBody(): { token: string } {
-  const token = readInvitationToken();
-  if (!token) throw new Error("invitation token missing");
+/**
+ * Le jeton est relu dans `sessionStorage` au moment de l'appel : il n'est ni une variable de mutation, ni une clé de requête.
+ * Lu pour le compte connecté : un jeton lié à un autre compte, ou de plus de 60 minutes, est effacé et l'appel n'a pas lieu.
+ */
+function tokenBody(accountId: string | undefined): { token: string } {
+  const token = readInvitationToken(accountId);
+  if (!token) throw new InvitationTokenMissingError();
   return { token };
 }
 
 /**
  * Aperçu (POST, sans effet de bord) : `useQuery` à fonction POST, clé sans le jeton, jamais conservé (`gcTime: 0`),
- * jamais relancé sur un 4xx. `enabled` seulement pour un visiteur connecté qui détient un jeton.
+ * jamais relancé sur un 4xx. `enabled` seulement pour un visiteur connecté qui détient un jeton. Un aperçu réussi lie
+ * le jeton au compte connecté (un autre compte ne pourra plus s'en servir dans cet onglet).
  */
 export function useInvitationPreview(enabled: boolean) {
+  const { user } = useAuth();
+  const accountId = user?.id;
   return useQuery({
     queryKey: INVITATION_PREVIEW_KEY,
-    queryFn: async () => (await apiClient.post<InvitationPreview>(invitationExchangeUrl("preview"), tokenBody())).data,
+    queryFn: async () => {
+      const data = (await apiClient.post<InvitationPreview>(invitationExchangeUrl("preview"), tokenBody(accountId))).data;
+      if (accountId) bindInvitationToken(accountId);
+      return data;
+    },
     enabled,
     staleTime: 0,
     gcTime: 0,
@@ -218,26 +228,32 @@ export function useInvitationPreview(enabled: boolean) {
   });
 }
 
-/** Accepter : le profil actif ne change pas (bouton « Ouvrir l'organisation »). Le jeton est effacé au succès. */
+/**
+ * Accepter : le profil actif ne change pas (bouton « Ouvrir l'organisation »). Le jeton est effacé au succès.
+ * La liste des profils est rechargée AVANT la résolution : le nouveau profil est sélectionnable dès l'écran de succès.
+ */
 export function useAcceptInvitation() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const accountId = user?.id;
   return useMutation({
-    mutationFn: async () => (await apiClient.post<InvitationAccepted>(invitationExchangeUrl("accept"), tokenBody())).data,
+    mutationFn: async () => (await apiClient.post<InvitationAccepted>(invitationExchangeUrl("accept"), tokenBody(accountId))).data,
     gcTime: 0,
     retry: false,
     onSuccess: () => {
       clearInvitationToken();
-      // Le nouveau profil apparaît à l'appel suivant de `contexts/`
-      void invalidateContexts(queryClient);
+      return invalidateContexts(queryClient);
     },
   });
 }
 
 /** Refuser (204) : le jeton est effacé au succès. */
 export function useDeclineInvitation() {
+  const { user } = useAuth();
+  const accountId = user?.id;
   return useMutation({
     mutationFn: async () => {
-      await apiClient.post(invitationExchangeUrl("decline"), tokenBody());
+      await apiClient.post(invitationExchangeUrl("decline"), tokenBody(accountId));
     },
     gcTime: 0,
     retry: false,

@@ -1,7 +1,8 @@
 import type { OrganizationInvitation } from "@/api/types";
 import i18n from "@/i18n";
 import { describeApiError, getApiErrorCode, isNetworkError } from "@/lib/api-errors";
-import { apiErrorMessage, httpStatus, isRateLimited, retryAfterSeconds } from "@/lib/errors";
+import { InvitationTokenMissingError } from "@/lib/invitation-token";
+import { httpStatus, isRateLimited, retryAfterSeconds } from "@/lib/errors";
 
 /** Longueur maximale de l'étiquette d'une invitation (contrat §2.1) : verrou de saisie, le serveur reste l'arbitre. */
 export const INVITATION_LABEL_MAX = 60;
@@ -42,9 +43,9 @@ export function classifyCreateInvitationError(error: unknown): CreateInvitationF
     const data = (error as { response?: { data?: Record<string, unknown> } }).response?.data;
     if (Array.isArray(data?.role)) return { kind: "field", field: "role", message: t("team.invite.errRole") };
     if (Array.isArray(data?.label)) {
-      const serverMessage = apiErrorMessage(error);
-      // Un message générique du serveur est remplacé par le texte local (la limite de 60 caractères)
-      return { kind: "field", field: "label", message: serverMessage && serverMessage.length <= 120 ? serverMessage : t("team.invite.errLabel") };
+      // Message de champ du serveur s'il en donne un ; sinon le texte de la spec (« Cette étiquette est trop longue. »)
+      const first = (data.label as unknown[]).find((item): item is string => typeof item === "string" && item.trim().length > 0);
+      return { kind: "field", field: "label", message: first ?? t("team.invite.errLabelTooLong") };
     }
   }
   return { kind: "form", message: describeApiError(error, { inOrganization: true }) };
@@ -53,11 +54,13 @@ export function classifyCreateInvitationError(error: unknown): CreateInvitationF
 /** Issue d'un échec d'aperçu, d'acceptation ou de refus, telle que la page d'acceptation l'affiche (spec E15 §4.5). */
 export type InvitationFailureKind =
   | "invalid"
+  /** Plus aucun jeton utilisable dans l'onglet (expiré après 60 minutes, lié à un autre compte) : « Lien incomplet ». */
+  | "missing"
   | "phone"
   | "limit"
   | "member"
   | "security"
-  /** 401 : session expirée, retour à l'écran visiteur (le jeton est conservé). */
+  /** 401 : retour à l'écran visiteur (une fin de session efface le jeton : voir `AuthContext`). */
   | "unauthenticated"
   | "rate"
   | "network"
@@ -74,6 +77,7 @@ export interface InvitationFailure {
  * jamais pourquoi un jeton est invalide (réponse uniforme, aucun oracle). Le jeton n'apparaît nulle part dans le résultat.
  */
 export function classifyInvitationError(error: unknown): InvitationFailure {
+  if (error instanceof InvitationTokenMissingError) return { kind: "missing" };
   if (isNetworkError(error)) return { kind: "network" };
   if (isRateLimited(error)) return { kind: "rate", retryAfter: retryAfterSeconds(error) };
   const status = httpStatus(error);

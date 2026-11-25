@@ -924,6 +924,7 @@ const fr = {
       errRateIn: "Vous avez créé beaucoup d'invitations. Réessayez dans {{minutes}} min.",
       errRole: "Ce rôle ne peut pas être donné par invitation.",
       errLabel: "Cette étiquette est invalide (60 caractères au plus).",
+      errLabelTooLong: "Cette étiquette est trop longue.",
       errNetwork: "Connexion perdue. Vérifiez l'onglet Invitations avant de réessayer.",
     },
     invitations: {
@@ -945,7 +946,7 @@ const fr = {
       loadMore: "Voir plus d'invitations",
       loadMoreError: "Impossible de charger la suite de la liste.",
       revoke: "Annuler l'invitation",
-      revokeLabel: "Annuler l'invitation : {{label}}",
+      revokeLabel: "Annuler l'invitation : {{label}}, {{role}}, expire le {{date}}",
       revokeTitle: "Annuler cette invitation ?",
       revokeBody: "Le lien ne fonctionnera plus. Si la personne l'a déjà reçu, elle ne pourra pas rejoindre l'équipe avec ce lien.",
       keep: "Garder l'invitation",
@@ -1024,7 +1025,8 @@ const fr = {
       body: "Quelqu'un vous invite à rejoindre une équipe sur Connecte+. Connectez-vous ou créez un compte pour voir de quelle organisation il s'agit.",
       login: "Se connecter",
       register: "Créer un compte",
-      caution: "N'acceptez que les invitations de personnes que vous connaissez.",
+      caution:
+        "N'acceptez que les invitations de personnes que vous connaissez. N'ouvrez pas ce lien sur un appareil partagé : il reste dans l'historique du navigateur.",
     },
     preview: {
       title: "Invitation à rejoindre une organisation",

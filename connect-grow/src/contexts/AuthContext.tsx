@@ -85,6 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearSession = useCallback(() => {
     tokenStorage.clear();
     clearLegacyNotices();
+    // Jeton d'invitation rangé dans l'onglet : jamais réutilisable par le compte suivant (L1-01-F2, audit S2).
+    // Couvre la déconnexion, la session expirée et la déconnexion depuis un autre onglet.
+    clearInvitationToken();
     setHasToken(false);
     // Vide tout le cache en mémoire : aucune donnée privée ne survit à la session
     queryClient.clear();
@@ -94,8 +97,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // (réseau faible, ou serveur injoignable : l'utilisateur est déconnecté ici dans tous les cas).
   const logout = useCallback(
     async (options?: { all?: boolean }) => {
-      // Déconnexion volontaire seulement (pas une session expirée) : un jeton d'invitation rangé ne survit pas (L1-01-F2)
-      clearInvitationToken();
       if (options?.all) {
         const done = await requestServerLogout(true);
         clearSession();

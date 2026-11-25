@@ -566,7 +566,7 @@ Déposer les pièces de l'organisation et lire exactement ce qui a été vérifi
 3. Bandeau d'information (`Alert` neutre, icône `Info`) : « La vérification ne peut pas être achetée. Aucun abonnement ni paiement ne la fournit. Elle ne dépend pas non plus du rôle des membres. »
 4. Liste `<ul>` des pièces exigées pour le type (`verification.required`, dans l'ordre reçu). Chaque ligne (`DocumentRow` extrait de l'existant) : icône, intitulé (clé `kyc.docs.<document_type>.title`), consigne (clé `…description`), état, motif de refus, boutons.
 5. Note de confidentialité (`Lock`) : « Vos pièces sont conservées dans un espace privé, accessibles uniquement aux personnes habilitées de l'équipe de vérification. Elles ne sont jamais publiées et jamais visibles par les autres membres de l'organisation. » (Le fichier n'est jamais renvoyé par l'API.)
-6. Si le rôle n'a pas `org.verification_submit` : `Alert` « Seuls le propriétaire et les administrateurs peuvent envoyer des pièces. » et aucun bouton d'envoi ni de suppression.
+6. Si le rôle n'a pas `org.verification_submit` : `Alert` « Seuls les administrateurs principaux et les administrateurs peuvent envoyer des pièces, en consulter le détail et lire les motifs de refus. » et aucun bouton d'envoi ni de suppression.
 
 ### 8.4. États d'une pièce (`state` de `verification.required`)
 | État | Pastille | Texte | Actions (si `org.verification_submit`) |
@@ -607,7 +607,7 @@ Source des pièces et motifs : `GET organizations/:id/kyc/documents/`, réservé
 | `verif.validatedCount_other` | `{{count}} pièces validées sur {{total}}` |
 | `verif.notPaid` | `La vérification ne peut pas être achetée. Aucun abonnement ni paiement ne la fournit. Elle ne dépend pas non plus du rôle des membres.` |
 | `verif.privacy` | `Vos pièces sont conservées dans un espace privé, accessibles uniquement aux personnes habilitées de l'équipe de vérification. Elles ne sont jamais publiées et jamais visibles par les autres membres de l'organisation.` |
-| `verif.readOnly` | `Seuls le propriétaire et les administrateurs peuvent envoyer des pièces.` |
+| `verif.readOnly` | `Seuls les administrateurs principaux et les administrateurs peuvent envoyer des pièces, en consulter le détail et lire les motifs de refus.` |
 | `verif.noRequirements` | `Aucune pièce n'est demandée pour ce type d'organisation pour le moment.` |
 | `verif.state.NONE` | `Non envoyée` |
 | `verif.state.EN_ATTENTE` | `En cours d'examen` |

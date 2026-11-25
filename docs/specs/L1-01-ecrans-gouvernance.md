@@ -1,9 +1,11 @@
 # L1-01-D2 : Spécification d'écran, gouvernance des organisations (ADR 0010)
 
 - **Date :** 25/11/2026 ; **auteur :** designer-ux ; **destinataires :** dev-frontend (F1-bis, F2-bis, F4, F5, F6), qa-testeur.
-- **Sources :** `docs/adr/0010-gouvernance-organisations.md` (D1 à D10, §7 notifications, §12, §18) ; `docs/specs/L1-01-contrat-api.md` §7 (contrat v2 : **les écrans ne montrent que ce qu'il expose**) ; réponses du client Q3, Q17, Q19, Q21, Q22, Q23, Q26, Q30 ; `docs/specs/L1-01-ecrans-equipe.md` (spec D1, amendée ici) ; `docs/specs/L0-09-ecrans-contextes.md` §6 (création).
+- **Sources :** `docs/adr/0010-gouvernance-organisations.md` (D1 à D10, §6.2, §7 notifications, §12, §18) ; `docs/specs/L1-01-contrat-api.md` §7 (contrat v2 : **les écrans ne montrent que ce qu'il expose**) ; réponses du client Q3, Q17, Q19, Q21, Q22, Q23, Q26, Q30 ; `docs/specs/L1-01-ecrans-equipe.md` (spec D1, amendée ici) ; `docs/specs/L0-09-ecrans-contextes.md` §6 (création).
 - **Décisions de l'utilisateur appliquées :** invitation comme Administrateur avec confirmation par l'émetteur (ou un Administrateur principal) avant toute ouverture de droits ; nomination d'un Administrateur principal avec acceptation de la personne promue, notification de tous les Administrateurs principaux, ressaisie du mot de passe, revue Connecte+ pour les organisations à vérification renforcée ; libellé « Administrateur principal » partout ; plus aucun plafond affiché du nombre d'organisations.
 - **Aucune dépendance graphique nouvelle.** shadcn/ui, lucide-react et Tailwind déjà installés suffisent.
+
+> **Révision du 26/11/2026 — code de rattachement (QG-2 tranché par la revue S3).** Une invitation Administrateur acceptée renvoie un **code à 6 chiffres** (`confirmation_code`) montré à la seule personne qui a accepté. Elle le communique de vive voix à la personne qui l'a invitée ; le confirmateur l'obtient **en l'appelant au numéro qu'il connaît**, puis saisit le code **et** son mot de passe. 5 codes faux rejettent la demande. La personne peut obtenir un nouveau code (l'ancien cesse de valoir). La liste des invitations porte `inviter_has_authority`. Sections modifiées : 1 (principe 8), 4.4, 4.5, 7.3, 8 (entièrement), 9.1, 9.3, 9.4, 11.2, 11.3 (nouvelle), 11.4, 11.5, 14, 15.1, 15.2, 15.3, 16.2, 17, 18, 19, 20, 21 (Q-D2-2 soldée, Q-D2-10 ajoutée). Contrat : §7.4, §7.4.5 à §7.4.7, §7.7 amendés.
 
 ### Ce que ce document remplace dans `L1-01-ecrans-equipe.md`
 
@@ -13,7 +15,7 @@
 | §2.5 matrice du menu | **Remplacée** par la section 4.3 |
 | §2.6 E6b « Changer le rôle » | **Amendée** par la section 5 (plus d'option Administrateur principal, rôle Membre, rétrogradation d'un autre Administrateur principal) |
 | §2.7 E6c | **Supprimée** (section 6) |
-| §3.3 E6a étape 1 (rôles, note `rolesNote`) et étape 2 (avertissement) | **Amendées** par la section 7 |
+| §3.3 E6a étape 1 (rôles, note `rolesNote`) et étape 2 (avertissement), erreur `invitation_limit_reached` | **Amendées** par la section 7 |
 | §4.4.2 aperçu, §4.4.3 succès, §4.5 erreurs `organization_limit_reached` | **Amendés** par la section 9 |
 | §6 tous les textes contenant « propriétaire » | **Remplacés** par la section 15.1 |
 | §10 décision 4 (deux chemins vers un nouveau propriétaire) | **Caduque** : un seul chemin, la nomination |
@@ -33,12 +35,12 @@ Tout le reste de D1 (structure de E6, CopyLinkField, gestion du jeton, accessibi
 | E6a | Inviter une personne (amendé) | dialogue de E6 | `components/team/InviteDialog.tsx` | F2-bis |
 | E6b | Changer le rôle (amendé) | dialogue de E6 | `components/team/ChangeRoleDialog.tsx` | F5 |
 | E6f | Proposer comme administrateur principal (**nouveau**, remplace E6c) | dialogue de E6 | `components/team/NominatePrimaryAdminDialog.tsx` | F5 |
-| E6g | Confirmer l'accès d'un administrateur invité (**nouveau**) | dialogue de E6 | `components/team/ConfirmAdminInvitationDialog.tsx` | F2-bis |
+| E6g | Confirmer l'accès d'un administrateur invité, avec code de rattachement (**nouveau**) | dialogue de E6 | `components/team/ConfirmAdminInvitationDialog.tsx` | F2-bis |
 | E6h | Rejeter une demande d'accès (**nouveau**) | alerte de E6 | `components/team/RejectAdminInvitationDialog.tsx` | F2-bis |
 | E6i | Répondre à une nomination : accepter, refuser (**nouveau**) | alerte de E6 | `components/team/NominationResponseDialog.tsx` | F5 |
 | E6j | Annuler une nomination (**nouveau**) | alerte de E6 | `components/team/CancelNominationDialog.tsx` | F5 |
-| E15 | Page d'acceptation (amendée) : aperçu enrichi, écran « confirmation en attente » | `/organization-invitation` | `pages/OrganizationInvitation.tsx` | F2-bis |
-| E17 | Section « Demandes en attente de confirmation » (**nouvelle**) + retrait | section de `/profiles` | `components/profiles/AwaitingMembershipsSection.tsx`, `WithdrawAwaitingDialog.tsx` | F2-bis |
+| E15 | Page d'acceptation (amendée) : aperçu enrichi, écran « Demande envoyée » avec le code | `/organization-invitation` | `pages/OrganizationInvitation.tsx` | F2-bis |
+| E17 | Section « Demandes en attente de confirmation » (**nouvelle**) : nouveau code, retrait | section de `/profiles` | `components/profiles/AwaitingMembershipsSection.tsx`, `NewConfirmationCodeDialog.tsx`, `WithdrawAwaitingDialog.tsx` | F2-bis |
 | E18 | Bannière de gouvernance (**nouvelle**) : « administration à régulariser », « en cours d'examen » ; badges sur les cartes de `/profiles` | `OrganizationPage` (toutes sections), `Profiles.tsx` | `components/organizations/GovernanceBanner.tsx` | F4 (`under_review`), F6 (`MISSING`) |
 | E3 | Créer une organisation (amendé) : sans plafond, `account_review_required` | `/organizations/new` | `pages/OrganizationNew.tsx`, `lib/organization-form.ts` | F4 |
 
@@ -55,6 +57,7 @@ Tous les dialogues nouveaux sont chargés à l'ouverture (`React.lazy` + `Suspen
 5. **Le mot « propriétaire »** disparaît de toute interface (contrat §7.1). Critère vérifiable : `grep -i "propriétaire" src/i18n/locales/fr.ts` ne renvoie rien (voir 15.1 pour la seule occurrence de sens différent, réécrite aussi).
 6. **Une seule région `aria-live="polite"` par page** (E6 : celle qui existe ; `/profiles` : une nouvelle ; E15 : celle qui existe). Les erreurs sont en `role="alert"` dans leur dialogue ou leur carte.
 7. **Aucune action différée.** Hors ligne, les boutons sont désactivés avec `common.offlineAction` relié par `aria-describedby` ; rien n'est mis en file.
+8. **Le code de rattachement est un secret à usage unique** (révision du 26/11). Il n'est affiché qu'à la personne qui a accepté, dans la réponse qui le contient (202 ou « nouveau code ») ; il n'existe qu'en mémoire du composant qui l'affiche. **Jamais** dans : une région `aria-live`, un `toast`, un `title`, une URL, `localStorage`, `sessionStorage`, une clé ou un cache React Query (mutations avec `gcTime: 0`, résultat remis à zéro au démontage), `console.*`, un message d'erreur, un attribut `data-*`, le presse-papiers (aucun bouton « Copier » : on le dicte, on ne le colle pas dans une messagerie). Côté confirmateur, le code saisi est vidé après tout échec de code et à la fermeture du dialogue. Tests Vitest à sentinelle (valeur `"482913"` cherchée dans le stockage, le cache de requêtes, les régions vivantes et les toasts).
 
 ---
 
@@ -188,6 +191,8 @@ Ordre des cartes (de la plus personnelle à la plus générale) :
 
 Chaque groupe a un `h3` : « Une nomination vous concerne » (`team.pending.forMe`), « Demandes d'accès à confirmer » (`team.pending.toConfirm`), « Nominations en cours » (`team.pending.nominations`). Un groupe vide n'est pas rendu.
 
+Une demande peut disparaître sans action de l'utilisateur : rejet automatique après 5 codes faux, ou parce que l'émetteur a été retiré, sanctionné ou désactivé (contrat §7.4). Aucun message n'est affiché pour ces disparitions : la liste est simplement à jour au rechargement.
+
 **Requêtes (au chargement de E6, en parallèle de `members/`) :**
 - `GET organizations/<id>/primary-admin-nominations/?status=open` (tous les rôles) ;
 - `GET organizations/<id>/invitations/?status=AWAITING_CONFIRMATION` (seulement si `org.manage_members`).
@@ -208,31 +213,36 @@ Justification : ce sont des actions attendues, signalées par notification avec 
 **Cas `can_confirm === true`** (émetteur habilité ou Administrateur principal effectif) :
 
 ```
-┌─────────────────────────────────────────────┐
-│ [RoleBadge Administrateur]  Toute l'organisation │
-│ Marie K. a accepté votre invitation          │  h4
-│ Téléphone se terminant par ••47              │
-│ Acceptée le 25 nov. 2026 à 14 h 05           │
-│ À confirmer avant le 28 nov. 2026 à 14 h 05  │
-│ Invitation créée par vous                    │
-│ ⓘ Vérifiez que c'est bien la personne à qui  │
-│   vous avez envoyé le lien (par exemple en   │
-│   l'appelant). Sinon, rejetez la demande.    │
-│ [ Confirmer l'accès ]   [ Rejeter ]          │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│ [RoleBadge Administrateur]  Toute l'organisation  │
+│ Marie K. a accepté l'invitation                   │  h4
+│ Téléphone se terminant par ••47                   │
+│ Acceptée le 25 nov. 2026 à 14 h 05                │
+│ À confirmer avant le 28 nov. 2026 à 14 h 05       │
+│ Invitation créée par vous                         │
+│ ⚠ (si inviter_has_authority = false) La personne │
+│   qui a créé l'invitation ne peut plus donner ce  │
+│   rôle…                                           │
+│ ⓘ Pour confirmer, appelez la personne au numéro  │
+│   que vous connaissez et demandez-lui le code à   │
+│   6 chiffres affiché sur son écran.               │
+│ [ Confirmer l'accès ]   [ Rejeter ]               │
+└──────────────────────────────────────────────────┘
 ```
 
 - Titre : « {{name}} a accepté l'invitation » (`team.awaiting.title`, `name = accepted_by_display_name`).
-- Indice : composant `PhoneHint` : texte visible « Téléphone se terminant par ••47 » (`team.awaiting.phoneHint`, `hint = accepted_by_phone_hint` tel que reçu) ; `aria-label` « Téléphone se terminant par 4 7 » (`team.awaiting.phoneHintAria`, chiffres extraits du `hint` et séparés par une espace, pour une lecture chiffre par chiffre ; les puces ne sont pas lues).
+- Indice : composant `PhoneHint` : texte visible « Téléphone se terminant par ••47 » (`team.awaiting.phoneHint`, `hint = accepted_by_phone_hint` tel que reçu) ; `aria-label` « Téléphone se terminant par 4 7 » (`team.awaiting.phoneHintAria`, chiffres extraits du `hint` et séparés par une espace, pour une lecture chiffre par chiffre ; les puces ne sont pas lues). L'indice est **un indice**, pas une preuve : la preuve est le code (texte de la carte).
 - Dates : `formatDateTime(accepted_at)`, `formatDateTime(confirmation_expires_at)`.
 - Créateur : « Invitation créée par vous » si `is_mine`, sinon « Invitation créée par {{name}} » (`created_by_display_name`) (clés existantes `team.invitations.createdByMe` / `createdBy`).
-- Aide : `team.awaiting.verifyHint` (icône `Info`).
+- **Si `inviter_has_authority === false`** : `Alert` d'avertissement compacte (icône `AlertTriangle`, bordure `border-warning/50`), placée avant les boutons : « La personne qui a créé cette invitation ne peut plus donner ce rôle (elle a changé de rôle ou quitté l'équipe). Seul un administrateur principal peut encore confirmer ou rejeter cette demande. Assurez-vous que cette arrivée est toujours souhaitée. » (`team.awaiting.inviterNoAuthority`). Pas de badge de couleur seule.
+- Consigne : `team.awaiting.callHint` (icône `Phone`) : « Pour confirmer, appelez la personne au numéro que vous connaissez et demandez-lui le code à 6 chiffres affiché sur son écran. Ne demandez pas le code par message. Si vous ne la reconnaissez pas, rejetez la demande. »
 - Boutons : « Confirmer l'accès » (`Button` principal, `min-h-11`, ouvre E6g) ; « Rejeter » (`variant="outline"`, texte destructif + icône `X`, ouvre E6h). Sur mobile : pleine largeur, empilés, Confirmer en premier.
 - `aria-label` des boutons : « Confirmer l'accès de {{name}} », « Rejeter la demande de {{name}} ».
 
 **Cas `can_confirm === false`** (administrateur qui n'est pas l'émetteur, ou émetteur qui a perdu l'autorité) : le serveur renvoie `accepted_by_display_name` et `accepted_by_phone_hint` à `null`.
 - Titre : « Une personne a accepté une invitation comme Administrateur » (`team.awaiting.titleAnonymous`).
 - Lignes : rôle, périmètre, « À confirmer avant le {{date}} », créateur.
+- Si `inviter_has_authority === false` : même avertissement que ci-dessus.
 - Texte : « Seuls la personne qui a créé l'invitation et les administrateurs principaux peuvent confirmer ou rejeter cette demande. » (`team.awaiting.notYours`).
 - Aucun bouton.
 
@@ -271,7 +281,7 @@ Justification : ce sont des actions attendues, signalées par notification avec 
 
 - Ligne 1 : badge de genre (`nomination.kind.*`) + badge d'état.
 - `h4` : « {{name}} » (`target.display_name`).
-- « Proposé(e) par {{name}} » (`nomination.by`) ou « Proposé(e) par vous » (`nomination.byMe`) si l'appelant est l'initiateur. **Note :** le contrat n'expose pas « l'appelant est l'initiateur » ; on affiche toujours `initiated_by_display_name` (voir question Q-D2-4).
+- « Proposé(e) par {{name}} » (`nomination.by`). Le contrat n'expose pas « l'appelant est l'initiateur » ; on affiche toujours `initiated_by_display_name` (voir question Q-D2-4).
 - TRANSFER : `nomination.transferNote`.
 - État `PENDING_ACCEPTANCE` : « En attente de la réponse de {{name}}. » (`nomination.manager.waitingTarget`). État `PENDING_REVIEW` : « {{name}} a accepté. L'équipe Connecte+ vérifie la nomination avant qu'elle prenne effet. » (`nomination.manager.waitingReview`).
 - Échéance.
@@ -285,7 +295,7 @@ Aucune nomination close n'est affichée en V1 (le contrat le permet par `?status
 |---|---|
 | Rôle Membre | `Member.role = "MEMBER"` |
 | Périmètre (dialogue de rôle) | `Member.scope` |
-| Demandes à confirmer | `Invitation.status = AWAITING_CONFIRMATION`, `role`, `scope`, `accepted_at`, `confirmation_expires_at`, `accepted_by_display_name`, `accepted_by_phone_hint`, `can_confirm`, `created_by_display_name`, `is_mine`, `invitation_id` (jamais affiché) |
+| Demandes à confirmer | `Invitation.status = AWAITING_CONFIRMATION`, `role`, `scope`, `accepted_at`, `confirmation_expires_at`, `accepted_by_display_name`, `accepted_by_phone_hint`, `can_confirm`, `inviter_has_authority`, `created_by_display_name`, `is_mine`, `invitation_id` (jamais affiché). Le code de rattachement n'est **jamais** dans cet objet. |
 | Nominations | `PrimaryAdminNomination.kind`, `status`, `target.display_name`, `target.membership_id` (jamais affiché ; sert au badge de ligne), `initiated_by_display_name`, `initiator_new_role`, `requires_review`, `expires_at`, `is_target_me`, `can_cancel`, `nomination_id` (jamais affiché) |
 | Nom de l'organisation (textes de nomination) | `OrganizationInternal.name` |
 | État de gouvernance | `OrganizationInternal.governance` |
@@ -323,7 +333,7 @@ Texte (`team.demoteOwnerBody`) : « {{name}} ne sera plus administrateur princip
 | `409 last_owner` | « Une organisation doit toujours avoir au moins un administrateur principal. » (`errors.code.last_owner_demote`) |
 | `409 last_effective_owner` | `errors.code.last_effective_owner` (15.1) |
 
-Succès : inchangé (toast `team.roleChanged`, annonce, focus au bouton `⋯`). Après la rétrogradation d'un Administrateur principal : invalider aussi `nominations` (le serveur peut en avoir invalidé).
+Succès : inchangé (toast `team.roleChanged`, annonce, focus au bouton `⋯`). Après la rétrogradation d'un Administrateur principal : invalider aussi `nominations` (le serveur peut en avoir invalidé) et les invitations `AWAITING_CONFIRMATION` (`inviter_has_authority` peut avoir changé).
 
 ---
 
@@ -392,7 +402,7 @@ Desktop : `Dialog` `max-w-lg`, même contenu.
 | OWNER, ADMIN | Membre, Analyste, Éditeur, Administrateur |
 | autres | aucun (bouton Inviter absent, inchangé) |
 
-Aucun rôle présélectionné (inchangé). Chaque option : libellé + `role.<code>_desc`. L'option Administrateur porte en plus un `Badge variant="outline"` « Confirmation requise » (icône `UserCheck`, `team.invite.confirmBadge`) et la phrase : « Après l'acceptation, vous ou un administrateur principal devrez confirmer l'identité de la personne. Aucun accès n'est ouvert avant. » (`team.invite.adminConfirmNote`).
+Aucun rôle présélectionné (inchangé). Chaque option : libellé + `role.<code>_desc`. L'option Administrateur porte en plus un `Badge variant="outline"` « Confirmation requise » (icône `UserCheck`, `team.invite.confirmBadge`) et la phrase : « Après l'acceptation, vous ou un administrateur principal devrez appeler la personne pour obtenir son code de confirmation. Aucun accès n'est ouvert avant. » (`team.invite.adminConfirmNote`).
 
 Le serveur reste l'arbitre de « ce que l'émetteur peut déléguer » : `400 invitation_role_not_allowed` → erreur sous la liste des rôles, `team.invite.errRole` réécrit (15.2), et rechargement de l'organisation (`my_role`).
 
@@ -401,10 +411,11 @@ Le serveur reste l'arbitre de « ce que l'émetteur peut déléguer » : `400 in
 - **Supprimer** `team.invite.rolesNote`. **Le remplacer** par : « Le rôle Administrateur principal ne peut pas être donné par invitation. Une fois la personne dans l'équipe, un administrateur principal peut la proposer. » (`team.invite.ownerNote`), `Alert` d'information.
 - Ligne fixe sous les rôles : « Périmètre : Toute l'organisation » (`team.scopeLine`). Aucun contrôle.
 - Champ `scope` non envoyé.
+- `409 invitation_limit_reached` compte désormais les invitations en attente **et** les demandes à confirmer (contrat §7.4.1) : texte `team.invite.errLimit` réécrit (15.1).
 
 ### 7.3 Étape 2 (lien)
 
-Si le rôle est `ADMIN` (`requires_confirmation === true` dans la réponse `201`), l'avertissement `team.invite.linkWarning` est remplacé par `team.invite.linkWarningAdmin` : « Ce lien ne sera plus affichable après la fermeture de cette fenêtre. Envoyez-le seulement à la personne concernée. Quiconque l'ouvre pourra demander à rejoindre l'équipe comme Administrateur, mais n'aura aucun accès avant que vous ou un administrateur principal confirmiez son identité. Vous verrez alors son nom abrégé et les deux derniers chiffres de son numéro. »
+Si le rôle est `ADMIN` (`requires_confirmation === true` dans la réponse `201`), l'avertissement `team.invite.linkWarning` est remplacé par `team.invite.linkWarningAdmin` : « Ce lien ne sera plus affichable après la fermeture de cette fenêtre. Envoyez-le seulement à la personne concernée. Quiconque l'ouvre pourra demander à rejoindre l'équipe comme Administrateur, mais n'aura aucun accès avant que vous ou un administrateur principal confirmiez son identité : il faudra appeler la personne au numéro que vous connaissez et lui demander le code à 6 chiffres qu'elle aura reçu. »
 
 Le reste (CopyLinkField, Partager, non-fuite du jeton) est inchangé.
 
@@ -422,51 +433,67 @@ Le reste (CopyLinkField, Partager, non-fuite du jeton) est inchangé.
 
 ### 8.1 Objectif et utilisateur
 
-L'émetteur d'une invitation Administrateur, ou un Administrateur principal, vérifie que la personne qui a accepté le lien est bien celle qu'il voulait inviter, puis lui ouvre l'accès (confirmer, avec mot de passe) ou le lui refuse (rejeter). **Action principale :** « Confirmer l'accès ».
+L'émetteur d'une invitation Administrateur, ou un Administrateur principal, vérifie que la personne qui a accepté le lien est bien celle qu'il voulait inviter, puis lui ouvre l'accès ou le lui refuse. **La preuve est le code de rattachement** : le confirmateur appelle la personne qu'il voulait inviter, au numéro qu'il connaît déjà, et lui demande le code affiché sur son écran. Si le lien a été transmis à un tiers, la personne appelée n'a pas de code. Le nom abrégé et l'indice de téléphone ne sont que des indices. **Action principale :** « Confirmer l'accès ».
 
 ### 8.2 Parcours
 
 1. Entrée : notification « Une invitation comme Administrateur pour « {organisation} » a été acceptée… » (lien `/organizations/<id>/team`) ou visite de E6 ; carte dans « À traiter ».
-2. « Confirmer l'accès » → E6g → mot de passe → `POST invitations/<id>/confirm/` → `200 Member`.
-3. Ou « Rejeter » → E6h → `POST invitations/<id>/reject/` → `204`.
-4. Sortie : la carte disparaît ; pour une confirmation, la personne apparaît dans la liste des membres.
+2. Le confirmateur appelle la personne (hors application) et note le code qu'elle lui dicte.
+3. « Confirmer l'accès » → E6g → code + case + mot de passe → `POST invitations/<id>/confirm/` → `200 Member`.
+4. Code faux : erreur sous le champ, nouvel essai possible ; au 5e code faux (tous confirmateurs confondus), la demande est rejetée automatiquement.
+5. Ou « Rejeter » → E6h → `POST invitations/<id>/reject/` → `204`.
+6. Sortie : la carte disparaît ; pour une confirmation, la personne apparaît dans la liste des membres.
 
 ### 8.3 E6g : `ConfirmAdminInvitationDialog` (`ResponsiveDialog`)
 
 Titre : « Confirmer l'accès de {{name}} » (`team.confirmInvite.title`).
 
-1. Récapitulatif (`dl`) : « Personne » `{{name}}` ; « Téléphone » `PhoneHint` ; « Rôle » `RoleBadge ADMIN` ; « Périmètre » `scopeLabel`.
-2. Texte : « En confirmant, {{name}} devient Administrateur de « {{org}} » immédiatement : cette personne pourra gérer le profil, la vérification, l'équipe (sauf les administrateurs principaux), les contacts et les messages. Les administrateurs principaux en sont informés. » (`team.confirmInvite.body`).
-3. `SensitiveConfirmFields` : case « Je confirme que {{name}} est bien la personne que j'ai voulu inviter » (`team.confirmInvite.check`) ; mot de passe.
-4. Boutons : « Annuler » et « Confirmer l'accès » (`team.confirmInvite.submit`, désactivé tant que case non cochée et mot de passe vide).
+1. Si `inviter_has_authority === false` : `Alert` d'avertissement `team.awaiting.inviterNoAuthority` en tête du dialogue.
+2. Consigne (`Alert` d'information, icône `Phone`), titre « Appelez d'abord la personne » (`team.confirmInvite.callTitle`), texte : « Appelez {{name}} au numéro que vous connaissez déjà, pas à un numéro reçu avec la demande, et demandez-lui le code à 6 chiffres affiché sur son écran. Ne demandez pas le code par message. Si la personne que vous appelez n'a pas de code, rejetez la demande. » (`team.confirmInvite.callBody`).
+3. Récapitulatif (`dl`) : « Personne » `{{name}}` ; « Téléphone » `PhoneHint` + texte `text-xs` « Vérifiez que ces chiffres correspondent au numéro que vous appelez. » (`team.confirmInvite.phoneCheck`) ; « Rôle » `RoleBadge ADMIN` ; « Périmètre » `scopeLabel`.
+4. Texte : « En confirmant, {{name}} devient Administrateur de « {{org}} » immédiatement : cette personne pourra gérer le profil, la vérification, l'équipe (sauf les administrateurs principaux), les contacts et les messages. Les administrateurs principaux en sont informés. » (`team.confirmInvite.body`).
+5. **Champ « Code à 6 chiffres »** (`team.confirmInvite.codeLabel`), composant `Field` + `Input` :
+   - `inputMode="numeric"`, `autoComplete="off"` (**pas** `one-time-code` : Android proposerait un code SMS reçu par le confirmateur lui-même), `spellCheck={false}`, `maxLength={7}` (6 chiffres et une espace éventuelle), classes `font-mono text-lg tracking-widest`, largeur fixe `w-40` sur desktop, pleine largeur sur mobile ;
+   - normalisation à la saisie et au collage : suppression de tout caractère non numérique, puis 6 chiffres au plus ; valeur envoyée = les 6 chiffres ;
+   - aide (`aria-describedby`) : « Le code que la personne lit sur son écran, par exemple 482 913. » (`team.confirmInvite.codeHelp`) ;
+   - validation locale : moins de 6 chiffres à l'envoi → « Saisissez les 6 chiffres du code. » (`team.confirmInvite.codeIncomplete`) ; aucun appel.
+6. `SensitiveConfirmFields` : case « J'ai obtenu ce code en appelant {{name}}, et c'est bien la personne que j'ai voulu inviter » (`team.confirmInvite.check`) ; mot de passe.
+7. Boutons : « Annuler » et « Confirmer l'accès » (`team.confirmInvite.submit`, désactivé tant que le code n'a pas 6 chiffres, la case n'est pas cochée ou le mot de passe est vide ; `Loader2` pendant l'appel).
 
-Focus initial : la case à cocher (le récapitulatif est lu par `DialogDescription` qui pointe vers le `dl`).
+Ordre de tabulation : avertissement éventuel (non focalisable), consigne, champ code, case, mot de passe, boutons. **Focus initial : le champ code.**
 
-Corps : `{confirm: true, password}`.
+Corps : `{confirm: true, password, code}`.
 
-**Succès (`200 Member`) :** fermeture ; `toast` « {{name}} a rejoint l'équipe comme Administrateur. » (`team.confirmInvite.done`) ; même texte dans `aria-live` ; invalidation de `invitations` (AWAITING) et `members` ; focus sur le `h2` « À traiter » s'il reste des cartes, sinon sur le titre de la liste des membres.
+**Succès (`200 Member`) :** fermeture ; code et mot de passe effacés de l'état ; `toast` « {{name}} a rejoint l'équipe comme Administrateur. » (`team.confirmInvite.done`) ; même texte dans `aria-live` ; invalidation de `invitations` (AWAITING) et `members` ; focus sur le `h2` « À traiter » s'il reste des cartes, sinon sur le titre de la liste des membres.
 
-**Erreurs :**
+**Erreurs** (dans l'ordre de contrôle du serveur, contrat §7.4.6) :
 
 | Réponse | Affichage |
 |---|---|
-| `403 reauthentication_failed` | Sous le mot de passe : « Mot de passe incorrect. » ; champ vidé, focus |
-| `429` | `team.retryLater`, bouton bloqué pendant `Retry-After` |
-| `400 user_unavailable` | `FormAlert` : « Cette personne ne peut pas rejoindre l'organisation pour le moment. La demande reste en attente jusqu'à son échéance ; vous pouvez aussi la rejeter. » (`team.confirmInvite.unavailable`) ; mot de passe vidé ; le dialogue reste ouvert |
-| `409 already_member` | Fermeture ; `toast.info` « Cette personne fait déjà partie de l'équipe. » (`team.confirmInvite.alreadyMember`) ; invalidation `invitations` et `members` |
-| `409 invitation_not_awaiting_confirmation`, `404 invitation_not_found` | Fermeture ; `toast.info` « Cette demande n'est plus en attente : elle a été traitée, retirée ou a expiré. » (`team.awaiting.gone`) ; invalidation |
-| `403 DENY_PERMISSION` | Fermeture ; `toast` « Vous ne pouvez plus confirmer cette demande. Un administrateur principal peut le faire. » (`team.confirmInvite.denied`) ; invalidation de l'organisation et de `invitations` |
 | `403 DENY_RELATION`, `DENY_SECURITY`, `DENY_OBJECT_STATE` | Flux existants |
+| `404 invitation_not_found`, `409 invitation_not_awaiting_confirmation` | Fermeture ; `toast.info` « Cette demande n'est plus en attente : elle a été traitée, retirée, rejetée ou a expiré. » (`team.awaiting.gone`) ; invalidation |
+| `403 DENY_PERMISSION` | Fermeture ; `toast` « Vous ne pouvez plus confirmer cette demande. Un administrateur principal peut le faire. » (`team.confirmInvite.denied`) ; invalidation de l'organisation et de `invitations` |
+| `400 confirmation_code_required` | Inatteignable (bouton désactivé) ; sous le champ code : `team.confirmInvite.codeIncomplete` ; focus sur le champ |
+| `400 confirmation_required`, `password_required` | Inatteignables ; `errors.generic` |
+| `403 reauthentication_failed` | Sous le mot de passe : « Mot de passe incorrect. Aucun essai de code n'a été compté. » (`team.confirmInvite.badPassword`) ; mot de passe vidé, **code conservé**, focus sur le mot de passe |
+| `400 confirmation_code_invalid` | Sous le champ code : « Ce code est incorrect. Vérifiez-le avec {{name}} au téléphone. Après plusieurs codes incorrects, la demande est rejetée automatiquement. » (`team.confirmInvite.codeInvalid`) ; **code vidé**, mot de passe conservé (il était correct), focus sur le champ code. Aucun nombre d'essais restants (non exposé). |
+| `409 confirmation_code_exhausted` | Fermeture ; code et mot de passe effacés ; `toast.error` durée 10 s : « Trop de codes incorrects : la demande a été rejetée automatiquement. Si cette personne doit rejoindre l'équipe, créez une nouvelle invitation. » (`team.confirmInvite.exhausted`) ; même texte dans `aria-live` ; invalidation ; focus sur le `h2` « À traiter » ou le titre de la liste des membres |
+| `400 user_unavailable` | `FormAlert` : « Cette personne ne peut pas rejoindre l'organisation pour le moment. La demande reste en attente jusqu'à son échéance ; vous pouvez aussi la rejeter. » (`team.confirmInvite.unavailable`) ; code et mot de passe vidés ; dialogue ouvert |
+| `409 already_member` | Fermeture ; `toast.info` « Cette personne fait déjà partie de l'équipe. » (`team.confirmInvite.alreadyMember`) ; invalidation `invitations` et `members` |
+| `429` | `team.retryLater`, bouton bloqué pendant `Retry-After` |
 | Autre 4xx avec `code` non prévu (dont un éventuel refus d'entitlement d'équipe, ADR 0009 `CAP-TEAM-MEMBER`, voir Q-D2-6) | `FormAlert` avec `describeApiError` ; dialogue ouvert |
-| `confirmation_required`, `password_required` | Inatteignables ; `errors.generic` |
-| Réseau coupé sans réponse | « Connexion perdue. L'accès a peut-être été confirmé : vérifiez la liste avant de réessayer. » (`team.confirmInvite.network`) ; invalidation à la reconnexion |
+| Réseau coupé sans réponse | « Connexion perdue. L'accès a peut-être été confirmé : vérifiez la liste avant de réessayer. » (`team.confirmInvite.network`) ; code conservé ; invalidation à la reconnexion |
+
+Les essais de code sont comptés **par invitation**, tous confirmateurs confondus : le texte `codeInvalid` ne promet donc aucun nombre d'essais.
 
 ### 8.4 E6h : `RejectAdminInvitationDialog` (`AlertDialog`)
 
-- Titre : « Rejeter la demande de {{name}} ? » (`team.rejectInvite.title`) ; si `can_confirm` mais nom nul (impossible par contrat), « Rejeter cette demande ? ».
+- Titre : « Rejeter la demande de {{name}} ? » (`team.rejectInvite.title`) ; si le nom est nul (impossible par contrat pour `can_confirm`), « Rejeter cette demande ? » (`team.rejectInvite.titleAnonymous`).
 - Texte : « Cette personne n'aura aucun accès à l'organisation et le lien ne pourra plus être utilisé. Elle sera prévenue, sans voir votre nom. » (`team.rejectInvite.body`).
+- Si `inviter_has_authority === false` : phrase ajoutée sous le texte : « La personne qui a créé cette invitation ne peut plus donner ce rôle. » (`team.rejectInvite.inviterNoAuthority`).
+- Consigne d'usage (`text-sm`) : « Rejetez si la personne que vous avez appelée n'a pas de code, ou si vous ne savez pas qui a accepté. » (`team.rejectInvite.when`).
 - Boutons : « Garder la demande » (focus initial, `team.rejectInvite.keep`) ; « Rejeter » (destructif, `team.rejectInvite.submit`).
-- Pas de mot de passe (contrat).
+- Pas de mot de passe ni de code (contrat).
 - Succès (`204`) : `toast` « Demande rejetée. » (`team.rejectInvite.done`), annonce, invalidation, focus comme 8.3.
 - Erreurs : `409 invitation_not_awaiting_confirmation`, `404 invitation_not_found` → `team.awaiting.gone` ; `403 DENY_PERMISSION` → `team.confirmInvite.denied` ; `429`, réseau : comme 8.3 (texte réseau : `team.networkLost`).
 
@@ -486,7 +513,7 @@ Liste de définition (`dl`, une ligne par entrée) :
 
 Si `role === "ADMIN"` : sous la liste, une phrase : « Ce rôle ne permet ni de nommer un administrateur principal, ni d'archiver l'organisation. » (`invitation.preview.adminLimits`).
 
-Si `requires_confirmation === true` : **avant** les boutons, `Alert` d'information (icône `UserCheck`), titre « Confirmation nécessaire » (`invitation.preview.confirmTitle`), texte exact du contrat §7.4.4 : « Pour ce rôle, la personne qui vous a invité(e) devra confirmer votre identité. Elle verra votre nom abrégé et les deux derniers chiffres de votre numéro de téléphone. Aucun accès ne vous sera ouvert avant cette confirmation. » (`invitation.preview.confirmBody`). Le bouton principal devient « Accepter l'invitation » (`invitation.acceptPending`) au lieu de « Rejoindre l'organisation » (on ne rejoint pas encore). `aria-describedby` du bouton → l'`Alert`.
+Si `requires_confirmation === true` : **avant** les boutons, `Alert` d'information (icône `UserCheck`), titre « Confirmation nécessaire » (`invitation.preview.confirmTitle`), texte exact du contrat §7.4.4 : « Pour ce rôle, la personne qui vous a invité(e) devra confirmer votre identité. Elle verra votre nom abrégé et les deux derniers chiffres de votre numéro de téléphone. Aucun accès ne vous sera ouvert avant cette confirmation. » (`invitation.preview.confirmBody`), suivi de : « Après avoir accepté, vous recevrez un code à 6 chiffres. Vous le donnerez de vive voix à cette personne quand elle vous appellera. » (`invitation.preview.codeNote`). Le bouton principal devient « Accepter l'invitation » (`invitation.acceptPending`) au lieu de « Rejoindre l'organisation » (on ne rejoint pas encore). `aria-describedby` du bouton → l'`Alert`.
 
 Texte de bas de carte (`invitation.preview.body`) inchangé pour les rôles sans confirmation ; avec confirmation : « Votre profil personnel et vos offres personnelles ne changent pas. Après confirmation, vous pourrez quitter l'organisation à tout moment. » (`invitation.preview.bodyPending`).
 
@@ -514,17 +541,24 @@ La table `CAPABILITY_LABELS` existante (`lib/organization-form.ts`, liste « Ce 
 ### 9.3 Parcours après « Accepter »
 
 - `200` avec `status: "ACTIVE"` : inchangé (D1 §4.4.3).
-- **`202` avec `status: "AWAITING_CONFIRMATION"`** : écran 9.4. Jeton supprimé de `sessionStorage` (l'invitation n'est plus `PENDING`). **Aucune** bascule de profil, **aucune** invalidation obligatoire de `contexts` (l'organisation n'y apparaît pas) ; invalider la clé `["my-awaiting-invitations"]` (E17).
+- **`202` avec `status: "AWAITING_CONFIRMATION"`** : écran 9.4. Jeton supprimé de `sessionStorage` (l'invitation n'est plus `PENDING`). **Aucune** bascule de profil, **aucune** invalidation obligatoire de `contexts` (l'organisation n'y apparaît pas) ; invalider la clé `["my-awaiting-invitations"]` (E17). La mutation d'acceptation s'exécute avec `gcTime: 0` ; `confirmation_code` est copié dans l'état local de l'écran 9.4 puis la mutation est remise à zéro (`mutation.reset()`), pour que le code ne reste dans aucun cache.
 
-### 9.4 Écran « Confirmation en attente » (même carte `max-w-md`)
+### 9.4 Écran « Demande envoyée » (même carte `max-w-md`)
 
 1. Icône `Hourglass` (décorative). `h1` « Demande envoyée à « {{name}} » » (`invitation.awaiting.title`, `name = organization_name` de la réponse 202), focus sur le `h1`.
 2. Texte : « Vous avez accepté le rôle {{role}}. La personne qui vous a invité(e) ou un administrateur principal doit maintenant confirmer votre identité. » (`invitation.awaiting.body`).
-3. Ligne : « Confirmation attendue avant le {{date}}. » (`invitation.awaiting.deadline`, `formatDateTime(confirmation_expires_at)`).
-4. `Alert` d'information : « Vous n'avez encore aucun accès à l'organisation. Vous serez prévenu(e) par une notification. Sans confirmation avant cette date, la demande expire et il faudra une nouvelle invitation. » (`invitation.awaiting.noAccess`).
-5. Bouton principal « Voir mes profils » → `/profiles` (où se trouve E17) (`invitation.err.profiles`, existant).
-6. Bouton secondaire `variant="ghost"` « Retirer ma demande » (`invitation.awaiting.withdraw`) → `WithdrawAwaitingDialog` (11.3) avec `invitation_id` de la réponse 202. Succès : écran « Demande retirée » (`h1` « Demande retirée », texte « Vous ne rejoindrez pas cette organisation. Le lien ne peut plus être utilisé. », lien « Retour à l'accueil »).
-7. Annonce `aria-live` : « Demande envoyée. Confirmation en attente. » (`invitation.awaiting.announce`).
+3. **Bloc du code** (`section aria-labelledby`), bordure `rounded-2xl border-2 border-primary/40 p-4`, centré :
+   - `h2` « Votre code de confirmation » (`invitation.awaiting.codeTitle`) ;
+   - le code en grand : `font-mono text-4xl font-bold tracking-[0.3em]`, affiché en deux groupes de 3 (« 482 913 ») dans un `span aria-hidden="true"`, doublé d'un `span className="sr-only"` qui contient les chiffres séparés par des espaces (« 4 8 2 9 1 3 ») pour une lecture chiffre par chiffre ; `select-all` désactivé (`select-none`), **aucun bouton Copier ni Partager** ;
+   - consigne (`text-sm`, sous le code) : « Donnez ce code **de vive voix** à la personne qui vous a invité(e), quand elle vous appelle ou en personne. Elle en a besoin pour vous ouvrir l'accès. Ne le communiquez à personne d'autre et ne l'envoyez pas par message, même si on vous le demande. » (`invitation.awaiting.codeInstruction`) ;
+   - avertissement (`text-xs text-muted-foreground`) : « Ce code ne sera plus affiché quand vous quitterez cette page. Si vous l'oubliez, obtenez-en un nouveau depuis « Mes profils » : l'ancien ne fonctionnera plus. » (`invitation.awaiting.codeOnce`).
+4. Ligne : « Confirmation attendue avant le {{date}}. » (`invitation.awaiting.deadline`, `formatDateTime(confirmation_expires_at)`).
+5. `Alert` d'information : « Vous n'avez encore aucun accès à l'organisation. Vous serez prévenu(e) par une notification. Sans confirmation avant cette date, la demande expire et il faudra une nouvelle invitation. » (`invitation.awaiting.noAccess`).
+6. Bouton principal « Voir mes profils » → `/profiles` (où se trouve E17) (`invitation.err.profiles`, existant).
+7. Bouton secondaire `variant="ghost"` « Retirer ma demande » (`invitation.awaiting.withdraw`) → `WithdrawAwaitingDialog` (11.4) avec `invitation_id` de la réponse 202. Succès : écran « Demande retirée » (`h1` « Demande retirée », texte « Vous ne rejoindrez pas cette organisation. Le lien ne peut plus être utilisé. », lien « Retour à l'accueil ») ; le code est effacé de l'état.
+8. Annonce `aria-live` : « Demande envoyée. Votre code de confirmation est affiché à l'écran. » (`invitation.awaiting.announce`). **Le code n'est jamais dans cette annonce.**
+
+Le code est effacé de l'état au démontage de la page. Un rechargement de la page affiche « Lien incomplet » (le jeton a été supprimé) : la personne retrouve sa demande dans E17 et peut y obtenir un nouveau code.
 
 ### 9.5 Erreurs modifiées ou ajoutées (remplace les lignes correspondantes de D1 §4.5)
 
@@ -540,7 +574,7 @@ La table `CAPABILITY_LABELS` existante (`lib/organization-form.ts`, liste « Ce 
 | Donnée | Champ API |
 |---|---|
 | Périmètre, accès, confirmation requise | `preview.scope`, `preview.capabilities`, `preview.requires_confirmation` |
-| Réponse 202 | `status`, `invitation_id` (jamais affiché), `organization_name`, `role`, `confirmation_expires_at` |
+| Réponse 202 | `status`, `invitation_id` (jamais affiché), `organization_name`, `role`, `confirmation_expires_at`, `confirmation_code` (affiché une fois, 9.4) |
 | Réponse 200 | clé `status: "ACTIVE"` ajoutée, ignorée à l'affichage |
 
 ---
@@ -593,23 +627,44 @@ Une nomination échue est présentée `EXPIRED` par le serveur et sort de `?stat
 
 ### 11.1 Objectif
 
-Permettre à la personne qui a accepté une invitation Administrateur de retrouver ses demandes en attente et de les retirer. Ses organisations n'apparaissent pas encore dans « Mes profils » (aucune appartenance).
+Permettre à la personne qui a accepté une invitation Administrateur de retrouver ses demandes en attente, d'obtenir un nouveau code de confirmation si elle a perdu le premier, et de retirer une demande. Ses organisations n'apparaissent pas encore dans « Mes profils » (aucune appartenance).
 
 ### 11.2 Structure
 
 Section `AwaitingMembershipsSection` insérée dans `Profiles.tsx` **après** la section « Organisations » (avant « Organisations indisponibles »). Rendue **seulement si** la liste n'est pas vide.
 
 - `h2` « Demandes en attente de confirmation » (`profiles.awaiting.title`), icône `Hourglass`.
-- Texte : « Vous avez accepté ces invitations. Vous n'aurez accès à l'organisation qu'après la confirmation de votre identité. » (`profiles.awaiting.intro`).
+- Texte : « Vous avez accepté ces invitations. Vous n'aurez accès à l'organisation qu'après la confirmation de votre identité par la personne qui vous a invité(e). Elle vous appellera pour vous demander votre code. » (`profiles.awaiting.intro`).
 - Une carte par élément :
   - initiales de l'organisation (`UserAvatar shape="square"` sans image), nom (`h3`, tronqué, `title`), `SellerTypeBadge`, `RoleBadge`, périmètre ;
-  - `status = AWAITING_CONFIRMATION` : « Acceptée le {{date}} » ; « Confirmation attendue avant le {{date}} » ; bouton « Retirer ma demande » (`outline`, `min-h-11`, `aria-label` « Retirer ma demande pour {{name}} ») ;
+  - `status = AWAITING_CONFIRMATION` : « Acceptée le {{date}} » ; « Confirmation attendue avant le {{date}} » ; texte `text-xs` : « Votre code n'est pas réaffiché ici. Si vous ne l'avez plus, obtenez-en un nouveau. » (`profiles.awaiting.codeHint`) ; deux boutons : « Obtenir un nouveau code » (`outline`, icône `KeyRound`, `min-h-11`, `aria-label` « Obtenir un nouveau code pour {{name}} », ouvre 11.3) puis « Retirer ma demande » (`ghost`, texte destructif, `min-h-11`, `aria-label` « Retirer ma demande pour {{name}} », ouvre 11.4). Sur mobile : empilés, pleine largeur ;
   - `status = EXPIRED` : badge « Non confirmée à temps » (`profiles.awaiting.expired`, icône `Clock`) ; texte « Demandez une nouvelle invitation si vous souhaitez toujours rejoindre cette organisation. » (`profiles.awaiting.expiredHint`) ; aucun bouton.
 - « Voir plus » si `next`.
 
-Requête : `GET organization-invitations/awaiting/?page_size=10` au montage de `/profiles` (`staleTime: 60 s`, pas de cache persistant). Une seule requête supplémentaire sur cette page.
+Requête : `GET organization-invitations/awaiting/?page_size=10` au montage de `/profiles` (`staleTime: 60 s`, pas de cache persistant). La liste ne contient **jamais** de code.
 
-### 11.3 `WithdrawAwaitingDialog` (`AlertDialog`)
+### 11.3 `NewConfirmationCodeDialog` (`ResponsiveDialog`, deux étapes)
+
+**Étape 1 (avertissement)** — titre « Obtenir un nouveau code ? » (`profiles.awaiting.newCodeTitle`) :
+- Texte : « Un nouveau code sera créé pour « {{name}} ». L'ancien ne fonctionnera plus : si vous l'avez déjà donné, donnez le nouveau à la personne qui vous a invité(e). » (`profiles.awaiting.newCodeBody`).
+- Boutons : « Garder mon code actuel » (focus initial, `profiles.awaiting.newCodeKeep`, ferme sans appel) ; « Obtenir un nouveau code » (`profiles.awaiting.newCodeSubmit`, `Loader2` pendant l'appel).
+- Appel : `POST organization-invitations/<id>/confirmation-code/`, mutation `gcTime: 0`, sans `retry`.
+
+**Étape 2 (code)** — même dialogue, contenu remplacé, `dismissible={false}` (le clic extérieur et le glissé ne ferment pas ; Échap et le bouton ferment), titre « Votre nouveau code » (`profiles.awaiting.newCodeShown`) :
+- Bloc du code identique à 9.4 point 3 (même composant `ConfirmationCodeDisplay`, consigne `invitation.awaiting.codeInstruction`, avertissement `invitation.awaiting.codeOnce`).
+- « Confirmation attendue avant le {{date}}. » (`confirmation_expires_at` de la réponse).
+- Bouton unique « J'ai noté le code » (`profiles.awaiting.newCodeDone`) : ferme, efface le code de l'état (`mutation.reset()`), rend le focus au bouton « Obtenir un nouveau code » de la carte.
+- Focus à l'apparition : le `h2` du bloc du code (`tabIndex={-1}`). Pas d'annonce `aria-live` du code ; annonce « Nouveau code affiché à l'écran. » (`profiles.awaiting.newCodeAnnounce`).
+
+**Erreurs (étape 1, `FormAlert`) :**
+
+| Réponse | Affichage |
+|---|---|
+| `404 invitation_not_found`, `409 invitation_not_awaiting_confirmation` | Fermeture ; `toast.info` « Cette demande n'est plus en attente. » (`team.invitations.notPending`, existant) ; rechargement de `awaiting/` **et** de `contexts` (la demande a peut-être été confirmée) |
+| `429` | `team.retryLater` ; bouton bloqué pendant `Retry-After` |
+| Réseau coupé sans réponse | « Connexion perdue. Un nouveau code a peut-être été créé et l'ancien ne fonctionne peut-être plus : réessayez pour en obtenir un. » (`profiles.awaiting.newCodeNetwork`) ; bouton de nouvel essai manuel (jamais automatique) |
+
+### 11.4 `WithdrawAwaitingDialog` (`AlertDialog`)
 
 - Titre : « Retirer votre demande pour « {{name}} » ? » (`profiles.awaiting.withdrawTitle`).
 - Texte : « Vous ne rejoindrez pas cette organisation. Le lien ne pourra plus être utilisé ; il faudra une nouvelle invitation. » (`profiles.awaiting.withdrawBody`).
@@ -617,18 +672,18 @@ Requête : `GET organization-invitations/awaiting/?page_size=10` au montage de `
 - Succès `204` : carte retirée, `toast` « Demande retirée. » (`profiles.awaiting.withdrawn`), annonce dans la région `aria-live` de `/profiles` (nouvelle, unique), focus sur le `h2` de la section, ou sur le `h2` « Organisations » si la section disparaît.
 - Erreurs : `404 invitation_not_found`, `409 invitation_not_awaiting_confirmation` → `toast.info` « Cette demande n'est plus en attente. » (`team.invitations.notPending`, existant) + rechargement (la demande a peut-être été confirmée : invalider aussi `contexts`) ; `429` ; réseau : `team.networkLost`.
 
-### 11.4 États
+### 11.5 États
 
 | État | Rendu |
 |---|---|
 | Chargement | Rien (section absente tant qu'on ne sait pas qu'elle est non vide) |
 | Vide | Section absente |
 | Erreur | Section absente ; aucune alerte (information secondaire ; la notification reste le canal principal). Nouvel essai à la prochaine visite. |
-| Hors ligne | Liste en mémoire conservée ; bouton Retirer désactivé + `common.offlineAction` |
+| Hors ligne | Liste en mémoire conservée ; boutons « Obtenir un nouveau code » et « Retirer ma demande » désactivés + `common.offlineAction` |
 
-### 11.5 Après confirmation
+### 11.6 Après confirmation ou rejet
 
-Quand la demande est confirmée (notification « Votre accès à « {organisation} » est confirmé. »), l'organisation apparaît dans `contexts/` et la demande disparaît de `awaiting/` au rechargement suivant. Aucune bascule automatique de profil.
+Quand la demande est confirmée (notification « Votre accès à « {organisation} » est confirmé. »), l'organisation apparaît dans `contexts/` et la demande disparaît de `awaiting/` au rechargement suivant. Aucune bascule automatique de profil. Une demande rejetée (par un confirmateur ou après 5 codes faux) disparaît aussi ; la notification « Votre demande pour rejoindre « {organisation} » n'a pas été confirmée. » en informe la personne, sans nom ni motif.
 
 ---
 
@@ -681,17 +736,18 @@ Hors ligne : texte L0-09 §6.4 inchangé, mais la justification « soumise à un
 | E18 bannière | aucune bannière | aucune bannière | aucune (vient de `internal/`, déjà géré par `OrganizationPage`) | dernière valeur en mémoire | — | sans objet |
 | E6 « À traiter » | section absente | section absente | ligne compacte + Réessayer | cartes conservées, boutons désactivés | toast + `aria-live` | `DENY_*` : flux de `OrganizationPage` |
 | E6f | — | — | `FormAlert` par code (6.4) | bouton déclencheur désactivé | toast, carte et badge | `DENY_PERMISSION` : fermeture + rechargement |
-| E6g / E6h | — | — | par code (8.3, 8.4) | boutons désactivés | toast, ligne membre | `DENY_PERMISSION` : toast + rechargement |
+| E6g | — | — | par code (8.3) ; code faux : erreur sous le champ ; 5e code faux : fermeture + toast | boutons désactivés, saisie conservée | toast, ligne membre | `DENY_PERMISSION` : toast + rechargement |
+| E6h | — | — | par code (8.4) | boutons désactivés | toast | `DENY_PERMISSION` : toast + rechargement |
 | E6i / E6j | — | — | par code (10.1, 10.2) | boutons désactivés | toast | `DENY_PERMISSION` (E6j) |
-| E15 aperçu | `Skeleton` (existant) | — | 9.5 + D1 §4.5 | boutons désactivés | 200 : D1 §4.4.3 ; 202 : 9.4 | `DENY_SECURITY` : D1 |
-| E17 | section absente | section absente | section absente | liste conservée, bouton désactivé | toast, carte retirée | sans objet |
+| E15 aperçu | `Skeleton` (existant) | — | 9.5 + D1 §4.5 | boutons désactivés | 200 : D1 §4.4.3 ; 202 : 9.4 (code affiché) | `DENY_SECURITY` : D1 |
+| E17 | section absente | section absente | section absente ; nouveau code : 11.3 | liste conservée, boutons désactivés | nouveau code affiché ; retrait : toast | sans objet |
 | E3 | inchangé | — | 13.2 | inchangé | navigation + bannière éventuelle | `DENY_SECURITY` inchangé |
 
 ---
 
 ## 15. Contenus : clés i18n
 
-### 15.1 Remplacements « propriétaire » (F1-bis)
+### 15.1 Remplacements « propriétaire » et textes modifiés (F1-bis, F2-bis)
 
 | Clé | Nouveau texte |
 |---|---|
@@ -711,6 +767,7 @@ Hors ligne : texte L0-09 §6.4 inchangé, mais la justification « soumise à un
 | `org.home.archiveBody` | Réservé aux administrateurs principaux. Les offres de l'organisation ne seront plus visibles. |
 | `orgEdit.readOnly` | Seuls les administrateurs principaux et les administrateurs peuvent modifier le profil de l'organisation. |
 | `team.invite.labelHelp` | … Visible par les administrateurs principaux et les administrateurs de l'organisation, … (reste inchangé) |
+| `team.invite.errLimit` | Le nombre maximal d'invitations ouvertes est atteint (liens en attente et demandes à confirmer). Annulez une invitation inutilisée ou traitez une demande à confirmer pour en créer une nouvelle. |
 | `team.lastOwner` | Seul administrateur principal actif |
 | `team.lastOwnerHelp` | Les autres administrateurs principaux, s'il y en a, ne peuvent pas agir actuellement (compte inactif ou restreint). |
 | `team.lastOwnerSelfHint` | Si vous quittez l'organisation, elle n'aura plus d'administrateur principal disponible. Proposez d'abord un autre administrateur principal. |
@@ -772,18 +829,28 @@ Hors ligne : texte L0-09 §6.4 inchangé, mais la justification « soumise à un
 | `team.awaiting.phoneHintAria` | Téléphone se terminant par {{digits}} |
 | `team.awaiting.acceptedAt` | Acceptée le {{date}} |
 | `team.awaiting.deadline` | À confirmer avant le {{date}} |
-| `team.awaiting.verifyHint` | Vérifiez que c'est bien la personne à qui vous avez envoyé le lien, par exemple en l'appelant. Sinon, rejetez la demande. |
+| `team.awaiting.inviterNoAuthority` | La personne qui a créé cette invitation ne peut plus donner ce rôle (elle a changé de rôle ou quitté l'équipe). Seul un administrateur principal peut encore confirmer ou rejeter cette demande. Assurez-vous que cette arrivée est toujours souhaitée. |
+| `team.awaiting.callHint` | Pour confirmer, appelez la personne au numéro que vous connaissez et demandez-lui le code à 6 chiffres affiché sur son écran. Ne demandez pas le code par message. Si vous ne la reconnaissez pas, rejetez la demande. |
 | `team.awaiting.notYours` | Seuls la personne qui a créé l'invitation et les administrateurs principaux peuvent confirmer ou rejeter cette demande. |
 | `team.awaiting.confirm` | Confirmer l'accès |
 | `team.awaiting.confirmAria` | Confirmer l'accès de {{name}} |
 | `team.awaiting.reject` | Rejeter |
 | `team.awaiting.rejectAria` | Rejeter la demande de {{name}} |
-| `team.awaiting.gone` | Cette demande n'est plus en attente : elle a été traitée, retirée ou a expiré. |
+| `team.awaiting.gone` | Cette demande n'est plus en attente : elle a été traitée, retirée, rejetée ou a expiré. |
 | `team.confirmInvite.title` | Confirmer l'accès de {{name}} |
+| `team.confirmInvite.callTitle` | Appelez d'abord la personne |
+| `team.confirmInvite.callBody` | Appelez {{name}} au numéro que vous connaissez déjà, pas à un numéro reçu avec la demande, et demandez-lui le code à 6 chiffres affiché sur son écran. Ne demandez pas le code par message. Si la personne que vous appelez n'a pas de code, rejetez la demande. |
 | `team.confirmInvite.person` | Personne |
 | `team.confirmInvite.phone` | Téléphone |
+| `team.confirmInvite.phoneCheck` | Vérifiez que ces chiffres correspondent au numéro que vous appelez. |
 | `team.confirmInvite.body` | En confirmant, {{name}} devient Administrateur de « {{org}} » immédiatement : cette personne pourra gérer le profil, la vérification, l'équipe (sauf les administrateurs principaux), les contacts et les messages. Les administrateurs principaux en sont informés. |
-| `team.confirmInvite.check` | Je confirme que {{name}} est bien la personne que j'ai voulu inviter |
+| `team.confirmInvite.codeLabel` | Code à 6 chiffres |
+| `team.confirmInvite.codeHelp` | Le code que la personne lit sur son écran, par exemple 482 913. |
+| `team.confirmInvite.codeIncomplete` | Saisissez les 6 chiffres du code. |
+| `team.confirmInvite.codeInvalid` | Ce code est incorrect. Vérifiez-le avec {{name}} au téléphone. Après plusieurs codes incorrects, la demande est rejetée automatiquement. |
+| `team.confirmInvite.exhausted` | Trop de codes incorrects : la demande a été rejetée automatiquement. Si cette personne doit rejoindre l'équipe, créez une nouvelle invitation. |
+| `team.confirmInvite.badPassword` | Mot de passe incorrect. Aucun essai de code n'a été compté. |
+| `team.confirmInvite.check` | J'ai obtenu ce code en appelant {{name}}, et c'est bien la personne que j'ai voulu inviter |
 | `team.confirmInvite.submit` | Confirmer l'accès |
 | `team.confirmInvite.done` | {{name}} a rejoint l'équipe comme Administrateur. |
 | `team.confirmInvite.unavailable` | Cette personne ne peut pas rejoindre l'organisation pour le moment. La demande reste en attente jusqu'à son échéance ; vous pouvez aussi la rejeter. |
@@ -793,11 +860,13 @@ Hors ligne : texte L0-09 §6.4 inchangé, mais la justification « soumise à un
 | `team.rejectInvite.title` | Rejeter la demande de {{name}} ? |
 | `team.rejectInvite.titleAnonymous` | Rejeter cette demande ? |
 | `team.rejectInvite.body` | Cette personne n'aura aucun accès à l'organisation et le lien ne pourra plus être utilisé. Elle sera prévenue, sans voir votre nom. |
+| `team.rejectInvite.inviterNoAuthority` | La personne qui a créé cette invitation ne peut plus donner ce rôle. |
+| `team.rejectInvite.when` | Rejetez si la personne que vous avez appelée n'a pas de code, ou si vous ne savez pas qui a accepté. |
 | `team.rejectInvite.keep` | Garder la demande |
 | `team.rejectInvite.submit` | Rejeter |
 | `team.rejectInvite.done` | Demande rejetée. |
 | `team.invite.confirmBadge` | Confirmation requise |
-| `team.invite.adminConfirmNote` | Après l'acceptation, vous ou un administrateur principal devrez confirmer l'identité de la personne. Aucun accès n'est ouvert avant. |
+| `team.invite.adminConfirmNote` | Après l'acceptation, vous ou un administrateur principal devrez appeler la personne pour obtenir son code de confirmation. Aucun accès n'est ouvert avant. |
 | `team.invite.ownerNote` | Le rôle Administrateur principal ne peut pas être donné par invitation. Une fois la personne dans l'équipe, un administrateur principal peut la proposer. |
 | `team.invite.linkWarningAdmin` | voir 7.3 |
 | `team.invite.errRole` | Vous ne pouvez pas donner ce rôle par invitation. |
@@ -845,14 +914,19 @@ Hors ligne : texte L0-09 §6.4 inchangé, mais la justification « soumise à un
 | `invitation.preview.adminLimits` | Ce rôle ne permet ni de nommer un administrateur principal, ni d'archiver l'organisation. |
 | `invitation.preview.confirmTitle` | Confirmation nécessaire |
 | `invitation.preview.confirmBody` | Pour ce rôle, la personne qui vous a invité(e) devra confirmer votre identité. Elle verra votre nom abrégé et les deux derniers chiffres de votre numéro de téléphone. Aucun accès ne vous sera ouvert avant cette confirmation. |
+| `invitation.preview.codeNote` | Après avoir accepté, vous recevrez un code à 6 chiffres. Vous le donnerez de vive voix à cette personne quand elle vous appellera. |
 | `invitation.preview.bodyPending` | Votre profil personnel et vos offres personnelles ne changent pas. Après confirmation, vous pourrez quitter l'organisation à tout moment. |
 | `invitation.acceptPending` | Accepter l'invitation |
 | `invitation.awaiting.title` | Demande envoyée à « {{name}} » |
 | `invitation.awaiting.body` | Vous avez accepté le rôle {{role}}. La personne qui vous a invité(e) ou un administrateur principal doit maintenant confirmer votre identité. |
+| `invitation.awaiting.codeTitle` | Votre code de confirmation |
+| `invitation.awaiting.codeAria` | Code : {{digits}} |
+| `invitation.awaiting.codeInstruction` | Donnez ce code de vive voix à la personne qui vous a invité(e), quand elle vous appelle ou en personne. Elle en a besoin pour vous ouvrir l'accès. Ne le communiquez à personne d'autre et ne l'envoyez pas par message, même si on vous le demande. |
+| `invitation.awaiting.codeOnce` | Ce code ne sera plus affiché quand vous quitterez cette page. Si vous l'oubliez, obtenez-en un nouveau depuis « Mes profils » : l'ancien ne fonctionnera plus. |
 | `invitation.awaiting.deadline` | Confirmation attendue avant le {{date}}. |
 | `invitation.awaiting.noAccess` | Vous n'avez encore aucun accès à l'organisation. Vous serez prévenu(e) par une notification. Sans confirmation avant cette date, la demande expire et il faudra une nouvelle invitation. |
 | `invitation.awaiting.withdraw` | Retirer ma demande |
-| `invitation.awaiting.announce` | Demande envoyée. Confirmation en attente. |
+| `invitation.awaiting.announce` | Demande envoyée. Votre code de confirmation est affiché à l'écran. |
 | `invitation.awaiting.withdrawnTitle` | Demande retirée |
 | `invitation.awaiting.withdrawnBody` | Vous ne rejoindrez pas cette organisation. Le lien ne peut plus être utilisé. |
 | `invitation.err.review.title` | Examen du compte nécessaire |
@@ -863,9 +937,20 @@ Hors ligne : texte L0-09 §6.4 inchangé, mais la justification « soumise à un
 | `access.cap.<code avec « . » remplacé par « _ »>` | libellés de 9.2 (ex. `access.cap.org_view_internal`) |
 | `access.others_one` / `access.others_other` | et {{count}} autre accès / et {{count}} autres accès |
 | `profiles.awaiting.title` | Demandes en attente de confirmation |
-| `profiles.awaiting.intro` | Vous avez accepté ces invitations. Vous n'aurez accès à l'organisation qu'après la confirmation de votre identité. |
+| `profiles.awaiting.intro` | Vous avez accepté ces invitations. Vous n'aurez accès à l'organisation qu'après la confirmation de votre identité par la personne qui vous a invité(e). Elle vous appellera pour vous demander votre code. |
 | `profiles.awaiting.acceptedAt` | Acceptée le {{date}} |
 | `profiles.awaiting.deadline` | Confirmation attendue avant le {{date}} |
+| `profiles.awaiting.codeHint` | Votre code n'est pas réaffiché ici. Si vous ne l'avez plus, obtenez-en un nouveau. |
+| `profiles.awaiting.newCode` | Obtenir un nouveau code |
+| `profiles.awaiting.newCodeAria` | Obtenir un nouveau code pour {{name}} |
+| `profiles.awaiting.newCodeTitle` | Obtenir un nouveau code ? |
+| `profiles.awaiting.newCodeBody` | Un nouveau code sera créé pour « {{name}} ». L'ancien ne fonctionnera plus : si vous l'avez déjà donné, donnez le nouveau à la personne qui vous a invité(e). |
+| `profiles.awaiting.newCodeKeep` | Garder mon code actuel |
+| `profiles.awaiting.newCodeSubmit` | Obtenir un nouveau code |
+| `profiles.awaiting.newCodeShown` | Votre nouveau code |
+| `profiles.awaiting.newCodeDone` | J'ai noté le code |
+| `profiles.awaiting.newCodeAnnounce` | Nouveau code affiché à l'écran. |
+| `profiles.awaiting.newCodeNetwork` | Connexion perdue. Un nouveau code a peut-être été créé et l'ancien ne fonctionne peut-être plus : réessayez pour en obtenir un. |
 | `profiles.awaiting.expired` | Non confirmée à temps |
 | `profiles.awaiting.expiredHint` | Demandez une nouvelle invitation si vous souhaitez toujours rejoindre cette organisation. |
 | `profiles.awaiting.withdraw` | Retirer ma demande |
@@ -896,8 +981,11 @@ Hors ligne : texte L0-09 §6.4 inchangé, mais la justification « soumise à un
 | `nomination_not_pending`, `nomination_not_found` | = `nomination.gone` |
 | `invitation_not_awaiting_confirmation` | = `team.awaiting.gone` |
 | `already_awaiting_confirmation` | = `invitation.err.awaiting.body` |
+| `confirmation_code_required` | = `team.confirmInvite.codeIncomplete` |
+| `confirmation_code_invalid` | Ce code est incorrect. Après plusieurs codes incorrects, la demande est rejetée automatiquement. (texte générique sans nom ; E6g utilise `team.confirmInvite.codeInvalid`) |
+| `confirmation_code_exhausted` | = `team.confirmInvite.exhausted` |
 
-Le garde `client-rules.test.ts` reste vert : aucun texte n'emploie « garanti », « certifié », « de confiance », « vendeur vérifié ». Les textes de revue disent « vérifie la nomination », jamais « organisation vérifiée ».
+Le garde `client-rules.test.ts` reste vert : aucun texte n'emploie « garanti », « certifié », « de confiance », « vendeur vérifié ». Les textes de revue disent « vérifie la nomination », jamais « organisation vérifiée ». Aucun texte n'affiche le nombre d'essais de code autorisés ou restants.
 
 ---
 
@@ -905,7 +993,7 @@ Le garde `client-rules.test.ts` reste vert : aucun texte n'emploie « garanti »
 
 ### 16.1 Réutilisés (noms exacts)
 
-`OrganizationPage`, `PageHeader`, `RoleBadge`, `SellerTypeBadge`, `UserAvatar` (initiales, sans `src`), `Badge`, `Alert`/`AlertTitle`/`AlertDescription`, `AlertDialog`, `ResponsiveDialog`, `RadioGroup`, `Checkbox`, `Label`, `Button`, `Collapsible`, `Tabs`, `DropdownMenu*`, `Skeleton`, `ErrorState`, `EmptyState`, `FormAlert`, `PasswordInput`, `Field`, `errorProps`, `SensitiveConfirmFields` (prop de libellé de case ajoutée si absente), `MemberRow`, `MemberActionsMenu`, `InviteDialog`, `ChangeRoleDialog`, `CopyLinkField`, `LeaveOrganizationCard`, `use-rate-block`, `useOnlineStatus`, `useIsMobile`, `describeApiError`, `getApiErrorCode`, `formatDateTime`, `formatLongDate`, `formatMonthYear`, `sonner`.
+`OrganizationPage`, `PageHeader`, `RoleBadge`, `SellerTypeBadge`, `UserAvatar` (initiales, sans `src`), `Badge`, `Alert`/`AlertTitle`/`AlertDescription`, `AlertDialog`, `ResponsiveDialog` (prop `dismissible` de D1), `RadioGroup`, `Checkbox`, `Label`, `Input`, `Button`, `Collapsible`, `Tabs`, `DropdownMenu*`, `Skeleton`, `ErrorState`, `EmptyState`, `FormAlert`, `PasswordInput`, `Field`, `errorProps`, `fieldInputClass`, `SensitiveConfirmFields` (prop de libellé de case ajoutée si absente), `MemberRow`, `MemberActionsMenu`, `InviteDialog`, `ChangeRoleDialog`, `CopyLinkField`, `LeaveOrganizationCard`, `use-rate-block`, `useOnlineStatus`, `useIsMobile`, `describeApiError`, `getApiErrorCode`, `formatDateTime`, `formatLongDate`, `formatMonthYear`, `sonner`.
 
 ### 16.2 Nouveaux (justifiés)
 
@@ -913,18 +1001,21 @@ Le garde `client-rules.test.ts` reste vert : aucun texte n'emploie « garanti »
 |---|---|---|
 | `GovernanceBanner` | Deux états indépendants affichés sur toutes les sections ; un seul point de rendu dans `OrganizationPage` | `governance?: {primary_admin_state, under_review}` |
 | `TeamPendingActions` | Regroupe les actions attendues en tête de E6 ; isole les deux requêtes et leur état | `org`, `onAnnounce`, `headingRef` |
-| `AwaitingInvitationCard` | Deux variantes (`can_confirm` ou non) ; données personnelles limitées à une seule variante, testable seule | `invitation`, `online`, `onConfirm`, `onReject` |
+| `AwaitingInvitationCard` | Deux variantes (`can_confirm` ou non), avertissement `inviter_has_authority` ; données personnelles limitées à une seule variante, testable seule | `invitation`, `online`, `onConfirm`, `onReject` |
 | `PhoneHint` | Lecture correcte de l'indice par les lecteurs d'écran ; point unique pour garantir qu'il n'est jamais copié ailleurs | `hint: string` |
+| `ConfirmationCodeDisplay` | Affichage du code (9.4, 11.3) : groupes de 3, lecture chiffre par chiffre, consigne ; point unique pour les tests de non-fuite | `code: string`, `headingId` |
+| `ConfirmationCodeInput` | Champ de saisie du code (E6g) : normalisation des chiffres, `autoComplete="off"`, erreurs | `value`, `onChange`, `error`, `disabled` |
 | `ConfirmAdminInvitationDialog`, `RejectAdminInvitationDialog` | Actions sensibles avec erreurs propres | `orgId`, `orgName`, `invitation`, `onClose`, `onDone`, `onAnnounce` |
 | `NominationCard` | Variantes `target` et `manager` | `nomination`, `variant`, `orgName`, `online`, `onAccept`, `onDecline`, `onCancel` |
 | `NominatePrimaryAdminDialog` | Remplace `TransferOwnershipDialog` (deux genres, deux étapes) | `orgId`, `member`, `transferBusy: boolean`, `onClose`, `onAnnounce` |
 | `NominationResponseDialog` | Accepter / refuser, mêmes erreurs | `mode: "accept" \| "decline"`, `orgId`, `orgName`, `nomination`, … |
 | `CancelNominationDialog` | Alerte destructive simple | `orgId`, `nomination`, … |
 | `RoleAccessList` + `lib/role-access.ts` (`groupCapabilities`) | Traduction des codes de capacité en accès lisibles regroupés, testable (Vitest : chaque code de la matrice a un libellé) | `capabilities: string[]` |
-| `AwaitingMembershipsSection`, `WithdrawAwaitingDialog` | Section de `/profiles` et son retrait | — |
+| `AwaitingMembershipsSection`, `NewConfirmationCodeDialog`, `WithdrawAwaitingDialog` | Section de `/profiles`, nouveau code, retrait | — |
 | `lib/team.ts` : `memberActions` (amendée), `assignableRoles`, `invitableRoles`, `scopeLabel` | Matrices pures testées case par case | — |
+| `lib/confirmation-code.ts` : `normalizeCode(input)`, `formatCodeGroups(code)`, `spellDigits(code)` | Fonctions pures testées (collage « 482 913 », lettres, plus de 6 chiffres) | — |
 | `lib/help.ts` : `HELP_LINKS` | Liens d'aide configurables (Q19), `undefined` avant L1-21 | `{ governance?: string; account?: string }` |
-| Hooks (`use-organization-team.ts`, `use-organization-invitations.ts`, nouveau `use-primary-admin-nominations.ts`) | `useAwaitingInvitations(orgId, enabled)`, `useConfirmInvitation`, `useRejectInvitation`, `useMyAwaitingInvitations`, `useWithdrawAwaitingInvitation`, `useNominations(orgId)`, `useCreateNomination`, `useAcceptNomination`, `useDeclineNomination`, `useCancelNomination` | mutations sans `retry` |
+| Hooks (`use-organization-team.ts`, `use-organization-invitations.ts`, nouveau `use-primary-admin-nominations.ts`) | `useAwaitingInvitations(orgId, enabled)`, `useConfirmInvitation`, `useRejectInvitation`, `useMyAwaitingInvitations`, `useRegenerateConfirmationCode` (`gcTime: 0`), `useWithdrawAwaitingInvitation`, `useNominations(orgId)`, `useCreateNomination`, `useAcceptNomination`, `useDeclineNomination`, `useCancelNomination` | mutations sans `retry` |
 
 **Retirés :** `TransferOwnershipDialog`, `useTransferOwnership`, l'action `transfer` de `TeamAction`.
 
@@ -932,35 +1023,41 @@ Le garde `client-rules.test.ts` reste vert : aucun texte n'emploie « garanti »
 
 ## 17. Accessibilité
 
-- **Cibles de 44 px** (`min-h-11 min-w-11`) : tous les boutons des cartes « À traiter », de E17, des dialogues, lignes de `RadioGroup` (label englobant), cases à cocher (label étendu), déclencheur du `Collapsible` des accès.
+- **Cibles de 44 px** (`min-h-11 min-w-11`) : tous les boutons des cartes « À traiter », de E17, des dialogues, lignes de `RadioGroup` (label englobant), cases à cocher (label étendu), déclencheur du `Collapsible` des accès, champ du code (`min-h-11`).
 - **Focus :**
   - E6f, E6b : focus initial sur le premier radio ; étape 2 : sur la case à cocher ; fermeture : bouton `⋯` de la ligne.
-  - E6g : focus initial sur la case ; E6h, E6i, E6j, retrait E17 : focus initial sur l'action sûre (« Garder… », « Pas maintenant »).
-  - Après une action qui fait disparaître la carte déclencheuse : `h2` « À traiter » (`tabIndex={-1}`) s'il reste des cartes, sinon titre de la liste des membres ; sur `/profiles` : `h2` de la section ou `h2` « Organisations ».
+  - E6g : focus initial sur le **champ code** ; après un code faux : retour sur le champ code (vidé) ; après un mot de passe faux : sur le mot de passe. E6h, E6i, E6j, retrait E17, étape 1 du nouveau code : focus initial sur l'action sûre (« Garder… », « Pas maintenant »).
+  - Après une action qui fait disparaître la carte déclencheuse (dont le rejet automatique après 5 codes faux) : `h2` « À traiter » (`tabIndex={-1}`) s'il reste des cartes, sinon titre de la liste des membres ; sur `/profiles` : `h2` de la section ou `h2` « Organisations ».
   - Après acceptation d'une nomination aboutie (`COMPLETED`) : le menu de la page change ; focus sur le `h1` de la page.
-  - E15 écran 202 : focus sur le `h1`.
-- **Une seule région `aria-live="polite"`** par page : E6 (existante) reçoit `team.nominate.sent`, `team.confirmInvite.done`, `team.rejectInvite.done`, `nomination.accept.done`/`review`, `nomination.decline.done`, `nomination.cancel.done` ; `/profiles` reçoit `profiles.awaiting.withdrawn` (région nouvelle, `sr-only`) ; E15 : `invitation.awaiting.announce`. **Jamais** l'indice de téléphone ni le nom de la personne confirmée dans la région vivante : les annonces de E6g utilisent `team.confirmInvite.done` qui contient `{{name}}` (abrégé, déjà visible à l'écran, accepté) mais jamais `{{hint}}`.
+  - E15 écran 202 : focus sur le `h1` ; le bloc du code suit dans l'ordre de lecture. Étape 2 du nouveau code : focus sur le `h2` du bloc du code ; fermeture : bouton « Obtenir un nouveau code » de la carte.
+- **Code de rattachement :**
+  - affichage : groupes visuels « 482 913 » en `aria-hidden`, doublés d'un texte `sr-only` « 4 8 2 9 1 3 » (`spellDigits`), pour une lecture **chiffre par chiffre** (« quatre, huit, deux… » et non « quatre cent quatre-vingt-deux mille ») ;
+  - **jamais** dans une région `aria-live`, un `toast`, un `aria-label` de bouton ni un `title` ; les annonces disent seulement « code affiché à l'écran » ;
+  - saisie : `label` visible « Code à 6 chiffres », aide et erreur reliées par `aria-describedby` via `errorProps`, `aria-invalid` sur erreur ; pas de six cases séparées (un seul champ : plus simple au lecteur d'écran et au collage) ;
+  - contraste : `text-foreground` sur `bg-card`, taille `text-4xl` (lisible à bout de bras pendant un appel).
+- **Une seule région `aria-live="polite"`** par page : E6 (existante) reçoit `team.nominate.sent`, `team.confirmInvite.done`, `team.confirmInvite.exhausted`, `team.rejectInvite.done`, `nomination.accept.done`/`review`, `nomination.decline.done`, `nomination.cancel.done` ; `/profiles` reçoit `profiles.awaiting.withdrawn`, `profiles.awaiting.newCodeAnnounce` (région nouvelle, `sr-only`) ; E15 : `invitation.awaiting.announce`. **Jamais** l'indice de téléphone ni le code ; le nom abrégé seulement dans `team.confirmInvite.done` (déjà visible à l'écran).
 - `GovernanceBanner` : sans rôle vivant (3.5).
 - **Indice de téléphone :** `aria-label` chiffre par chiffre (4.5).
-- **Couleur jamais seule :** badges d'état de nomination (icône + texte), « Confirmation requise », « Non confirmée à temps », bannières (titre explicite).
+- **Couleur jamais seule :** badges d'état de nomination (icône + texte), « Confirmation requise », « Non confirmée à temps », avertissement `inviter_has_authority` (icône + texte), bannières (titre explicite).
 - **Boutons à verbe d'action**, jamais « OK » ; « Annuler » seul n'est utilisé que pour fermer un dialogue de saisie ; les alertes destructives utilisent « Garder… » face à l'action.
-- **Zoom 200 % :** cartes sans largeur fixe, boutons empilés sous 768 px, noms tronqués avec `title`.
+- **Zoom 200 % :** cartes sans largeur fixe, boutons empilés sous 768 px, noms tronqués avec `title` ; le code `text-4xl` passe à la ligne entre ses deux groupes si nécessaire.
 
 ---
 
 ## 18. Réseau faible
 
-- **Aucune image.** Avatars en initiales. Icônes lucide importées une par une : `Crown`, `Hourglass`, `Clock`, `UserCheck`, `ShieldAlert`, `Info`, `X`, `Check` (déjà ou nouvellement importées, quelques centaines d'octets chacune).
+- **Aucune image.** Avatars en initiales. Icônes lucide importées une par une : `Crown`, `Hourglass`, `Clock`, `UserCheck`, `ShieldAlert`, `AlertTriangle`, `Info`, `Phone`, `KeyRound`, `X`, `Check` (quelques centaines d'octets chacune).
 - **Requêtes par écran :**
   - E6 : `internal/` + `members/` + `primary-admin-nominations/?status=open` + (si `org.manage_members`) `invitations/?status=AWAITING_CONFIRMATION`, en parallèle ; `invitations/?status=PENDING` à l'ouverture de l'onglet (inchangé).
   - E15 connecté : `preview/` seul ; `accept/` à l'appui.
-  - `/profiles` : `contexts/` (existant) + `organization-invitations/awaiting/`.
+  - `/profiles` : `contexts/` (existant) + `organization-invitations/awaiting/` ; `confirmation-code/` seulement à la demande.
   - E3 : inchangé.
 - **Lazy :** tous les dialogues nouveaux.
-- **Pas de cache persistant** pour `invitations/*`, `organization-invitations/*` (dont `awaiting/`), `primary-admin-nominations/*` : `NetworkOnly` dans la configuration PWA (`vite.config.ts`), comme D1 §8. L'indice de téléphone n'existe qu'en mémoire de l'onglet.
-- **Aucune action différée** : confirmation, rejet, nomination, acceptation, refus, annulation, retrait. Boutons désactivés hors ligne.
-- **Anti-doublon :** boutons désactivés pendant l'appel ; pas de `retry` sur les mutations ; après un échec réseau sans réponse, texte qui demande de vérifier la liste avant de réessayer (6.4, 8.3), et invalidation de la liste à la reconnexion.
-- Mot de passe vidé après tout échec ; jamais conservé hors du champ.
+- **Pas de cache persistant** pour `invitations/*`, `organization-invitations/*` (dont `awaiting/` et `confirmation-code/`), `primary-admin-nominations/*` : `NetworkOnly` dans la configuration PWA (`vite.config.ts`), comme D1 §8. L'indice de téléphone et le code n'existent qu'en mémoire de l'onglet.
+- **Aucune action différée** : confirmation, rejet, nomination, acceptation, refus, annulation, retrait, nouveau code. Boutons désactivés hors ligne.
+- **Anti-doublon :** boutons désactivés pendant l'appel ; pas de `retry` sur les mutations (en particulier `confirm/` : un nouvel essai automatique pourrait décompter un essai de code, et `confirmation-code/` : il invaliderait le code affiché) ; après un échec réseau sans réponse, texte qui demande de vérifier avant de réessayer (6.4, 8.3, 11.3), et invalidation de la liste à la reconnexion.
+- Mot de passe vidé après tout échec de mot de passe ; code vidé après un code faux ; les deux effacés à la fermeture.
+- **Appel du confirmateur :** l'étape « appeler la personne » se fait hors application (appel téléphonique normal, sans données). Le dialogue E6g peut rester ouvert pendant l'appel ; s'il est fermé, rien n'est perdu côté serveur (la saisie est à refaire).
 
 ---
 
@@ -970,12 +1067,12 @@ Le garde `client-rules.test.ts` reste vert : aucun texte n'emploie « garanti »
 |---|---|
 | 1. Un compte, plusieurs contextes | « Membre » est un rôle dans une organisation, pas un type de compte. Aucun plafond affiché du nombre d'organisations (Q22) : aucun chiffre, aucun conseil « quittez une organisation pour en créer une ». L'acceptation 202 ne crée aucun contexte ; aucune bascule de profil automatique. |
 | 2. Permissions ≠ droits commerciaux | Aucun plan, prix ni paiement dans les dialogues de nomination, de confirmation ou d'invitation. La liste d'accès traduit des capacités de rôle ; `billing.*` est présenté comme un accès, sans promesse commerciale. Aucune requête ne porte de paramètre de plan. |
-| 3. Vérification non achetable, précise | `assurance_level` n'est jamais affiché. La revue Connecte+ est décrite comme « l'équipe Connecte+ vérifie **la nomination** », jamais comme un badge ou une « organisation vérifiée ». La confirmation d'un administrateur invité confirme « que c'est bien la personne invitée », pas une identité légale. La revue de création (« en cours d'examen ») n'est ni publique ni présentée comme une vérification. |
-| 4. Aucun score de confiance | Aucune note, étoile ni indicateur. La revue de création est un état binaire montré aux seuls membres. Aucun tri par un indicateur de qualité. |
+| 3. Vérification non achetable, précise | `assurance_level` n'est jamais affiché. La revue Connecte+ est décrite comme « l'équipe Connecte+ vérifie **la nomination** », jamais comme un badge ou une « organisation vérifiée ». La confirmation d'un administrateur invité atteste seulement que la personne qui a accepté est celle que le confirmateur a appelée (code de rattachement), pas une identité légale ; aucun badge n'en résulte. La revue de création (« en cours d'examen ») n'est ni publique ni présentée comme une vérification. |
+| 4. Aucun score de confiance | Aucune note, étoile ni indicateur. La revue de création est un état binaire montré aux seuls membres. Aucun tri par un indicateur de qualité. Le compteur d'essais de code n'est jamais affiché. |
 | 5. Sponsorisé | Sans objet (aucun contenu promotionnel). |
-| 10. Données personnelles par finalité | Indice de téléphone (`••47`) affiché **seulement** sur la carte et le dialogue de confirmation, pour un appelant `can_confirm`, pendant l'attente ; annoncé à la personne **avant** qu'elle accepte (texte du contrat) ; jamais dans un toast, une région vivante, une notification, une URL, un stockage, un journal client. Noms abrégés seulement. Aucun nom de confirmateur montré à la personne rejetée. |
-| 12. Journalisation | Côté serveur. Les textes informent que « tous les administrateurs principaux sont informés » ; l'interface n'affiche aucun journal. Mot de passe jamais stocké. |
-| Q21, Q30 (maker-checker) | Administrateur principal jamais par invitation (option absente, note explicite) ; jamais par « Changer le rôle » (option absente) ; la nomination exige l'acceptation de la cible ; aucune promotion automatique en état `MISSING` (texte de la bannière). |
+| 10. Données personnelles par finalité | Indice de téléphone (`••47`) affiché **seulement** sur la carte et le dialogue de confirmation, pour un appelant `can_confirm`, pendant l'attente ; annoncé à la personne **avant** qu'elle accepte (texte du contrat) ; jamais dans un toast, une région vivante, une notification, une URL, un stockage, un journal client. Le **code de rattachement** n'est montré qu'à la personne qui a accepté, une fois par génération, jamais relisible ni stocké côté client (principe 8). Noms abrégés seulement. Aucun nom de confirmateur montré à la personne rejetée. |
+| 12. Journalisation | Côté serveur (dont chaque code faux, sans le code). Les textes informent que « tous les administrateurs principaux sont informés » ; l'interface n'affiche aucun journal. Mot de passe et code jamais stockés. |
+| Q21, Q30 (maker-checker) | Administrateur principal jamais par invitation (option absente, note explicite) ; jamais par « Changer le rôle » (option absente) ; la nomination exige l'acceptation de la cible ; l'ouverture d'un accès Administrateur exige un code détenu par la personne entrée et obtenu par le confirmateur hors du canal du lien ; aucune promotion automatique en état `MISSING` (texte de la bannière). |
 
 ---
 
@@ -993,11 +1090,15 @@ Le garde `client-rules.test.ts` reste vert : aucun texte n'emploie « garanti »
 10. **Liens d'aide conditionnels** (`HELP_LINKS`) : aucune phrase « contactez le support » sans lien fonctionnel (Q19).
 11. **Liste des accès repliée sur mobile au-delà de 6 accès** dans l'aperçu d'invitation.
 12. **Aucun historique** des nominations closes ni des demandes rejetées dans l'interface V1.
+13. **Code de rattachement sans bouton Copier ni Partager** (révision du 26/11) : le code se dicte au téléphone ; un bouton de copie pousserait à le coller dans la messagerie, le canal même où un lien peut avoir fui.
+14. **Un seul champ de saisie pour le code** (pas six cases), `autoComplete="off"` : plus simple au lecteur d'écran, au collage, et sans suggestion des codes SMS du confirmateur.
+15. **Nouveau code en deux étapes** (avertissement « l'ancien ne fonctionnera plus », puis affichage non fermable par clic extérieur) depuis E17.
+16. **Consigne « appelez la personne au numéro que vous connaissez »** répétée sur la carte (E6), dans le dialogue (E6g) et dans l'avertissement du lien (E6a).
 
 ## 21. Questions ouvertes
 
 - **Q-D2-1 (chef de projet, client) : lien d'aide.** Q19 interdit « contactez le support » sans lien fonctionnel ; L1-21 n'est pas livrée. Le texte du contrat §7.6 pour `MISSING` dit « contactez l'aide Connecte+ ». Proposition : retirer cette phrase du texte et afficher le lien seulement quand `HELP_LINKS.governance` existe. Les textes existants (`errors.deny.SECURITY.action`, `org.unavailable.recourse.*`, `orgEdit.nameLocked`…) ont le même défaut : à traiter avec L1-21.
-- **Q-D2-2 (utilisateur) : QG-2.** Si l'auditeur (S3) impose un **code de rattachement** au lieu de l'indice de téléphone, E6g gagne un champ de saisie et E15 (écran 202) l'affichage du code ; la spec serait amendée.
+- ~~**Q-D2-2 : QG-2.**~~ **Soldée le 26/11/2026** : code de rattachement retenu (revue S3) ; spec amendée (sections 8, 9.4, 11.3).
 - **Q-D2-3 (architecte) : rôle de repli `MEMBER` pour un `TRANSFER`.** Le contrat l'autorise ; un ancien Administrateur principal ramené au rôle Membre perd les statistiques. Le garder dans les choix ? (la spec le garde, en dernier).
 - **Q-D2-4 (architecte) : « Proposé(e) par vous ».** L'objet `PrimaryAdminNomination` n'a pas de booléen `is_mine` (contrairement à `Invitation`). Ajout additif souhaitable ; sans lui, l'initiateur lit son propre nom abrégé.
 - **Q-D2-5 (utilisateur) : historique.** Faut-il afficher les nominations closes (refusées, expirées, rejetées par Connecte+) aux administrateurs principaux ? Le contrat le permet (`?status=closed`) ; non retenu en V1.
@@ -1005,3 +1106,4 @@ Le garde `client-rules.test.ts` reste vert : aucun texte n'emploie « garanti »
 - **Q-D2-7 (architecte) : `governance` dans `contexts/` pour les organisations où l'appelant n'est que `MEMBER` ou `ANALYST`.** La spec affiche les badges à tous les rôles ; à confirmer que le contrat ne restreint pas ce champ.
 - **Q-D2-8 (client, QO-6) : libellé « Membre ».** Si le client confirme un rôle distinct, envisager un libellé moins ambigu (« Membre simple ») ; le contrat impose « Membre » à ce jour.
 - **Q-D2-9 (chef de projet) : nomination vue par la cible ailleurs qu'en E6.** Un éditeur visé ne voit la carte que sur l'écran Équipe (lien de la notification). Faut-il aussi une alerte sur l'Aperçu de l'organisation (une requête de plus) ?
+- **Q-D2-10 (architecte, chef de projet) : texte de la consigne du code.** Le contrat §7.4.5 impose « …de vive voix ou par un canal que vous partagez déjà… ». La spec (`invitation.awaiting.codeInstruction`) dit « de vive voix … ne l'envoyez pas par message », conformément à la consigne « par un appel » et au risque résiduel d'ADR 0010 §12 (code demandé par la messagerie compromise). Aligner le contrat sur ce texte, ou revenir au texte du contrat.

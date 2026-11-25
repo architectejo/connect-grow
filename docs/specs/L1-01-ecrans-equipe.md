@@ -1,5 +1,8 @@
 # L1-01-D1 : Spécification d'écran, équipe, invitations et acceptation
 
+> **Amendée par `L1-01-ecrans-gouvernance.md` (ADR 0010, 25/11/2026)** : §2.5, §2.6, §2.7 (E6c supprimé), §3.3, §4.4.2, §4.4.3, §4.5 (`organization_limit_reached`), §6 (textes « propriétaire ») et §10 décision 4 sont remplacés ; le reste reste en vigueur.
+
+
 - **Date :** 09/11/2026 ; **auteur :** designer-ux ; **destinataire :** dev-frontend (F1, F2, F3)
 - **Sources :** CDC v1.2 §3.1 ; `docs/adr/0008-equipe-organisation-invitations.md` ; `docs/specs/L1-01-contrat-api.md` (contrat figé : les écrans ne montrent que ce qu'il expose) ; `docs/specs/L1-01-organisations.md` (stories b à h, k) ; `docs/specs/L0-09-ecrans-contextes.md` (§2, §7.7, §16).
 - **Périmètre :** E6 Équipe (liste, rôle, retrait, transfert), invitations (création, lien, liste, révocation), page d'acceptation, bloc « blocages de suppression » des Paramètres. **Hors périmètre :** revendication, KYB, page publique, plans.
@@ -302,7 +305,7 @@ Au montage, avant tout appel :
 3. Sinon (fragment absent ou non conforme) : lire `sessionStorage`.
 4. Aucun jeton trouvé : afficher l'état « Lien incomplet » (4.6) sans appel réseau.
 5. Le jeton est toujours envoyé dans le **corps** d'un `POST`, jamais dans une URL, un en-tête ni une clé de requête.
-6. Le jeton n'est supprimé de `sessionStorage` que sur : acceptation réussie, refus réussi, `404 invitation_invalid`, `409 already_member`, déconnexion volontaire. Il est conservé sur : réseau coupé, `429`, `403 phone_verification_required`, `409 organization_limit_reached`, `401` (session expirée).
+6. Le jeton n'est supprimé de `sessionStorage` que sur : acceptation réussie, refus réussi, `404 invitation_invalid`, `409 already_member`, déconnexion volontaire. Il est conservé sur : réseau coupé, `429`, `403 phone_verification_required`, `409 organization_limit_reached`. **Révision L1-01-F2 (audit S2)** : il est aussi effacé à toute fin de session (déconnexion, `401` de session expirée, déconnexion depuis un autre onglet), au-delà de 60 minutes dans l'onglet, et s'il est lu par un autre compte que celui qui a obtenu le premier aperçu ; la page affiche alors « Lien incomplet ».
 
 Un lien partagé dans WhatsApp ne transmet pas le fragment aux serveurs (aperçu de lien compris).
 
@@ -360,7 +363,7 @@ Toutes dans la même carte, `role="alert"`, avec un bouton d'action unique. **Au
 | `409 organization_limit_reached` | « Vous avez atteint la limite d'organisations » | « Un compte ne peut pas faire partie d'un nombre illimité d'organisations. Quittez une organisation dont vous ne faites plus usage, puis revenez sur ce lien tant qu'il est valable. » | « Voir mes profils » (`/profiles`) ; jeton conservé |
 | `409 already_member` | « Vous faites déjà partie de cette organisation » | « Cette invitation ne change pas votre rôle. Si vous voulez un autre rôle, demandez-le à un propriétaire ou à un administrateur. » | « Voir mes profils » ; jeton supprimé |
 | `403 DENY_SECURITY` (compte restreint) | « Action temporairement impossible » | Texte existant `errors.deny.SECURITY.action` | « Retour à l'accueil » |
-| `401` (session expirée) | retour à l'état non connecté (4.4.1) ; jeton conservé | | |
+| `401` (session expirée) | « Lien incomplet » : la fin de session efface le jeton (audit S2, L1-01-F2) | le texte invite à rouvrir le lien depuis le message reçu | « Retour à l'accueil » |
 | `429` | « Trop de tentatives » | « Patientez quelques minutes puis rouvrez le lien. » | « Réessayer » (désactivé pendant le délai si `Retry-After` est lisible) ; jeton conservé |
 | Réseau coupé | « Connexion perdue » | « Votre invitation n'a pas été modifiée. Réessayez quand vous êtes reconnecté. » | « Réessayer » ; jeton conservé ; **aucune action n'est mise en file** |
 | `400 {"token": [...]}` | traité comme `invitation_invalid` | | |

@@ -18,7 +18,8 @@ def _history(points):
 
 
 class DashboardStatsView(identity_services.ActingContextMixin, APIView):
-    """Agrégats du CONTEXTE ACTIF (en-tête `X-Context`, capacité `stats.view` : tous les rôles, ADR 0006, 9.8)."""
+    """Agrégats du CONTEXTE ACTIF (en-tête `X-Context`, capacité `stats.view` : tous les rôles sauf « Membre », et
+    seulement avec un périmètre couvrant toute l'organisation ; ADR 0006, 9.8, ADR 0010 D2, D3)."""
 
     permission_classes = [IsAuthenticated]
 

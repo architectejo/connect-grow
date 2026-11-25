@@ -314,6 +314,16 @@ def get_request_user_contexts(request) -> dict:
     return cached
 
 
+def get_request_internal_contexts(request) -> set:
+    """Contextes de la requête dont l'utilisateur voit les offres NON publiques (capacité `offer.view_internal` :
+    ni un « Membre » ni un membre à périmètre partiel, ADR 0010 D2, D3). Dérivé de `get_request_user_contexts`,
+    sans requête supplémentaire."""
+    return {
+        key for key, role in get_request_user_contexts(request).items()
+        if identity_services.context_has_capability(key[0], role, CAP_VIEW_INTERNAL)
+    }
+
+
 def authorize_offer(actor, offer: Offer, capability: str) -> None:
     """Autorise `actor` d'après le contexte PROPRIÉTAIRE de l'offre et son rôle réel (jamais d'après l'en-tête
     `X-Context`, ADR 0006, 6.4). Lève `ContextDenied` (403 `DENY_*`). À refaire sous `transaction.atomic()`,

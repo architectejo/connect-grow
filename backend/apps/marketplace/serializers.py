@@ -188,9 +188,14 @@ class OfferSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        # Le masquage par la modération n'est connu que du vendeur (L0-19).
+        # Le masquage par la modération n'est connu que du vendeur (L0-19), c'est-à-dire des comptes qui voient les
+        # offres internes de ce contexte (`offer.view_internal` : pas un « Membre », ADR 0010 D2).
         self._cache(instance)  # charge `user_contexts` si l'objet est sérialisé seul
-        is_owner = (instance.seller_context_type, instance.seller_context_id) in self.context['user_contexts']
+        role_key = (instance.seller_context_type, instance.seller_context_id)
+        user_contexts = self.context['user_contexts']
+        is_owner = role_key in user_contexts and identity_services.context_has_capability(
+            role_key[0], user_contexts[role_key], services.CAP_VIEW_INTERNAL,
+        )
         if not is_owner:
             data.pop('is_hidden_by_moderation', None)
         return data

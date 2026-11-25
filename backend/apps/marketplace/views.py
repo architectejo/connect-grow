@@ -155,10 +155,11 @@ class OfferViewSet(identity_services.ActingContextMixin, ActionScopedThrottleMix
         return queryset.order_by(ordering, '-created_at', 'id')
 
     def _own_contexts_filter(self):
-        """Filtre « offres des contextes dans lesquels l'utilisateur peut agir » (personnel, prestataire actif,
-        organisations actives dont il est membre) : deux requêtes, aucun cache."""
+        """Filtre « offres des contextes dont l'utilisateur voit les offres internes » (personnel, prestataire actif,
+        organisations actives où son rôle a `offer.view_internal` : pas un « Membre ») : deux requêtes, aucun cache.
+        Sans contexte : filtre vide (aucune offre non publique)."""
         by_type = defaultdict(list)
-        for context_type, context_id in services.get_request_user_contexts(self.request):
+        for context_type, context_id in services.get_request_internal_contexts(self.request):
             by_type[context_type].append(context_id)
         condition = Q()
         for context_type, ids in by_type.items():

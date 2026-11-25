@@ -881,10 +881,10 @@ def sweep_invitations_of_inviter(actor, organization, inviter_id, new_role=None,
     à l'acceptation (ADR 0008 §5.1). Renvoie le nombre d'invitations révoquées."""
     now = timezone.now()
     revoked = 0
+    inviter_scope = new_scope or capabilities.ORGANIZATION_SCOPE
     for invitation in OrganizationInvitation.objects.filter(
         organization=organization, created_by_id=inviter_id, status=OrganizationInvitation.STATUS_PENDING,
     ).only('id', 'role', 'scope_type', 'scope_id'):
-        inviter_scope = new_scope or capabilities.ORGANIZATION_SCOPE
         if (
             new_role is not None and capabilities.role_has_capability(new_role, 'org.manage_members')
             and capabilities.scope_allows(inviter_scope, 'org.manage_members')
@@ -942,7 +942,7 @@ def _apply_role_change(
     l'organisation (forcé ici, et garanti en base par `membership_owner_org_scope`)."""
     old_role = membership.role
     old_scope = membership_scope(membership)
-    scope = capabilities.ORGANIZATION_SCOPE if new_role == ROLE_OWNER else (new_scope or old_scope)
+    scope = _target_scope(membership, new_role, new_scope)
     if old_role == new_role and scope == old_scope:
         return membership
     effective_before = _effective_owners_before(organization, old_role)

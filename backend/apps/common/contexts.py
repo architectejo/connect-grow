@@ -46,7 +46,9 @@ class ActingContext:
     id: uuid.UUID
     role: Optional[str] = None
     # Périmètre de l'appartenance (organisation seulement ; ADR 0010 D3). Codes et UUID, sans dépendance à `identity`.
-    scope_type: str = 'ORGANIZATION'
+    # Fermé par défaut (relecture B6) : un contexte d'organisation construit sans périmètre n'exerce aucune capacité
+    # de niveau organisation, sauf `org.leave` ; la résolution (`identity.acting`) le renseigne toujours.
+    scope_type: Optional[str] = None
     scope_id: Optional[uuid.UUID] = None
 
 

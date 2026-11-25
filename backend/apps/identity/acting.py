@@ -218,8 +218,9 @@ def can(user_id, context_type, context_id, capability, target_scope=None) -> boo
         return False
     try:
         authorize_on(stub, context_type, context_id, capability, target_scope=target_scope)
-    except (ContextDenied, ValueError, TypeError):
-        # `ValueError`/`TypeError` : périmètre visé mal formé (défense en profondeur ; `scope_allows` refuse déjà).
+    except ContextDenied:
+        # Seul un refus est un « non » ; un périmètre visé mal formé est déjà un refus (`scope_allows`), et toute autre
+        # exception (capacité inconnue…) est une erreur de programmation qui doit remonter.
         return False
     return True
 
@@ -290,16 +291,19 @@ class AvailableContext:
 
 # Colonnes lues pour décrire un contexte d'organisation (rien d'autre ; le type de périmètre règle les capacités affichées).
 _CONTEXT_FIELDS = (
-    'role', 'scope_type', 'organization__id', 'organization__name', 'organization__org_type', 'organization__logo',
+    'role', 'scope_type', 'scope_id', 'organization__id', 'organization__name', 'organization__org_type',
+    'organization__logo',
     'organization__legacy_business_profile_id', 'organization__status',
 )
 
 
 def _membership_capabilities(membership) -> list:
-    """Capacités affichées pour une appartenance : celles du rôle si le périmètre couvre toute l'organisation ;
-    sinon seulement celles que `scope_allows` laisse passer sans périmètre visé (`org.leave`)."""
+    """Capacités affichées pour une appartenance : celles du rôle que son périmètre permet d'exercer au niveau de
+    l'organisation, par la règle unique `capabilities.scope_allows` (sans périmètre visé = organisation entière). Un
+    périmètre `ORGANIZATION` les garde toutes ; un périmètre `CITY` ou `UNIT` ne garde que `org.leave` (fermé par
+    défaut, ADR 0010 D3) ; un périmètre mal formé ne garde, lui aussi, que `org.leave`."""
     granted = capabilities.capabilities_for_context(CONTEXT_ORGANIZATION, membership.role)
-    holder = capabilities.Scope(membership.scope_type, None)  # seul le type compte sans périmètre visé
+    holder = capabilities.Scope.of(membership.scope_type, membership.scope_id)
     return [c for c in granted if capabilities.scope_allows(holder, c)]
 
 

@@ -509,7 +509,8 @@ class ConvertedWorldTests(SharedStateTestCase):
         # Schéma historique (identity 0011) : les colonnes de réglages ajoutées par identity 0016 n'existent pas ;
         # des réglages par défaut non enregistrés suffisent à ces lectures.
         # Idem pour le périmètre (identity 0018) : le filtre des destinataires par périmètre est neutralisé.
-        with mock.patch.object(IdentitySettings, 'get_solo', return_value=IdentitySettings()),                 mock.patch('apps.identity.sellers.org_capability_scope_q', return_value=Q()):
+        with mock.patch.object(IdentitySettings, 'get_solo', return_value=IdentitySettings()), \
+                mock.patch('apps.identity.sellers.org_capability_scope_q', return_value=Q()):
             detail, listing, page = self.read_public_api(client, w, org)
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()['allowed_channels'], ['MESSAGE'])
@@ -529,8 +530,9 @@ class ConvertedWorldTests(SharedStateTestCase):
     def test_converted_organization_is_listed_in_the_contexts_of_its_owner(self):
         client = APIClient()
         client.force_authenticate(get_user_model().objects.get(pk=self.w.owner_id))
-        # Schéma historique (identity 0011) : pas de colonne de périmètre (identity 0018) ; lecture sans elle.
-        fields = tuple(f for f in acting._CONTEXT_FIELDS if f != 'scope_type')
+        # Schéma historique (identity 0011) : pas de colonnes de périmètre (`scope_type`, `scope_id` : identity 0018) ;
+        # lecture sans elles.
+        fields = tuple(f for f in acting._CONTEXT_FIELDS if f not in ('scope_type', 'scope_id'))
         with mock.patch.object(acting, '_CONTEXT_FIELDS', fields), mock.patch.object(
             acting, '_membership_capabilities',
             lambda m: capabilities.capabilities_for_context('ORGANIZATION', m.role),

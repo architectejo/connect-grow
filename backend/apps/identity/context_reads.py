@@ -25,7 +25,12 @@ def get_capable_contexts(user_id, capability) -> set:
     4 requêtes (état du compte : 2 ; profil prestataire : 1 ; appartenances : 1), quel que soit le nombre d'objets
     à tester. Le compte désactivé ou sous sanction bloquante n'a aucun droit (même garde que `authorize_on`).
     Un contexte absent du résultat est refusé : organisation suspendue ou archivée, ancien membre, profil
-    prestataire archivé, rôle sans la capacité (ex. analyste pour `review.reply`)."""
+    prestataire archivé, rôle sans la capacité (ex. analyste pour `review.reply`).
+
+    Périmètre (ADR 0010 D3, fermé par défaut) : une appartenance limitée à une ville ou une unité figure avec un rôle
+    NUL (`get_user_context_roles`), donc sans AUCUNE capacité ici, pas même `org.leave` (contrairement à
+    `capabilities.scope_allows`, qui la laisse passer) : cette lecture par lot sert aux capacités de contenu ; la
+    sortie volontaire, elle, passe par `leave_organization`, qui l'autorise pour tout périmètre."""
     parsed = parse_uuid(user_id)
     if parsed is None:
         return set()

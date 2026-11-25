@@ -7,6 +7,8 @@ pour un membre dont l'appartenance est limitée à une ville (fermé par défaut
 import uuid
 from unittest import mock
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from rest_framework import status
 
@@ -52,6 +54,18 @@ class MemberOfferVisibilityTests(ContextBase):
         response = self.retrieve(self.simple, offer)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertNotIn('is_hidden_by_moderation', response.data)
+
+    def test_member_retrieve_costs_no_more_queries_than_an_editor(self):
+        """Relecture B6 : la lecture « Membre » (pas d'`offer.view_internal`) n'ajoute aucune requête par rapport à
+        celle de l'éditeur de la même organisation (même chemin d'autorisation, sans N+1)."""
+        offer = self.org_offer(title='Offre publique comptée en requêtes')
+        # Amorce pour les deux comptes (cache de permissions Django porté par l'objet compte, réglages).
+        self.retrieve(self.editor, offer)
+        self.retrieve(self.simple, offer)
+        with CaptureQueriesContext(connection) as editor_queries:
+            self.assertEqual(self.retrieve(self.editor, offer).status_code, status.HTTP_200_OK)
+        with self.assertNumQueries(len(editor_queries)):
+            self.assertEqual(self.retrieve(self.simple, offer).status_code, status.HTTP_200_OK)
 
     def test_member_view_of_its_own_organization_offer_is_not_counted(self):
         """Le compteur de vues reste sur l'appartenance : un Membre ne gonfle pas les statistiques."""

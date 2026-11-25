@@ -121,6 +121,27 @@ Elles bloquent L1-01i (revendication), L1-01j (décision et secours) et L1-01l (
 
 ---
 
+## 4 bis. Questions ouvertes après les réponses du client (25/11/2026)
+
+Source : `docs/specs/impact-reponses-client-Q1-Q36.md` §5 et `docs/adr/0010-gouvernance-organisations.md` §17.
+
+| ID | Question | Hypothèse actuelle | Réponse |
+|---|---|---|---|
+| QO-1 | Existe-t-il de vrais anciens comptes entreprise à migrer (avec des utilisateurs réels) ? Sinon Q18 et Q20 sont sans objet. | Aucune donnée de production (ADR 0002) | |
+| QO-2 | Une contestation d'autorité est-elle notifiée à l'administrateur en place, et peut-il y répondre dans l'application ? | Notifié sans identité du demandeur ; réponse hors application | |
+| QO-3 | Quel prix du Premium fait foi : environ 50 USD/an (Q28) ou 2 USD/mois (CDC §7) ? | Prix en base, non fixé | |
+| QO-4 | Passes du particulier : sort des offres déjà publiées sans pass ; définition d'une « activation » ; durée d'un pass. | À définir avec L1-11 | |
+| QO-5 | La location de son propre bien immobilier (Property Rental Pass) entre-t-elle en V1 ? L'immobilier n'est pas dans le périmètre actuel. | Hors V1 tant que non confirmé | |
+| QO-6 | « Simple membre » (Q23) est-il un rôle distinct d'Analyste ? | Rôle « Membre » ajouté (consultation interne et départ seulement) | |
+| QO-7 | Que se passe-t-il à la fin des 90 jours de grâce de vérification (Q26) ? | Restriction de la visibilité, à confirmer | |
+| QO-8 | Seuils de dormance d'une organisation et délai avant archivage d'une organisation sans administrateur principal. | Réglables, sans valeur | |
+| QO-9 | Délai de traitement annoncé pour une vérification ou une récupération. | Aucun délai promis | |
+| QO-10 | Qui voit l'historique d'accès aux coordonnées d'une organisation ? | Administrateurs principaux et administrateurs | |
+| QO-13 | Qui valide la grille des durées de conservation (juriste du client, IMARA TECH) ? | En attente | |
+| QG-4 | Une organisation peut-elle choisir d'avoir un seul Administrateur principal (option de gouvernance) ? | Plusieurs permis, sans plafond | |
+| QG-5 | Une organisation sans administrateur principal (Q17) reste-t-elle visible publiquement pendant la régularisation ? | Non publique jusqu'à régularisation | |
+| QG-8 | Liste initiale des catégories et organisations à vérification renforcée (banques, Mobile Money, télécoms, ministères…). | Liste vide, configurable en back-office | |
+
 ## 5. Autres blocages externes déjà notés au backlog
 
 | Sujet | Tâche | Ce qu'on attend |

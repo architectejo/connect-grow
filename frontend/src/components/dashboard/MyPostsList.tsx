@@ -16,7 +16,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { EmptyState, ErrorState, ImageWithFallback } from "@/components/common";
+import { AccessDenied, EmptyState, ErrorState, ImageWithFallback } from "@/components/common";
 import { useActiveContext, useCan } from "@/contexts/ActiveContextContext";
 import { usePostLifecycle } from "@/hooks/use-account";
 import { formatCount, formatPrice, formatRelativeDate } from "@/lib/format";
@@ -25,11 +25,13 @@ interface MyPostsListProps {
   posts: Post[];
   isLoading: boolean;
   isError: boolean;
+  /** Refus 403 `DENY_PERMISSION` (ou capacité absente du profil confirmé) : message explicite, jamais « Réessayer ». */
+  isDenied?: boolean;
   onRetry: () => void;
 }
 
 /** Liste « Mes annonces » du tableau de bord vendeur (CDC 3.9). */
-export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListProps) {
+export function MyPostsList({ posts, isLoading, isError, isDenied = false, onRetry }: MyPostsListProps) {
   const { t } = useTranslation();
   const { moveToTrash } = usePostLifecycle();
   const { active, contexts, unavailable = [] } = useActiveContext();
@@ -54,10 +56,10 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
           <h2 id="mes-annonces-titre" className="text-lg font-bold">
             {t("dashboardPage.myPosts.title")}
           </h2>
-          <p className="text-sm text-muted-foreground">{t("dashboardPage.myPosts.online", { count: posts.length })}</p>
+          {!isDenied && <p className="text-sm text-muted-foreground">{t("dashboardPage.myPosts.online", { count: posts.length })}</p>}
         </div>
-        {!canEdit && !canDelete && posts.length > 0 && <p className="text-xs text-muted-foreground sm:order-last sm:w-full">{t("scope.readOnlyOffers")}</p>}
-        {posts.length > 4 && (
+        {!isDenied && !canEdit && !canDelete && posts.length > 0 && <p className="text-xs text-muted-foreground sm:order-last sm:w-full">{t("scope.readOnlyOffers")}</p>}
+        {!isDenied && posts.length > 4 && (
           <label className="relative sm:w-64">
             <span className="sr-only">{t("dashboardPage.myPosts.searchLabel")}</span>
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
@@ -72,7 +74,9 @@ export function MyPostsList({ posts, isLoading, isError, onRetry }: MyPostsListP
         )}
       </div>
 
-      {isLoading ? (
+      {isDenied ? (
+        <AccessDenied className="m-5" title={t("dashboardPage.roleRestricted.title")} description={t("dashboardPage.myPosts.denied")} />
+      ) : isLoading ? (
         <ul className="divide-y">
           {[0, 1, 2].map((i) => (
             <li key={i} className="flex items-center gap-4 p-4 sm:px-6">

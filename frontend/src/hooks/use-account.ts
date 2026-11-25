@@ -16,12 +16,17 @@ export const accountKeys = {
 
 // --- Tableau de bord ---
 
-export function useDashboardStats() {
+/**
+ * Statistiques du profil actif (`stats.view`). `enabled` à faux quand le profil confirmé n'a pas la capacité
+ * (rôle Membre) : aucune requête vouée au refus. Un 403 `DENY_PERMISSION` n'est pas relancé (`shouldRetryQuery`) ;
+ * la page le lit avec `isPermissionDenied` (lib/dashboard).
+ */
+export function useDashboardStats(enabled = true) {
   const { isAuthenticated } = useAuth();
   return useQuery({
     queryKey: accountKeys.dashboard,
     queryFn: async () => (await apiClient.get<DashboardStats>("marketplace/stats/dashboard/")).data,
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && enabled,
   });
 }
 

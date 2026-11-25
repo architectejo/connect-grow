@@ -21,8 +21,8 @@ export interface InvitationsPanelHandle {
 interface InvitationsPanelProps {
   org: Pick<OrganizationInternal, "id" | "capabilities">;
   onAnnounce: (message: string) => void;
-  /** Action de l'état vide : ouvre le dialogue d'invitation. */
-  onInvite: () => void;
+  /** Action de l'état vide : ouvre le dialogue d'invitation (le bouton est passé pour lui rendre le focus à la fermeture). */
+  onInvite: (trigger?: HTMLElement) => void;
 }
 
 /**
@@ -71,7 +71,7 @@ export const InvitationsPanel = forwardRef<InvitationsPanelHandle, InvitationsPa
         icon={UserPlus}
         description={t("team.invitations.empty")}
         action={
-          <Button type="button" className="min-h-11" disabled={!online} onClick={onInvite}>
+          <Button type="button" className="min-h-11" disabled={!online} onClick={(event) => onInvite(event.currentTarget)}>
             {t("team.invite.open")}
           </Button>
         }

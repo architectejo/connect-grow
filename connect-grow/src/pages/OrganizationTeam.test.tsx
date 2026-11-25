@@ -150,11 +150,24 @@ describe("écran Équipe", () => {
     await screen.findByText("Aucune invitation en attente.");
     const panel = screen.getByRole("tabpanel");
     const emptyAction = within(panel).getByRole("button", { name: "Inviter une personne" });
-    emptyAction.focus();
+    // Comme sous Safari, le clic ne donne pas le focus au bouton : le déclencheur doit être transmis explicitement
+    expect(document.activeElement).not.toBe(emptyAction);
     fireEvent.click(emptyAction);
     const dialog = await screen.findByRole("dialog", { name: "Inviter une personne" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Annuler" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await waitFor(() => expect(emptyAction).toHaveFocus());
+  });
+
+  it("bouton d'en-tête cliqué sans prendre le focus : le focus lui revient à l'annulation", async () => {
+    renderPage(owner);
+    await screen.findByText("Marie K.");
+    const header = screen.getByRole("button", { name: "Inviter une personne" });
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.click(header);
+    const dialog = await screen.findByRole("dialog", { name: "Inviter une personne" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Annuler" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(header).toHaveFocus());
   });
 });

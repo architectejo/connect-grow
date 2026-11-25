@@ -35,8 +35,10 @@ const OrganizationTeam = () => {
   const inviteButton = useRef<HTMLButtonElement>(null);
   /** Vrai déclencheur de la fenêtre (bouton d'en-tête ou action de l'état vide) : il récupère le focus à la fermeture. */
   const opener = useRef<HTMLElement | null>(null);
-  const openInvite = () => {
-    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  // Déclencheur passé explicitement : sous Safari, un clic ne donne pas le focus au bouton (activeElement reste body)
+  const openInvite = (trigger?: HTMLElement) => {
+    const active = document.activeElement;
+    opener.current = trigger ?? (active instanceof HTMLElement && active !== document.body ? active : null);
     setInviteOpen(true);
   };
   const invitations = useRef<InvitationsPanelHandle>(null);
@@ -64,7 +66,7 @@ const OrganizationTeam = () => {
               title={t("team.title")}
               actions={
                 canInvite && (
-                  <Button ref={inviteButton} type="button" className="min-h-11 w-full md:w-auto" disabled={!online} onClick={openInvite}>
+                  <Button ref={inviteButton} type="button" className="min-h-11 w-full md:w-auto" disabled={!online} onClick={(event) => openInvite(event.currentTarget)}>
                     <UserPlus aria-hidden />
                     {t("team.invite.open")}
                   </Button>

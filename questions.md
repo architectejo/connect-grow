@@ -1,7 +1,9 @@
 # Questions à poser au client — Connecte+
 
 Fichier tenu par le chef de projet. Toute nouvelle question destinée au client s'ajoute ici, dans la catégorie qui convient.
-Dernière mise à jour : 09/11/2026.
+Dernière mise à jour : 25/11/2026.
+
+> **Le client a répondu (25/11/2026)** : `docs/client/ConnectePlus_Reponses_Consolidees_Q1-Q36.md`. Q1 à Q35 sont **verrouillées** ; Q36 (troc) attend une **proposition de l'équipe de développement**. Analyse d'impact en cours : `docs/specs/impact-reponses-client-Q1-Q36.md`. Les nouvelles questions s'ajoutent ci-dessous.
 
 **Comment lire ce fichier**
 - **Bloque** : la tâche citée ne peut pas être clôturée sans la réponse. **Ne bloque pas** : une hypothèse de travail permet d'avancer ; elle est réversible.
@@ -69,7 +71,7 @@ Aucune de ces questions ne bloque le développement. Elles doivent être closes 
 | Q-L1-10 | La suppression libre-service du compte est-elle voulue en V1 ? Le CDC n'en parle pas. | Hors périmètre ; seuls les blocages côté équipe sont livrés | |
 | LEG-PRV-invit-1 | Invitations d'équipe : durée de conservation des invitations closes (elles gardent l'identifiant de l'inviteur et de la personne qui a accepté) et durée de validité d'un lien. | 7 jours de validité, 30 jours de conservation après clôture, valeurs provisoires | |
 | LEG-PRV-invit-2 | Invitation : l'inviteur peut saisir une étiquette libre (60 caractères), lisible par les membres habilités pendant la vie de l'invitation, effacée à la clôture. Quelle finalité et quelle mention d'aide faut-il afficher (« ne saisissez pas de coordonnées ») ? | Texte d'aide à poser par le front | |
-| LEG-PRV-invit-3 | Un lien d'invitation transmis à un tiers permet de rejoindre l'équipe sans vérifier l'identité de la personne visée (seul le téléphone du compte qui accepte est vérifié). Est-ce acceptable pour les rôles éditeur et analyste ? | Accepté en V1, atténué par rôles limités, usage unique, expiration, révocation et notification de l'inviteur | |
+| LEG-PRV-invit-3 | Un lien d'invitation transmis à un tiers permet de rejoindre l'équipe sans vérifier l'identité de la personne visée (seul le téléphone du compte qui accepte est vérifié). Est-ce acceptable pour les rôles éditeur et analyste ? Faut-il informer l'inviteur de ce risque (transmettre le lien par un canal privé, annuler en cas de doute) ? Une évolution possible est de rattacher l'invitation à un téléphone vérifié. | Accepté en V1, atténué par rôles limités, usage unique, expiration, révocation et notification de l'inviteur | |
 
 ### 2.2. Nom, usurpation et revendication (**bloquantes**)
 
@@ -134,4 +136,11 @@ Elles bloquent L1-01i (revendication), L1-01j (décision et secours) et L1-01l (
 
 | Date | ID | Réponse | Reçue de | Impact |
 |---|---|---|---|---|
-| | | | | |
+| 25/11/2026 | Q-CLI8, Q-L1-6, Q-L1-8, Q-CLI6 (Q1 à Q4) | Homonymes permis sans droit d'antériorité ; pas de fiches précréées (revendication = récupération d'anciens comptes et conflits d'autorité) ; badge « Organisation vérifiée » ; rôle supérieur « Administrateur principal » ; durées de conservation par catégorie, configurables | Client (questionnaire consolidé) | L1-01i/j/l et L1-02 à replanifier |
+| 25/11/2026 | LEG-PRV-01 à 12 (Q5 à Q14) | Contacts distincts (compte, professionnel, transactionnel, paiement) ; consentement contextuel versionné ; historique d'accès à mes coordonnées ; rappel anti-démarchage ; avertissement avant WhatsApp ; modérateur sans numéro complet ; IP temporaire et proportionnée | Client | Écarts à mesurer avec L0-10a / ADR 0005 |
+| 25/11/2026 | LEG-PRV-05 b, sanctions, orpheline, mapping (Q15 à Q18) | L'auteur modifie, actualise ou supprime son avis ; « Ancien utilisateur Connecte+ » ; sanction distincte du compte ; organisation « sans administrateur principal » sans promotion automatique ; mapping legacy temporaire | Client | À planifier |
+| 25/11/2026 | Q-SUSP1, Q-SUSP5 (Q19, Q20) | Vraie architecture Aide et Support avant lancement ; parcours de migration par e-mail/SMS + in-app | Client | Nouveau chantier |
+| 25/11/2026 | Q-CLI1, Q-CLI4, Q-L1-3, Q-L1-10, Q-L1-11, Q-L1-12 (Q21 à Q26) | Pas de « plusieurs propriétaires » ; périmètres (branches) à modéliser ; pas de plafond de 10 organisations ; invitation possible comme Administrateur ; suppression libre-service du compte en V1 ; liste de noms protégés ; escalade et second contrôle | Client | **Contradictions avec L1-01 livré** |
+| 25/11/2026 | Q-CLI2, Q-CLI3, Q-CLI7, Q-CLI5 (Q27 à Q30) | Matrice documentaire progressive ; Pass et Premium pour le particulier ; vérification du prestataire proportionnée au risque ; gestion du numéro d'organisation par personne autorisée, maker-checker | Client | Impact L1-02, L1-11 |
+| 25/11/2026 | D11, D3, Q-SUSP2, Q-SUSP3, A13 (Q31 à Q35) | « Marie K. » + avatar ; moyenne masquée sous 3 avis (hypothèse confirmée) ; catégorie de suspension visible ; restauration exceptionnelle d'une archivée ; changement de nom par procédure contrôlée | Client | À planifier |
+| 25/11/2026 | Troc (Q36) | En attente d'une proposition de l'équipe (A intégrer V1, B architecture prévue mais reportée, C ne pas intégrer) | Client | Proposition à rédiger |

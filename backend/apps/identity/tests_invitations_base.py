@@ -69,7 +69,8 @@ class InvitationModelTests(TestCase):
 
     def test_no_conditional_unique_constraint_and_named_indexes(self):
         meta = OrganizationInvitation._meta
-        self.assertEqual([c.name for c in meta.constraints], ['orginv_role_not_owner'])
+        # Contraintes inconditionnelles seulement ; `orginv_scope_consistent` : périmètre (ADR 0010 §4.3, L1-01-B6).
+        self.assertEqual([c.name for c in meta.constraints], ['orginv_role_not_owner', 'orginv_scope_consistent'])
         self.assertEqual(
             sorted(i.name for i in meta.indexes), ['orginv_created_by', 'orginv_org_status', 'orginv_status_expires'],
         )

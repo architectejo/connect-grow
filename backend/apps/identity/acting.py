@@ -78,10 +78,11 @@ def _provider_state(user_id, provider_id):
 
 
 def _membership_state(user_id, organization_id):
-    """(rôle, statut de l'organisation) pour une appartenance ACTIVE, sinon None. Une requête (jointure)."""
+    """(rôle, statut de l'organisation, type de périmètre, identifiant de périmètre) pour une appartenance ACTIVE,
+    sinon None. Une requête (jointure)."""
     return Membership.objects.filter(
         user_id=user_id, organization_id=organization_id, status=Membership.STATUS_ACTIVE,
-    ).values_list('role', 'organization__status').first()
+    ).values_list('role', 'organization__status', 'scope_type', 'scope_id').first()
 
 
 def _check_organization_status(org_status):
@@ -129,7 +130,7 @@ def resolve_acting_context(user, raw_header=None, allow_restricted=False) -> Act
     state = _membership_state(user.pk, context_id)
     if state is None:
         raise ContextDenied(DENY_RELATION, MSG_NOT_MEMBER)
-    role, org_status = state
+    role, org_status = state[0], state[1]
     _check_organization_status(org_status)
     return ActingContext(user.pk, CONTEXT_ORGANIZATION, context_id, role)
 
@@ -158,10 +159,17 @@ def authorize(ctx: ActingContext, capability) -> ActingContext:
     return ctx
 
 
-def authorize_on(user, context_type, context_id, capability, allow_restricted=False) -> ActingContext:
+def authorize_on(
+    user, context_type, context_id, capability, allow_restricted=False, target_scope=None,
+) -> ActingContext:
     """Autorisation PAR OBJET : d'après le contexte détenteur de l'objet et le rôle réel de `user`,
     jamais d'après l'en-tête (ADR 0006, 6.4). Codes : DENY_RELATION, DENY_SECURITY, DENY_OBJECT_STATE,
     DENY_PERMISSION.
+
+    `target_scope` (ADR 0010 §6.1) : périmètre de l'objet visé (`capabilities.Scope`), `None` = organisation entière.
+    Pour une organisation, refus `DENY_PERMISSION` si le périmètre de l'appartenance ne le couvre pas
+    (`scope_covers`), après le contrôle de capacité. Sans objet pour les contextes personnel et prestataire (leur
+    titulaire couvre tout son contexte).
 
     ÉCRITURES SENSIBLES : cette vérification se fait AVANT l'écriture, donc avant tout verrou. Un service qui
     modifie des données sensibles doit la refaire sous `transaction.atomic()`, juste avant d'écrire, pour
@@ -184,15 +192,20 @@ def authorize_on(user, context_type, context_id, capability, allow_restricted=Fa
             raise ContextDenied(DENY_RELATION, MSG_NOT_MEMBER)
         _check_organization_status(state[1])
         ctx = ActingContext(user.pk, CONTEXT_ORGANIZATION, parsed, state[0])
+        holder_scope = capabilities.Scope.of(state[2], state[3])
     else:
         raise ContextDenied(DENY_CONTEXT, MSG_MALFORMED)
     if not allow_restricted:
         _ensure_actor_usable(user, capability)
-    return authorize(ctx, capability)
+    authorize(ctx, capability)
+    if context_type == CONTEXT_ORGANIZATION and not capabilities.scope_covers(holder_scope, target_scope):
+        raise ContextDenied(DENY_PERMISSION, MSG_FORBIDDEN)
+    return ctx
 
 
-def can(user_id, context_type, context_id, capability) -> bool:
-    """Variante sans exception d'`authorize_on` pour les autres domaines et les sérialiseurs."""
+def can(user_id, context_type, context_id, capability, target_scope=None) -> bool:
+    """Variante sans exception d'`authorize_on` pour les autres domaines et les sérialiseurs (`target_scope` : voir
+    `authorize_on`)."""
     if user_id is None:
         return False
     # `authorize_on` n'utilise que `user.pk` (l'état du compte est relu en base par la garde).
@@ -200,7 +213,7 @@ def can(user_id, context_type, context_id, capability) -> bool:
     if stub.pk is None:
         return False
     try:
-        authorize_on(stub, context_type, context_id, capability)
+        authorize_on(stub, context_type, context_id, capability, target_scope=target_scope)
     except ContextDenied:
         return False
     return True
@@ -270,6 +283,13 @@ class AvailableContext:
     status: str  # `results` : toujours ACTIVE ; `unavailable` : SUSPENDED ou ARCHIVED (explicite à la construction)
 
 
+# Colonnes lues pour décrire un contexte d'organisation (rien d'autre : ni périmètre, ni réglage interne).
+_CONTEXT_FIELDS = (
+    'role', 'organization__id', 'organization__name', 'organization__org_type', 'organization__logo',
+    'organization__legacy_business_profile_id', 'organization__status',
+)
+
+
 def get_contexts_for_user(user) -> list:
     """Contextes que `user` peut activer : personnel, prestataire s'il est actif, organisations ACTIVE dont
     il est membre actif (par nom). Deux requêtes, quel que soit le nombre d'organisations."""
@@ -290,7 +310,7 @@ def get_contexts_for_user(user) -> list:
     memberships = (
         Membership.objects.filter(
             user_id=user.pk, status=Membership.STATUS_ACTIVE, organization__status=Organization.STATUS_ACTIVE,
-        ).select_related('organization').order_by(Lower('organization__name'), 'organization_id')
+        ).select_related('organization').only(*_CONTEXT_FIELDS).order_by(Lower('organization__name'), 'organization_id')
     )
     for membership in memberships:
         org = membership.organization
@@ -311,7 +331,8 @@ def get_unavailable_organizations(user) -> list:
     memberships = (
         Membership.objects.filter(user_id=user.pk, status=Membership.STATUS_ACTIVE)
         .exclude(organization__status=Organization.STATUS_ACTIVE)
-        .select_related('organization').order_by(Lower('organization__name'), 'organization_id')
+        .select_related('organization').only(*_CONTEXT_FIELDS)
+        .order_by(Lower('organization__name'), 'organization_id')
     )
     return [
         AvailableContext(

@@ -16,7 +16,7 @@ from django.utils import timezone
 from apps.common.images import sanitize_uploaded_field, validate_image_pixels, validate_image_upload_size
 from apps.common.models import BaseModel, SingletonSettingsModel
 
-from .capabilities import ROLE_ANALYST, ROLE_CHOICES, ROLE_EDITOR, ROLE_OWNER
+from .capabilities import ROLE_ANALYST, ROLE_CHOICES, ROLE_EDITOR, ROLE_OWNER, SCOPE_CHOICES, SCOPE_ORGANIZATION
 from .kyc_files import kyc_upload_to
 
 logger = logging.getLogger(__name__)
@@ -495,9 +495,11 @@ class OrganizationCategory(BaseModel):
 
 
 class Membership(BaseModel):
-    """Appartenance d'un compte à une organisation, avec un rôle. Une seule ligne par couple
-    (organisation, compte) : un retour réactive la même ligne (R12). La règle « au moins un
-    propriétaire » n'est pas en base : elle est garantie par le service, sous verrou."""
+    """Appartenance d'un compte à une organisation, avec un rôle dans un périmètre (ADR 0010 D3). Une seule ligne
+    par couple (organisation, compte) : un retour réactive la même ligne (R12). La règle « au moins un
+    administrateur principal » n'est pas en base : elle est garantie par le service, sous verrou. En base : un
+    administrateur principal couvre toujours toute l'organisation, et `scope_id` est nul si et seulement si le
+    périmètre est l'organisation entière."""
 
     STATUS_ACTIVE = 'ACTIVE'
     STATUS_REVOKED = 'REVOKED'
@@ -515,6 +517,10 @@ class Membership(BaseModel):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='memberships')
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='memberships')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    # Périmètre (ADR 0010 §4.2) : `ORGANIZATION` seul accepté par les services en V1 ; `scope_id` désigne une ville
+    # (`catalog`, par UUID, sans clé étrangère) ou une future unité. Non indexé : jamais filtré en V1.
+    scope_type = models.CharField(max_length=20, choices=SCOPE_CHOICES, default=SCOPE_ORGANIZATION)
+    scope_id = models.UUIDField(null=True, blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
     end_reason = models.CharField(max_length=12, choices=END_REASON_CHOICES, blank=True, default='')
     joined_at = models.DateTimeField(default=timezone.now)
@@ -527,7 +533,20 @@ class Membership(BaseModel):
     )
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=['organization', 'user'], name='membership_org_user_uniq')]
+        constraints = [
+            models.UniqueConstraint(fields=['organization', 'user'], name='membership_org_user_uniq'),
+            models.CheckConstraint(
+                check=~(models.Q(role=ROLE_OWNER) & ~models.Q(scope_type=SCOPE_ORGANIZATION)),
+                name='membership_owner_org_scope',
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(scope_type=SCOPE_ORGANIZATION, scope_id__isnull=True)
+                    | (~models.Q(scope_type=SCOPE_ORGANIZATION) & models.Q(scope_id__isnull=False))
+                ),
+                name='membership_scope_consistent',
+            ),
+        ]
         indexes = [
             models.Index(fields=['user', 'status'], name='membership_user_status'),
             models.Index(fields=['organization', 'role', 'status'], name='membership_org_role_status'),
@@ -562,6 +581,9 @@ class OrganizationInvitation(BaseModel):
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='invitations')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    # Périmètre proposé (ADR 0010 §4.3), mêmes règles que `Membership`.
+    scope_type = models.CharField(max_length=20, choices=SCOPE_CHOICES, default=SCOPE_ORGANIZATION)
+    scope_id = models.UUIDField(null=True, blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)
     token_hash = models.CharField(max_length=64, unique=True)
     label = models.CharField(max_length=60, blank=True, default='')
@@ -577,6 +599,13 @@ class OrganizationInvitation(BaseModel):
     class Meta:
         constraints = [
             models.CheckConstraint(check=~models.Q(role=ROLE_OWNER), name='orginv_role_not_owner'),
+            models.CheckConstraint(
+                check=(
+                    models.Q(scope_type=SCOPE_ORGANIZATION, scope_id__isnull=True)
+                    | (~models.Q(scope_type=SCOPE_ORGANIZATION) & models.Q(scope_id__isnull=False))
+                ),
+                name='orginv_scope_consistent',
+            ),
         ]
         indexes = [
             models.Index(fields=['organization', 'status'], name='orginv_org_status'),

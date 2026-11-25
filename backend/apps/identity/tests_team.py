@@ -22,7 +22,7 @@ from .tests_route_guard import collect_unguarded_write_routes
 
 OWNER, ADMIN, EDITOR, ANALYST = capabilities.ROLE_OWNER, capabilities.ROLE_ADMIN, capabilities.ROLE_EDITOR, capabilities.ROLE_ANALYST
 ORGS = '/api/v1/accounts/organizations/'
-MEMBER_KEYS = {'membership_id', 'display_name', 'role', 'joined_at', 'is_self', 'is_last_effective_owner'}
+MEMBER_KEYS = {'membership_id', 'display_name', 'role', 'joined_at', 'is_self', 'is_last_effective_owner', 'scope'}
 PASSWORD = 'x'
 SECRET_PHONE = '+243999000777'
 SECRET_EMAIL_PART = 'secret-team'
@@ -95,7 +95,7 @@ class MemberListTests(TeamBase):
         return self.as_role(role).get(url_members(org or self.org), params)
 
     def test_every_role_reads_the_list_with_exact_keys_and_pagination_envelope(self):
-        for role in capabilities.ROLES:
+        for role in (OWNER, ADMIN, EDITOR, ANALYST):  # rôles de l'équipe de base ; MEMBER : tests_member_scope
             with self.subTest(role=role):
                 response = self.get(role)
                 self.assertEqual(response.status_code, 200)

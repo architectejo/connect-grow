@@ -222,6 +222,35 @@ def _validate_role(role):
         raise serializers.ValidationError({'role': ["Rôle inconnu."]})
 
 
+SCOPE_NOT_AVAILABLE_MESSAGE = "Ce périmètre n'est pas encore disponible."
+
+
+def _validate_scope(scope) -> capabilities.Scope:
+    """Périmètre demandé en entrée d'API (contrat L1-01 §7.1). Absent ou nul : organisation entière. Seule valeur
+    acceptée en V1 : `{"type": "ORGANIZATION", "id": null}` ; toute autre valeur (type réservé `CITY` ou `UNIT`,
+    identifiant non nul, forme invalide) : erreur de champ 400 `{"scope": [...]}` (ADR 0010 §6.1)."""
+    if scope is None:
+        return capabilities.ORGANIZATION_SCOPE
+    if (
+        isinstance(scope, dict) and set(scope) <= {'type', 'id'}
+        and scope.get('type') in capabilities.ACTIVE_SCOPE_TYPES and scope.get('id') is None
+    ):
+        return capabilities.Scope(scope['type'], None)
+    raise serializers.ValidationError({'scope': [SCOPE_NOT_AVAILABLE_MESSAGE]})
+
+
+def membership_scope(membership) -> capabilities.Scope:
+    """Périmètre d'une appartenance (ou d'une invitation : mêmes champs)."""
+    return capabilities.Scope.of(membership.scope_type, membership.scope_id)
+
+
+def _can_manage_member(actor_membership, membership) -> bool:
+    """L'acteur peut agir sur ce membre : il peut gérer son rôle ET son périmètre couvre celui du membre."""
+    return capabilities.can_delegate(
+        actor_membership.role, membership_scope(actor_membership), membership.role, membership_scope(membership),
+    )
+
+
 def _get_membership(organization, user_id) -> Membership:
     membership = Membership.objects.filter(organization=organization, user_id=user_id).first()
     if membership is None:
@@ -256,6 +285,10 @@ def _audit_membership(
         f"organization={organization.pk}; user={membership.user_id}; "
         f"old_role={old_role or '-'}; new_role={new_role or '-'}"
     )
+    scope_type = getattr(membership, 'scope_type', capabilities.SCOPE_ORGANIZATION)
+    if new_role and scope_type != capabilities.SCOPE_ORGANIZATION:
+        # ADR 0010 §8 : le périmètre n'est tracé que s'il n'est pas l'organisation entière (codes et UUID seulement).
+        details += f"; scope_type={scope_type}; scope_id={membership.scope_id}"
     if reauth:
         details += "; reauth=true"
     if orphaned:
@@ -751,12 +784,16 @@ def _publish_status_change(organization, reason, actor):
 
 # --- Équipe -------------------------------------------------------------------------------
 
-def _activate_membership(actor, organization, target, role, added_by=None, via=None, invited_by=None):
+def _activate_membership(
+    actor, organization, target, role, added_by=None, via=None, invited_by=None, scope=None,
+):
     """Noyau interne, JAMAIS exposé : crée l'appartenance `ACTIVE` ou réactive la même ligne (R12), puis audit
     `MEMBERSHIP_ADDED` (acteur = `actor`) et événement `identity.membership_changed` (acteur = `added_by`, par défaut
     `actor`). Aucune autorisation ici : l'appelant l'a faite sous verrou. Déjà membre actif : 409 `already_member`.
-    `via='invitation'` et `invited_by` tracent l'origine dans l'audit et l'événement (ADR 0008 §5.1, §6)."""
+    `via='invitation'` et `invited_by` tracent l'origine dans l'audit et l'événement (ADR 0008 §5.1, §6). `scope` :
+    périmètre de l'appartenance (défaut : organisation entière ; une réactivation repart du périmètre donné)."""
     added_by = added_by or actor
+    scope = scope or capabilities.ORGANIZATION_SCOPE
     membership = Membership.objects.filter(organization=organization, user=target).first()
     if membership is not None and membership.status == Membership.STATUS_ACTIVE:
         raise OrganizationError("Ce compte est déjà membre de l'organisation.", 'already_member')
@@ -764,11 +801,12 @@ def _activate_membership(actor, organization, target, role, added_by=None, via=N
     if membership is None:
         membership = Membership.objects.create(
             organization=organization, user=target, role=role, status=Membership.STATUS_ACTIVE,
-            added_by=added_by, joined_at=now,
+            scope_type=scope.type, scope_id=scope.id, added_by=added_by, joined_at=now,
         )
         change = CHANGE_ADDED
     else:
         membership.role, membership.status = role, Membership.STATUS_ACTIVE
+        membership.scope_type, membership.scope_id = scope.type, scope.id
         membership.end_reason, membership.ended_at, membership.ended_by = '', None, None
         membership.added_by, membership.joined_at = added_by, now
         membership.save()
@@ -792,7 +830,9 @@ def add_member(actor, organization_id, user_id, role) -> Membership:
     with transaction.atomic():
         organization = _lock_organization(organization_id)
         actor_membership = _authorize_member(actor, organization, 'org.manage_members')
-        if not capabilities.can_manage_role_of(actor_membership.role, role):
+        if not capabilities.can_delegate(
+            actor_membership.role, membership_scope(actor_membership), role, capabilities.ORGANIZATION_SCOPE,
+        ):
             raise ContextDenied(DENY_PERMISSION, "Vous ne pouvez pas attribuer ce rôle.")
         # La cible est verrouillée et son plafond vérifié avant toute lecture de ses appartenances.
         target = User.objects.select_for_update().filter(pk=user_id, is_active=True).first()
@@ -875,19 +915,24 @@ def _ensure_not_orphaned(organization, effective_before) -> bool:
 
 def _apply_role_change(
     actor, organization, membership, new_role, audit_action='MEMBERSHIP_ROLE_CHANGED', reauth=False,
-    publish_owners=True,
+    publish_owners=True, new_scope=None,
 ):
     """Écrit un changement de rôle (verrou déjà posé, autorisation déjà faite) et vérifie les invariants
     après l'écriture : `last_owner` (zéro propriétaire) puis `last_effective_owner` (ADR 0008 §9) ; une
-    transition qui les viole annule la transaction. Un mouvement de propriétaire publie `owners_changed`."""
+    transition qui les viole annule la transaction. Un mouvement de propriétaire publie `owners_changed`.
+    `new_scope` : nouveau périmètre (None : inchangé) ; un administrateur principal couvre toujours toute
+    l'organisation (forcé ici, et garanti en base par `membership_owner_org_scope`)."""
     old_role = membership.role
-    if old_role == new_role:
+    old_scope = membership_scope(membership)
+    scope = capabilities.ORGANIZATION_SCOPE if new_role == ROLE_OWNER else (new_scope or old_scope)
+    if old_role == new_role and scope == old_scope:
         return membership
     effective_before = _effective_owners_before(organization, old_role)
     Membership.objects.filter(pk=membership.pk, status=Membership.STATUS_ACTIVE).update(
-        role=new_role, updated_at=timezone.now(),
+        role=new_role, scope_type=scope.type, scope_id=scope.id, updated_at=timezone.now(),
     )
     membership.role = new_role
+    membership.scope_type, membership.scope_id = scope.type, scope.id
     orphaned = False
     if old_role == ROLE_OWNER:
         if count_active_owners(organization.pk) < 1:
@@ -913,8 +958,9 @@ def change_member_role(actor, organization_id, user_id, new_role) -> Membership:
         membership = _get_membership(organization, user_id)
         if membership.status != Membership.STATUS_ACTIVE:
             raise OrganizationError("Ce compte n'est pas membre de l'organisation.", 'member_not_found', 404)
-        if not (capabilities.can_manage_role_of(actor_membership.role, membership.role)
-                and capabilities.can_manage_role_of(actor_membership.role, new_role)):
+        if not (_can_manage_member(actor_membership, membership) and capabilities.can_delegate(
+            actor_membership.role, membership_scope(actor_membership), new_role, membership_scope(membership),
+        )):
             raise ContextDenied(DENY_PERMISSION, "Vous ne pouvez pas modifier ce rôle.")
         _ensure_target_available(membership.user_id)
         return _apply_role_change(actor, organization, membership, new_role)
@@ -1000,7 +1046,7 @@ def revoke_member(actor, organization_id, user_id) -> Membership:
         membership = _get_membership(organization, user_id)
         if membership.status != Membership.STATUS_ACTIVE:
             raise OrganizationError("Ce compte n'est pas membre de l'organisation.", 'member_not_found', 404)
-        if not capabilities.can_manage_role_of(actor_membership.role, membership.role):
+        if not _can_manage_member(actor_membership, membership):
             raise ContextDenied(DENY_PERMISSION, "Vous ne pouvez pas retirer ce membre.")
         return _end_membership(actor, organization, membership, Membership.END_REMOVED, 'MEMBERSHIP_REVOKED')
 
@@ -1040,13 +1086,14 @@ def sole_effective_owner_id(organization_id):
 
 
 def list_members(actor, organization_id) -> TeamList:
-    """Membres ACTIFS (`org.view_internal`, tout rôle). Ordre : propriétaires, administrateurs, éditeurs,
-    analystes, puis `joined_at`, puis identifiant. Seul `full_name` du compte est lu (abrégé à l'affichage)."""
+    """Membres ACTIFS (`org.view_internal`, tout rôle). Ordre : administrateurs principaux, administrateurs,
+    éditeurs, analystes, membres, puis `joined_at`, puis identifiant. Seul `full_name` du compte est lu (abrégé à
+    l'affichage)."""
     organization, role = get_organization_for_member(actor, organization_id, 'org.view_internal')
     queryset = Membership.objects.filter(
         organization=organization, status=Membership.STATUS_ACTIVE,
     ).select_related('user').only(
-        'id', 'organization', 'user', 'role', 'status', 'joined_at', 'user__full_name',
+        'id', 'organization', 'user', 'role', 'scope_type', 'scope_id', 'status', 'joined_at', 'user__full_name',
     ).annotate(role_rank=_ROLE_ORDER).order_by('role_rank', 'joined_at', 'id')
     can_manage = capabilities.role_has_capability(role, 'org.manage_members')
     return TeamList(queryset, can_manage, sole_effective_owner_id(organization.pk) if can_manage else None)
@@ -1097,11 +1144,14 @@ def _require_reauthentication(actor, organization, confirm, password, action):
     REAUTH_FAILURES.success(key)
 
 
-def _resolve_role_change(actor, organization, membership_id, new_role):
+def _resolve_role_change(actor, organization, membership_id, new_role, new_scope):
+    """Acteur autorisé (`org.manage_roles`), cible de CETTE organisation, délégation permise sur le rôle et le
+    périmètre actuels de la cible comme sur le rôle et le périmètre visés (`can_delegate`, ADR 0010 §9.1)."""
     actor_membership = _authorize_member(actor, organization, 'org.manage_roles')
     membership = _get_member(organization, membership_id)
-    if not (capabilities.can_manage_role_of(actor_membership.role, membership.role)
-            and capabilities.can_manage_role_of(actor_membership.role, new_role)):
+    actor_scope = membership_scope(actor_membership)
+    if not (_can_manage_member(actor_membership, membership)
+            and capabilities.can_delegate(actor_membership.role, actor_scope, new_role, new_scope)):
         raise ContextDenied(DENY_PERMISSION, "Vous ne pouvez pas modifier ce rôle.")
     _ensure_target_available(membership.user_id)
     return membership
@@ -1111,15 +1161,19 @@ def _role_change_needs_reauth(membership, new_role) -> bool:
     return new_role == ROLE_OWNER or membership.role == ROLE_OWNER
 
 
-def change_role(actor, organization_id, membership_id, new_role, confirm=False, password=None) -> Membership:
+def change_role(
+    actor, organization_id, membership_id, new_role, confirm=False, password=None, scope=None,
+) -> Membership:
     """Change le rôle d'un membre actif de l'organisation (`org.manage_roles`). L'administrateur ne touche jamais
     un administrateur principal et n'attribue jamais OWNER. Promotion vers OWNER ou rétrogradation d'un OWNER :
     `confirm` et ressaisie du mot de passe. Invariants `last_owner` et `last_effective_owner` vérifiés sous verrou. Même
-    rôle : aucun effet, aucune trace."""
+    rôle et même périmètre : aucun effet, aucune trace. `scope` (contrat §7.2) : périmètre visé, organisation entière
+    par défaut ; seul `ORGANIZATION` est accepté en V1 (sinon 400 `{"scope": [...]}`)."""
     _validate_role(new_role)
+    new_scope = _validate_scope(scope)
     organization = _get_organization(organization_id)
-    membership = _resolve_role_change(actor, organization, membership_id, new_role)
-    if membership.role == new_role:
+    membership = _resolve_role_change(actor, organization, membership_id, new_role, new_scope)
+    if membership.role == new_role and membership_scope(membership) == new_scope:
         return membership  # même rôle : ni ressaisie, ni quota, ni trace (l'autorisation a déjà été vérifiée)
     reauth = _role_change_needs_reauth(membership, new_role)
     if reauth:
@@ -1129,13 +1183,13 @@ def change_role(actor, organization_id, membership_id, new_role, confirm=False, 
         )
     with transaction.atomic():
         organization = _lock_organization(organization_id)
-        membership = _resolve_role_change(actor, organization, membership_id, new_role)
+        membership = _resolve_role_change(actor, organization, membership_id, new_role, new_scope)
         if _role_change_needs_reauth(membership, new_role) and not reauth:
             # Le rôle de la cible a changé entre la lecture et le verrou : la ressaisie n'a pas eu lieu.
             raise OrganizationError(
                 "Mot de passe incorrect.", 'reauthentication_failed', status.HTTP_403_FORBIDDEN,
             )
-        _apply_role_change(actor, organization, membership, new_role, reauth=reauth)
+        _apply_role_change(actor, organization, membership, new_role, reauth=reauth, new_scope=new_scope)
     return membership
 
 
@@ -1150,7 +1204,7 @@ def remove_member(actor, organization_id, membership_id) -> Membership:
         membership = _get_member(organization, membership_id)
         if membership.user_id == actor.pk:
             raise OrganizationError("Utilisez « quitter l'organisation ».", 'use_leave', status.HTTP_400_BAD_REQUEST)
-        if not capabilities.can_manage_role_of(actor_membership.role, membership.role):
+        if not _can_manage_member(actor_membership, membership):
             raise ContextDenied(DENY_PERMISSION, "Vous ne pouvez pas retirer ce membre.")
         if membership.role == ROLE_OWNER:
             raise OrganizationError(

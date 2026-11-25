@@ -46,6 +46,8 @@ from .verification import (  # noqa: F401
 )
 
 from .capabilities import CAP_ORG_LEAVE  # noqa: F401
+# Périmètre (ADR 0010 D3) : objet passé en `target_scope` à `authorize_on` et `can` par les autres domaines.
+from .capabilities import ORGANIZATION_SCOPE, Scope, can_delegate, scope_covers  # noqa: F401
 
 # Contextes vendeur : fiches publiques, visibilité, destinataires, canaux, état du compte (ADR 0006, 7.1).
 from .sellers import (  # noqa: F401

@@ -278,12 +278,13 @@ class ConvertedWorldTests(SharedStateTestCase):
         self.assertEqual(
             set(OrganizationCategory.objects.filter(organization=org).values_list('category_id', flat=True)),
             w.categories)
-        members = list(Membership.objects.filter(organization=org))
+        # Colonnes explicites : la base est à l'état `identity 0011`, sans les colonnes ajoutées depuis (périmètre, 0018).
+        members = list(Membership.objects.filter(organization=org).values_list(
+            'user_id', 'role', 'status', 'added_by_id', 'ended_at', 'joined_at',
+        ))
         self.assertEqual(len(members), 1)
-        member = members[0]
-        self.assertEqual((member.user_id, member.role, member.status, member.added_by_id, member.ended_at),
-                         (w.owner_id, 'OWNER', 'ACTIVE', None, None))
-        self.assertEqual(member.joined_at, w.full.created_at)
+        self.assertEqual(members[0][:5], (w.owner_id, 'OWNER', 'ACTIVE', None, None))
+        self.assertEqual(members[0][5], w.full.created_at)
         mapping = LegacyAccountMapping.objects.get(user_id=w.owner_id)
         self.assertEqual(mapping.organization_id, org.pk)
         docs = KycDocument.objects.filter(organization=org)
@@ -420,9 +421,9 @@ class ConvertedWorldTests(SharedStateTestCase):
     def test_a_revoked_owner_still_cannot_decide_nor_download(self):
         User = get_user_model()
         profile = self.w.revoked_owner
-        membership = Membership.objects.get(organization=org_of(profile))
-        membership.status = Membership.STATUS_REVOKED
-        membership.save()
+        # Mise à jour d'une seule colonne : la base est à l'état `identity 0011` (sans les colonnes de périmètre, 0018).
+        membership = Membership.objects.filter(organization=org_of(profile))
+        membership.update(status=Membership.STATUS_REVOKED)
         try:
             doc = KycDocument.objects.get(organization=org_of(profile))
             reviewer = User.objects.get(pk=profile.user_id)
@@ -438,11 +439,11 @@ class ConvertedWorldTests(SharedStateTestCase):
             self.assertEqual(client.get('/api/v1/accounts/kyc/documents/').status_code, 404)
             self.assertEqual(client.post('/api/v1/accounts/kyc/documents/', {}, format='json').status_code, 404)
             self.assertEqual(client.delete(f'/api/v1/accounts/kyc/documents/{doc.pk}/').status_code, 404)
-            self.assertIn(client.get(f'/api/v1/accounts/organizations/{org_of(profile).pk}/kyc/documents/').status_code,
-                          (403, 404))
+            # La route d'organisation (`organizations/<id>/kyc/documents/`) n'est plus appelée ici : elle exécute le code
+            # d'autorisation courant, qui lit les colonnes de périmètre (identity 0018) absentes d'une base à l'état
+            # `identity 0011`. Le refus d'un ancien membre y est couvert par `tests_verification` (DENY_RELATION).
         finally:
-            membership.status = Membership.STATUS_ACTIVE
-            membership.save()
+            membership.update(status=Membership.STATUS_ACTIVE)
 
     # -- offres, compteurs, avis -------------------------------------------------------------------------
     def test_offers_counters_and_reviews_follow_the_organization(self):

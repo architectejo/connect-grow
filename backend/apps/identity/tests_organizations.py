@@ -24,11 +24,13 @@ from .models import (
 )
 
 OWNER, ADMIN, EDITOR, ANALYST = capabilities.ROLE_OWNER, capabilities.ROLE_ADMIN, capabilities.ROLE_EDITOR, capabilities.ROLE_ANALYST
+MEMBER = 'MEMBER'
 
-# Matrice de l'ADR 0006 section 5, recopiée telle quelle (indépendante du code testé).
+# Matrice de l'ADR 0006 section 5, amendée par l'ADR 0010 §4.1 (rôle MEMBER), recopiée telle quelle (indépendante du
+# code testé). MEMBER : `org.view_internal` et `org.leave` seulement.
 EXPECTED_MATRIX = {
-    'org.view_internal': {OWNER, ADMIN, EDITOR, ANALYST},
-    'org.leave': {OWNER, ADMIN, EDITOR, ANALYST},
+    'org.view_internal': {OWNER, ADMIN, EDITOR, ANALYST, MEMBER},
+    'org.leave': {OWNER, ADMIN, EDITOR, ANALYST, MEMBER},
     'org.edit_profile': {OWNER, ADMIN},
     'org.manage_members': {OWNER, ADMIN},
     'org.manage_roles': {OWNER, ADMIN},
@@ -64,6 +66,7 @@ class CapabilityMatrixTests(SimpleTestCase):
         self.assertEqual({k: set(v) for k, v in capabilities.CAPABILITIES.items()}, EXPECTED_MATRIX)
 
     def test_every_role_and_capability_pair(self):
+        self.assertEqual(capabilities.ROLES, (OWNER, ADMIN, EDITOR, ANALYST, MEMBER))  # 5 rôles x 16 capacités
         for capability, allowed in EXPECTED_MATRIX.items():
             for role in capabilities.ROLES:
                 with self.subTest(capability=capability, role=role):

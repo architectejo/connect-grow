@@ -228,6 +228,14 @@ class OrganizationLeaveView(APIView):
 
 # --- Équipe (ADR 0008, contrat L1-01 §1) ----------------------------------------------------------------------
 
+def _scope_schema(**kwargs):
+    """Objet `Scope` (contrat §7.1, clés exactes) : V1, seule valeur `{"type": "ORGANIZATION", "id": null}`."""
+    return inline_serializer('Scope', {
+        'type': serializers.ChoiceField(choices=capabilities.SCOPE_TYPES),
+        'id': serializers.UUIDField(allow_null=True),
+    }, **kwargs)
+
+
 def _member_schema(**kwargs):
     return inline_serializer('Member', {
         'membership_id': serializers.UUIDField(),
@@ -236,6 +244,7 @@ def _member_schema(**kwargs):
         'joined_at': serializers.DateTimeField(),
         'is_self': serializers.BooleanField(),
         'is_last_effective_owner': serializers.BooleanField(allow_null=True),
+        'scope': _scope_schema(),
     }, **kwargs)
 
 
@@ -248,6 +257,7 @@ MEMBER_PAGE_SCHEMA = inline_serializer('MemberPage', {
 })
 ROLE_CHANGE_SCHEMA = inline_serializer('MemberRoleChange', {
     'role': serializers.ChoiceField(choices=capabilities.ROLES),
+    'scope': _scope_schema(required=False, allow_null=True),
     'confirm': serializers.BooleanField(required=False),
     'password': serializers.CharField(required=False, write_only=True),
 })
@@ -264,8 +274,13 @@ TRANSFER_RESULT_SCHEMA = inline_serializer('OwnershipTransferResult', {
 })
 
 
+def serialize_scope(holder):
+    """`Scope` d'une appartenance ou d'une invitation (contrat §7.1)."""
+    return {'type': holder.scope_type, 'id': str(holder.scope_id) if holder.scope_id else None}
+
+
 def serialize_member(membership, actor, can_manage, sole_owner_id):
-    """`Member` (contrat §0, clés exactes). Jamais de téléphone, e-mail, nom complet, photo ni identifiant de
+    """`Member` (contrat §0 et §7.1, clés exactes). Jamais de téléphone, e-mail, nom complet, photo ni identifiant de
     compte. `is_last_effective_owner` n'est révélé qu'aux appelants `org.manage_members` (sinon `null`)."""
     return {
         'membership_id': str(membership.pk),
@@ -274,6 +289,7 @@ def serialize_member(membership, actor, can_manage, sole_owner_id):
         'joined_at': _iso(membership.joined_at),
         'is_self': membership.user_id == actor.pk,
         'is_last_effective_owner': (membership.user_id == sole_owner_id) if can_manage else None,
+        'scope': serialize_scope(membership),
     }
 
 
@@ -321,7 +337,7 @@ class OrganizationMemberDetailView(APIView):
         data = _body(request)
         membership = change_role(
             request.user, pk, membership_id, data.get('role'),
-            confirm=data.get('confirm') is True, password=data.get('password'),
+            confirm=data.get('confirm') is True, password=data.get('password'), scope=data.get('scope'),
         )
         sole = sole_effective_owner_id(pk)
         return _private(Response(serialize_member(membership, request.user, True, sole)))

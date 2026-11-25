@@ -321,7 +321,7 @@ class SuspendedOrganizationTests(PurgeBase):
         Organization.objects.filter(pk=self.org.pk).update(status=Organization.STATUS_ACTIVE)
         with self.assertRaises(services.OrganizationError) as general:
             services.leave_organization(self.seller, self.org.pk)
-        self.assertEqual(str(general.exception.detail), "Une organisation doit garder au moins un propriétaire.")
+        self.assertEqual(str(general.exception.detail), "Une organisation doit garder au moins un administrateur principal.")
 
 
 class IndexTests(PurgeBase):

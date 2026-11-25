@@ -71,7 +71,8 @@ class UserAdmin(admin.ModelAdmin):
         )
 
     def delete_view(self, request, object_id, extra_context=None):
-        # Un compte non supprimable (seul propriétaire, sanction en cours, signalement grave ouvert) est refusé.
+        # Un compte non supprimable (seul administrateur principal, sanction en cours, signalement grave ouvert) est
+        # refusé.
         if request.method == 'POST':
             obj = self.get_object(request, unquote(object_id))
             if obj is not None:
@@ -100,8 +101,8 @@ class UserAdmin(admin.ModelAdmin):
 
     def delete_queryset(self, request, queryset):
         # Suppression en masse (action « supprimer la sélection ») : une transaction et une trace par compte ; les
-        # comptes non supprimables (seul propriétaire, sanction en cours, signalement grave ouvert) sont ignorés et
-        # signalés.
+        # comptes non supprimables (seul administrateur principal, sanction en cours, signalement grave ouvert) sont
+        # ignorés et signalés.
         blocked = 0
         for obj in queryset:
             try:
@@ -112,8 +113,8 @@ class UserAdmin(admin.ModelAdmin):
         if blocked:
             self.message_user(
                 request,
-                f"{blocked} compte(s) non supprimé(s) : seul propriétaire d'une organisation, sanction en "
-                "cours ou signalement grave ouvert.",
+                f"{blocked} compte(s) non supprimé(s) : seul administrateur principal d'une organisation, "
+                "sanction en cours ou signalement grave ouvert.",
                 messages.WARNING,
             )
 

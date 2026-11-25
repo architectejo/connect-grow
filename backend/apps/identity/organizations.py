@@ -83,22 +83,22 @@ class OrganizationError(CodedAPIException):
 
 
 def _last_owner_error(organization=None):
-    """Refus `last_owner`. Pour une organisation SUSPENDED (le seul propriétaire ne peut ni partir ni changer de
-    rôle), le message explique l'issue : attendre la levée de la suspension ou contacter le support."""
+    """Refus `last_owner`. Pour une organisation SUSPENDED (le seul administrateur principal ne peut ni partir ni
+    changer de rôle), le message explique l'issue : attendre la levée de la suspension ou contacter le support."""
     if organization is not None and organization.status == Organization.STATUS_SUSPENDED:
         return OrganizationError(
-            "Cette organisation est suspendue et vous en êtes le seul propriétaire : vous ne pouvez pas la quitter ni "
-            "changer votre rôle tant que la suspension n'est pas levée. Attendez la levée de la suspension ou "
-            "contactez le support.",
+            "Cette organisation est suspendue et vous en êtes le seul administrateur principal : vous ne pouvez pas "
+            "la quitter ni changer votre rôle tant que la suspension n'est pas levée. Attendez la levée de la "
+            "suspension ou contactez le support.",
             'last_owner',
         )
-    return OrganizationError("Une organisation doit garder au moins un propriétaire.", 'last_owner')
+    return OrganizationError("Une organisation doit garder au moins un administrateur principal.", 'last_owner')
 
 
 def _last_effective_owner_error():
     return OrganizationError(
-        "Cette opération laisserait l'organisation sans propriétaire actif alors qu'elle a des offres actives. "
-        "Désignez d'abord un autre propriétaire.",
+        "Cette opération laisserait l'organisation sans administrateur principal actif alors qu'elle a des offres "
+        "actives. Désignez d'abord un autre administrateur principal.",
         'last_effective_owner',
     )
 
@@ -926,14 +926,20 @@ def transfer_ownership(actor, organization_id, new_owner_user_id, actor_new_role
     Une seule transaction, deux événements, une trace `ORG_OWNERSHIP_TRANSFERRED`."""
     _validate_role(actor_new_role)
     if actor_new_role == ROLE_OWNER:
-        raise serializers.ValidationError({'role': ["Le propriétaire sortant doit prendre un autre rôle."]})
+        raise serializers.ValidationError(
+            {'role': ["L'administrateur principal sortant doit prendre un autre rôle."]},
+        )
     if str(new_owner_user_id) == str(actor.pk):
-        raise OrganizationError("Vous êtes déjà propriétaire.", 'invalid_transfer', status.HTTP_400_BAD_REQUEST)
+        raise OrganizationError(
+            "Vous êtes déjà administrateur principal.", 'invalid_transfer', status.HTTP_400_BAD_REQUEST,
+        )
     with transaction.atomic():
         organization = _lock_organization(organization_id)
         actor_membership = _authorize_member(actor, organization, 'org.manage_roles', allow_archived=True)
         if actor_membership.role != ROLE_OWNER:
-            raise ContextDenied(DENY_PERMISSION, "Seul un propriétaire peut transférer la propriété.")
+            raise ContextDenied(
+                DENY_PERMISSION, "Seul un administrateur principal peut transférer l'administration principale.",
+            )
         target = _get_membership(organization, new_owner_user_id)
         if target.status != Membership.STATUS_ACTIVE:
             raise OrganizationError("Ce compte n'est pas membre de l'organisation.", 'member_not_found', 404)
@@ -1107,8 +1113,8 @@ def _role_change_needs_reauth(membership, new_role) -> bool:
 
 def change_role(actor, organization_id, membership_id, new_role, confirm=False, password=None) -> Membership:
     """Change le rôle d'un membre actif de l'organisation (`org.manage_roles`). L'administrateur ne touche jamais
-    un propriétaire et n'attribue jamais OWNER. Promotion vers OWNER ou rétrogradation d'un OWNER : `confirm` et
-    ressaisie du mot de passe. Invariants `last_owner` et `last_effective_owner` vérifiés sous verrou. Même
+    un administrateur principal et n'attribue jamais OWNER. Promotion vers OWNER ou rétrogradation d'un OWNER :
+    `confirm` et ressaisie du mot de passe. Invariants `last_owner` et `last_effective_owner` vérifiés sous verrou. Même
     rôle : aucun effet, aucune trace."""
     _validate_role(new_role)
     organization = _get_organization(organization_id)
@@ -1134,8 +1140,8 @@ def change_role(actor, organization_id, membership_id, new_role, confirm=False, 
 
 
 def remove_member(actor, organization_id, membership_id) -> Membership:
-    """Retire un membre (`org.manage_members`). Soi-même : 400 `use_leave`. Un propriétaire ne se retire jamais
-    directement (409 `owner_must_be_demoted` : le rétrograder d'abord, ce qui exige la ressaisie du mot de
+    """Retire un membre (`org.manage_members`). Soi-même : 400 `use_leave`. Un administrateur principal ne se retire
+    jamais directement (409 `owner_must_be_demoted` : le rétrograder d'abord, ce qui exige la ressaisie du mot de
     passe). Effet immédiat ; les invitations en attente créées par la personne retirée sont révoquées dans la même
     transaction (`sweep_invitations_of_inviter`)."""
     with transaction.atomic():
@@ -1148,7 +1154,7 @@ def remove_member(actor, organization_id, membership_id) -> Membership:
             raise ContextDenied(DENY_PERMISSION, "Vous ne pouvez pas retirer ce membre.")
         if membership.role == ROLE_OWNER:
             raise OrganizationError(
-                "Un propriétaire ne peut pas être retiré directement : rétrogradez-le d'abord.",
+                "Un administrateur principal ne peut pas être retiré directement : rétrogradez-le d'abord.",
                 'owner_must_be_demoted',
             )
         return _end_membership(actor, organization, membership, Membership.END_REMOVED, 'MEMBERSHIP_REVOKED')
@@ -1157,10 +1163,14 @@ def remove_member(actor, organization_id, membership_id) -> Membership:
 def _resolve_transfer(actor, organization, membership_id):
     actor_membership = _authorize_member(actor, organization, 'org.manage_roles', allow_archived=True)
     if actor_membership.role != ROLE_OWNER:
-        raise ContextDenied(DENY_PERMISSION, "Seul un propriétaire peut transférer la propriété.")
+        raise ContextDenied(
+            DENY_PERMISSION, "Seul un administrateur principal peut transférer l'administration principale.",
+        )
     target = _get_member(organization, membership_id)
     if target.user_id == actor.pk:
-        raise OrganizationError("Vous êtes déjà propriétaire.", 'invalid_transfer', status.HTTP_400_BAD_REQUEST)
+        raise OrganizationError(
+            "Vous êtes déjà administrateur principal.", 'invalid_transfer', status.HTTP_400_BAD_REQUEST,
+        )
     _ensure_target_available(target.user_id)
     return actor_membership, target
 
@@ -1173,7 +1183,9 @@ def transfer_ownership_to(
     `my_new_role` (jamais OWNER). Autorisé sur une organisation archivée, refusé sur une suspendue. Renvoie
     `(appartenance de la cible, appartenance de l'acteur)`, rôles à jour."""
     if my_new_role not in TRANSFER_SELF_ROLES:
-        raise serializers.ValidationError({'my_new_role': ["Rôle inconnu ou non permis pour le propriétaire sortant."]})
+        raise serializers.ValidationError(
+            {'my_new_role': ["Rôle inconnu ou non permis pour l'administrateur principal sortant."]},
+        )
     organization = _get_organization(organization_id)
     _resolve_transfer(actor, organization, membership_id)
     _require_reauthentication(actor, organization, confirm, password, REAUTH_TRANSFER)
@@ -1200,8 +1212,8 @@ def assert_account_removable(user):
     blockers = account_removal_blockers(user)
     if blockers.organizations:
         raise OrganizationError(
-            "Ce compte est le seul propriétaire d'une organisation active ou suspendue : transférez la propriété "
-            "d'abord.",
+            "Ce compte est le seul administrateur principal d'une organisation active ou suspendue : désignez "
+            "d'abord un autre administrateur principal.",
             'last_owner_account',
         )
     if blockers.other_code == 'blocking_sanction':

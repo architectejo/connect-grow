@@ -154,5 +154,6 @@ class LastEffectiveOwnerWithOffersTests(ContextBase):
     def test_the_refusal_is_in_french_and_carries_no_personal_data(self):
         self.org_offer()
         body = self.leave().json()
-        self.assertIn('propriétaire', body['detail'])
+        self.assertIn('administrateur principal', body['detail'])
+        self.assertNotIn('propriétaire', body['detail'])
         self.assertNotIn(self.member.email, str(body))

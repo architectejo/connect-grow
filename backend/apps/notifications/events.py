@@ -305,9 +305,9 @@ _STATUS_MESSAGES = {
 @subscribe('identity.seller_context_status_changed', name='notifications.notify_organization_status')
 def notify_organization_status(event):
     """Annonce la suspension, l'archivage ou la réactivation d'une organisation à toute son équipe active
-    (propriétaires, administrateurs, éditeurs, analystes ; hors auteur de l'action). Texte neutre, sans motif ni
-    auteur ; le lien mène à la page de l'organisation. Les autres contextes (compte, prestataire) ne produisent
-    aucune notification ici. Aucun membre actif : rien n'est envoyé."""
+    (administrateurs principaux, administrateurs, éditeurs, analystes ; hors auteur de l'action). Texte neutre,
+    sans motif ni auteur ; le lien mène à la page de l'organisation. Les autres contextes (compte, prestataire)
+    ne produisent aucune notification ici. Aucun membre actif : rien n'est envoyé."""
     payload = event.payload
     context_type, context_id, reason = _require(payload, 'context_type', 'context_id', 'reason')
     if context_type != CONTEXT_ORGANIZATION or reason not in _STATUS_MESSAGES:
@@ -340,8 +340,8 @@ _KYB_MESSAGES = {
 
 @subscribe('identity.organization_verification_changed', name='notifications.notify_kyb_decision')
 def notify_kyb_decision(event):
-    """Annonce la décision du personnel sur une pièce de l'organisation à ses propriétaires et administrateurs
-    (capacité de dépôt de pièces). Ni le motif de refus ni le nom du décideur ne sont repris."""
+    """Annonce la décision du personnel sur une pièce de l'organisation à ses administrateurs principaux et
+    administrateurs (capacité de dépôt de pièces). Ni le motif de refus ni le nom du décideur ne sont repris."""
     organization_id, document_type, decision = _require(
         event.payload, 'organization_id', 'document_type', 'decision',
     )

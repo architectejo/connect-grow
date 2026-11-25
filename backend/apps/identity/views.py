@@ -41,7 +41,7 @@ from .throttles import (
 logger = logging.getLogger(__name__)
 
 # Capacité exigée pour les réglages de contact : contexte personnel ou prestataire (toujours), organisation
-# (propriétaire ou administrateur seulement), ADR 0006, section 5.
+# (administrateur principal ou administrateur seulement), ADR 0006, section 5.
 CONTACT_CAPABILITY = 'contact.manage_channels'
 
 # Échecs de connexion / de confirmation de reset : délai croissant par couple identifiant+IP.
@@ -375,8 +375,8 @@ class KycDocumentDownloadView(APIView):
 
 class _ContactSettingsBase(ActingContextMixin, APIView):
     """Réglages de contact du contexte actif (ADR 0005, 5.1 ; ADR 0006, 9.8). L'en-tête `X-Context` désigne le
-    contexte : compte (personnel ou prestataire) ou organisation (capacité `contact.manage_channels`, propriétaire
-    ou administrateur). Aucun identifiant dans l'URL. Numéros masqués ; jamais mis en cache."""
+    contexte : compte (personnel ou prestataire) ou organisation (capacité `contact.manage_channels`,
+    administrateur principal ou administrateur). Aucun identifiant dans l'URL. Numéros masqués ; jamais mis en cache."""
 
     permission_classes = [permissions.IsAuthenticated]
 

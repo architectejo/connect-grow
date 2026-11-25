@@ -12,7 +12,7 @@ ROLE_EDITOR = 'EDITOR'
 ROLE_ANALYST = 'ANALYST'
 ROLES = (ROLE_OWNER, ROLE_ADMIN, ROLE_EDITOR, ROLE_ANALYST)
 ROLE_CHOICES = (
-    (ROLE_OWNER, "Propriétaire"),
+    (ROLE_OWNER, "Administrateur principal"),
     (ROLE_ADMIN, "Administrateur"),
     (ROLE_EDITOR, "Éditeur"),
     (ROLE_ANALYST, "Analyste"),
@@ -91,7 +91,7 @@ def context_has_capability(context_type, role, capability) -> bool:
 
 
 def can_manage_role_of(actor_role, target_role) -> bool:
-    """Un administrateur ne manipule que ADMIN, EDITOR, ANALYST ; seul un propriétaire agit sur OWNER (R9)."""
+    """Un administrateur ne manipule que ADMIN, EDITOR, ANALYST ; seul un administrateur principal agit sur OWNER (R9)."""
     if actor_role == ROLE_OWNER:
         return True
     if actor_role == ROLE_ADMIN:

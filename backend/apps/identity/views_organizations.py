@@ -2,7 +2,7 @@
 `organization_reads.py`, exposés par `identity.services`.
 
 L'en-tête `X-Context` est IGNORÉ ici (ADR 6.4) :
-- la création est toujours faite par le compte (le créateur devient propriétaire) ;
+- la création est toujours faite par le compte (le créateur devient administrateur principal) ;
 - les routes `organizations/<id>/…` désignent l'organisation par leur chemin ; l'autorisation se fait par objet,
   d'après le rôle réel du compte dans CETTE organisation (jamais d'après l'en-tête), dans le service, sous verrou
   pour les écritures ;
@@ -201,7 +201,8 @@ class OrganizationInternalView(APIView):
 
 
 class OrganizationArchiveView(APIView):
-    """`POST organizations/<uuid>/archive/` : archivage (`org.archive`, propriétaire). Irréversible par l'API."""
+    """`POST organizations/<uuid>/archive/` : archivage (`org.archive`, administrateur principal). Irréversible
+    par l'API."""
 
     acting_context_exempt = EXEMPT_REASON
     permission_classes = [permissions.IsAuthenticated]
@@ -214,7 +215,7 @@ class OrganizationArchiveView(APIView):
 
 class OrganizationLeaveView(APIView):
     """`POST organizations/<uuid>/leave/` : sortie volontaire (tout membre actif). Permise aussi sur une
-    organisation suspendue ou archivée ; refusée au dernier propriétaire (409 `last_owner`)."""
+    organisation suspendue ou archivée ; refusée au dernier administrateur principal (409 `last_owner`)."""
 
     acting_context_exempt = EXEMPT_REASON
     permission_classes = [permissions.IsAuthenticated]
@@ -308,7 +309,7 @@ class OrganizationMembersView(APIView):
 @method_decorator(sensitive_post_parameters('password'), name='dispatch')
 class OrganizationMemberDetailView(APIView):
     """`PATCH` (rôle) et `DELETE` (retrait) d'un membre, par `membership_id`. Le mot de passe n'est exigé que pour
-    un siège de propriétaire (ADR 0008 §8.2)."""
+    un siège d'administrateur principal (ADR 0008 §8.2)."""
 
     acting_context_exempt = EXEMPT_REASON
     permission_classes = [permissions.IsAuthenticated]
@@ -333,8 +334,8 @@ class OrganizationMemberDetailView(APIView):
 
 @method_decorator(sensitive_post_parameters('password'), name='dispatch')
 class OrganizationTransferOwnershipView(APIView):
-    """`POST organizations/<uuid>/transfer-ownership/` : transfert atomique de la propriété (`confirm` et
-    ressaisie du mot de passe obligatoires)."""
+    """`POST organizations/<uuid>/transfer-ownership/` : transfert atomique du rôle d'administrateur
+    principal (`confirm` et ressaisie du mot de passe obligatoires)."""
 
     acting_context_exempt = EXEMPT_REASON
     permission_classes = [permissions.IsAuthenticated]

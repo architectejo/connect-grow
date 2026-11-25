@@ -193,15 +193,15 @@ class OrganizationWriteThrottle(UserWriteThrottle):
 
 
 class OrganizationSensitiveThrottle(UserWriteThrottle):
-    """Opérations sensibles d'équipe (transfert de propriété, promotion ou rétrogradation d'un propriétaire) :
-    10/h par compte (ADR 0008 §8.3). Un PATCH de rôle n'est compté que s'il porte une ressaisie de mot de passe ou
-    vise OWNER ; un changement de rôle ordinaire ne relève que de `org_write`."""
+    """Opérations sensibles d'équipe (transfert du rôle d'administrateur principal, promotion ou rétrogradation
+    d'un administrateur principal) : 10/h par compte (ADR 0008 §8.3). Un PATCH de rôle n'est compté que s'il
+    porte une ressaisie de mot de passe ou vise OWNER ; un changement de rôle ordinaire ne relève que de `org_write`."""
 
     scope = 'org_sensitive'
 
     def allow_request(self, request, view):
         if request.method == 'POST':
-            return super().allow_request(request, view)  # transfert de propriété
+            return super().allow_request(request, view)  # transfert du rôle d'administrateur principal
         if request.method == 'PATCH':
             data = request.data if hasattr(request.data, 'get') else {}
             if 'password' in data or data.get('role') == 'OWNER':

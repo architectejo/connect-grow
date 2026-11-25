@@ -159,7 +159,7 @@ def authorize(ctx: ActingContext, capability) -> ActingContext:
 
 
 def authorize_on(user, context_type, context_id, capability, allow_restricted=False) -> ActingContext:
-    """Autorisation PAR OBJET : d'après le contexte propriétaire de l'objet et le rôle réel de `user`,
+    """Autorisation PAR OBJET : d'après le contexte détenteur de l'objet et le rôle réel de `user`,
     jamais d'après l'en-tête (ADR 0006, 6.4). Codes : DENY_RELATION, DENY_SECURITY, DENY_OBJECT_STATE,
     DENY_PERMISSION.
 
@@ -222,9 +222,9 @@ class ActingContextMixin:
     `self.authorize_capability('offer.publish')` contrôle la capacité.
 
     RÈGLE (ADR 0006, 6.4) : à la CRÉATION et pour les listes « de mon contexte », on utilise l'en-tête
-    (`acting_context`, `authorize_capability`). Sur un OBJET EXISTANT, on autorise d'après le propriétaire
-    réel de l'objet avec `authorize_object`, qui ignore l'en-tête : sinon un membre éditeur de A et analyste
-    de B pourrait agir sur un objet de B en présentant l'en-tête de A (IDOR). Écriture sensible : refaire
+    (`acting_context`, `authorize_capability`). Sur un OBJET EXISTANT, on autorise d'après le contexte auquel
+    appartient réellement l'objet, avec `authorize_object`, qui ignore l'en-tête : sinon un membre éditeur de A
+    et analyste de B pourrait agir sur un objet de B en présentant l'en-tête de A (IDOR). Écriture sensible : refaire
     `authorize_on` sous `transaction.atomic()` dans le service."""
 
     @property
@@ -235,7 +235,7 @@ class ActingContextMixin:
         return authorize(self.acting_context, capability)
 
     def authorize_object(self, obj_context_type, obj_context_id, capability) -> ActingContext:
-        """Autorisation d'après le contexte propriétaire de l'objet ; l'en-tête `X-Context` est ignoré."""
+        """Autorisation d'après le contexte détenteur de l'objet ; l'en-tête `X-Context` est ignoré."""
         return authorize_on(self.request.user, obj_context_type, obj_context_id, capability)
 
 

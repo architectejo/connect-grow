@@ -1,4 +1,4 @@
-# L1-01 — Contrat d'API figé : équipe d'organisation, invitations, transfert de propriété, blocages de suppression
+# L1-01 — Contrat d'API figé : équipe d'organisation, invitations, transfert d'administration principale, blocages de suppression
 
 - **Version 2 (25/11/2026) :** section 7 « Amendement ADR 0010 » (gouvernance : Administrateur principal, rôle `MEMBER`, périmètre, invitations v2 avec confirmation, nominations, anti-abus de création, état de gouvernance). **La section 7 prévaut sur les sections 0 à 6 en cas de contradiction.** Briefs B5 à B10, F1-bis, F2-bis, F4, F5, F6 : recopier les sections 0 à 7.
 - **Date :** 09/11/2026 ; **auteur :** architecte-technique ; **ADR :** `docs/adr/0008-equipe-organisation-invitations.md` (à recopier avec ce contrat dans les briefs B1, B2b, B4, F1, F2, F3)
@@ -28,7 +28,7 @@
 }
 ```
 
-`display_name` = `public_display_name(full_name)`. `is_last_effective_owner` : `true` uniquement sur la ligne du seul propriétaire effectif de l'organisation ; `false` sur les autres lignes ; `null` partout si l'appelant n'a pas `org.manage_members` (analyste, éditeur). Jamais de téléphone, e-mail, nom complet, photo, identifiant de compte, historique, pièces.
+`display_name` = `public_display_name(full_name)`. `is_last_effective_owner` : `true` uniquement sur la ligne du seul administrateur principal effectif de l'organisation ; `false` sur les autres lignes ; `null` partout si l'appelant n'a pas `org.manage_members` (analyste, éditeur). Jamais de téléphone, e-mail, nom complet, photo, identifiant de compte, historique, pièces.
 
 ### Objet `Invitation` (liste réservée à `org.manage_members`)
 
@@ -54,11 +54,11 @@
 
 `GET ID organizations/<uuid:pk>/members/` — capacité `org.view_internal` (tous les rôles).
 
-- `200` paginé de `Member`. Seulement `ACTIVE`. Ordre : propriétaires, administrateurs, éditeurs, analystes, puis `joined_at`, puis `membership_id`.
+- `200` paginé de `Member`. Seulement `ACTIVE`. Ordre : administrateurs principaux, administrateurs, éditeurs, analystes, puis `joined_at`, puis `membership_id`.
 - `403 DENY_RELATION` (non-membre, ancien membre, organisation inexistante), `DENY_SECURITY` (organisation suspendue ou compte restreint), `DENY_OBJECT_STATE` (archivée).
 - Nombre de requêtes SQL indépendant de la taille de la page (`assertNumQueries`).
 
-### 1.2 Changer le rôle d'un membre (L1-01e, et promotion d'un second propriétaire, L1-01h)
+### 1.2 Changer le rôle d'un membre (L1-01e, et promotion d'un second administrateur principal, L1-01h)
 
 `PATCH ID organizations/<uuid:pk>/members/<uuid:membership_id>/` — capacité `org.manage_roles`.
 
@@ -68,7 +68,7 @@
 
 - `role` obligatoire parmi `OWNER`, `ADMIN`, `EDITOR`, `ANALYST`. `confirm` et `password` **obligatoires seulement** si le nouveau rôle est `OWNER` **ou** si le rôle actuel de la cible est `OWNER` ; ignorés sinon. **Exception :** si le nouveau rôle est identique au rôle actuel, le cas est traité AVANT la ressaisie (200 sans mot de passe, sans quota `org_sensitive`, sans compteur d'échecs, sans trace ni événement), après les contrôles d'autorisation habituels.
 - `200` + `Member` (même clés). Même rôle : `200` sans trace ni événement. Effet sur les capacités dès la requête suivante de la cible.
-- Règles : un administrateur ne touche jamais un propriétaire et n'attribue jamais `OWNER` (`403 DENY_PERMISSION`) ; éditeur et analyste : `403 DENY_PERMISSION`.
+- Règles : un administrateur ne touche jamais un administrateur principal et n'attribue jamais `OWNER` (`403 DENY_PERMISSION`) ; éditeur et analyste : `403 DENY_PERMISSION`.
 - Erreurs : `400 {"role": [...]}` (rôle absent ou inconnu) ; `400 confirmation_required` ; `400 password_required` ; `403 reauthentication_failed` ; `404 member_not_found` (membre inexistant, révoqué ou d'une autre organisation) ; `400 user_unavailable` (compte de la cible inactif ou restreint, neutre) ; `409 last_owner` ; `409 last_effective_owner` (voir ADR 0008 §9) ; `429`.
 
 ### 1.3 Retirer un membre (L1-01f)
@@ -76,9 +76,9 @@
 `DELETE ID organizations/<uuid:pk>/members/<uuid:membership_id>/` — capacité `org.manage_members`. Pas de corps.
 
 - `204`. Appartenance `REVOKED` (`end_reason = removed`), effet immédiat : la requête suivante de la personne retirée, avec le même jeton d'accès, sous `X-Context: ORGANIZATION:<id>` donne `403 DENY_RELATION` ; son contexte personnel reste utilisable. Ses invitations en attente sont révoquées.
-- Erreurs : `403 DENY_PERMISSION` (administrateur sur un propriétaire ; éditeur ; analyste) ; `400 use_leave` (soi-même : utiliser `POST organizations/<id>/leave/`, inchangé) ; `409 owner_must_be_demoted` (cible `OWNER` : la rétrograder d'abord par 1.2) ; `404 member_not_found` ; `409 last_owner` ; `409 last_effective_owner` ; `429`.
+- Erreurs : `403 DENY_PERMISSION` (administrateur sur un administrateur principal ; éditeur ; analyste) ; `400 use_leave` (soi-même : utiliser `POST organizations/<id>/leave/`, inchangé) ; `409 owner_must_be_demoted` (cible `OWNER` : la rétrograder d'abord par 1.2) ; `404 member_not_found` ; `409 last_owner` ; `409 last_effective_owner` ; `429`.
 
-### 1.4 Transférer la propriété (L1-01h)
+### 1.4 Transférer l'administration principale (L1-01h)
 
 `POST ID organizations/<uuid:pk>/transfer-ownership/` — capacité `org.manage_roles`, acteur `OWNER` uniquement. Throttle `org_sensitive` (compté seulement pour ce POST et pour les PATCH de rôle portant `password` ou `role=OWNER` ; jamais pour DELETE).
 
@@ -87,7 +87,7 @@
 ```
 
 - `my_new_role` facultatif parmi `ADMIN` (défaut), `EDITOR`, `ANALYST` (jamais `OWNER`). `confirm` doit valoir `true` et `password` est obligatoire.
-- `200 {"new_owner": Member, "me": Member}`. Une seule transaction : la cible devient `OWNER`, l'acteur prend `my_new_role` ; deux `MEMBERSHIP_ROLE_CHANGED` au plus (un seul si la cible est déjà `OWNER` : transfert vers un co-propriétaire) et un `ORG_OWNERSHIP_TRANSFERRED` ; un seul événement de visibilité `owners_changed`. `is_last_effective_owner` des deux `Member` suit le rôle effectif de l'appelant après transfert (`null` s'il est devenu éditeur ou analyste). Toute erreur laisse l'état inchangé.
+- `200 {"new_owner": Member, "me": Member}`. Une seule transaction : la cible devient `OWNER`, l'acteur prend `my_new_role` ; deux `MEMBERSHIP_ROLE_CHANGED` au plus (un seul si la cible est déjà `OWNER` : transfert vers un autre administrateur principal) et un `ORG_OWNERSHIP_TRANSFERRED` ; un seul événement de visibilité `owners_changed`. `is_last_effective_owner` des deux `Member` suit le rôle effectif de l'appelant après transfert (`null` s'il est devenu éditeur ou analyste). Toute erreur laisse l'état inchangé.
 - Autorisé sur organisation archivée, refusé sur suspendue (`DENY_SECURITY`).
 - Erreurs : `403 DENY_PERMISSION` (administrateur, éditeur, analyste) ; `400 confirmation_required` ; `400 password_required` ; `403 reauthentication_failed` ; `404 member_not_found` ; `400 invalid_transfer` (soi-même) ; `400 user_unavailable` ; `400 {"my_new_role": [...]}` ; `429`. Aucun paramètre de plan ou de paiement.
 
@@ -176,7 +176,7 @@ Corps strictement identique pour : jeton de forme incorrecte, jeton inconnu, inv
 }
 ```
 
-- `organizations` : organisations `ACTIVE` ou `SUSPENDED` dont le compte est le **seul** propriétaire actif (règle de `assert_account_removable`, source unique de décision). `suggested_action` : `wait_for_unsuspension` si `SUSPENDED` ; sinon `transfer_ownership` si `other_members_count > 0`, sinon `archive`. `other_members_count` : comptage seulement, jamais d'identité.
+- `organizations` : organisations `ACTIVE` ou `SUSPENDED` dont le compte est le **seul** administrateur principal actif (règle de `assert_account_removable`, source unique de décision). `suggested_action` : `wait_for_unsuspension` si `SUSPENDED` ; sinon `transfer_ownership` si `other_members_count > 0`, sinon `archive`. `other_members_count` : comptage seulement, jamais d'identité.
 - `has_other_blocker` : vrai si une sanction bloquante ou un signalement grave ouvert empêche la suppression ; **jamais détaillé**.
 - Liste vide et `false` : rien n'empêche (la suppression libre-service n'existe pas en V1). Sans cache : le blocage disparaît à l'appel suivant un transfert ou un archivage. Aucune écriture d'audit en lecture.
 
@@ -212,7 +212,7 @@ Changement de comportement existant : `POST organizations/<id>/leave/` peut main
 
 ## 5. Ce qui est exposé à qui
 
-| Donnée | Membre (tout rôle) | Propriétaire, administrateur | Cible d'une invitation | Public |
+| Donnée | Membre (tout rôle) | Administrateur principal, administrateur | Cible d'une invitation | Public |
 |---|---|---|---|---|
 | Liste des membres (`display_name` abrégé, rôle, `joined_at`) | oui | oui | non | non |
 | `is_last_effective_owner` | `null` | oui | non | non |

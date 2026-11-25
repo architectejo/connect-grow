@@ -18,17 +18,26 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 
 const ORG = (identity.organization_internal_owner as { id: string }).id;
 let internal: unknown;
+let verification: unknown;
 let failVerification = false;
+
+/** Éditeur : mêmes capacités que l'analyste plus l'édition, jamais `org.verification_submit`. */
+const editor = {
+  ...identity.organization_internal_analyst,
+  my_role: "EDITOR",
+  capabilities: ["offer.create", "offer.edit", "offer.view_internal", "org.edit_profile", "org.leave", "org.view_internal", "stats.view"],
+};
 
 beforeEach(() => {
   online.value = true;
   failVerification = false;
   internal = identity.organization_internal_owner;
+  verification = identity.verification_mixed;
   vi.spyOn(apiClient, "get").mockImplementation((async (url: string) => {
     if (url.endsWith("/internal/")) return { data: internal };
     if (url.endsWith("/verification/")) {
       if (failVerification) throw Object.assign(new Error("panne"), { response: { status: 500, data: {} } });
-      return { data: identity.verification_mixed };
+      return { data: verification };
     }
     if (url.endsWith("/kyc/documents/")) return { data: identity.kyc_documents };
     return { data: [] };
@@ -84,13 +93,36 @@ describe("Vérification de l'organisation (E7)", () => {
     expect(document.querySelector("a[href*='download'], a[download]")).toBeNull();
   });
 
-  it("analyste ou éditeur : lecture seule, aucun bouton d'envoi ni de suppression", async () => {
-    internal = identity.organization_internal_analyst;
+  it.each([
+    ["analyste", identity.organization_internal_analyst],
+    ["éditeur", editor],
+  ])("%s : lecture seule, aucun bouton, aucune requête vers les pièces, motif remplacé (L1-01-B6)", async (_role, org) => {
+    internal = org;
+    verification = identity.verification_mixed_restricted; // le serveur vide le motif pour ces rôles
+    const get = vi.mocked(apiClient.get);
     renderPage();
-    expect(await screen.findByText("Seuls les administrateurs principaux et les administrateurs peuvent envoyer des pièces.")).toBeInTheDocument();
-    await row("Identification nationale");
+    expect(
+      await screen.findByText(
+        "Seuls les administrateurs principaux et les administrateurs peuvent envoyer des pièces, en consulter le détail et lire les motifs de refus.",
+      ),
+    ).toBeInTheDocument();
+    const identite = await row("Identification nationale");
+    expect(identite.getByText("Refusée")).toBeInTheDocument();
+    expect(identite.getByText("Le motif est visible par les administrateurs.")).toBeInTheDocument();
+    expect(identite.queryByText(/Motif du refus/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Envoyer/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Supprimer/ })).not.toBeInTheDocument();
+    expect(get.mock.calls.some(([url]) => String(url).includes("kyc/documents"))).toBe(false);
+  });
+
+  it("administrateur : les pièces sont lues et le motif du refus est affiché (non-régression L1-01-B6)", async () => {
+    const get = vi.mocked(apiClient.get);
+    renderPage();
+    const identite = await row("Identification nationale");
+    expect(identite.getByText(/Motif du refus/)).toBeInTheDocument();
+    expect(identite.getByText(/Document illisible/)).toBeInTheDocument();
+    expect(identite.queryByText("Le motif est visible par les administrateurs.")).not.toBeInTheDocument();
+    await waitFor(() => expect(get).toHaveBeenCalledWith(`accounts/organizations/${ORG}/kyc/documents/`));
   });
 
   it("format refusé localement : message, aucune requête", async () => {

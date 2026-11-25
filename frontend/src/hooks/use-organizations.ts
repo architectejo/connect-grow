@@ -113,12 +113,16 @@ export function useOrganizationVerification(id: Uuid | undefined) {
   });
 }
 
-/** Pièces déposées (métadonnées seulement : le serveur ne renvoie jamais le fichier). */
-export function useOrganizationDocuments(id: Uuid | undefined) {
+/**
+ * Pièces déposées (métadonnées seulement : le serveur ne renvoie jamais le fichier).
+ * Réservé par le serveur à `org.verification_submit` (L1-01-B6) : passer `enabled: false`
+ * pour les autres rôles, sinon la requête finit en 403 `DENY_PERMISSION`.
+ */
+export function useOrganizationDocuments(id: Uuid | undefined, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: organizationKeys.documents(id ?? ""),
     queryFn: async () => unwrapList<OrganizationKycDocument>((await apiClient.get<Paginated<OrganizationKycDocument>>(`${BASE}${id}/kyc/documents/`)).data),
-    enabled: !!id,
+    enabled: !!id && enabled,
     retry: shouldRetryQuery,
   });
 }

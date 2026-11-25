@@ -1,5 +1,5 @@
 {
-  "_note": "Réponses réelles du backend (main, après T5b, T6 et T7 de L0-09), enregistrées le 24/10/2026 par un script jetable hors dépôt dans une base de test en mémoire (client API de test, données fictives, aucun secret). Contact : `context` et `available_channels` (organisation avec l'interrupteur des canaux téléphoniques fermé puis ouvert), erreurs `channel_not_available` et `login_phone_not_allowed`. Messagerie : `seller_context`, `sender_context`, `sender_name`, `is_me`, vues acheteur et équipe, organisation suspendue. Notifications : `context`. Profil public vendeur : `marketplace/sellers/organization/<id>/`. Le backend ne renvoie pas encore `is_owner` sur les offres ni `name` dans `seller_context` des conversations. Mise a jour B-SUSP (commit 6e3822a, 09/11/2026) : `contexts_with_unavailable` (profils personnel, prestataire, organisation active, plus une organisation suspendue convertie et une archivee dans `unavailable`), `contexts_after_leave_archived`, `leave_archived_last_owner` (204), `leave_suspended_last_owner_error` (409 last_owner), `leave_suspended_editor` (204) sont enregistres par un script jetable hors depot ; `status` et `unavailable` des anciennes entrees `contexts` et `contexts_after_leave` sont alignes sur le contrat verifie par les tests du backend (tests_contexts_unavailable).",
+  "_note": "Réponses réelles du backend (main, après T5b, T6 et T7 de L0-09), enregistrées le 24/10/2026 par un script jetable hors dépôt dans une base de test en mémoire (client API de test, données fictives, aucun secret). Contact : `context` et `available_channels` (organisation avec l'interrupteur des canaux téléphoniques fermé puis ouvert), erreurs `channel_not_available` et `login_phone_not_allowed`. Messagerie : `seller_context`, `sender_context`, `sender_name`, `is_me`, vues acheteur et équipe, organisation suspendue. Notifications : `context`. Profil public vendeur : `marketplace/sellers/organization/<id>/`. Le backend ne renvoie pas encore `is_owner` sur les offres ni `name` dans `seller_context` des conversations. Mise a jour B-SUSP (commit 6e3822a, 09/11/2026) : `contexts_with_unavailable` (profils personnel, prestataire, organisation active, plus une organisation suspendue convertie et une archivee dans `unavailable`), `contexts_after_leave_archived`, `leave_archived_last_owner` (204), `leave_suspended_last_owner_error` (409 last_owner), `leave_suspended_editor` (204) sont enregistres par un script jetable hors depot ; `status` et `unavailable` des anciennes entrees `contexts` et `contexts_after_leave` sont alignes sur le contrat verifie par les tests du backend (tests_contexts_unavailable). Mise a jour L1-01-FVERIF (25/11/2026) : `verification_mixed_restricted` est derivee a la main de `verification_mixed` (motifs vides), conformement a L1-01-B6 (commit af31aca) qui vide `rejection_reason` pour les roles sans `org.verification_submit` ; elle n'a pas ete enregistree sur le backend.",
   "provider_not_found_error": {
     "status": 404,
     "body": {
@@ -754,6 +754,45 @@
         "claim_label": "Identification nationale vérifiée",
         "status": "REFUSE",
         "rejection_reason": "Document illisible"
+      },
+      {
+        "document_type": "PIECE_GERANT",
+        "document_type_label": "Pièce d'identité du gérant",
+        "claim_code": "REPRESENTATIVE_VERIFIED",
+        "claim_label": "Représentant vérifié",
+        "status": "MANQUANTE",
+        "rejection_reason": ""
+      }
+    ]
+  },
+  "verification_mixed_restricted": {
+    "verified_claims": [
+      {
+        "code": "RCCM_VERIFIED",
+        "label": "RCCM vérifié",
+        "verified_at": "2026-10-10T17:27:56.016216Z"
+      }
+    ],
+    "summary": {
+      "complete": false,
+      "label": null
+    },
+    "requirements": [
+      {
+        "document_type": "RCCM",
+        "document_type_label": "RCCM",
+        "claim_code": "RCCM_VERIFIED",
+        "claim_label": "RCCM vérifié",
+        "status": "VALIDE",
+        "rejection_reason": ""
+      },
+      {
+        "document_type": "ID_NATIONALE",
+        "document_type_label": "Identification nationale",
+        "claim_code": "NATIONAL_ID_VERIFIED",
+        "claim_label": "Identification nationale vérifiée",
+        "status": "REFUSE",
+        "rejection_reason": ""
       },
       {
         "document_type": "PIECE_GERANT",

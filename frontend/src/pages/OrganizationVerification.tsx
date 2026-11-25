@@ -14,8 +14,9 @@ function VerificationContent({ org }: { org: OrganizationInternal }) {
   const { t } = useTranslation();
   const online = useOnlineStatus();
   const verification = useOrganizationVerification(org.id);
-  const documents = useOrganizationDocuments(org.id);
   const canSubmit = org.capabilities.includes("org.verification_submit");
+  // Détail des pièces réservé à `org.verification_submit` (L1-01-B6) : aucune requête pour les autres rôles.
+  const documents = useOrganizationDocuments(org.id, { enabled: canSubmit });
 
   let body;
   if (verification.isLoading) {

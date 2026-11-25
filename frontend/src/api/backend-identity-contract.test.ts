@@ -199,6 +199,12 @@ describe("vérification des pièces", () => {
     expect(verification.summary).toEqual({ complete: false, label: null });
   });
 
+  it("rôle sans org.verification_submit : même état agrégé, motif du refus vide (L1-01-B6)", () => {
+    const restricted = f.verification_mixed_restricted as unknown as { requirements: Row[] };
+    expect(restricted.requirements.map((item) => item.status)).toEqual(verification.requirements.map((item) => item.status));
+    expect(restricted.requirements.every((item) => item.rejection_reason === "")).toBe(true);
+  });
+
   it("chaque pièce exigée a un titre et une consigne en français (clés kyc.docs.*)", () => {
     for (const item of verification.requirements) {
       expect(t(`kyc.docs.${item.document_type as string}.title`)).not.toMatch(/^kyc\.docs/);

@@ -1099,7 +1099,8 @@ const fr = {
     notPaid: "La vérification ne peut pas être achetée. Aucun abonnement ni paiement ne la fournit. Elle ne dépend pas non plus du rôle des membres.",
     privacy:
       "Vos pièces sont conservées dans un espace privé, accessibles uniquement aux personnes habilitées de l'équipe de vérification. Elles ne sont jamais publiées et jamais visibles par les autres membres de l'organisation.",
-    readOnly: "Seuls les administrateurs principaux et les administrateurs peuvent envoyer des pièces.",
+    readOnly:
+      "Seuls les administrateurs principaux et les administrateurs peuvent envoyer des pièces, en consulter le détail et lire les motifs de refus.",
     noRequirements: "Aucune pièce n'est demandée pour ce type d'organisation pour le moment.",
     state: {
       MANQUANTE: "Non envoyée",
@@ -1109,6 +1110,7 @@ const fr = {
     },
     sentOn: "envoyée {{date}}",
     rejectionReason: "Motif du refus : ",
+    rejectionReasonHidden: "Le motif est visible par les administrateurs.",
     send: "Envoyer",
     sendAgain: "Envoyer à nouveau",
     sendAria: "Envoyer : {{title}}",

@@ -45,6 +45,13 @@ describe("hooks d'organisation", () => {
     expect(get).toHaveBeenCalledWith(`accounts/organizations/${ORG}/kyc/documents/`);
   });
 
+  it("ne lit pas les pièces quand la lecture est désactivée (rôle sans org.verification_submit)", () => {
+    const get = vi.spyOn(apiClient, "get");
+    const docs = renderHook(() => useOrganizationDocuments(ORG, { enabled: false }), { wrapper: wrapperFor(newClient()) });
+    expect(get).not.toHaveBeenCalled();
+    expect(docs.result.current.fetchStatus).toBe("idle");
+  });
+
   it("ne lit rien sans identifiant", () => {
     const get = vi.spyOn(apiClient, "get");
     renderHook(() => useOrganization(undefined), { wrapper: wrapperFor(newClient()) });

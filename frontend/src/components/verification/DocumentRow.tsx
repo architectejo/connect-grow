@@ -102,12 +102,16 @@ export function DocumentRow({ organizationId, requirement, latest, canSubmit, on
           {status === "EN_ATTENTE" && latest && <span className="font-normal opacity-80">· {t("verif.sentOn", { date: formatRelativeDate(latest.uploaded_at) })}</span>}
           {status === "VALIDE" && <span className="font-normal">· {claimLabel(t, { code: requirement.claim_code, label: requirement.claim_label })}</span>}
         </p>
-        {status === "REFUSE" && requirement.rejection_reason && (
-          <p className="mt-2 rounded-lg bg-destructive/5 p-3 text-sm text-foreground">
-            <span className="font-semibold">{t("verif.rejectionReason")}</span>
-            {requirement.rejection_reason}
-          </p>
-        )}
+        {status === "REFUSE" &&
+          (requirement.rejection_reason ? (
+            <p className="mt-2 rounded-lg bg-destructive/5 p-3 text-sm text-foreground">
+              <span className="font-semibold">{t("verif.rejectionReason")}</span>
+              {requirement.rejection_reason}
+            </p>
+          ) : (
+            // Motif masqué par le serveur pour les rôles sans `org.verification_submit` (L1-01-B6).
+            <p className="mt-2 text-sm text-muted-foreground">{t("verif.rejectionReasonHidden")}</p>
+          ))}
         {upload.isPending && (
           <p role="status" className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> {t("verif.sending")}

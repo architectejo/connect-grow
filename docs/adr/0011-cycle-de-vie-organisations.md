@@ -1,5 +1,6 @@
 # ADR 0011 — Cycle de vie, restrictions et changement de nom des organisations (L1-17, L1-19, L1-20)
 
+- **Amendement A-L17 / D-L17 (25-26/11/2026) :** décisions C1, C2, C3, C5, C6, C8, QU-2 du chef de projet (`docs/specs/L1-17-cycle-de-vie-organisations.md` §7, §10.2) et QD-1, QD-2, QD-4, QD-5 (`docs/specs/L1-17-ecrans-cycle-de-vie.md` §17) intégrées en D8, D10, 4.2, 4.4, 5.1, 6.1, 6.2, 6.3, 7 ; détail dans l'en-tête du contrat.
 - **Statut :** proposé (à valider par le chef de projet ; points de la section 17 marqués « utilisateur » ou « client » à faire valider par Anicet ou Jonathan)
 - **Date :** 25/11/2026
 - **Décideurs :** client (décisions verrouillées Q17, Q33, Q34, Q35, Q4), chef de projet (découpage L1-17 à L1-20), architecte technique (rédaction, modèle)
@@ -83,7 +84,7 @@ Conséquence assumée : la **sanction d'un compte** (`moderation.Sanction`) et l
 7. **D7 — Fermeture par les membres.** `POST closure/` remplace `POST archive/` : Administrateur principal effectif, ressaisie du mot de passe, motif codé ; passage à `CLOSING` ; finalisation en `ARCHIVED` dès que le délai `closure_delay_days` est écoulé **et** qu'aucune obligation ouverte n'est signalée par les modules concernés (registre, 6.4). Délai 0 et aucune obligation : `CLOSING` puis `ARCHIVED` dans la même transaction (comportement actuel conservé). Annulation possible pendant `CLOSING` par tout Administrateur principal effectif. Fermeture permise sous suspension (QL-3) : les restrictions survivent à l'archivage et bloquent l'effacement.
 8. **D8 — Dormance.** `ACTIVE -> DORMANT` par le cron quand aucune activité n'est constatée depuis `dormancy_after_days` (0 = désactivé, défaut tant que le client n'a pas fixé la valeur, QO-8). Effets : aucune capacité retirée ; sortie de l'annuaire ; profil et offres restent publics ; bannière aux administrateurs. Retour `ACTIVE` par l'action « Confirmer l'activité » (`POST resume/`) ou par le cron dès qu'une activité nouvelle est constatée. La revérification d'informations expirées relève de la vérification (L1-02d), pas du cycle de vie.
 9. **D9 — Changement de nom contrôlé (Q35).** Champs `name` (nom d'affichage, inchangé) et `legal_name` (dénomination légale, nouveau), historique append-only `OrganizationNameHistory`, objet `OrganizationNameChangeRequest` (trois types : correction typographique, changement du nom d'affichage, changement de dénomination légale). Le verrou A13 reste ; il porte sur les deux champs ; le message renvoie à la demande. Justificatifs = pièces KYB rattachées à la demande, **exclues du calcul des badges** tant que la demande n'est pas aboutie. Décision par l'équipe Vérification (ADR 0010 §9.1). « Nouvelle entité » : refus motivé `new_entity_required`, l'organisation doit être créée à part (rien n'est transféré).
-10. **D10 — Code de refus `DENY_RESTRICTION`** (403), ajouté à la famille A14 : refus d'une capacité par une restriction ciblée, avec la clé additive `measure`. La suspension totale garde `DENY_SECURITY` ; `CLOSING` et `ARCHIVED` gardent `DENY_OBJECT_STATE` (compatibilité du front livré).
+10. **D10 — Code de refus `DENY_RESTRICTION`** (403), ajouté à la famille A14 : refus d'une capacité par une restriction ciblée, avec la clé additive `measure`. **Réservé aux membres de l'organisation** (C2) : un acheteur ou un tiers ne reçoit jamais `DENY_RESTRICTION` ni `measure`, mais le refus neutre existant `403 seller_contact_unavailable` (celui d'une organisation sans canal, ADR 0006 §19.3 n°4), qui ne révèle aucune mesure. La suspension totale garde `DENY_SECURITY` ; `CLOSING` et `ARCHIVED` gardent `DENY_OBJECT_STATE` (compatibilité du front livré).
 11. **D11 — Ce qui ne change pas.** `org_type` immuable ; homonymes permis (A12) ; `org.leave` toujours permis (sauf `last_owner` sur une organisation non archivée) ; la revue de création (ADR 0010 D8) reste un état propre, **pas** une restriction (une restriction a une catégorie et un motif communiqués, ce qui révélerait le seuil caché de Q22) ; aucun service ne reçoit de plan, de prix ni de droit commercial (règle 2) ; `is_staff` n'ouvre rien.
 
 ## 4. Modèle de données (domaine `identity`)
@@ -96,7 +97,7 @@ UUID partout (`BaseModel`). Aucune clé étrangère hors d'`identity`, sauf vers
 |---|---|---|---|
 | `lifecycle_status` | `CharField(12)`, choix | `'ACTIVE'` | `ACTIVE`, `DORMANT`, `CLOSING`, `ARCHIVED`, `ERASED` |
 | `lifecycle_changed_at` | `DateTimeField` | `timezone.now` | « depuis » du cycle de vie |
-| `lifecycle_reason` | `CharField(30)`, blank | `''` | code de la dernière transition (`member_closure`, `closure_cancelled`, `dormancy`, `resumed`, `activity_detected`, `orphaned`, `staff_decision`, `restored`, `legacy_status`) |
+| `lifecycle_reason` | `CharField(30)`, blank | `''` | exposé aux seuls détenteurs de `org.view_restrictions` sous une forme réduite (`origin` : `MEMBERS`, `CONNECTE_PLUS`, `AUTOMATIC`, contrat §0.2, C6 ; jamais l'auteur ni la note) ; code de la dernière transition (`member_closure`, `closure_cancelled`, `dormancy`, `resumed`, `activity_detected`, `orphaned`, `staff_decision`, `restored`, `legacy_status`) |
 | `closure_effective_at` | `DateTimeField`, nul | | `CLOSING` seulement : date de finalisation au plus tôt |
 | `last_activity_at` | `DateTimeField`, nul | | calculé par le cron (6.5) ; jamais écrit sur une requête de lecture |
 | `active_restriction_measures` | `CharField(255)`, blank | `''` | résumé dénormalisé : codes des mesures actives, triés, séparés par des virgules ; lu en Python, jamais filtré en SQL |
@@ -116,15 +117,15 @@ Permissions Django (`Meta.permissions`) : `suspend_organization` est **remplacé
 | `FULL_SUSPENSION` | tout refusé (`DENY_SECURITY`) sauf `org.leave`, `org.view_restrictions`, `org.archive` (fermeture, QL-3) | organisation et offres non publiques ; contact, révélation, échange, message entrants refusés (`DENY_SECURITY`, inchangé) |
 | `PUBLICATION_BLOCK` | `offer.publish`, `offer.edit` (création, modification, renouvellement, reprise) refusés ; `offer.delete` et la mise en pause restent permis (réduire l'exposition est toujours permis) | aucun ; les offres déjà publiées restent |
 | `PUBLIC_VISIBILITY_HIDDEN` | aucune | organisation et offres non publiques (usage contesté d'un nom pendant l'examen, Q1 ; revérification après restauration, D6) |
-| `CONTACT_BLOCK` | aucune | canaux de contact vides, révélation et échange entrants refusés (`DENY_RESTRICTION`) |
-| `MESSAGING_BLOCK` | `message.reply` refusé | nouvelle conversation vers l'organisation refusée |
+| `CONTACT_BLOCK` | aucune | canaux de contact vides, révélation et échange entrants refusés (`403 seller_contact_unavailable`, neutre, C2) |
+| `MESSAGING_BLOCK` | `message.reply` refusé | nouvelle conversation **et** nouveau message d'un acheteur dans une conversation déjà ouverte refusés (`403 seller_contact_unavailable`, neutre, C5) ; l'historique reste lisible |
 | `REVIEW_REPLY_BLOCK` | `review.reply` refusé | aucun |
 | `TEAM_CHANGES_BLOCK` | `org.manage_members`, `org.manage_roles` refusés (invitations, confirmations, nominations, rôles, retraits) ; `org.leave` permis | aucun (conflit d'autorité, L1-02e) |
 | `PROFILE_EDIT_BLOCK` | `org.edit_profile` refusé ; **la demande de changement de nom reste permise** (`org.request_name_change`, c'est le remède) | aucun |
 
 Une mesure inconnue lève une erreur de programmation. La matrice rôle x cycle de vie x mesure x capacité est testée case par case (test paramétré). Toute nouvelle capacité doit être classée dans cette table (test qui échoue sinon).
 
-**Capacités ajoutées (ADR 0006 §5 amendé) :** `org.view_restrictions` (Administrateur principal, Administrateur) ; `org.request_name_change` (Administrateur principal, Administrateur). `org.archive` garde son code et prend le libellé « Fermer l'organisation » (Administrateur principal seul, inchangé).
+**Capacités ajoutées (ADR 0006 §5 amendé) :** `org.view_restrictions` (Administrateur principal, Administrateur) ; `org.request_name_change` (Administrateur principal, Administrateur : mêmes rôles que `org.verification_submit`, QD-5) ; `org.confirm_activity` (Administrateur principal, Administrateur ; absente de toute liste de blocage des mesures ciblées, QD-2). Lecture partagée `restricted_capabilities(role, scope, measures)` : capacités du rôle retirées par les seules mesures ciblées, exposée dans `contexts/` et `internal/` (QD-1). `org.archive` garde son code et prend le libellé « Fermer l'organisation » (Administrateur principal seul, inchangé).
 
 **Capacités permises selon le cycle de vie** (avant toute restriction) :
 
@@ -162,7 +163,7 @@ Valeurs posées par la migration (provisoires, éditables, taxonomie finale = DO
 | `category` | FK `RestrictionCategory`, `PROTECT` | |
 | `communicated_reason` | `CharField(500)`, blank | motif communiqué aux administrateurs ; **aucune donnée personnelle d'un tiers** (consigne du formulaire, revue `auditeur-securite`) |
 | `disclosure` | `CharField(10)`, défaut `'STANDARD'` | `STANDARD`, `LIMITED` (sécurité, enquête, tiers : motif communiqué masqué, catégorie et action requise montrées, Q33) |
-| `required_action` | `CharField(30)` | `NONE`, `CONTACT_SUPPORT`, `SUBMIT_DOCUMENTS`, `REGULARIZE_GOVERNANCE`, `REMOVE_CONTENT`, `UPDATE_PROFILE`, `AWAIT_REVIEW` |
+| `required_action` | `CharField(30)` | `NONE`, `CONTACT_SUPPORT`, `SUBMIT_DOCUMENTS`, `REGULARIZE_GOVERNANCE`, `REMOVE_CONTENT`, `UPDATE_PROFILE`, `AWAIT_REVIEW` ; **compatibilité contrôlée en service** (C1, table ci-dessous) |
 | `required_action_detail` | `CharField(300)`, blank | précision facultative, mêmes consignes |
 | `appeal_mode` | `CharField(20)`, défaut `'SUPPORT_REQUEST'` | `NONE`, `SUPPORT_REQUEST` (par L1-21) |
 | `appeal_deadline` | `DateTimeField`, nul | |
@@ -176,6 +177,17 @@ Valeurs posées par la migration (provisoires, éditables, taxonomie finale = DO
 | `lifted_by` | FK `User`, `SET_NULL`, nul, `related_name='+'` | |
 | `lifted_at` | `DateTimeField`, nul | |
 | `lift_reason` | `CharField(30)`, blank | `resolved`, `appeal_upheld`, `issued_in_error`, `superseded`, `governance_restored`, `reverification_done`, `expired`, `other` |
+
+**Compatibilité mesure × action requise (C1).** Une action requise n'est acceptée que si la capacité qu'elle suppose reste exerçable sous la mesure (et sous toute autre restriction effective de l'organisation au moment de la pose ou de la modification) ; sinon erreur de champ `400 {"required_action": ["Action impossible sous cette mesure."]}` (code `required_action_incompatible`). La catégorie ne peut pas proposer par défaut une action incompatible : le formulaire retombe sur `CONTACT_SUPPORT`.
+
+| Action requise | Capacité supposée | Incompatible avec |
+|---|---|---|
+| `SUBMIT_DOCUMENTS` | `org.verification_submit` | `FULL_SUSPENSION` |
+| `REMOVE_CONTENT` | `offer.delete` | `FULL_SUSPENSION` |
+| `UPDATE_PROFILE` | `org.edit_profile` | `FULL_SUSPENSION`, `PROFILE_EDIT_BLOCK` |
+| `NONE`, `CONTACT_SUPPORT`, `AWAIT_REVIEW`, `REGULARIZE_GOVERNANCE` | aucune | aucune |
+
+Une suspension totale posée en attendant des pièces porte donc `CONTACT_SUPPORT` ou `AWAIT_REVIEW` ; ouvrir `org.verification_submit` sous suspension reste une option à étudier avec l'auditeur (spec A-L17 C1 b), hors V1.
 
 Index : `orgrestr_org_status (organization, status)`, `orgrestr_status_ends (status, ends_at)`. Restriction **effective** = `status = ACTIVE` et `starts_at <= now` et (`ends_at` nul ou `> now`). Une restriction n'est jamais supprimée par l'application (historique ; conservation : L1-24).
 
@@ -233,7 +245,7 @@ Index : `orgname_org_status (organization, status)`, `orgname_status_created (st
 | Champ | Type | Défaut | Bornes | Remarques |
 |---|---|---|---|---|
 | `dormancy_after_days` | PositiveSmallInteger | **0** (désactivé) | 0 ou 30 à 3 650 | QO-8 : valeur à fixer par le client |
-| `closure_delay_days` | PositiveSmallInteger | **0** | 0 à 90 | 0 = comportement actuel (QL-2) |
+| `closure_delay_days` | PositiveSmallInteger | **0** | 0 à 90 | 0 = comportement actuel (QL-2) ; exposé par `GET organizations/limits/` (C3) |
 | `orphan_restrict_after_days` | PositiveSmallInteger | **0** (désactivé) | 0 ou 1 à 3 650 | QO-8 |
 | `orphan_archive_after_days` | PositiveSmallInteger | **0** (désactivé) | 0 ou 1 à 3 650 ; strictement supérieur au précédent si les deux sont non nuls (validation du modèle) | QO-8 |
 | `restoration_request_ttl_days` | PositiveSmallInteger | 30 (provisoire) | 7 à 365 | une demande ouverte au-delà passe `VOID` (`expired`) |
@@ -247,7 +259,7 @@ Toutes les durées sont **provisoires** et désactivées par défaut quand le cl
 
 ```
 ACTIVE  --cron : aucune activité depuis dormancy_after_days (> 0)----------------> DORMANT   (système, dormancy)
-DORMANT --resume (org.edit_profile) | cron : activité postérieure à l'entrée------> ACTIVE    (resumed | activity_detected)
+DORMANT --resume (org.confirm_activity) | cron : activité postérieure à l'entrée------> ACTIVE    (resumed | activity_detected)
 ACTIVE|DORMANT --closure (Administrateur principal effectif, ressaisie)------------> CLOSING   (member_closure)
 CLOSING --cancel (Administrateur principal effectif)------------------------------> ACTIVE    (closure_cancelled)
 CLOSING --délai écoulé ET aucune obligation (immédiat si délai 0 ; sinon cron)------> ARCHIVED  (member_closure)
@@ -307,7 +319,7 @@ Fichiers : `identity/lifecycle.py` (cycle de vie), `identity/restrictions.py` (r
 - `is_organization_operational(org)` : `lifecycle_status in (ACTIVE, DORMANT)` et pas de `FULL_SUSPENSION` (remplace « `status == ACTIVE` » dans les invitations, nominations, création d'appartenance).
 - `get_seller_context_public_flags` (ORGANIZATION) : `lifecycle_status in (ACTIVE, DORMANT)` **et** `public_visibility_blocked = False` **et** propriétaire effectif **et** `creation_review_status != PENDING` (ADR 0010).
 - Annuaire `GET organizations/` : `lifecycle_status = ACTIVE` (les dormantes en sortent, D8) **et** `public_visibility_blocked = False` et les conditions existantes.
-- `ensure_seller_context_accepts_contact(type, id, kind)` : `FULL_SUSPENSION` -> `DENY_SECURITY` (inchangé) ; `CLOSING`, `ARCHIVED`, `ERASED` -> `DENY_OBJECT_STATE` ; `CONTACT_BLOCK` (contact, révélation, échange) ou `MESSAGING_BLOCK` (nouvelle conversation) -> `DENY_RESTRICTION`. `kind` est un paramètre additif (`contact`, `reveal`, `exchange`, `message`), défaut `contact`.
+- `ensure_seller_context_accepts_contact(type, id, kind)` : `FULL_SUSPENSION` -> `DENY_SECURITY` (inchangé) ; `CLOSING`, `ARCHIVED`, `ERASED` -> `DENY_OBJECT_STATE` ; `CONTACT_BLOCK` (contact, révélation, échange) ou `MESSAGING_BLOCK` (nouvelle conversation, nouveau message d'acheteur dans une conversation existante) -> `403 seller_contact_unavailable` (neutre ; jamais `DENY_RESTRICTION` ni `measure` pour un non-membre, C2, C5). `kind` est un paramètre additif (`contact`, `reveal`, `exchange`, `message`), défaut `contact`.
 - `get_allowed_channels` d'une organisation : vide si `CONTACT_BLOCK`.
 - `acts_for_context` : « organisation non suspendue » devient « sans `FULL_SUSPENSION` » (sens inchangé).
 - `count_active_memberships` (plafond technique, ADR 0010) : appartenances actives d'organisations `lifecycle_status in (ACTIVE, DORMANT, CLOSING)` (une suspension ne libère plus de place : ce n'est pas une sortie).
@@ -319,7 +331,7 @@ Fichiers : `identity/lifecycle.py` (cycle de vie), `identity/restrictions.py` (r
 - `impose_system_restriction(org, measure, category_code, source_type, source_id)` : interne, `source_type in ('governance', 'restoration')` seulement (sinon `ValueError` : D6) ; acteur nul ; idempotente (pas de seconde ligne active de même mesure et même origine pour la même source).
 - `lift_restriction(actor, restriction_id, lift_reason)` : permission `identity.lift_organizationrestriction` ; même conflit d'intérêts ; `ACTIVE -> LIFTED` (mise à jour conditionnelle) ; résumé ; audit `ORG_RESTRICTION_LIFTED` ; événements (`lifted` ; visibilité `reactivated` si la dernière `FULL_SUSPENSION` tombe, `restriction_lifted` sinon).
 - `lift_system_restrictions(org, source_type, lift_reason)` : interne (gouvernance rétablie, revérification faite).
-- `update_restriction_disclosure(actor, restriction_id, **fields)` : texte communiqué, divulgation, action requise, recours, échéance ; jamais mesure, catégorie, périmètre ; audit `ORG_RESTRICTION_UPDATED` (noms de champs seulement).
+- `update_restriction_disclosure(actor, restriction_id, **fields)` : texte communiqué, divulgation, action requise (compatibilité C1 revérifiée), recours, échéance ; jamais mesure, catégorie, périmètre ; événement `identity.organization_restriction_changed` (`updated`, notifié, QU-2) ; audit `ORG_RESTRICTION_UPDATED` (noms de champs seulement).
 - `list_restrictions_for_members(actor, org_id, include_history=False)` : `org.view_restrictions` ; lecture permise sous `FULL_SUSPENSION`, `CLOSING`, `ARCHIVED` (4.2).
 - `expire_organization_restrictions(now)` et `sync_restriction_summaries()` : cron (6.5).
 - `_refresh_restriction_summary(org)` : relit les restrictions effectives de l'organisation (une requête), écrit `active_restriction_measures` et `public_visibility_blocked` si différents.
@@ -329,7 +341,7 @@ Fichiers : `identity/lifecycle.py` (cycle de vie), `identity/restrictions.py` (r
 - `request_closure(actor, org_id, reason_code, confirm, password)` : ressaisie (action d'audit `close_organization`, limiteur `org_reauth`) ; sous verrou : Administrateur principal **effectif** avec `org.archive` (permise sous `FULL_SUSPENSION`, QL-3) ; `lifecycle_status in (ACTIVE, DORMANT)` sinon `409 closure_already_requested` (`CLOSING`) ; transition `CLOSING`, `closure_effective_at = now + closure_delay_days` ; puis `_try_finalize_closure` dans la même transaction. Notifications : tous les membres actifs et tous les Administrateurs principaux.
 - `cancel_closure(actor, org_id)` : Administrateur principal effectif ; `CLOSING -> ACTIVE` ; `409 closure_not_pending` sinon.
 - `_try_finalize_closure(org)` : si `now >= closure_effective_at` et `open_obligations(org) == []` -> `ARCHIVED` ; sinon reste `CLOSING` et renvoie les codes d'obligation (sans détail).
-- `resume_organization(actor, org_id)` : `org.edit_profile` ; `DORMANT -> ACTIVE` (`resumed`), `last_activity_at = now` ; `409 organization_not_dormant` sinon.
+- `resume_organization(actor, org_id)` : `org.confirm_activity` (non bloquée par `PROFILE_EDIT_BLOCK`, QD-2) ; `DORMANT -> ACTIVE` (`resumed`), `last_activity_at = now` ; `409 organization_not_dormant` sinon.
 - `archive_by_staff(staff, org_id, reason_code)` : permission `identity.archive_organization_staff` ; conflit d'intérêts ; depuis `ACTIVE`, `DORMANT`, `CLOSING` ; motif codé (`duplicate`, `fraud_confirmed`, `legal_decision`, `orphaned_unresolved`, `other`).
 - `process_organization_lifecycle(now)` (cron horaire, idempotent, par lots de 500) : (1) finalisation des `CLOSING` échues ; (2) calcul de `last_activity_at` (6.5) puis dormance et sortie de dormance ; (3) organisations `MISSING` : restriction système puis archivage système selon les délais (lit `primary_admin_state`, `primary_admin_missing_since` de l'ADR 0010 ; une organisation suspendue et orpheline suit la même règle) ; levée des restrictions `governance` des organisations revenues à `OK` ; (4) demandes de restauration échues -> `VOID`. Un délai à 0 désactive l'étape correspondante.
 
@@ -373,6 +385,7 @@ Déclarations dans `platform_core/catalog.py` (contrôle `platform_core.E001`). 
 |---|---|---|
 | restriction `imposed`, `FULL_SUSPENSION` | tous les membres actifs (hors acteur) | texte existant « L'organisation « {name} » a été suspendue : ses offres ne sont plus publiques. » ; pour `OWNER`, `ADMIN` en plus : « Consultez le détail et l'action requise. » (lien `/organizations/<id>/restrictions`) |
 | restriction ciblée `imposed` | `OWNER`, `ADMIN` | « Une restriction s'applique à « {name} ». Consultez le détail et l'action requise. » |
+| restriction `updated` (QU-2) | `OWNER`, `ADMIN` | « La restriction appliquée à « {name} » a été mise à jour. Consultez le détail. » |
 | restriction `lifted`, `expired` | mêmes destinataires que la pose | « La restriction appliquée à « {name} » a été levée. » / texte existant « réactivée » pour la dernière suspension |
 | cycle de vie `CLOSING` | tous les membres actifs | « La fermeture de « {name} » a été demandée. Elle prendra effet au plus tôt le {date}. » |
 | `CLOSING -> ACTIVE` | tous les membres actifs | « La fermeture de « {name} » a été annulée. » |
@@ -410,7 +423,7 @@ Les actions `ORG_SUSPENDED`, `ORG_REACTIVATED`, `ORG_REACTIVATION_DENIED` ne son
 |---|---|---|
 | Lire les restrictions (détail) | `org.view_restrictions` (Administrateur principal, Administrateur) | permise sous suspension, fermeture, archivage ; compte restreint : `DENY_SECURITY` |
 | Demander la fermeture, annuler | Administrateur principal effectif (`org.archive`) | fermeture : ressaisie |
-| Confirmer l'activité (dormante) | `org.edit_profile` | |
+| Confirmer l'activité (dormante) | `org.confirm_activity` (Administrateur principal, Administrateur) | non bloquée par `PROFILE_EDIT_BLOCK` (QD-2) |
 | Demander un changement de nom, annuler | `org.request_name_change` | création : ressaisie |
 | Poser, modifier, lever une restriction | personnel, `impose_organizationrestriction`, `lift_organizationrestriction` | conflit d'intérêts |
 | Archiver par décision du personnel | personnel, `archive_organization_staff` | conflit d'intérêts, motif codé |
@@ -486,7 +499,7 @@ Registre de recette MySQL : pose simultanée de deux restrictions ; fermeture et
 
 - **Règle 10.** Motif communiqué et détail d'action : 500 et 300 caractères, consigne « aucune information sur une autre personne, aucun moyen d'enquête » dans le formulaire du back-office ; `disclosure = LIMITED` les masque. Note interne : jamais exposée (test à sentinelle sur toutes les réponses d'organisation, l'audit, l'outbox, les notifications). Détail des restrictions réservé à `org.view_restrictions`. `legal_name` minimisé comme le NIF.
 - **Aucune fuite de la sanction d'un tiers.** Les restrictions converties de T9 sont `LIMITED` + `other` ; aucune réponse n'indique qu'un compte membre est sanctionné.
-- **Oracle.** `restrictions/` d'une organisation inexistante ou d'un non-membre : `403 DENY_RELATION` (règle existante) ; `DENY_RESTRICTION` n'est renvoyé qu'à un membre qui détient la capacité refusée.
+- **Oracle.** `restrictions/` d'une organisation inexistante ou d'un non-membre : `403 DENY_RELATION` (règle existante) ; `DENY_RESTRICTION` n'est renvoyé qu'à un membre qui détient la capacité refusée ; un acheteur reçoit `seller_contact_unavailable`, identique au cas « organisation sans canal » (C2, test d'égalité des corps de réponse).
 - **Escalade.** Aucun membre ne lève une restriction ; aucune restriction n'est levée par un paiement, un plan ou une nomination (test d'introspection étendu à `restrictions.py`, `lifecycle.py`, `restoration.py`, `name_changes.py`) ; un changement d'Administrateur principal ne lève rien (Q17, test).
 - **Double contrôle de la restauration.** `prepared_by != decided_by`, `recorded_by != decided_by`, conflit d'intérêts sur les trois.
 - **Usurpation par renommage.** Verrou maintenu ; historique complet ; badges non hérités ; nouvelle entité refusée par renommage.

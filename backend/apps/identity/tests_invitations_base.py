@@ -25,7 +25,9 @@ from apps.platform_core import catalog, registry
 from apps.platform_core.models import OutboxEvent
 
 from . import throttles
-from .models import INVITABLE_ROLES, IdentitySettings, Organization, OrganizationInvitation
+from .models import (
+    CONFIRMATION_REQUIRED_ROLES, INVITABLE_ROLES, IdentitySettings, Organization, OrganizationInvitation,
+)
 from .tests_admin import make_admin_user
 
 User = get_user_model()
@@ -51,8 +53,10 @@ class InvitationModelTests(TestCase):
         self.assertIsNone(invitation.closed_at)
         self.assertIsNone(invitation.closed_by)
 
-    def test_invitable_roles_are_editor_and_analyst_only(self):
-        self.assertEqual(INVITABLE_ROLES, ('EDITOR', 'ANALYST'))
+    def test_invitable_roles_and_roles_requiring_confirmation(self):
+        # Invitations v2 (ADR 0010 D4) : jamais OWNER ; ADMIN seulement avec confirmation par l'émetteur.
+        self.assertEqual(INVITABLE_ROLES, ('ADMIN', 'EDITOR', 'ANALYST', 'MEMBER'))
+        self.assertEqual(CONFIRMATION_REQUIRED_ROLES, ('ADMIN',))
 
     def test_owner_role_is_refused_by_the_database(self):
         with self.assertRaises(IntegrityError), transaction.atomic():
@@ -72,7 +76,8 @@ class InvitationModelTests(TestCase):
         # Contraintes inconditionnelles seulement ; `orginv_scope_consistent` : périmètre (ADR 0010 §4.3, L1-01-B6).
         self.assertEqual([c.name for c in meta.constraints], ['orginv_role_not_owner', 'orginv_scope_consistent'])
         self.assertEqual(
-            sorted(i.name for i in meta.indexes), ['orginv_created_by', 'orginv_org_status', 'orginv_status_expires'],
+            sorted(i.name for i in meta.indexes),
+            ['orginv_accepted_by', 'orginv_created_by', 'orginv_org_status', 'orginv_status_expires'],
         )
         # Plusieurs invitations en attente pour un même rôle : aucune unicité par cible.
         make_invitation(self.organization, token='1')
@@ -82,7 +87,7 @@ class InvitationModelTests(TestCase):
         meta = OrganizationInvitation._meta
         self.assertEqual(meta.get_field('token_hash').max_length, 64)
         self.assertEqual(meta.get_field('label').max_length, 60)
-        self.assertEqual(meta.get_field('status').max_length, 10)
+        self.assertEqual(meta.get_field('status').max_length, 24)  # `AWAITING_CONFIRMATION` (ADR 0010 §4.3)
         self.assertEqual(meta.get_field('role').max_length, 20)
 
     def test_deleting_the_organization_deletes_its_invitations(self):
@@ -106,6 +111,7 @@ class InvitationSettingsTests(TestCase):
             'max_categories_per_context': row.max_categories_per_context,
             'kyb_file_retention_days': row.kyb_file_retention_days,
             'invitation_ttl_days': 7, 'max_pending_invitations': 20, 'invitation_history_days': 30,
+            'admin_invitation_confirmation_hours': row.admin_invitation_confirmation_hours,
         }
         data.update(extra)
         return data
@@ -345,4 +351,8 @@ class InvitationMigrationTests(TransactionTestCase):
         self.assertNotIn('identity_organizationinvitation', connection.introspection.table_names())
         self.migrate(('identity', '0016_identitysettings_invitations'))
         self.assertIn('identity_organizationinvitation', connection.introspection.table_names())
-        self.assertEqual(IdentitySettings.get_solo().invitation_ttl_days, 7)
+        # Lecture par le modèle HISTORIQUE de 0016 : le modèle courant porte des colonnes ajoutées après (0019…).
+        state = MigrationExecutor(connection).loader.project_state(('identity', '0016_identitysettings_invitations'))
+        historical = state.apps.get_model('identity', 'IdentitySettings')
+        row, _ = historical.objects.get_or_create(pk=IdentitySettings.SINGLETON_ID)
+        self.assertEqual(row.invitation_ttl_days, 7)

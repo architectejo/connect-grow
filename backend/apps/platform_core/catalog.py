@@ -35,6 +35,9 @@ _TYPES = (
     # ADR 0008, section 6 : `organization_id`, `invitation_id`, `change` (created, accepted, declined, revoked), `role`,
     # `actor_id`, `inviter_id` ; UUID et codes seulement (ni nom, ni jeton, ni étiquette). Émetteur : services
     # d'invitation (L1-01-B2b) ; abonné `notifications.notify_invitation_outcome` (prévient l'inviteur seul).
+    # ADR 0010 §7 (L1-01-B7), additif en v1 : `change` vaut aussi `awaiting_confirmation`, `confirmed`, `rejected`, avec
+    # la clé `accepted_by_id` (UUID ; jamais nom, téléphone ni indice) ; l'abonné prévient alors les comptes qui
+    # peuvent confirmer, ou la personne qui a accepté.
     # `identity.membership_changed` porte en plus la clé additive `via` (« invitation » ou absente).
     EventType('identity.organization_invitation_changed'),
     # Identité d'une organisation modifiée (T8) : noms de champs seulement, aucune valeur.

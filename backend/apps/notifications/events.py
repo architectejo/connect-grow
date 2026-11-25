@@ -268,14 +268,35 @@ _INVITATION_OUTCOMES = {
 
 @subscribe('identity.organization_invitation_changed', name='notifications.notify_invitation_outcome')
 def notify_invitation_outcome(event):
-    """Prévient l'INVITEUR SEUL (s'il est toujours destinataire de `org.manage_members`) qu'une invitation a été
-    acceptée ou refusée. Texte neutre : jamais le nom de la personne, ni l'étiquette, ni le jeton. Rien n'est
-    notifié pour une création ou une révocation (ADR 0008 §6)."""
+    """Issue d'une invitation (ADR 0008 §6, ADR 0010 §7). Textes neutres : jamais le nom de la personne, ni son
+    téléphone ou l'indice de téléphone, ni l'étiquette, ni le jeton ; destinataires résolus À LA LIVRAISON.
+    - `accepted`, `declined` : l'INVITEUR SEUL, s'il est toujours destinataire de `org.manage_members` ;
+    - `awaiting_confirmation` : les comptes qui peuvent confirmer (l'émetteur s'il en a toujours l'autorité, les
+      administrateurs principaux effectifs) ;
+    - `confirmed` : la personne entrée, et les comptes qui pouvaient confirmer (sauf l'auteur de la confirmation) ;
+    - `rejected` : la personne qui avait accepté, dans son contexte personnel (elle n'est pas membre), sans le nom du
+      confirmateur.
+    Rien n'est notifié pour une création ou une révocation."""
     payload = event.payload
     organization_id, change = _require(payload, 'organization_id', 'change')
-    if change not in _INVITATION_OUTCOMES:
-        return
     organization = _user_id(organization_id)
+    if change in _INVITATION_OUTCOMES:
+        _notify_inviter_of_outcome(payload, organization, change)
+    elif change == 'awaiting_confirmation':
+        _notify_confirmers(event, organization)
+    elif change == 'confirmed':
+        _notify_confirmed(event, organization)
+    elif change == 'rejected':
+        accepted_by = payload.get('accepted_by_id')
+        if accepted_by:
+            services.notify(
+                user_id=_user_id(accepted_by), notification_type=services.SYSTEM, title="Demande non confirmée",
+                content=f"Votre demande pour rejoindre « {_organization_name(organization)} » n'a pas été confirmée.",
+                link='/profiles',
+            )
+
+
+def _notify_inviter_of_outcome(payload, organization, change):
     inviter = payload.get('inviter_id')
     if not inviter:
         return
@@ -289,6 +310,50 @@ def notify_invitation_outcome(event):
         content=f"Une invitation à rejoindre « {_organization_name(organization)} » avec le rôle {role} a été {outcome}.",
         link=f'/organizations/{organization}/team', context=(CONTEXT_ORGANIZATION, organization),
     )
+
+
+def _confirmer_ids(event, organization):
+    invitation_id = _require(event.payload, 'invitation_id')[0]
+    return identity_services.get_invitation_confirmer_ids(organization, _user_id(invitation_id))
+
+
+def _notify_confirmers(event, organization):
+    """Une invitation Administrateur a été acceptée : l'émetteur (s'il peut encore confirmer) et tous les
+    administrateurs principaux effectifs doivent confirmer l'identité de la personne avant tout accès."""
+    name = _organization_name(organization)
+    role = identity_services.get_role_label(event.payload.get('role'))
+    for recipient in _confirmer_ids(event, organization):
+        services.notify(
+            user_id=recipient, notification_type=services.SYSTEM, title="Confirmation requise",
+            content=(
+                f"Une invitation comme {role} pour « {name} » a été acceptée. Confirmez l'identité de la "
+                "personne avant de lui ouvrir l'accès."
+            ),
+            link=f'/organizations/{organization}/team', context=(CONTEXT_ORGANIZATION, organization),
+        )
+
+
+def _notify_confirmed(event, organization):
+    payload = event.payload
+    name = _organization_name(organization)
+    link = f'/organizations/{organization}/team'
+    accepted_by = payload.get('accepted_by_id')
+    if accepted_by:
+        services.notify(
+            user_id=_user_id(accepted_by), notification_type=services.SYSTEM, title="Accès confirmé",
+            content=f"Votre accès à « {name} » est confirmé.", link=link,
+            context=(CONTEXT_ORGANIZATION, organization),
+        )
+    actor = payload.get('actor_id')
+    role = identity_services.get_role_label(payload.get('role'))
+    for recipient in _confirmer_ids(event, organization):
+        if str(recipient) in (actor, accepted_by):
+            continue
+        services.notify(
+            user_id=recipient, notification_type=services.SYSTEM, title="Accès confirmé",
+            content=f"Une invitation comme {role} pour « {name} » a été confirmée.", link=link,
+            context=(CONTEXT_ORGANIZATION, organization),
+        )
 
 
 _STATUS_MESSAGES = {

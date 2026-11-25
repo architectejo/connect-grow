@@ -918,6 +918,9 @@ class GuardAndRulesTests(TestCase):
                 'api/v1/accounts/organizations/<uuid:pk>/transfer-ownership/',
                 'api/v1/accounts/organizations/<uuid:pk>/invitations/',
                 'api/v1/accounts/organizations/<uuid:pk>/invitations/<uuid:invitation_id>/',
+                # Invitations v2 (L1-01-B7, contrat §7.4.6)
+                'api/v1/accounts/organizations/<uuid:pk>/invitations/<uuid:invitation_id>/confirm/',
+                'api/v1/accounts/organizations/<uuid:pk>/invitations/<uuid:invitation_id>/reject/',
             },
         )
         for route, (methods, reason) in seen.items():

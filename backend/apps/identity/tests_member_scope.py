@@ -318,11 +318,10 @@ class ScopeServiceTests(TestCase):
         self.assertEqual((membership.pk, membership.role), (self.editor_membership.pk, MEMBER))
         self.assertEqual((membership.scope_type, membership.scope_id), (SCOPE_ORGANIZATION, None))
 
-    def test_member_is_not_yet_invitable(self):
-        """Invitations v2 (B7) hors périmètre : `MEMBER` reste hors `INVITABLE_ROLES` jusque-là."""
-        with self.assertRaises(services.OrganizationError) as ctx:
-            services.create_invitation(self.owner, self.org.pk, MEMBER)
-        self.assertEqual(ctx.exception.detail.code, 'invitation_role_not_allowed')
+    def test_member_is_invitable_since_invitations_v2(self):
+        """Invitations v2 (L1-01-B7, ADR 0010 D4) : `MEMBER` est invitable (inversion du test de B6)."""
+        invitation, _ = services.create_invitation(self.owner, self.org.pk, MEMBER)
+        self.assertEqual((invitation.role, invitation.status), (MEMBER, 'PENDING'))
 
 
 # --- Fermé par défaut : chaque chemin de lecture des rôles (relecture et audit de B6) -----------------------------
@@ -422,7 +421,7 @@ class InvitationScopeTests(TestCase):
     def test_accept_propagates_the_invitation_scope_to_the_membership(self):
         invitation, token = self.invite(self.owner)
         OrganizationInvitation.objects.filter(pk=invitation.pk).update(scope_type=SCOPE_CITY, scope_id=KINSHASA.id)
-        membership = services.accept_invitation(self.guest, token)
+        membership = services.accept_invitation(self.guest, token).membership
         membership.refresh_from_db()
         self.assertEqual((membership.scope_type, membership.scope_id), (SCOPE_CITY, KINSHASA.id))
 
@@ -636,6 +635,7 @@ class MigrationRollbackGuardTests(TransactionTestCase):
         # sans ce signal, comme le fait Django lui-même entre deux tests à `serialized_rollback`.
         call_command('flush', verbosity=0, interactive=False, inhibit_post_migrate=True)
         super()._fixture_setup()
+
     def tearDown(self):
         call_command('migrate', verbosity=0)
 

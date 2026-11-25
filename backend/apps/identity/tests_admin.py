@@ -129,6 +129,7 @@ class IdentitySettingsAuditTests(TestCase):
             'invitation_ttl_days': settings_row.invitation_ttl_days,
             'max_pending_invitations': settings_row.max_pending_invitations,
             'invitation_history_days': settings_row.invitation_history_days,
+            'admin_invitation_confirmation_hours': settings_row.admin_invitation_confirmation_hours,
         }
         if settings_row.org_phone_channels_enabled:
             data['org_phone_channels_enabled'] = 'on'

@@ -26,8 +26,9 @@ from .views_organizations import (
     OrganizationTransferOwnershipView, OrganizationViewSet,
 )
 from .views_invitations import (
-    InvitationAcceptView, InvitationDeclineView, InvitationPreviewView, OrganizationInvitationDetailView,
-    OrganizationInvitationsView,
+    InvitationAcceptView, InvitationDeclineView, InvitationPreviewView, InvitationWithdrawView,
+    MyAwaitingInvitationsView, OrganizationInvitationConfirmView, OrganizationInvitationDetailView,
+    OrganizationInvitationRejectView, OrganizationInvitationsView,
 )
 from .views_verification import (
     OrganizationKycDocumentDeleteView, OrganizationKycDocumentListCreateView, OrganizationVerificationView,
@@ -78,6 +79,15 @@ urlpatterns = [
     path('organization-invitations/preview/', InvitationPreviewView.as_view(), name='organization_invitation_preview'),
     path('organization-invitations/accept/', InvitationAcceptView.as_view(), name='organization_invitation_accept'),
     path('organization-invitations/decline/', InvitationDeclineView.as_view(), name='organization_invitation_decline'),
+    # Invitations v2 (ADR 0010 D4, contrat L1-01 §7.4.6 et §7.4.7) : confirmation d'une invitation Administrateur
+    path('organizations/<uuid:pk>/invitations/<uuid:invitation_id>/confirm/',
+         OrganizationInvitationConfirmView.as_view(), name='organization_invitation_confirm'),
+    path('organizations/<uuid:pk>/invitations/<uuid:invitation_id>/reject/',
+         OrganizationInvitationRejectView.as_view(), name='organization_invitation_reject'),
+    path('organization-invitations/awaiting/', MyAwaitingInvitationsView.as_view(),
+         name='organization_invitations_awaiting'),
+    path('organization-invitations/<uuid:invitation_id>/withdraw/', InvitationWithdrawView.as_view(),
+         name='organization_invitation_withdraw'),
 
     # Prestataire individuel (ADR 0006, 9.3)
     path('provider/', ProviderDetailView.as_view(), name='provider_detail'),

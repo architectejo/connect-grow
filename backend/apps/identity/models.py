@@ -16,7 +16,9 @@ from django.utils import timezone
 from apps.common.images import sanitize_uploaded_field, validate_image_pixels, validate_image_upload_size
 from apps.common.models import BaseModel, SingletonSettingsModel
 
-from .capabilities import ROLE_ANALYST, ROLE_CHOICES, ROLE_EDITOR, ROLE_OWNER, SCOPE_CHOICES, SCOPE_ORGANIZATION
+from .capabilities import (
+    ROLE_ADMIN, ROLE_ANALYST, ROLE_CHOICES, ROLE_EDITOR, ROLE_MEMBER, ROLE_OWNER, SCOPE_CHOICES, SCOPE_ORGANIZATION,
+)
 from .kyc_files import kyc_upload_to
 
 logger = logging.getLogger(__name__)
@@ -414,6 +416,13 @@ class IdentitySettings(SingletonSettingsModel):
         help_text="Jours de conservation d'une invitation close (acceptée, refusée, révoquée, expirée) avant purge "
                   "(1 à 365). Valeur provisoire, à confirmer.",
     )
+    # Invitations v2 (ADR 0010 §4.7). Délai laissé à l'émetteur ou à un administrateur principal pour confirmer une
+    # invitation Administrateur acceptée ; l'échéance est renvoyée, jamais la règle.
+    admin_invitation_confirmation_hours = models.PositiveSmallIntegerField(
+        default=72, validators=[MinValueValidator(1), MaxValueValidator(336)],
+        help_text="Délai de confirmation d'une invitation Administrateur acceptée, en heures (1 à 336). Valeur "
+                  "provisoire, à confirmer.",
+    )
 
     class Meta:
         verbose_name = "Paramètres d'identité"
@@ -556,9 +565,13 @@ class Membership(BaseModel):
         return f"Appartenance {self.role} ({self.status})"
 
 
-# Rôles qu'une invitation peut porter (ADR 0008, 3.2). `OWNER` est de plus interdit en base ; `ADMIN` s'obtient par
-# promotion. L'assouplir ne demande aucune migration.
-INVITABLE_ROLES = (ROLE_EDITOR, ROLE_ANALYST)
+# Rôles qu'une invitation peut porter (ADR 0010 D4, amende ADR 0008 §3.2), chacun seulement si l'émetteur peut le
+# déléguer (`can_delegate`). `OWNER` jamais : refusé en service et interdit en base (`orginv_role_not_owner`).
+# Modifier ces listes ne demande aucune migration.
+INVITABLE_ROLES = (ROLE_ADMIN, ROLE_EDITOR, ROLE_ANALYST, ROLE_MEMBER)
+# Rôles dont l'acceptation attend la confirmation de l'émetteur ou d'un administrateur principal (ADR 0010 D4, U2) :
+# aucune appartenance, donc aucun droit, avant cette confirmation.
+CONFIRMATION_REQUIRED_ROLES = (ROLE_ADMIN,)
 
 
 class OrganizationInvitation(BaseModel):
@@ -567,24 +580,30 @@ class OrganizationInvitation(BaseModel):
     garanti en service, sous verrou. L'étiquette est vidée dès que l'invitation quitte `PENDING` (règle 10)."""
 
     STATUS_PENDING = 'PENDING'
+    STATUS_AWAITING_CONFIRMATION = 'AWAITING_CONFIRMATION'
     STATUS_ACCEPTED = 'ACCEPTED'
     STATUS_DECLINED = 'DECLINED'
     STATUS_REVOKED = 'REVOKED'
+    STATUS_REJECTED = 'REJECTED'
     STATUS_EXPIRED = 'EXPIRED'
     STATUS_CHOICES = (
         (STATUS_PENDING, "En attente"),
+        (STATUS_AWAITING_CONFIRMATION, "En attente de confirmation"),
         (STATUS_ACCEPTED, "Acceptée"),
         (STATUS_DECLINED, "Refusée"),
         (STATUS_REVOKED, "Révoquée"),
+        (STATUS_REJECTED, "Rejetée"),
         (STATUS_EXPIRED, "Expirée"),
     )
+    # États non terminaux (ADR 0010 §5.1) : tous les autres sont définitifs.
+    OPEN_STATUSES = (STATUS_PENDING, STATUS_AWAITING_CONFIRMATION)
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='invitations')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     # Périmètre proposé (ADR 0010 §4.3), mêmes règles que `Membership`.
     scope_type = models.CharField(max_length=20, choices=SCOPE_CHOICES, default=SCOPE_ORGANIZATION)
     scope_id = models.UUIDField(null=True, blank=True)
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default=STATUS_PENDING)
     token_hash = models.CharField(max_length=64, unique=True)
     label = models.CharField(max_length=60, blank=True, default='')
     created_by = models.ForeignKey(
@@ -593,6 +612,16 @@ class OrganizationInvitation(BaseModel):
     expires_at = models.DateTimeField()
     closed_at = models.DateTimeField(null=True, blank=True)
     closed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+    )
+    # Confirmation d'une invitation Administrateur (ADR 0010 §4.3) : personne qui a accepté (aucune appartenance tant
+    # que la confirmation n'est pas donnée), échéance de la confirmation, et confirmateur ou auteur du rejet.
+    accepted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+    )
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    confirmation_expires_at = models.DateTimeField(null=True, blank=True)
+    confirmed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
     )
 
@@ -611,6 +640,7 @@ class OrganizationInvitation(BaseModel):
             models.Index(fields=['organization', 'status'], name='orginv_org_status'),
             models.Index(fields=['status', 'expires_at'], name='orginv_status_expires'),
             models.Index(fields=['created_by', 'status'], name='orginv_created_by'),
+            models.Index(fields=['accepted_by', 'status'], name='orginv_accepted_by'),
         ]
 
     def __str__(self):

@@ -295,11 +295,12 @@ class MembershipAdmin(ReadOnlyAdmin):
 
 @admin.register(OrganizationInvitation)
 class OrganizationInvitationAdmin(ReadOnlyAdmin):
-    """Lecture seule (ADR 0008, 13) : ni l'empreinte du jeton, ni l'étiquette, ni les comptes ne sont affichés."""
+    """Lecture seule (ADR 0008, 13) : ni l'empreinte du jeton, ni l'étiquette, ni les comptes (émetteur, personne qui a
+    accepté, confirmateur, auteur de la clôture) ne sont affichés."""
 
-    list_display = ('organization', 'role', 'status', 'expires_at', 'closed_at')
+    list_display = ('organization', 'role', 'status', 'expires_at', 'confirmation_expires_at', 'closed_at')
     list_filter = ('status', 'role')
-    exclude = ('token_hash', 'label', 'created_by', 'closed_by')
+    exclude = ('token_hash', 'label', 'created_by', 'closed_by', 'accepted_by', 'confirmed_by')
 
 
 @admin.register(ProviderProfile)
@@ -345,4 +346,5 @@ class IdentitySettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
     list_display = (
         'max_organizations_per_account', 'max_categories_per_context', 'org_phone_channels_enabled',
         'kyb_file_retention_days', 'invitation_ttl_days', 'max_pending_invitations', 'invitation_history_days',
+        'admin_invitation_confirmation_hours',
     )

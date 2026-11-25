@@ -26,7 +26,7 @@ from apps.notifications.models import Notification
 from apps.platform_core.models import OutboxEvent
 from apps.platform_core.testing import dispatch_outbox_now
 
-from . import invitations, services, tests_team as team
+from . import capabilities, invitations, services, tests_team as team
 from .models import IdentitySettings, Membership, Organization, OrganizationInvitation
 from .tests_invitations_base import SENTINEL_LABEL, make_invitation
 from .tests_route_guard import collect_unguarded_write_routes
@@ -39,8 +39,15 @@ INVITER_NAME = 'Balthazar Inviteur-Sentinelle'
 TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{43}$')
 INVITATION_KEYS = {
     'invitation_id', 'role', 'status', 'label', 'created_at', 'expires_at', 'created_by_display_name', 'is_mine',
+    # Invitations v2 (contrat §7.4)
+    'scope', 'requires_confirmation', 'accepted_at', 'confirmation_expires_at', 'accepted_by_display_name',
+    'accepted_by_phone_hint', 'can_confirm',
 }
-CREATED_KEYS = {'invitation_id', 'role', 'status', 'label', 'created_at', 'expires_at', 'link_token'}
+CREATED_KEYS = {
+    'invitation_id', 'role', 'status', 'label', 'created_at', 'expires_at', 'link_token', 'scope',
+    'requires_confirmation',
+}
+ORG_SCOPE = {'type': 'ORGANIZATION', 'id': None}
 INVALID = {'detail': "Cette invitation n'est pas valide.", 'code': 'invitation_invalid'}
 
 
@@ -135,12 +142,18 @@ class CreateInvitationTests(InvBase):
             (invitation.expires_at - before).total_seconds(), 3 * 86400, delta=60,
         )
 
-    def test_owner_and_admin_roles_are_refused(self):
-        for role in (OWNER, ADMIN):
+    def test_owner_role_is_refused_but_admin_and_member_are_invitable(self):
+        """Invitations v2 (ADR 0010 D4) : inversion du test qui refusait ADMIN (et MEMBER, B6) ; OWNER jamais."""
+        self.assertDenied(self.create(invite_role=OWNER), 'invitation_role_not_allowed', 400)
+        self.assertFalse(OrganizationInvitation.objects.exists())
+        for role, confirmation in ((ADMIN, True), ('MEMBER', False), (EDITOR, False), (ANALYST, False)):
             with self.subTest(role=role):
                 response = self.create(invite_role=role)
-                self.assertDenied(response, 'invitation_role_not_allowed', 400)
-        self.assertFalse(OrganizationInvitation.objects.exists())
+                self.assertEqual(response.status_code, 201, response.content)
+                body = response.json()
+                self.assertEqual(
+                    (body['role'], body['requires_confirmation'], body['scope']), (role, confirmation, ORG_SCOPE),
+                )
 
     def test_invalid_role_and_label(self):
         client = self.as_role(OWNER)
@@ -209,7 +222,10 @@ class CreateInvitationTests(InvBase):
         entry = self.audit('INVITATION_CREATED').get()
         self.assertEqual(entry.actor, self.owner)
         self.assertEqual(entry.target_id, invitation.pk)
-        self.assertEqual(entry.details, f'organization={self.org.pk}; role={EDITOR}; ttl_days=7')
+        self.assertEqual(
+            entry.details,
+            f'organization={self.org.pk}; role={EDITOR}; ttl_days=7; scope_type=ORGANIZATION; scope_id=-',
+        )
         event = OutboxEvent.objects.get(event_type='identity.organization_invitation_changed')
         self.assertEqual(event.payload, {
             'organization_id': str(self.org.pk), 'invitation_id': str(invitation.pk), 'change': 'created',
@@ -405,9 +421,12 @@ class PreviewTests(InvBase):
         response = self.preview(token)
         self.assertEqual(response.status_code, 200, response.content)
         body = response.json()
-        self.assertEqual(
-            set(body), {'organization_name', 'org_type', 'role', 'expires_at', 'invited_by_display_name'},
-        )
+        self.assertEqual(set(body), {
+            'organization_name', 'org_type', 'role', 'expires_at', 'invited_by_display_name', 'scope', 'capabilities',
+            'requires_confirmation',
+        })
+        self.assertEqual((body['scope'], body['requires_confirmation']), (ORG_SCOPE, False))
+        self.assertEqual(body['capabilities'], capabilities.capabilities_for_role(EDITOR))
         self.assertEqual((body['organization_name'], body['org_type'], body['role']), (self.org.name, 'ENTREPRISE', EDITOR))
         self.assertEqual(body['invited_by_display_name'], services.public_display_name(self.owner.full_name))
         self.assertEqual(response['Cache-Control'], 'private, no-store')
@@ -552,10 +571,12 @@ class UniformResponseTests(InvBase):
             self.assertEqual(self.call(action, token + '\n').json(), INVALID)
 
     def test_a_row_with_a_role_outside_invitable_roles_is_never_accepted(self):
+        # Depuis B7 tout rôle délégable sauf OWNER (interdit en base) est invitable : on retire ANALYST de la liste.
         token = 'Zz' * 20
-        row = make_invitation(self.org, token, role='ADMIN', created_by=self.owner)
-        self.assertEqual(self.preview(token).json(), INVALID)
-        self.assertEqual(self.accept(token).json(), INVALID)
+        row = make_invitation(self.org, token, role=ANALYST, created_by=self.owner)
+        with mock.patch.object(invitations, 'INVITABLE_ROLES', (ADMIN, EDITOR, 'MEMBER')):
+            self.assertEqual(self.preview(token).json(), INVALID)
+            self.assertEqual(self.accept(token).json(), INVALID)
         self.assertEqual(self.fresh(row).status, 'PENDING')
         self.assertFalse(Membership.objects.filter(user=self.invitee).exists())
         self.assertTrue(self.audit('INVITATION_REFUSED').get().details.endswith('reason=role_not_invitable'))
@@ -579,8 +600,8 @@ class AcceptInvitationTests(InvBase):
         self.assertEqual(response.status_code, 200, response.content)
         membership = Membership.objects.get(organization=self.org, user=self.invitee)
         self.assertEqual(response.json(), {
-            'organization_id': str(self.org.pk), 'organization_name': self.org.name, 'role': EDITOR,
-            'membership_id': str(membership.pk),
+            'status': 'ACTIVE', 'organization_id': str(self.org.pk), 'organization_name': self.org.name,
+            'role': EDITOR, 'membership_id': str(membership.pk),
         })
         self.assertEqual(response['Cache-Control'], 'private, no-store')
         self.assertEqual((membership.status, membership.role, membership.added_by), ('ACTIVE', EDITOR, self.owner))
@@ -1049,7 +1070,8 @@ class InvitationRouteGuardTests(TestCase):
         from . import views_invitations as v
         for view in (
             v.OrganizationInvitationsView, v.OrganizationInvitationDetailView, v.InvitationPreviewView,
-            v.InvitationAcceptView, v.InvitationDeclineView,
+            v.InvitationAcceptView, v.InvitationDeclineView, v.OrganizationInvitationConfirmView,
+            v.OrganizationInvitationRejectView, v.MyAwaitingInvitationsView, v.InvitationWithdrawView,
         ):
             self.assertTrue(view.acting_context_exempt, view)
 
@@ -1066,7 +1088,7 @@ class InvitationRouteGuardTests(TestCase):
 
         walk(get_resolver())
         invitation_routes = [r for r in routes if r.startswith('api/v1/') and 'invitation' in r]
-        self.assertEqual(len(invitation_routes), 5, invitation_routes)
+        self.assertEqual(len(invitation_routes), 9, invitation_routes)  # + confirm, reject, awaiting, withdraw (B7)
         self.assertFalse([r for r in invitation_routes if 'token' in r])
 
     def test_no_view_imports_add_member(self):
@@ -1097,5 +1119,7 @@ class InvitationRouteGuardTests(TestCase):
         from drf_spectacular.generators import SchemaGenerator
         paths = SchemaGenerator().get_schema(request=None, public=True)['paths']
         found = {p: sorted(m for m in ops if m in ('get', 'post', 'patch', 'delete')) for p, ops in paths.items() if 'invitation' in p}
-        self.assertEqual(len(found), 5, found)
-        self.assertEqual(sorted(found.values()), [['delete'], ['get', 'post'], ['post'], ['post'], ['post']])
+        self.assertEqual(len(found), 9, found)
+        self.assertEqual(
+            sorted(found.values()), [['delete'], ['get'], ['get', 'post']] + [['post']] * 6,
+        )

@@ -5,6 +5,7 @@ import apiClient, { refreshSession } from "@/api/client";
 import i18n from "@/i18n";
 import { httpStatus } from "@/lib/errors";
 import type { User } from "@/api/types";
+import { clearInvitationToken } from "@/lib/invitation-token";
 import { clearLegacyNotices } from "@/lib/legacy-notice";
 import { AUTH_EXPIRED_EVENT, tokenStorage } from "@/lib/tokens";
 
@@ -93,6 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // (réseau faible, ou serveur injoignable : l'utilisateur est déconnecté ici dans tous les cas).
   const logout = useCallback(
     async (options?: { all?: boolean }) => {
+      // Déconnexion volontaire seulement (pas une session expirée) : un jeton d'invitation rangé ne survit pas (L1-01-F2)
+      clearInvitationToken();
       if (options?.all) {
         const done = await requestServerLogout(true);
         clearSession();

@@ -1,7 +1,12 @@
-import { useInfiniteQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import apiClient from "@/api/client";
 import type {
   ChangeMemberRoleBody,
+  CreatedInvitation,
+  CreateInvitationBody,
+  InvitationAccepted,
+  InvitationPreview,
+  OrganizationInvitation,
   OrganizationMember,
   Paginated,
   TransferOwnershipBody,
@@ -13,6 +18,7 @@ import { invalidateContexts } from "@/hooks/use-contexts";
 import { organizationKeys } from "@/hooks/use-organizations";
 import { getApiErrorCode } from "@/lib/api-errors";
 import { shouldRetryQuery } from "@/lib/errors";
+import { clearInvitationToken, readInvitationToken } from "@/lib/invitation-token";
 
 // Équipe d'une organisation (L1-01, contrat `docs/specs/L1-01-contrat-api.md` §1). Les réponses sont `private, no-store`
 // et contiennent des noms de personnes : elles ne vivent qu'en mémoire de l'onglet (aucun cache persistant, service
@@ -29,6 +35,13 @@ const base = (orgId: Uuid) => `accounts/organizations/${orgId}/`;
 export const membersUrl = (orgId: Uuid) => `${base(orgId)}members/`;
 export const memberUrl = (orgId: Uuid, membershipId: Uuid) => `${membersUrl(orgId)}${membershipId}/`;
 export const transferUrl = (orgId: Uuid) => `${base(orgId)}transfer-ownership/`;
+export const invitationsUrl = (orgId: Uuid) => `${base(orgId)}invitations/`;
+export const invitationUrl = (orgId: Uuid, invitationId: Uuid) => `${invitationsUrl(orgId)}${invitationId}/`;
+/** Échange du jeton : le jeton voyage dans le corps du POST, jamais dans ces URL. */
+export const invitationExchangeUrl = (action: "preview" | "accept" | "decline") => `accounts/organization-invitations/${action}/`;
+
+/** Clé de l'aperçu d'invitation : volontairement SANS le jeton (une clé de requête n'est jamais un secret). */
+export const INVITATION_PREVIEW_KEY = ["org-invitation-preview"] as const;
 
 /** Membres actifs, 20 par page (« Voir plus »). Jamais de relance automatique d'un 429, 5xx ou réseau coupé. */
 export function useMembers(orgId: Uuid | undefined) {
@@ -57,6 +70,8 @@ function refreshAfterRefusal(queryClient: QueryClient, orgId: Uuid, error: unkno
   const code = getApiErrorCode(error);
   if (code === "member_not_found") {
     void queryClient.invalidateQueries({ queryKey: teamKeys.members(orgId) });
+  } else if (code === "invitation_not_pending" || code === "invitation_not_found") {
+    void queryClient.invalidateQueries({ queryKey: teamKeys.invitations(orgId) });
   } else if (code === "DENY_PERMISSION" || code === "DENY_RELATION" || code === "DENY_OBJECT_STATE" || code === "DENY_SECURITY") {
     void queryClient.invalidateQueries({ queryKey: teamKeys.members(orgId) });
     void queryClient.invalidateQueries({ queryKey: organizationKeys.internal(orgId) });
@@ -115,5 +130,117 @@ export function useTransferOwnership(orgId: Uuid) {
       void invalidateContexts(queryClient);
     },
     onError: (error) => refreshAfterRefusal(queryClient, orgId, error),
+  });
+}
+
+/**
+ * Invitations en attente (onglet Invitations, 20 par page). `enabled` : la requête ne part qu'à l'ouverture de l'onglet.
+ * Aucune donnée de jeton : la réponse n'en contient jamais.
+ */
+export function useInvitations(orgId: Uuid | undefined, enabled = true) {
+  const { isAuthenticated } = useAuth();
+  return useInfiniteQuery({
+    queryKey: teamKeys.invitations(orgId ?? ""),
+    queryFn: async ({ pageParam }) =>
+      (
+        await apiClient.get<Paginated<OrganizationInvitation>>(invitationsUrl(orgId as Uuid), {
+          params: { status: "PENDING", ...(pageParam > 1 ? { page: pageParam } : {}) },
+        })
+      ).data,
+    initialPageParam: 1,
+    getNextPageParam: (last, pages) => (last.next ? pages.length + 1 : undefined),
+    enabled: enabled && isAuthenticated && !!orgId,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    retry: shouldRetryQuery,
+    select: (data) => {
+      const seen = new Set<Uuid>();
+      const invitations = data.pages.flatMap((page) => page.results).filter((i) => !seen.has(i.invitation_id) && !!seen.add(i.invitation_id));
+      return { invitations, count: data.pages[0]?.count ?? invitations.length };
+    },
+  });
+}
+
+/**
+ * Créer une invitation. `gcTime: 0` : le résultat (qui porte `link_token`, relisible nulle part ailleurs) quitte le cache
+ * de mutations dès que le dialogue se démonte ; il n'entre jamais dans le cache de requêtes. Pas de relance automatique
+ * (deux invitations par erreur).
+ */
+export function useCreateInvitation(orgId: Uuid) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: CreateInvitationBody) => (await apiClient.post<CreatedInvitation>(invitationsUrl(orgId), body)).data,
+    gcTime: 0,
+    retry: false,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: teamKeys.invitations(orgId) });
+    },
+    onError: (error) => refreshAfterRefusal(queryClient, orgId, error),
+  });
+}
+
+/** Annuler une invitation en attente (204) : le lien devient inutilisable. */
+export function useRevokeInvitation(orgId: Uuid) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (invitationId: Uuid) => {
+      await apiClient.delete(invitationUrl(orgId, invitationId));
+    },
+    gcTime: 0,
+    retry: false,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: teamKeys.invitations(orgId) });
+    },
+    onError: (error) => refreshAfterRefusal(queryClient, orgId, error),
+  });
+}
+
+/** Le jeton est relu dans `sessionStorage` au moment de l'appel : il n'est ni une variable de mutation, ni une clé de requête. */
+function tokenBody(): { token: string } {
+  const token = readInvitationToken();
+  if (!token) throw new Error("invitation token missing");
+  return { token };
+}
+
+/**
+ * Aperçu (POST, sans effet de bord) : `useQuery` à fonction POST, clé sans le jeton, jamais conservé (`gcTime: 0`),
+ * jamais relancé sur un 4xx. `enabled` seulement pour un visiteur connecté qui détient un jeton.
+ */
+export function useInvitationPreview(enabled: boolean) {
+  return useQuery({
+    queryKey: INVITATION_PREVIEW_KEY,
+    queryFn: async () => (await apiClient.post<InvitationPreview>(invitationExchangeUrl("preview"), tokenBody())).data,
+    enabled,
+    staleTime: 0,
+    gcTime: 0,
+    retry: shouldRetryQuery,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/** Accepter : le profil actif ne change pas (bouton « Ouvrir l'organisation »). Le jeton est effacé au succès. */
+export function useAcceptInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => (await apiClient.post<InvitationAccepted>(invitationExchangeUrl("accept"), tokenBody())).data,
+    gcTime: 0,
+    retry: false,
+    onSuccess: () => {
+      clearInvitationToken();
+      // Le nouveau profil apparaît à l'appel suivant de `contexts/`
+      void invalidateContexts(queryClient);
+    },
+  });
+}
+
+/** Refuser (204) : le jeton est effacé au succès. */
+export function useDeclineInvitation() {
+  return useMutation({
+    mutationFn: async () => {
+      await apiClient.post(invitationExchangeUrl("decline"), tokenBody());
+    },
+    gcTime: 0,
+    retry: false,
+    onSuccess: () => clearInvitationToken(),
   });
 }

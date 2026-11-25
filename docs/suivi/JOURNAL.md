@@ -188,3 +188,11 @@ Une entrée par tâche terminée ou décision prise, la plus récente en haut.
 - **Lancé** : ADR 0010 (gouvernance des organisations) par l'architecte. F2 : corrections livrées (9adc9dd, 8deb5ae, 818dc32), vérification et relecture en cours.
 - **Dépôt GitHub** : remote `origin` = https://github.com/architectejo/connect-grow.git (historique distant = ancêtre du nôtre, avance rapide possible). **Push refusé (403)** : le compte connecté `anicetboendock-collab` n'a pas le droit d'écriture. En attente d'accès.
 - **Travail d'une autre session** non commité : ADR 0009 et specs L1-11/L1-12 (12/11), `backend/apps/common/locking.py`, `tests_c0.py`, modifications de réglages ; `connect-grow/vitest.config.ts` et `src/test/setup.ts`. Non touchés.
+
+## 2026-11-25 (suite) — L1-01-F2 validée, D2 et B5 livrées
+
+- **F2** (dev-frontend, 3 allers-retours) : onglet Invitations, dialogue avec lien affiché une fois, page publique `/organization-invitation`, jeton en fragment puis `sessionStorage` (daté 60 min, lié au compte, effacé en fin de session), session expirée → « Lien incomplet ». Relue (approuvée au 3e tour), audit sécurité front OK sous réserve. Vérifié par le chef de projet : lint 0 erreur, 1032 tests, build OK. Tests instables identifiés et stabilisés (premiers rendus à froid de `App.resilience` et `SellerProfile`).
+- **Prérequis de déploiement (audit front)** : en-têtes Nginx `Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`. Risque accepté : l'URL d'invitation reste dans l'historique global du navigateur (ADR 0008).
+- **D2** : `docs/specs/L1-01-ecrans-gouvernance.md` (13 composants, ~150 clés). Décisions : pas de lien d'aide tant que le module Aide n'existe pas ; pas d'historique des nominations closes en V1 ; pas d'alerte de nomination sur l'aperçu.
+- **B5** (10e5b00) : « Administrateur principal » dans tous les textes backend, code `OWNER` et codes d'erreur inchangés, migration 0017 cosmétique (no-op). Relue : approuvée. Suggestions reportées à B6 (balayage de test non vide, schémas OpenAPI, harmonisation du contrat §1-§5).
+- **Environnement** : l'interpréteur du projet est `D:\Projects\cp\.env\Scripts\python.exe` (le `python` du PATH pointe ailleurs). À préciser dans CLAUDE.md §7.

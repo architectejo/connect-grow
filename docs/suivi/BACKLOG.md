@@ -47,10 +47,10 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 
 | ID | Tâche | Agents | Statut | Réf. CDC / client |
 |---|---|---|---|---|
-| L1-01 | Organisations : création, revendication, invitation, membres et rôles | dev-backend, dev-frontend | En cours (backend livré : B1 équipe, B2a/B2b invitations, B4 blocages de suppression, relus et audités, 1998 tests backend ; front : F1 équipe fait, F2 invitations en cours, F3 blocages à faire ; restent S front, recette ; revendication L1-01i/j/l bloquée par les questions client, voir `questions.md`) | §3.1 — IAM-005/006 |
+| L1-01 | Organisations : création, revendication, invitation, membres et rôles | dev-backend, dev-frontend | En cours : contrat v1 livré et validé (B1, B2a, B2b, B4 : 1998 tests backend ; F1, F2 : 1032 tests front, relus et audités) ; gouvernance ADR 0010 en cours (B5 livrée, B6 à B10 et front à faire) ; F3 en pause ; revendication déplacée en L1-02 | §3.1 — IAM-005/006 |
 | L1-01-R | Gouvernance après réponses du client : ADR 0010 (Administrateur principal, rôle Membre, périmètre, invitation Administrateur avec confirmation, nomination, anti-abus, organisation sans administrateur principal) | architecte-technique | Fait (ADR 0010 proposé, contrat v2) | Q2, Q3, Q17, Q21-Q26, Q30 |
-| L1-01-B5 | Libellé « Administrateur principal » côté backend | dev-backend | En cours | ADR 0010 |
-| L1-01-D2 | Spécifications d'écran de la gouvernance | designer-ux | En cours | ADR 0010 |
+| L1-01-B5 | Libellé « Administrateur principal » côté backend | dev-backend | En relecture (10e5b00 relu : approuvé ; suite complète en cours) | ADR 0010 |
+| L1-01-D2 | Spécifications d'écran de la gouvernance | designer-ux | Fait (`docs/specs/L1-01-ecrans-gouvernance.md`) | ADR 0010 |
 | L1-01-B6 | Rôle Membre et périmètre sur l'appartenance | dev-backend | À faire | ADR 0010 |
 | L1-01-B7 | Invitations v2 (Administrateur avec confirmation, aperçu enrichi) + revue sécurité S3 | dev-backend, auditeur-securite | À faire | ADR 0010, Q23 |
 | L1-01-B8 | Anti-abus de création d'organisations (fin du plafond de 10) + S5 | dev-backend, auditeur-securite | À faire | ADR 0010, Q22 |

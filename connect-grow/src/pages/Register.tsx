@@ -15,7 +15,7 @@ import { errorProps, Field, fieldInputClass, FormAlert, MethodToggle, PasswordIn
 import { OtpStep } from "@/components/auth/OtpStep";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRequestOtp } from "@/hooks/use-otp";
-import { safeNext } from "@/lib/auth-paths";
+import { loginPath, safeNext } from "@/lib/auth-paths";
 import { cn } from "@/lib/utils";
 import i18n from "@/i18n";
 import { emailSchema, localPhoneSchema, parseApiErrors, passwordSchema, toE164 } from "@/lib/validation";
@@ -83,6 +83,8 @@ const Register = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const next = safeNext(searchParams.get("next"));
+  // La destination (ex. une invitation d'organisation) survit au passage par la connexion
+  const loginLink = next !== "/dashboard" ? loginPath(next) : "/login";
   const { login, isAuthenticated } = useAuth();
   const requestOtp = useRequestOtp();
   const { t } = useTranslation();
@@ -160,7 +162,7 @@ const Register = () => {
     } catch {
       // Compte créé mais connexion automatique impossible : l'utilisateur se connecte lui-même
       toast.success(t("authForm.register.createdLogin"));
-      navigate("/login", { replace: true });
+      navigate(loginLink, { replace: true });
     } finally {
       setIsCreating(false);
     }
@@ -198,7 +200,7 @@ const Register = () => {
         step === 1 && (
           <>
             {t("authForm.register.alreadyMember")}{" "}
-            <Link to="/login" className="font-semibold text-primary hover:underline">
+            <Link to={loginLink} className="font-semibold text-primary hover:underline">
               {t("authForm.register.login")}
             </Link>
           </>

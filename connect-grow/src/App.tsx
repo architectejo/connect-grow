@@ -38,6 +38,7 @@ const OrganizationNew = lazy(() => import("./pages/OrganizationNew.tsx"));
 const OrganizationHome = lazy(() => import("./pages/OrganizationHome.tsx"));
 const OrganizationEdit = lazy(() => import("./pages/OrganizationEdit.tsx"));
 const OrganizationTeam = lazy(() => import("./pages/OrganizationTeam.tsx"));
+const OrganizationInvitation = lazy(() => import("./pages/OrganizationInvitation.tsx"));
 const OrganizationVerification = lazy(() => import("./pages/OrganizationVerification.tsx"));
 const Messages = lazy(() => import("./pages/Messages.tsx"));
 const Businesses = lazy(() => import("./pages/Businesses.tsx"));
@@ -151,6 +152,8 @@ const App = () => {
                   <Route path="/organizations/:id/edit" element={<OrganizationEdit />} />
                   <Route path="/organizations/:id/team" element={<OrganizationTeam />} />
                   <Route path="/organizations/:id/verification" element={<OrganizationVerification />} />
+                  {/* Publique, hors RequireAuth : le jeton est dans le fragment (#token=), jamais dans le chemin */}
+                  <Route path="/organization-invitation" element={<OrganizationInvitation />} />
                   <Route path="/profile" element={<Navigate to="/settings" replace />} />
                   <Route path="/messages" element={<Messages />} />
                   {DesignSystem && <Route path="/design" element={<DesignSystem />} />}

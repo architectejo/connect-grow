@@ -141,6 +141,13 @@ Source : `docs/specs/impact-reponses-client-Q1-Q36.md` §5 et `docs/adr/0010-gou
 | QG-4 | Une organisation peut-elle choisir d'avoir un seul Administrateur principal (option de gouvernance) ? | Plusieurs permis, sans plafond | |
 | QG-5 | Une organisation sans administrateur principal (Q17) reste-t-elle visible publiquement pendant la régularisation ? | Non publique jusqu'à régularisation | |
 | LEG-PRV-invit-4 | Invitation comme Administrateur : la personne qui accepte voit annoncé que le confirmateur verra son nom abrégé et les deux derniers chiffres de son téléphone vérifié (finalité : vérifier l'identité avant un accès privilégié). Cette finalité et la mention d'information sont-elles valables ? Durée de conservation de « qui a accepté, quand » sur l'invitation close ? | Mention dans l'aperçu ; conservation 30 jours après clôture (réglable) | |
+| QC-1 | Cycle de vie (ADR 0011 §17) : confirmez-vous les choix de l'équipe : la dormance ne retire aucune capacité (QL-1) ; une fermeture reste possible sous suspension (QL-3) ; l'ancien nom reste affiché pendant l'examen d'un changement (QL-5) ; le modérateur ne pose pas de restriction en V1 (QL-7) ; taxonomie de départ des 9 catégories (QL-8) ; revérification par défaut après une restauration (QL-10) ; les rôles ordinaires ne voient ni catégorie ni motif (QL-11) ; champ « dénomination légale » distinct du nom d'affichage (QL-13) ? | Appliqués tels quels | |
+| QC-2 | Validez-vous les 9 explications de catégories de restriction (`docs/specs/L1-17-cycle-de-vie-organisations.md` §6) ? | Textes de l'équipe | |
+| QC-3 | Changement de nom : quels justificatifs accepter selon les formes d'entités en RDC ? | Justificatifs libres, décidés par l'équipe Vérification | |
+| QC-4 | Un changement de forme juridique est-il un changement de nom de la même entité ou une nouvelle entité ? | Nouvelle entité si le numéro d'enregistrement change | |
+| QC-5 | Que deviennent les droits commerciaux (plans, promotions) d'une organisation fermée ? | À trancher avec L1-11 | |
+| QC-6 | Faut-il communiquer au demandeur le motif d'un refus de restauration ? | Oui, motif communiqué court | |
+| QC-7 | Quel délai de recours par défaut contre une restriction ? | Réglable, sans valeur | |
 | QG-8 | Liste initiale des catégories et organisations à vérification renforcée (banques, Mobile Money, télécoms, ministères…). | Liste vide, configurable en back-office | |
 
 ## 5. Autres blocages externes déjà notés au backlog

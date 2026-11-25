@@ -140,6 +140,7 @@ Source : `docs/specs/impact-reponses-client-Q1-Q36.md` §5 et `docs/adr/0010-gou
 | QO-13 | Qui valide la grille des durées de conservation (juriste du client, IMARA TECH) ? | En attente | |
 | QG-4 | Une organisation peut-elle choisir d'avoir un seul Administrateur principal (option de gouvernance) ? | Plusieurs permis, sans plafond | |
 | QG-5 | Une organisation sans administrateur principal (Q17) reste-t-elle visible publiquement pendant la régularisation ? | Non publique jusqu'à régularisation | |
+| LEG-PRV-invit-4 | Invitation comme Administrateur : la personne qui accepte voit annoncé que le confirmateur verra son nom abrégé et les deux derniers chiffres de son téléphone vérifié (finalité : vérifier l'identité avant un accès privilégié). Cette finalité et la mention d'information sont-elles valables ? Durée de conservation de « qui a accepté, quand » sur l'invitation close ? | Mention dans l'aperçu ; conservation 30 jours après clôture (réglable) | |
 | QG-8 | Liste initiale des catégories et organisations à vérification renforcée (banques, Mobile Money, télécoms, ministères…). | Liste vide, configurable en back-office | |
 
 ## 5. Autres blocages externes déjà notés au backlog

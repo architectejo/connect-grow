@@ -134,7 +134,7 @@ Source : `docs/specs/impact-reponses-client-Q1-Q36.md` §5 et `docs/adr/0010-gou
 | QO-5 | La location de son propre bien immobilier (Property Rental Pass) entre-t-elle en V1 ? L'immobilier n'est pas dans le périmètre actuel. | Hors V1 tant que non confirmé | |
 | QO-6 | « Simple membre » (Q23) est-il un rôle distinct d'Analyste ? | Rôle « Membre » ajouté (consultation interne et départ seulement) | |
 | QO-7 | Que se passe-t-il à la fin des 90 jours de grâce de vérification (Q26) ? | Restriction de la visibilité, à confirmer | |
-| QO-8 | Seuils de dormance d'une organisation et délai avant archivage d'une organisation sans administrateur principal. | Réglables, sans valeur | |
+| QO-8 | Seuils de dormance d'une organisation et délai avant archivage d'une organisation sans administrateur principal. | Réglables, livrés à 0 (désactivés). Proposition de l'équipe (ADR 0011) : dormance après 365 jours sans activité ; organisation sans administrateur principal restreinte à 30 jours puis archivée à 180 jours | |
 | QO-9 | Délai de traitement annoncé pour une vérification ou une récupération. | Aucun délai promis | |
 | QO-10 | Qui voit l'historique d'accès aux coordonnées d'une organisation ? | Administrateurs principaux et administrateurs | |
 | QO-13 | Qui valide la grille des durées de conservation (juriste du client, IMARA TECH) ? | En attente | |

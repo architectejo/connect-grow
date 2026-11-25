@@ -13,7 +13,8 @@ export function isCacheableApiContent({ url, request }: { url: URL; request: Req
   // Données personnelles : pièces KYC, messages, contacts, avis, notifications (jamais en cache)
   if (/\/(accounts\/kyc|interactions)\//.test(url.pathname)) return false;
   // Espace d'une organisation (internal, kyc, verification, limits, archive, leave), prestataire et profils : privés
-  if (/\/accounts\/(organizations\/[^/]+|provider|contexts)(\/|$)/.test(url.pathname)) return false;
+  // Échange d'invitation (`organization-invitations/preview|accept|decline`, jeton dans le corps) : jamais en cache
+  if (/\/accounts\/(organizations\/[^/]+|organization-invitations|provider|contexts)(\/|$)/.test(url.pathname)) return false;
   // Lectures publiques : offres, profils publics de vendeurs, liste (seule) des organisations
   return (
     /\/api\/v1\/marketplace\/(posts|sellers)\//.test(url.pathname) || /\/api\/v1\/accounts\/organizations\/$/.test(url.pathname)
@@ -40,9 +41,9 @@ export function isContextsRequest({ url }: { url: URL }): boolean {
 
 /**
  * Espace privé d'une organisation et profil prestataire : `organizations/<id>/…` (internal, kyc, verification, archive,
- * leave, limits), `provider/…` et `kyc/…`. Rôles, NIF, état des pièces : jamais en cache hors ligne (réseau seul).
+ * leave, limits, members, invitations), `organization-invitations/…` (aperçu, acceptation, refus : jeton dans le corps), `provider/…` et `kyc/…`. Rôles, NIF, état des pièces : jamais en cache hors ligne (réseau seul).
  * La liste PUBLIQUE `organizations/` n'en fait pas partie. Même contrainte d'autonomie que ci-dessus.
  */
 export function isSensitiveIdentityRequest({ url }: { url: URL }): boolean {
-  return /\/api\/(v\d+\/)?accounts\/(organizations\/[^/]+|provider|kyc)(\/|$)/.test(url.pathname);
+  return /\/api\/(v\d+\/)?accounts\/(organizations\/[^/]+|organization-invitations|provider|kyc)(\/|$)/.test(url.pathname);
 }

@@ -479,6 +479,53 @@ export interface OrganizationLimits {
     name_min_length: number;
     name_max_length: number;
     description_max_length: number;
+    /** Durée de validité d'une invitation (jours) : absente si le serveur ne la renvoie pas (le texte est alors omis). */
+    invitation_ttl_days?: number;
+}
+
+/** Statut effectif d'une invitation : une `PENDING` échue est présentée `EXPIRED` (contrat §0). */
+export type InvitationStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "REVOKED" | "EXPIRED";
+
+/** Rôles qu'une invitation peut donner (jamais OWNER ni ADMIN, contrat §2.1). */
+export type InvitableRole = "EDITOR" | "ANALYST";
+
+/** Invitation en liste (`organizations/<id>/invitations/`, `org.manage_members`). Jamais le jeton ni son empreinte. */
+export interface OrganizationInvitation {
+    invitation_id: Uuid;
+    role: InvitableRole;
+    status: InvitationStatus;
+    label: string;
+    created_at: string;
+    expires_at: string;
+    created_by_display_name: string;
+    is_mine: boolean;
+}
+
+export interface CreateInvitationBody {
+    role: InvitableRole;
+    label?: string;
+}
+
+/** Réponse 201 : `link_token` n'existe que dans cette réponse et n'est jamais relisible. */
+export interface CreatedInvitation extends Omit<OrganizationInvitation, "created_by_display_name" | "is_mine"> {
+    link_token: string;
+}
+
+/** `organization-invitations/preview/` : aucune donnée de l'équipe. */
+export interface InvitationPreview {
+    organization_name: string;
+    org_type: OrganizationType;
+    role: InvitableRole;
+    expires_at: string;
+    invited_by_display_name: string;
+}
+
+/** `organization-invitations/accept/` : `membership_id` n'est pas affiché. */
+export interface InvitationAccepted {
+    organization_id: Uuid;
+    organization_name: string;
+    role: InvitableRole;
+    membership_id: Uuid;
 }
 
 /**

@@ -89,6 +89,14 @@ export function formatMonthYear(date: string | Date): string {
   return Number.isNaN(d.getTime()) ? "" : monthYearFormatter.format(d);
 }
 
+const longDateFormatter = new Intl.DateTimeFormat(LOCALE, { day: "numeric", month: "long", year: "numeric", timeZone: DISPLAY_TIME_ZONE });
+
+/** « 16 novembre 2026 » à l'heure de Kinshasa ; chaîne vide si la date est invalide. */
+export function formatLongDate(date: string | Date): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  return Number.isNaN(d.getTime()) ? "" : longDateFormatter.format(d);
+}
+
 const dateTimeFormatter = new Intl.DateTimeFormat(LOCALE, {
   day: "numeric",
   month: "long",

@@ -38,6 +38,13 @@ const BUSINESS_CODES = [
   "use_leave",
   "confirmation_required",
   "password_required",
+  // Invitations d'organisation (L1-01, contrat §2)
+  "invitation_invalid",
+  "invitation_limit_reached",
+  "invitation_not_found",
+  "invitation_not_pending",
+  "invitation_role_not_allowed",
+  "already_member",
 ] as const;
 export type BusinessCode = (typeof BUSINESS_CODES)[number];
 

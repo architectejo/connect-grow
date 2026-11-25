@@ -139,6 +139,11 @@ describe("espace d'une organisation, prestataire et pièces : jamais en cache ho
     `/api/v1/accounts/organizations/${ID}/members/${ID}/`,
     `/api/v1/accounts/organizations/${ID}/transfer-ownership/`,
     `/api/v1/accounts/organizations/${ID}/invitations/`,
+    `/api/v1/accounts/organizations/${ID}/invitations/?status=PENDING&page=2`,
+    `/api/v1/accounts/organizations/${ID}/invitations/${ID}/`,
+    "/api/v1/accounts/organization-invitations/preview/",
+    "/api/v1/accounts/organization-invitations/accept/",
+    "/api/v1/accounts/organization-invitations/decline/",
     `/api/v1/accounts/organizations/${ID}/`,
     "/api/v1/accounts/organizations/limits/",
     "/api/v1/accounts/provider/",
@@ -173,6 +178,27 @@ describe("espace d'une organisation, prestataire et pièces : jamais en cache ho
       expect(call(path), path).toBe(false);
       expect(call(path, {}, "POST"), path).toBe(false);
     }
+  });
+
+  it("les routes d'invitation (création, liste, révocation, échange du jeton) sont réseau seul, avec ou sans /v1/", () => {
+    for (const path of [
+      `/api/v1/accounts/organizations/${ID}/invitations/`,
+      `/api/v1/accounts/organizations/${ID}/invitations/${ID}/`,
+      "/api/v1/accounts/organization-invitations/preview/",
+      "/api/accounts/organization-invitations/accept/",
+      "/api/v2/accounts/organization-invitations/decline/",
+    ]) {
+      expect(match(path), path).toBe(true);
+      expect(call(path), path).toBe(false);
+      expect(call(path, {}, "POST"), path).toBe(false);
+    }
+  });
+
+  it("la page /organization-invitation n'est pas une route d'API et le jeton (fragment) n'atteint jamais le service worker", () => {
+    expect(match("/organization-invitation")).toBe(false);
+    expect(call("/organization-invitation")).toBe(false);
+    // Un fragment n'est jamais envoyé au réseau : l'URL vue par le service worker n'en contient pas
+    expect(new URL("http://localhost/organization-invitation#token=abc").search).toBe("");
   });
 
   it("la liste publique des organisations n'est pas une route sensible", () => {

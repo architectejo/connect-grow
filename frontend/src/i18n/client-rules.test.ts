@@ -56,6 +56,17 @@ describe("textes de l'interface", () => {
     expect(strings.find(({ path }) => path === "badge.sponsored")?.text).toBe("Sponsorisé");
   });
 
+  it("le mot « propriétaire » (et « propriété ») a disparu de l'interface : « Administrateur principal » (contrat L1-01 §7.1)", () => {
+    expect(strings.filter(({ text }) => /propriétaire|propriété/i.test(text)).map(({ path }) => path)).toEqual([]);
+  });
+
+  it("libellés des cinq rôles imposés (contrat L1-01 §7.1) et « Dans l'équipe depuis » (spec D2 §2.2)", () => {
+    expect(fr.role).toMatchObject({ OWNER: "Administrateur principal", ADMIN: "Administrateur", EDITOR: "Éditeur", ANALYST: "Analyste", MEMBER: "Membre" });
+    for (const code of ["OWNER", "ADMIN", "EDITOR", "ANALYST", "MEMBER"] as const) expect(fr.role[`${code}_desc`].length).toBeGreaterThan(20);
+    expect(fr.team.since).toBe("Dans l'équipe depuis {{date}}");
+    expect(fr.team.colSince).toBe("Dans l'équipe depuis");
+  });
+
   it("le mot « contexte » n'apparaît jamais à l'écran (D1)", () => {
     const hits = strings.filter(({ path, text }) => /\bcontextes?\b/i.test(text) && !/^errors\.deny\./.test(path));
     expect(hits.map(({ path }) => path)).toEqual([]);

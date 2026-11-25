@@ -87,7 +87,7 @@ describe("Vérification de l'organisation (E7)", () => {
   it("analyste ou éditeur : lecture seule, aucun bouton d'envoi ni de suppression", async () => {
     internal = identity.organization_internal_analyst;
     renderPage();
-    expect(await screen.findByText("Seuls le propriétaire et les administrateurs peuvent envoyer des pièces.")).toBeInTheDocument();
+    expect(await screen.findByText("Seuls les administrateurs principaux et les administrateurs peuvent envoyer des pièces.")).toBeInTheDocument();
     await row("Identification nationale");
     expect(screen.queryByRole("button", { name: /Envoyer/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Supprimer/ })).not.toBeInTheDocument();

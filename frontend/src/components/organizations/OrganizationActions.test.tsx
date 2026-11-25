@@ -61,12 +61,12 @@ describe("Quitter l'organisation (E4/E6)", () => {
     expect(leaveActive).toHaveBeenCalledWith({ type: "ORGANIZATION", id: analyst.id }, "left");
   });
 
-  it("dernier propriétaire (409 last_owner) : message persistant dans la page, aucune sortie du profil", async () => {
+  it("dernier administrateur principal (409 last_owner) : message persistant dans la page, aucune sortie du profil", async () => {
     vi.spyOn(apiClient, "post").mockRejectedValue({ response: { status: 409, data: { detail: "x", code: "last_owner" } } });
     renderCard(<LeaveOrganizationCard org={owner} />);
     fireEvent.click(screen.getByRole("button", { name: "Quitter l'organisation" }));
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Quitter l'organisation" }));
-    expect(await screen.findByText(/Vous êtes le dernier propriétaire : vous ne pouvez pas quitter l'organisation/)).toBeInTheDocument();
+    expect(await screen.findByText(/Vous êtes le dernier administrateur principal : vous ne pouvez pas quitter l'organisation/)).toBeInTheDocument();
     expect(screen.queryByText("Mes profils (page)")).not.toBeInTheDocument();
     expect(leaveActive).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
@@ -77,7 +77,7 @@ describe("Quitter l'organisation (E4/E6)", () => {
     renderCard(<LeaveOrganizationCard org={owner} />);
     fireEvent.click(screen.getByRole("button", { name: "Quitter l'organisation" }));
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Quitter l'organisation" }));
-    expect(await screen.findByText(/Cette organisation a des offres actives : elle doit garder au moins un propriétaire disponible/)).toBeInTheDocument();
+    expect(await screen.findByText(/Cette organisation a des offres actives : elle doit garder au moins un administrateur principal disponible/)).toBeInTheDocument();
     expect(screen.queryByText("Mes profils (page)")).not.toBeInTheDocument();
     expect(leaveActive).not.toHaveBeenCalled();
   });
@@ -98,7 +98,7 @@ describe("Quitter l'organisation (E4/E6)", () => {
   });
 });
 
-describe("Archiver l'organisation (propriétaire)", () => {
+describe("Archiver l'organisation (administrateur principal)", () => {
   it("réservé aux détenteurs de org.archive : rien pour un administrateur ou un analyste", () => {
     const { container } = renderCard(<ArchiveOrganizationCard org={analyst} />);
     expect(container).toBeEmptyDOMElement();

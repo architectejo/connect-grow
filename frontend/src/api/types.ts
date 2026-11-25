@@ -365,7 +365,14 @@ export interface FeaturesResponse {
 // --- Contextes (profils) du compte : GET accounts/contexts/ (ADR 0006 §9.1) ---
 
 export type ContextType = "USER" | "PROVIDER" | "ORGANIZATION";
-export type OrganizationRole = "OWNER" | "ADMIN" | "EDITOR" | "ANALYST";
+/** Rôles d'une organisation (contrat L1-01 §7.1). `OWNER` = « Administrateur principal » à l'écran ; `MEMBER` = « Membre ». */
+export type OrganizationRole = "OWNER" | "ADMIN" | "EDITOR" | "ANALYST" | "MEMBER";
+
+/** Périmètre d'une adhésion (contrat L1-01 §7.1). V1 : seule valeur produite `{"type": "ORGANIZATION", "id": null}`. */
+export interface MembershipScope {
+  type: "ORGANIZATION" | "CITY" | "UNIT";
+  id: Uuid | null;
+}
 export type OrganizationType = "ENTREPRISE" | "BOUTIQUE" | "ONG" | "ORGANISATEUR_EVENEMENTS";
 
 /** Élément de `contexts/` : un profil sous lequel le compte peut agir. `capabilities` ne sert qu'à masquer des boutons. */
@@ -430,7 +437,7 @@ export interface OrganizationVerificationBlock {
     summary: VerificationSummary;
 }
 
-/** Détail réservé aux membres actifs. `nif` n'est renseigné que pour le propriétaire et les administrateurs (règle 10). */
+/** Détail réservé aux membres actifs. `nif` n'est renseigné que pour les administrateurs principaux et les administrateurs (règle 10). */
 export interface OrganizationInternal {
     id: Uuid;
     name: string;
@@ -540,6 +547,8 @@ export interface OrganizationMember {
     joined_at: string;
     is_self: boolean;
     is_last_effective_owner: boolean | null;
+    /** Périmètre (B6). Absent d'un serveur antérieur : rien n'est affiché. Jamais modifiable en V1. */
+    scope?: MembershipScope;
 }
 
 /** Corps du PATCH d'un rôle : `confirm` et `password` seulement pour une promotion vers OWNER ou la rétrogradation d'un OWNER. */
@@ -549,8 +558,8 @@ export interface ChangeMemberRoleBody {
     password?: string;
 }
 
-/** Rôles que l'acteur peut prendre après un transfert (jamais OWNER). */
-export type TransferNewRole = Exclude<OrganizationRole, "OWNER">;
+/** Rôles que l'acteur peut prendre après un transfert (jamais OWNER ; MEMBER non proposé avant F5). */
+export type TransferNewRole = Exclude<OrganizationRole, "OWNER" | "MEMBER">;
 
 export interface TransferOwnershipBody {
     membership_id: Uuid;

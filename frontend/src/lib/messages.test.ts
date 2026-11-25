@@ -34,7 +34,7 @@ describe("sendMessageErrorMessage", () => {
     expect(sendMessageErrorMessage(archived)).toBe(fr.errors.deny.OBJECT_STATE.action);
   });
 
-  it("rôle insuffisant dans une organisation : texte « demandez à un propriétaire »", () => {
+  it("rôle insuffisant dans une organisation : texte « demandez à un administrateur principal »", () => {
     expect(sendMessageErrorMessage(failure(403, { code: "DENY_PERMISSION" }), true)).toBe(fr.errors.deny.PERMISSION.org);
   });
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import "@/i18n";
 import fr from "@/i18n/locales/fr";
 import { describeApiError } from "./api-errors";
-import { assignableRoles, classifyTeamError, isOwnersOnlyRow, memberActions, needsReauthentication } from "./team";
+import { ORGANIZATION_ROLES, assignableRoles, classifyTeamError, isOwnersOnlyRow, memberActions, needsReauthentication, scopeLabel } from "./team";
 
 const failure = (status: number, data: unknown = {}, headers: Record<string, string> = {}) =>
   new AxiosError(`HTTP ${status}`, String(status), undefined, null, { status, data, headers } as unknown as AxiosResponse);
@@ -16,9 +16,9 @@ const admin = { role: "ADMIN" as const, capabilities: MANAGE };
 const editor = { role: "EDITOR" as const, capabilities: ["org.view_internal"] };
 
 describe("memberActions : menu selon le rôle de l'acteur et de la cible", () => {
-  it("un propriétaire : changer le rôle et transférer sur tous, retirer sauf sur un propriétaire", () => {
+  it("un administrateur principal : changer le rôle et transférer sur tous, retirer sauf sur un administrateur principal", () => {
     expect(memberActions(owner, { role: "OWNER", is_self: false })).toEqual(["changeRole", "transfer"]);
-    for (const role of ["ADMIN", "EDITOR", "ANALYST"] as const) {
+    for (const role of ["ADMIN", "EDITOR", "ANALYST", "MEMBER"] as const) {
       expect(memberActions(owner, { role, is_self: false })).toEqual(["changeRole", "transfer", "remove"]);
     }
   });
@@ -26,22 +26,26 @@ describe("memberActions : menu selon le rôle de l'acteur et de la cible", () =>
     expect(memberActions(owner, { role: "OWNER", is_self: true })).toEqual([]);
     expect(memberActions(admin, { role: "ADMIN", is_self: true })).toEqual([]);
   });
-  it("un administrateur : changer le rôle et retirer, jamais de transfert, rien sur un propriétaire", () => {
+  it("un administrateur : changer le rôle et retirer, jamais de transfert, rien sur un administrateur principal", () => {
     expect(memberActions(admin, { role: "EDITOR", is_self: false })).toEqual(["changeRole", "remove"]);
+    expect(memberActions(admin, { role: "MEMBER", is_self: false })).toEqual(["changeRole", "remove"]);
     expect(memberActions(admin, { role: "ADMIN", is_self: false })).toEqual(["changeRole", "remove"]);
     expect(memberActions(admin, { role: "OWNER", is_self: false })).toEqual([]);
   });
-  it("éditeur et analyste : aucune action", () => {
-    for (const role of ["OWNER", "ADMIN", "EDITOR", "ANALYST"] as const) {
+  it("éditeur, analyste et membre : aucune action, sur aucun rôle", () => {
+    for (const role of ORGANIZATION_ROLES) {
       expect(memberActions(editor, { role, is_self: false })).toEqual([]);
       expect(memberActions({ role: "ANALYST", capabilities: [] }, { role, is_self: false })).toEqual([]);
+      // Capacités de MEMBER (contrat §7.1) : org.leave et org.view_internal seulement
+      expect(memberActions({ role: "MEMBER", capabilities: ["org.leave", "org.view_internal"] }, { role, is_self: false })).toEqual([]);
+      expect(isOwnersOnlyRow({ role: "MEMBER", capabilities: [] }, { role, is_self: false })).toBe(false);
     }
   });
   it("suit les capacités : sans org.manage_roles, ni changement de rôle ni transfert", () => {
     const limited = { role: "OWNER" as const, capabilities: ["org.manage_members"] };
     expect(memberActions(limited, { role: "EDITOR", is_self: false })).toEqual(["remove"]);
   });
-  it("« Réservé aux propriétaires » seulement pour un administrateur devant un propriétaire", () => {
+  it("« Réservé aux administrateurs principaux » seulement pour un administrateur devant un administrateur principal", () => {
     expect(isOwnersOnlyRow(admin, { role: "OWNER", is_self: false })).toBe(true);
     expect(isOwnersOnlyRow(admin, { role: "EDITOR", is_self: false })).toBe(false);
     expect(isOwnersOnlyRow(owner, { role: "OWNER", is_self: false })).toBe(false);
@@ -49,16 +53,34 @@ describe("memberActions : menu selon le rôle de l'acteur et de la cible", () =>
 });
 
 describe("rôles attribuables et ressaisie du mot de passe", () => {
-  it("un administrateur n'attribue jamais Propriétaire", () => {
-    expect(assignableRoles("OWNER")).toEqual(["OWNER", "ADMIN", "EDITOR", "ANALYST"]);
-    expect(assignableRoles("ADMIN")).toEqual(["ADMIN", "EDITOR", "ANALYST"]);
+  it("ordre des rôles : Membre en dernier (contrat §7.1)", () => {
+    expect(ORGANIZATION_ROLES).toEqual(["OWNER", "ADMIN", "EDITOR", "ANALYST", "MEMBER"]);
   });
-  it("exigée pour une promotion vers Propriétaire ou la rétrogradation d'un Propriétaire seulement", () => {
+  it("un administrateur n'attribue jamais Administrateur principal ; Membre est attribuable", () => {
+    expect(assignableRoles("OWNER")).toEqual(["OWNER", "ADMIN", "EDITOR", "ANALYST", "MEMBER"]);
+    expect(assignableRoles("ADMIN")).toEqual(["ADMIN", "EDITOR", "ANALYST", "MEMBER"]);
+  });
+  it("exigée pour une promotion vers Administrateur principal ou la rétrogradation d'un Administrateur principal seulement", () => {
     expect(needsReauthentication("ADMIN", "OWNER")).toBe(true);
     expect(needsReauthentication("OWNER", "ADMIN")).toBe(true);
     expect(needsReauthentication("ADMIN", "EDITOR")).toBe(false);
     expect(needsReauthentication("EDITOR", "ANALYST")).toBe(false);
     expect(needsReauthentication("OWNER", "OWNER")).toBe(false);
+    expect(needsReauthentication("ANALYST", "MEMBER")).toBe(false);
+    expect(needsReauthentication("OWNER", "MEMBER")).toBe(true);
+  });
+});
+
+describe("scopeLabel : périmètre affiché, jamais choisi (spec D2 §2.4)", () => {
+  const t = (key: string) => key;
+  it("ORGANIZATION : « Toute l'organisation »", () => {
+    expect(scopeLabel({ type: "ORGANIZATION" }, t)).toBe("scope.ORGANIZATION");
+    expect(fr.scope.ORGANIZATION).toBe("Toute l'organisation");
+  });
+  it("toute autre valeur (inatteignable en V1) : « Périmètre limité », sans détail inventé", () => {
+    expect(scopeLabel({ type: "CITY" }, t)).toBe("scope.limited");
+    expect(scopeLabel({ type: "UNIT" }, t)).toBe("scope.limited");
+    expect(fr.scope.limited).toBe("Périmètre limité");
   });
 });
 
@@ -78,7 +100,7 @@ describe("textes des codes d'erreur d'équipe (describeApiError)", () => {
     expect(text).toBe(expected);
     expect(text).not.toContain("serveur");
   });
-  it("last_owner en retrait ou rétrogradation : texte « au moins un propriétaire »", () => {
+  it("last_owner en retrait ou rétrogradation : texte « au moins un administrateur principal »", () => {
     expect(describeApiError(coded(409, "last_owner"), { demote: true })).toBe(fr.errors.code.last_owner_demote);
   });
 });
@@ -90,7 +112,7 @@ describe("classifyTeamError", () => {
   it("404 member_not_found : le membre n'est plus là", () => {
     expect(classifyTeamError(coded(404, "member_not_found"))).toMatchObject({ kind: "gone", message: fr.team.alreadyGone });
   });
-  it("DENY_PERMISSION et DENY_RELATION : refus avec le texte « demandez à un propriétaire »", () => {
+  it("DENY_PERMISSION et DENY_RELATION : refus avec le texte « demandez à un administrateur principal »", () => {
     expect(classifyTeamError(coded(403, "DENY_PERMISSION"))).toEqual({ kind: "denied", message: fr.errors.deny.PERMISSION.org });
     expect(classifyTeamError(coded(403, "DENY_RELATION"))).toMatchObject({ kind: "denied" });
   });

@@ -79,7 +79,7 @@ describe("OrganizationPage : organisation suspendue ou archivée", () => {
   it("organisation archivée : texte « archivée » et recours de l'équipe", async () => {
     renderAt(`/organizations/${archived.id}`);
     expect(await screen.findByText("Cette organisation est archivée")).toBeInTheDocument();
-    expect(screen.getByText(/Pour toute question, adressez-vous au propriétaire/)).toBeInTheDocument();
+    expect(screen.getByText(/Pour toute question, adressez-vous à un administrateur principal/)).toBeInTheDocument();
   });
 
   it("relit contexts/ une seule fois à l'ouverture (en ligne)", async () => {
@@ -128,7 +128,7 @@ describe("UnavailableOrganizationsSection (/profiles)", () => {
     expect(screen.getByText("Atelier Suspendu")).toBeInTheDocument();
     expect(screen.getByLabelText("Statut de l'organisation : Suspendue")).toBeInTheDocument();
     expect(screen.getByLabelText("Statut de l'organisation : Archivée")).toBeInTheDocument();
-    expect(screen.getByText("Propriétaire")).toBeInTheDocument();
+    expect(screen.getByText("Administrateur principal")).toBeInTheDocument();
     expect(screen.queryByText("Agir sous ce profil")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Voir l'état de Atelier Suspendu" })).toHaveAttribute("href", `/organizations/${suspended.id}`);

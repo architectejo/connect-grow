@@ -77,7 +77,7 @@ describe("écran Équipe", () => {
     expect(rolesToggle).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("propriétaire : bouton « Inviter une personne » et onglets Membres / Invitations", async () => {
+  it("administrateur principal : bouton « Inviter une personne » et onglets Membres / Invitations", async () => {
     renderPage(owner);
     await screen.findByText("Marie K.");
     expect(screen.getByRole("button", { name: "Inviter une personne" })).toBeEnabled();
@@ -92,6 +92,25 @@ describe("écran Équipe", () => {
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Inviter une personne" })).not.toBeInTheDocument();
     expect(screen.queryByText(/Invitations/)).not.toBeInTheDocument();
+  });
+
+  it("membre (MEMBER) : lecture seule, son rôle « Membre » décrit, tableau des cinq rôles avec Membre en dernier", async () => {
+    renderPage({ ...analyst, my_role: "MEMBER", capabilities: ["org.leave", "org.view_internal"] });
+    await screen.findByText("Marie K.");
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Inviter une personne" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Actions pour Marie K." })).not.toBeInTheDocument();
+    const yourRole = screen.getByRole("heading", { name: "Votre rôle" }).closest("section") as HTMLElement;
+    expect(within(yourRole).getByText("Membre")).toBeInTheDocument();
+    expect(within(yourRole).getByText(/ne voit pas les statistiques/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Que peut faire chaque rôle ?" }));
+    const items = await screen.findAllByRole("listitem");
+    const roles = items.filter((item) => item.querySelector("p.text-sm")).map((item) => item.querySelector(".gap-1")?.textContent);
+    expect(roles).toEqual(["Administrateur principal", "Administrateur", "Éditeur", "Analyste", "Membre"]);
+    const mine = items.find((item) => item.getAttribute("aria-current") === "true") as HTMLElement;
+    expect(within(mine).getByText("Membre")).toBeInTheDocument();
+    // Aucun « propriétaire » visible
+    expect(document.body.textContent).not.toMatch(/propriétaire/i);
   });
 
   it("la requête des invitations part à l'ouverture de l'onglet, pas au chargement de la page", async () => {

@@ -115,7 +115,7 @@ export function useRemoveMember(orgId: Uuid) {
 }
 
 /**
- * Transfert de propriété. Le rôle de l'acteur change : détail de l'organisation (`my_role`, capacités), liste des profils
+ * Transfert d'administration principale. Le rôle de l'acteur change : détail de l'organisation (`my_role`, capacités), liste des profils
  * (rôle mémorisé du profil actif) et liste des membres sont rechargés.
  */
 export function useTransferOwnership(orgId: Uuid) {

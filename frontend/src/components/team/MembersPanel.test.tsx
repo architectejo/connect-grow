@@ -85,24 +85,24 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("liste des membres : affichage selon le rôle", () => {
-  it("propriétaire : tableau avec en-têtes, noms abrégés, (vous), rôles et ancienneté", async () => {
+  it("administrateur principal : tableau avec en-têtes, noms abrégés, (vous), rôles et ancienneté", async () => {
     renderPanel("OWNER", MANAGE);
     expect(await screen.findByText("Paul M.")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: /Membres de l'équipe/ })).toBeInTheDocument();
-    for (const header of ["Membre", "Rôle", "Membre depuis", "Actions"]) expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
+    for (const header of ["Membre", "Rôle", "Dans l'équipe depuis", "Actions"]) expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
     expect(screen.getByText("(vous)")).toBeInTheDocument();
     const adminRow = screen.getByText("Paul M.").closest("tr") as HTMLElement;
     expect(within(adminRow).getByText("Administrateur")).toBeInTheDocument();
     expect(within(adminRow).getByText("septembre 2026")).toBeInTheDocument();
   });
 
-  it("mobile : cartes empilées avec « Membre depuis … »", async () => {
+  it("mobile : cartes empilées avec « Dans l'équipe depuis … »", async () => {
     window.innerWidth = 500;
     renderPanel("OWNER", MANAGE);
     expect(await screen.findByText("Paul M.")).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.getAllByRole("listitem")).toHaveLength(TEAM.length);
-    expect(screen.getAllByText("Membre depuis septembre 2026")).toHaveLength(TEAM.length);
+    expect(screen.getAllByText("Dans l'équipe depuis septembre 2026")).toHaveLength(TEAM.length);
   });
 
   it("n'affiche aucun téléphone, e-mail ni identifiant de compte ou d'appartenance (règle 10)", async () => {
@@ -129,27 +129,27 @@ describe("liste des membres : affichage selon le rôle", () => {
     }
   });
 
-  it("administrateur : menu sur les non-propriétaires, texte « Réservé aux propriétaires » sur un propriétaire", async () => {
+  it("administrateur : menu sur les non-administrateurs principaux, texte « Réservé aux administrateurs principaux » sur un administrateur principal", async () => {
     renderPanel("ADMIN", MANAGE, [CO_OWNER, { ...ADMIN, is_self: true }, EDITOR]);
     await screen.findByText("Jean T.");
     expect(trigger("Luc D.")).not.toBeInTheDocument();
-    expect(screen.getByText("Réservé aux propriétaires")).toBeInTheDocument();
+    expect(screen.getByText("Réservé aux administrateurs principaux")).toBeInTheDocument();
     expect(trigger("Paul M.")).not.toBeInTheDocument(); // sa propre ligne
     const menu = await openMenu("Jean T.");
     expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Changer le rôle", "Retirer de l'équipe"]);
   });
 
-  it("badge « Seul propriétaire actif » seulement si is_last_effective_owner vaut true ; aide sur sa propre ligne", async () => {
+  it("badge « Seul administrateur principal actif » seulement si is_last_effective_owner vaut true ; aide sur sa propre ligne", async () => {
     renderPanel("OWNER", MANAGE, [{ ...ME_OWNER, is_last_effective_owner: true }, ADMIN, { ...EDITOR, is_last_effective_owner: null }]);
     await screen.findByText("Paul M.");
-    expect(screen.getAllByText("Seul propriétaire actif")).toHaveLength(1);
-    expect(screen.getByText(/elle n'aura plus de propriétaire disponible/)).toBeInTheDocument();
-    const badge = screen.getByText("Seul propriétaire actif").closest("div") as HTMLElement;
+    expect(screen.getAllByText("Seul administrateur principal actif")).toHaveLength(1);
+    expect(screen.getByText(/elle n'aura plus d'administrateur principal disponible/)).toBeInTheDocument();
+    const badge = screen.getByText("Seul administrateur principal actif").closest("div") as HTMLElement;
     expect(badge).toHaveAttribute("title", expect.stringContaining("ne peuvent pas agir actuellement"));
     expect(document.getElementById(badge.getAttribute("aria-describedby") as string)).toHaveTextContent("ne peuvent pas agir actuellement");
   });
 
-  it("ne bloque jamais d'avance sur le dernier propriétaire : le menu de l'autre propriétaire reste complet", async () => {
+  it("ne bloque jamais d'avance sur le dernier administrateur principal : le menu de l'autre administrateur principal reste complet", async () => {
     renderPanel("OWNER", MANAGE, [{ ...ME_OWNER, is_last_effective_owner: true }, { ...CO_OWNER, is_last_effective_owner: false }]);
     await screen.findByText("Luc D.");
     const menu = await openMenu("Luc D.");
@@ -157,23 +157,78 @@ describe("liste des membres : affichage selon le rôle", () => {
   });
 });
 
-describe("menu d'actions d'un propriétaire", () => {
-  it("cible non propriétaire : changer le rôle, transférer, puis retirer après un séparateur destructif", async () => {
+describe("rôle Membre (contrat L1-01 §7.1, spec D2 §2.1 et §4.3)", () => {
+  const MEMBER = make(6, "Rose N.", "MEMBER", { scope: { type: "ORGANIZATION", id: null } });
+
+  it("un membre voit l'équipe sans aucun menu ni indication de gestion, sur aucune ligne", async () => {
+    renderPanel("MEMBER", ["org.leave", "org.view_internal"], [CO_OWNER, ADMIN, EDITOR, ANALYST, { ...MEMBER, is_self: true, is_last_effective_owner: null }]);
+    await screen.findByText("Rose N.");
+    for (const name of ["Luc D.", "Paul M.", "Jean T.", "Awa B.", "Rose N."]) expect(trigger(name)).not.toBeInTheDocument();
+    expect(screen.queryByText("Réservé aux administrateurs principaux")).not.toBeInTheDocument();
+    expect(screen.queryByText("Pour retirer cet administrateur principal, changez d'abord son rôle.")).not.toBeInTheDocument();
+    // Le rôle s'affiche par un badge « Membre », l'ancienneté par « Dans l'équipe depuis » (pas de confusion)
+    expect(screen.getAllByText("Membre").length).toBeGreaterThanOrEqual(2); // en-tête de colonne + badge
+    expect(screen.getByRole("columnheader", { name: "Dans l'équipe depuis" })).toBeInTheDocument();
+  });
+
+  it("mobile : carte du membre avec badge « Membre » et « Dans l'équipe depuis »", async () => {
+    window.innerWidth = 375;
+    renderPanel("MEMBER", ["org.leave", "org.view_internal"], [{ ...MEMBER, is_self: true }]);
+    await screen.findByText("Rose N.");
+    expect(screen.getByText("Membre")).toBeInTheDocument();
+    expect(screen.getByText("Dans l'équipe depuis septembre 2026")).toBeInTheDocument();
+  });
+
+  it("un administrateur principal gère un membre : changer le rôle, transférer, retirer", async () => {
+    renderPanel("OWNER", MANAGE, [ME_OWNER, MEMBER]);
+    await screen.findByText("Rose N.");
+    const menu = await openMenu("Rose N.");
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Changer le rôle", "Transférer l'administration principale à Rose N.", "Retirer de l'équipe"]);
+  });
+
+  it("changer le rôle : Membre proposé en dernier, périmètre affiché sous le titre, jamais envoyé", async () => {
+    const patch = vi.spyOn(apiClient, "patch").mockResolvedValue({ data: { ...MEMBER, role: "ANALYST" } });
+    renderPanel("ADMIN", MANAGE, [{ ...ADMIN, is_self: true }, MEMBER]);
+    await screen.findByText("Rose N.");
+    await pick("Rose N.", "Changer le rôle");
+    const dialog = await screen.findByRole("dialog", { name: "Changer le rôle de Rose N." });
+    expect(within(dialog).getByText("Périmètre : Toute l'organisation")).toBeInTheDocument();
+    const radios = within(dialog).getAllByRole("radio");
+    expect(radios.map((radio) => radio.getAttribute("value"))).toEqual(["ADMIN", "EDITOR", "ANALYST", "MEMBER"]);
+    expect(within(dialog).getByRole("radio", { name: /^Membre/ })).toBeChecked();
+    // Aucun contrôle de saisie du périmètre (spec D2 §2.4)
+    expect(within(dialog).queryByRole("combobox")).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Analyste/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enregistrer le rôle" }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith(`accounts/organizations/${ORG}/members/${MEMBER.membership_id}/`, { role: "ANALYST" }));
+  });
+
+  it("serveur antérieur sans `scope` : aucune ligne de périmètre, rien d'inventé", async () => {
+    renderPanel("OWNER", MANAGE, [ME_OWNER, EDITOR]);
+    await screen.findByText("Jean T.");
+    await pick("Jean T.", "Changer le rôle");
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByText(/Périmètre/)).not.toBeInTheDocument();
+  });
+});
+
+describe("menu d'actions d'un administrateur principal", () => {
+  it("cible non administrateur principal : changer le rôle, transférer, puis retirer après un séparateur destructif", async () => {
     renderPanel("OWNER", MANAGE);
     await screen.findByText("Paul M.");
     expect(trigger("Marie K.")).not.toBeInTheDocument(); // pas de menu sur sa propre ligne
     const menu = await openMenu("Paul M.");
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Changer le rôle", "Transférer la propriété à Paul M.", "Retirer de l'équipe"]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Changer le rôle", "Transférer l'administration principale à Paul M.", "Retirer de l'équipe"]);
     expect(within(menu).getByRole("separator")).toBeInTheDocument();
   });
 
-  it("cible propriétaire : pas de « Retirer », avec l'indication « rétrogradez-le d'abord »", async () => {
+  it("cible administrateur principal : pas de « Retirer », avec l'indication « changez d'abord son rôle »", async () => {
     renderPanel("OWNER", MANAGE);
     await screen.findByText("Luc D.");
     const menu = await openMenu("Luc D.");
     expect(within(menu).queryByRole("menuitem", { name: /Retirer/ })).not.toBeInTheDocument();
     expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
-    expect(screen.getByText("Pour retirer ce propriétaire, rétrogradez-le d'abord.")).toBeInTheDocument();
+    expect(screen.getByText("Pour retirer cet administrateur principal, changez d'abord son rôle.")).toBeInTheDocument();
   });
 
   it("le déclencheur a un nom accessible propre à la ligne et le menu s'ouvre au clavier (Entrée)", async () => {
@@ -205,25 +260,25 @@ describe("changer le rôle (E6b)", () => {
     expect(onAnnounce).toHaveBeenCalledWith("Le rôle de Jean T. est maintenant Analyste.");
   });
 
-  it("l'administrateur ne peut pas choisir Propriétaire", async () => {
+  it("l'administrateur ne peut pas choisir Administrateur principal", async () => {
     renderPanel("ADMIN", MANAGE, [{ ...ADMIN, is_self: true }, EDITOR]);
     await screen.findByText("Jean T.");
     await pick("Jean T.", "Changer le rôle");
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getAllByRole("radio")).toHaveLength(3);
-    expect(within(dialog).queryByRole("radio", { name: /Propriétaire/ })).not.toBeInTheDocument();
+    expect(within(dialog).getAllByRole("radio")).toHaveLength(4);
+    expect(within(dialog).queryByRole("radio", { name: /^Administrateur principal/ })).not.toBeInTheDocument();
   });
 
-  it("promotion vers Propriétaire : étape 2 avec case et mot de passe, envoyés dans le corps seulement", async () => {
+  it("promotion vers Administrateur principal : étape 2 avec case et mot de passe, envoyés dans le corps seulement", async () => {
     const patch = vi.spyOn(apiClient, "patch").mockResolvedValue({ data: { ...ADMIN, role: "OWNER" } });
     renderPanel("OWNER", MANAGE);
     await screen.findByText("Paul M.");
     await pick("Paul M.", "Changer le rôle");
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("radio", { name: /Propriétaire/ }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Administrateur principal/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Enregistrer le rôle" }));
     expect(patch).not.toHaveBeenCalled();
-    expect(within(dialog).getByText(/Paul M\. deviendra propriétaire/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Paul M\. deviendra administrateur principal/)).toBeInTheDocument();
     const confirmButton = within(dialog).getByRole("button", { name: "Confirmer le changement" });
     expect(confirmButton).toBeDisabled();
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Je confirme ce changement" }));
@@ -246,16 +301,16 @@ describe("changer le rôle (E6b)", () => {
     expect(document.body.innerHTML).not.toContain(PASSWORD);
   });
 
-  it("rétrogradation d'un propriétaire : étape 2 avec le texte de rétrogradation ; « Retour » revient au choix", async () => {
+  it("rétrogradation d'un administrateur principal : étape 2 avec le texte de rétrogradation ; « Retour » revient au choix", async () => {
     renderPanel("OWNER", MANAGE);
     await screen.findByText("Luc D.");
     await pick("Luc D.", "Changer le rôle");
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("radio", { name: /Administrateur/ }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Administrateur(?! principal)/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Enregistrer le rôle" }));
-    expect(within(dialog).getByText(/Luc D\. ne sera plus propriétaire/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Luc D\. ne sera plus administrateur principal/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Retour" }));
-    expect(within(dialog).getAllByRole("radio")).toHaveLength(4);
+    expect(within(dialog).getAllByRole("radio")).toHaveLength(5);
     expect(within(dialog).queryByLabelText("Votre mot de passe")).not.toBeInTheDocument();
   });
 
@@ -265,7 +320,7 @@ describe("changer le rôle (E6b)", () => {
     await screen.findByText("Luc D.");
     await pick("Luc D.", "Changer le rôle");
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("radio", { name: /Administrateur/ }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Administrateur(?! principal)/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Enregistrer le rôle" }));
     fireEvent.click(within(dialog).getByRole("checkbox"));
     fireEvent.change(within(dialog).getByLabelText("Votre mot de passe"), { target: { value: PASSWORD } });
@@ -286,7 +341,7 @@ describe("changer le rôle (E6b)", () => {
   });
 
   it.each([
-    ["409 last_owner", apiError(409, "last_owner"), "Une organisation doit toujours avoir au moins un propriétaire."],
+    ["409 last_owner", apiError(409, "last_owner"), "Une organisation doit toujours avoir au moins un administrateur principal."],
     ["409 last_effective_owner", apiError(409, "last_effective_owner"), "Cette organisation a des offres actives"],
     ["400 user_unavailable", apiError(400, "user_unavailable"), "Ce changement n'est pas possible pour ce compte pour le moment."],
     ["400 confirmation_required", apiError(400, "confirmation_required"), "Cochez la case de confirmation"],
@@ -345,28 +400,28 @@ describe("changer le rôle (E6b)", () => {
   });
 });
 
-describe("transférer la propriété (E6c)", () => {
+describe("transférer l'administration principale (E6c)", () => {
   const open = async () => {
     renderPanel("OWNER", MANAGE);
     await screen.findByText("Paul M.");
-    await pick("Paul M.", /Transférer la propriété/);
-    return screen.findByRole("dialog", { name: "Transférer la propriété à Paul M." });
+    await pick("Paul M.", /Transférer l'administration principale/);
+    return screen.findByRole("dialog", { name: "Transférer l'administration principale à Paul M." });
   };
   const fill = (dialog: HTMLElement) => {
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Je confirme le transfert de propriété" }));
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Je confirme le transfert d'administration principale" }));
     fireEvent.change(within(dialog).getByLabelText("Votre mot de passe"), { target: { value: PASSWORD } });
   };
 
-  it("contenu : texte, rôle après transfert (Administrateur par défaut, jamais Propriétaire), alternative ; focus initial « Annuler »", async () => {
+  it("contenu : texte, rôle après transfert (Administrateur par défaut, jamais Administrateur principal), alternative ; focus initial « Annuler »", async () => {
     const dialog = await open();
-    expect(within(dialog).getByText(/Paul M\. deviendra propriétaire\. Vous ne serez plus propriétaire/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Paul M\. deviendra administrateur principal\. Vous ne serez plus administrateur principal/)).toBeInTheDocument();
     expect(within(dialog).getByText(/utilisez plutôt « Changer le rôle »/)).toBeInTheDocument();
     const radios = within(dialog).getAllByRole("radio");
     expect(radios.map((r) => r.id)).toEqual(["transfer-role-ADMIN", "transfer-role-EDITOR", "transfer-role-ANALYST"]);
-    expect(within(dialog).getByRole("radio", { name: /Administrateur/ })).toBeChecked();
+    expect(within(dialog).getByRole("radio", { name: /^Administrateur(?! principal)/ })).toBeChecked();
     expect(within(dialog).getByRole("radiogroup", { name: "Votre rôle après le transfert" })).toBeInTheDocument();
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Annuler" })).toHaveFocus());
-    expect(within(dialog).getByRole("button", { name: "Transférer la propriété" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Transférer l'administration principale" })).toBeDisabled();
   });
 
   it("succès : POST avec membership_id, my_new_role, confirm et mot de passe ; toast ; fermeture", async () => {
@@ -374,7 +429,7 @@ describe("transférer la propriété (E6c)", () => {
     const dialog = await open();
     fireEvent.click(within(dialog).getByRole("radio", { name: /Éditeur/ }));
     fill(dialog);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer la propriété" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer l'administration principale" }));
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith(`accounts/organizations/${ORG}/transfer-ownership/`, {
         membership_id: ADMIN.membership_id,
@@ -384,7 +439,7 @@ describe("transférer la propriété (E6c)", () => {
       }),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(toast.success).toHaveBeenCalledWith("La propriété a été transférée à Paul M..");
+    expect(toast.success).toHaveBeenCalledWith("L'administration principale a été transférée à Paul M..");
   });
 
   it.each([
@@ -396,7 +451,7 @@ describe("transférer la propriété (E6c)", () => {
     vi.spyOn(apiClient, "post").mockRejectedValue(error);
     const dialog = await open();
     fill(dialog);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer la propriété" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer l'administration principale" }));
     expect(await within(dialog).findByText(new RegExp(text))).toBeInTheDocument();
   });
 
@@ -404,21 +459,21 @@ describe("transférer la propriété (E6c)", () => {
     vi.spyOn(apiClient, "post").mockRejectedValue(apiError(403, "reauthentication_failed"));
     const dialog = await open();
     fill(dialog);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer la propriété" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer l'administration principale" }));
     expect(await within(dialog).findByText("Mot de passe incorrect.")).toBeInTheDocument();
     const password = within(dialog).getByLabelText("Votre mot de passe");
     expect(password).toHaveValue("");
     await waitFor(() => expect(password).toHaveFocus());
-    expect(within(dialog).getByRole("button", { name: "Transférer la propriété" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Transférer l'administration principale" })).toBeDisabled();
   });
 
   it("429 : message de patience, bouton désactivé, aucune relance automatique", async () => {
     const post = vi.spyOn(apiClient, "post").mockRejectedValueOnce(apiError(429, undefined, { "retry-after": "600" }));
     const dialog = await open();
     fill(dialog);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer la propriété" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer l'administration principale" }));
     expect(await within(dialog).findByText("Trop de tentatives. Réessayez dans quelques minutes.")).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Transférer la propriété" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Transférer l'administration principale" })).toBeDisabled();
     expect(post).toHaveBeenCalledTimes(1);
   });
 
@@ -426,7 +481,7 @@ describe("transférer la propriété (E6c)", () => {
     vi.spyOn(apiClient, "post").mockRejectedValue(apiError(403, "DENY_PERMISSION"));
     const dialog = await open();
     fill(dialog);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer la propriété" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer l'administration principale" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Votre rôle ne permet pas cette action"));
   });
@@ -435,7 +490,7 @@ describe("transférer la propriété (E6c)", () => {
     vi.spyOn(apiClient, "post").mockRejectedValue(apiError(404, "member_not_found"));
     const dialog = await open();
     fill(dialog);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer la propriété" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer l'administration principale" }));
     await waitFor(() => expect(toast.info).toHaveBeenCalledWith("Cette personne ne fait plus partie de l'équipe."));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
@@ -453,7 +508,7 @@ describe("le mot de passe de ressaisie n'est jamais conservé", () => {
     await screen.findByText("Luc D.");
     await pick("Luc D.", "Changer le rôle");
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("radio", { name: /Administrateur/ }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Administrateur(?! principal)/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Enregistrer le rôle" }));
     fireEvent.click(within(dialog).getByRole("checkbox"));
     fireEvent.change(within(dialog).getByLabelText("Votre mot de passe"), { target: { value: PASSWORD } });
@@ -463,11 +518,11 @@ describe("le mot de passe de ressaisie n'est jamais conservé", () => {
   const fillTransfer = async () => {
     renderPanel("OWNER", MANAGE);
     await screen.findByText("Paul M.");
-    await pick("Paul M.", /Transférer la propriété/);
-    const dialog = await screen.findByRole("dialog", { name: "Transférer la propriété à Paul M." });
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Je confirme le transfert de propriété" }));
+    await pick("Paul M.", /Transférer l'administration principale/);
+    const dialog = await screen.findByRole("dialog", { name: "Transférer l'administration principale à Paul M." });
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Je confirme le transfert d'administration principale" }));
     fireEvent.change(within(dialog).getByLabelText("Votre mot de passe"), { target: { value: PASSWORD } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer la propriété" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Transférer l'administration principale" }));
     return dialog;
   };
 
@@ -493,7 +548,7 @@ describe("le mot de passe de ressaisie n'est jamais conservé", () => {
     const dialog = await fillTransfer();
     await waitFor(() => expect(post).toHaveBeenCalled());
     await waitFor(() => expect(within(dialog).getByLabelText("Votre mot de passe")).toHaveValue(""));
-    expect(within(dialog).getByRole("button", { name: "Transférer la propriété" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Transférer l'administration principale" })).toBeDisabled();
     noTrace();
   });
 
@@ -503,10 +558,10 @@ describe("le mot de passe de ressaisie n'est jamais conservé", () => {
     await within(dialog).findByText(/Connexion perdue/);
     fireEvent.click(within(dialog).getByRole("button", { name: "Annuler" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    await pick("Paul M.", /Transférer la propriété/);
-    const reopened = await screen.findByRole("dialog", { name: "Transférer la propriété à Paul M." });
+    await pick("Paul M.", /Transférer l'administration principale/);
+    const reopened = await screen.findByRole("dialog", { name: "Transférer l'administration principale à Paul M." });
     expect(within(reopened).getByLabelText("Votre mot de passe")).toHaveValue("");
-    expect(within(reopened).getByRole("checkbox", { name: "Je confirme le transfert de propriété" })).not.toBeChecked();
+    expect(within(reopened).getByRole("checkbox", { name: "Je confirme le transfert d'administration principale" })).not.toBeChecked();
   });
 
   it("succès : aucune trace du mot de passe (stockages, DOM, URL, cache de mutations)", async () => {
@@ -554,8 +609,8 @@ describe("retirer un membre (E6d)", () => {
   });
 
   it.each([
-    ["409 owner_must_be_demoted", apiError(409, "owner_must_be_demoted"), "Cette personne est propriétaire. Changez d'abord son rôle, puis retirez-la."],
-    ["409 last_owner", apiError(409, "last_owner"), "Une organisation doit toujours avoir au moins un propriétaire."],
+    ["409 owner_must_be_demoted", apiError(409, "owner_must_be_demoted"), "Cette personne est administrateur principal. Changez d'abord son rôle, puis retirez-la."],
+    ["409 last_owner", apiError(409, "last_owner"), "Une organisation doit toujours avoir au moins un administrateur principal."],
     ["409 last_effective_owner", apiError(409, "last_effective_owner"), "Cette organisation a des offres actives"],
     ["400 use_leave", apiError(400, "use_leave"), "Pour quitter l'organisation, utilisez la carte"],
     ["réseau coupé", { isAxiosError: true, message: "Network Error" }, "Connexion perdue."],

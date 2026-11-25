@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { SensitiveConfirmFields } from "./SensitiveConfirmFields";
 import { useRateBlock } from "./use-rate-block";
 
-/** Rôles que l'acteur peut garder après le transfert : jamais Propriétaire (contrat §1.4). */
+/** Rôles que l'acteur peut garder après le transfert : jamais Administrateur principal (contrat §1.4). */
 const MY_NEW_ROLES: TransferNewRole[] = ["ADMIN", "EDITOR", "ANALYST"];
 const EMPTY: SensitiveConfirmValue = { confirmed: false, password: "" };
 
@@ -26,7 +26,7 @@ interface TransferOwnershipDialogProps {
   onAnnounce: (message: string) => void;
 }
 
-/** E6c : transfert de propriété. Case de confirmation et mot de passe obligatoires ; focus initial sur « Annuler ». */
+/** E6c : transfert d'administration principale (remplacé par la nomination en F5). Case de confirmation et mot de passe obligatoires ; focus initial sur « Annuler ». */
 export function TransferOwnershipDialog({ orgId, target, online, onClose, onAnnounce }: TransferOwnershipDialogProps) {
   const { t } = useTranslation();
   const mutation = useTransferOwnership(orgId);

@@ -11,7 +11,7 @@ interface SensitiveConfirmFieldsProps {
   idPrefix: string;
   value: SensitiveConfirmValue;
   onChange: (value: SensitiveConfirmValue) => void;
-  /** Libellé de la case (« Je confirme ce changement », « Je confirme le transfert de propriété »). */
+  /** Libellé de la case (« Je confirme ce changement », « Je confirme le transfert d'administration principale »). */
   confirmLabel: string;
   /** Erreur de ressaisie (403 reauthentication_failed), reliée au champ mot de passe. */
   error?: string;
@@ -20,8 +20,8 @@ interface SensitiveConfirmFieldsProps {
 }
 
 /**
- * Case de confirmation et ressaisie du mot de passe, exigées par le serveur pour un transfert de propriété, une promotion vers
- * Propriétaire et la rétrogradation d'un Propriétaire. L'état reste dans la fenêtre qui l'utilise (mémoire du composant) :
+ * Case de confirmation et ressaisie du mot de passe, exigées par le serveur pour un transfert d'administration principale, une promotion vers
+ * Administrateur principal et la rétrogradation d'un Administrateur principal. L'état reste dans la fenêtre qui l'utilise (mémoire du composant) :
  * le mot de passe n'est ni persisté, ni envoyé ailleurs que dans le corps de la requête.
  */
 export function SensitiveConfirmFields({ idPrefix, value, onChange, confirmLabel, error, disabled, passwordRef }: SensitiveConfirmFieldsProps) {

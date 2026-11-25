@@ -261,7 +261,7 @@ export function ContactSettingsSection() {
   const { t } = useTranslation();
   const { active } = useActiveContext();
   const isOrganization = active.type === "ORGANIZATION";
-  // Réglages d'une organisation : `contact.manage_channels` (propriétaire, administrateurs). Le serveur reste le juge.
+  // Réglages d'une organisation : `contact.manage_channels` (administrateurs principaux, administrateurs). Le serveur reste le juge.
   const denied = isOrganization && active.confirmed && !active.capabilities.includes("contact.manage_channels");
   const query = useContactSettings(!denied);
   const setChannel = useSetContactChannel();

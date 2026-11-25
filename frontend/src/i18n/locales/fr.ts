@@ -54,14 +54,17 @@ const fr = {
     alwaysPersonal: "Cette action est toujours faite avec votre profil personnel.",
   },
   role: {
-    OWNER: "Propriétaire",
+    OWNER: "Administrateur principal",
     ADMIN: "Administrateur",
     EDITOR: "Éditeur",
     ANALYST: "Analyste",
-    OWNER_desc: "Gère l'organisation, l'équipe, les rôles et l'archivage.",
-    ADMIN_desc: "Gère le profil, la vérification, l'équipe (sauf les propriétaires), les contacts et les messages.",
+    MEMBER: "Membre",
+    OWNER_desc:
+      "Répond de l'organisation sur Connecte+. Gère toute l'équipe, y compris les administrateurs, propose d'autres administrateurs principaux et peut archiver l'organisation.",
+    ADMIN_desc: "Gère le profil, la vérification, l'équipe (sauf les administrateurs principaux), les contacts et les messages.",
     EDITOR_desc: "Publie et modifie les offres, répond aux avis et voit qui a demandé à être contacté.",
     ANALYST_desc: "Consulte les statistiques et les offres. Ne peut rien modifier.",
+    MEMBER_desc: "Voit l'espace interne de l'organisation et son équipe. Ne peut rien publier ni modifier, et ne voit pas les statistiques.",
   },
   orgType: {
     ENTREPRISE: "Entreprise",
@@ -357,7 +360,7 @@ const fr = {
         action: "Vous n'avez pas accès à cet élément.",
       },
       PERMISSION: {
-        org: "Votre rôle ne permet pas cette action. Demandez à un propriétaire ou à un administrateur de l'organisation.",
+        org: "Votre rôle ne permet pas cette action. Demandez à un administrateur principal ou à un administrateur de l'organisation.",
         generic: "Vous n'avez pas le droit d'effectuer cette action.",
       },
       SECURITY: {
@@ -371,8 +374,8 @@ const fr = {
     },
     code: {
       last_owner:
-        "Vous êtes le dernier propriétaire : vous ne pouvez pas quitter l'organisation. Un autre propriétaire doit d'abord être nommé, ou l'organisation doit être archivée.",
-      last_owner_demote: "Une organisation doit toujours avoir au moins un propriétaire.",
+        "Vous êtes le dernier administrateur principal : vous ne pouvez pas quitter l'organisation. Un autre administrateur principal doit d'abord être nommé, ou l'organisation doit être archivée.",
+      last_owner_demote: "Une organisation doit toujours avoir au moins un administrateur principal.",
       organization_limit_reached:
         "Vous avez atteint le nombre maximal d'organisations pour un compte. Quittez ou archivez une organisation pour en créer une nouvelle.",
       phone_verification_required: "Vérifiez d'abord votre numéro de téléphone de connexion pour créer une organisation.",
@@ -392,8 +395,8 @@ const fr = {
       invalid_logo: "Cette image ne peut pas être utilisée comme logo.",
       provider_not_found: "Vous n'avez pas encore de profil prestataire.",
       last_effective_owner:
-        "Cette organisation a des offres actives : elle doit garder au moins un propriétaire disponible. Nommez d'abord un autre propriétaire.",
-      owner_must_be_demoted: "Cette personne est propriétaire. Changez d'abord son rôle, puis retirez-la.",
+        "Cette organisation a des offres actives : elle doit garder au moins un administrateur principal disponible. Nommez d'abord un autre administrateur principal.",
+      owner_must_be_demoted: "Cette personne est administrateur principal. Changez d'abord son rôle, puis retirez-la.",
       reauthentication_failed: "Mot de passe incorrect.",
       member_not_found: "Cette personne ne fait plus partie de l'équipe.",
       user_unavailable: "Ce changement n'est pas possible pour ce compte pour le moment.",
@@ -486,7 +489,7 @@ const fr = {
     titleFor: "Contact avec les acheteurs — {{name}}",
     orgMessageOnly:
       "Les appels et WhatsApp ne sont pas encore proposés pour les organisations. Les acheteurs vous écrivent par message ; aucun numéro n'est transmis.",
-    orgDenied: "Seuls le propriétaire et les administrateurs gèrent les moyens de contact.",
+    orgDenied: "Seuls les administrateurs principaux et les administrateurs gèrent les moyens de contact.",
     title: "Contact avec les acheteurs",
     intro:
       "Votre numéro n'est jamais public. Il n'est transmis qu'à une personne connectée qui demande à vous appeler ou à vous écrire sur WhatsApp, et seulement si vous avez accepté ce moyen de contact.",
@@ -751,7 +754,7 @@ const fr = {
   orgNew: {
     title: "Créer une organisation",
     description:
-      "Une organisation vous permet de publier sous le nom de votre entreprise, boutique, ONG ou structure d'événements, et de travailler avec une équipe. Vous en serez le propriétaire.",
+      "Une organisation vous permet de publier sous le nom de votre entreprise, boutique, ONG ou structure d'événements, et de travailler avec une équipe. Vous en serez l'administrateur principal.",
     type: "Type d'organisation",
     name: "Nom de l'organisation",
     nameHint: "Ce nom est public. Une fois une pièce de vérification validée, il ne pourra plus être modifié.",
@@ -811,11 +814,11 @@ const fr = {
       recourse: {
         SUSPENDED: {
           OWNER: "Pour en savoir plus sur cette suspension, contactez le support de Connecte+.",
-          other: "Pour en savoir plus, adressez-vous au propriétaire de l'organisation ou au support de Connecte+.",
+          other: "Pour en savoir plus, adressez-vous à un administrateur principal de l'organisation ou au support de Connecte+.",
         },
         ARCHIVED: {
           OWNER: "Un archivage ne peut pas être annulé depuis l'application. Pour toute question, contactez le support de Connecte+.",
-          other: "Pour toute question, adressez-vous au propriétaire de l'organisation.",
+          other: "Pour toute question, adressez-vous à un administrateur principal de l'organisation.",
         },
       },
       migrated: "Cette organisation vient de votre ancien compte entreprise.",
@@ -840,7 +843,7 @@ const fr = {
     home: {
       activate: "Agir sous ce profil",
       createdTitle: "Votre organisation est créée.",
-      createdBody: "Vous en êtes le propriétaire. La prochaine étape recommandée est d'envoyer les pièces de vérification.",
+      createdBody: "Vous en êtes l'administrateur principal. La prochaine étape recommandée est d'envoyer les pièces de vérification.",
       createdAction: "Envoyer les pièces",
       roleTitle: "Votre rôle",
       canTitle: "Ce que vous pouvez faire",
@@ -853,7 +856,7 @@ const fr = {
       leaveTitle: "Quitter l'organisation",
       leaveBody: "Vous perdrez l'accès à cette organisation. Les offres de l'organisation lui restent.",
       archiveTitle: "Archiver l'organisation",
-      archiveBody: "Réservé au propriétaire. Les offres de l'organisation ne seront plus visibles.",
+      archiveBody: "Réservé aux administrateurs principaux. Les offres de l'organisation ne seront plus visibles.",
       alreadyLeft: "Vous ne faites plus partie de cette organisation.",
     },
   },
@@ -869,6 +872,7 @@ const fr = {
     messages: "Répondre aux messages",
     stats: "Consulter les statistiques",
     archive: "Archiver l'organisation",
+    view_internal: "Consulter l'espace de l'organisation et son équipe",
   },
   orgEdit: {
     title: "Profil de l'organisation",
@@ -882,7 +886,7 @@ const fr = {
     removeLogo: "Retirer le logo",
     save: "Enregistrer",
     saved: "Profil enregistré.",
-    readOnly: "Seuls le propriétaire et les administrateurs peuvent modifier le profil de l'organisation.",
+    readOnly: "Seuls les administrateurs principaux et les administrateurs peuvent modifier le profil de l'organisation.",
     unsavedTitle: "Quitter sans enregistrer ?",
     unsavedBody: "Vos modifications seront perdues.",
     unsavedStay: "Rester",
@@ -898,10 +902,10 @@ const fr = {
         "Vous obtenez un lien à envoyer vous-même à la personne (par exemple sur WhatsApp). Elle l'ouvre, se connecte et accepte. Le lien ne fonctionne qu'une seule fois.",
       roleLabel: "Rôle",
       rolesNote:
-        "Pour donner le rôle Administrateur ou Propriétaire, invitez d'abord la personne, puis changez son rôle une fois qu'elle a rejoint l'équipe.",
+        "Pour donner le rôle Administrateur ou Administrateur principal, invitez d'abord la personne, puis changez son rôle une fois qu'elle a rejoint l'équipe.",
       labelLabel: "Étiquette (facultatif)",
       labelHelp:
-        "Un repère pour retrouver cette invitation, par exemple « Jean, comptable ». Visible par les propriétaires et administrateurs de l'organisation, supprimée dès que l'invitation est utilisée ou annulée. Ne mettez ni téléphone ni adresse.",
+        "Un repère pour retrouver cette invitation, par exemple « Jean, comptable ». Visible par les administrateurs principaux et les administrateurs de l'organisation, supprimée dès que l'invitation est utilisée ou annulée. Ne mettez ni téléphone ni adresse.",
       labelCount: "{{n}}/{{max}}",
       validity: "Le lien est valable {{days}} jours.",
       create: "Créer le lien",
@@ -958,22 +962,22 @@ const fr = {
     listCaption: "Membres de l'équipe",
     colMember: "Membre",
     colRole: "Rôle",
-    colSince: "Membre depuis",
+    colSince: "Dans l'équipe depuis",
     colActions: "Actions",
-    since: "Membre depuis {{date}}",
+    since: "Dans l'équipe depuis {{date}}",
     you: "(vous)",
     loadMore: "Voir plus de membres",
     loadMoreError: "Impossible de charger la suite de la liste.",
-    lastOwner: "Seul propriétaire actif",
-    lastOwnerHelp: "Les autres propriétaires, s'il y en a, ne peuvent pas agir actuellement (compte inactif ou restreint).",
+    lastOwner: "Seul administrateur principal actif",
+    lastOwnerHelp: "Les autres administrateurs principaux, s'il y en a, ne peuvent pas agir actuellement (compte inactif ou restreint).",
     lastOwnerSelfHint:
-      "Si vous quittez l'organisation, elle n'aura plus de propriétaire disponible. Nommez d'abord un autre propriétaire.",
-    ownersOnly: "Réservé aux propriétaires",
-    ownerRemoveHint: "Pour retirer ce propriétaire, rétrogradez-le d'abord.",
+      "Si vous quittez l'organisation, elle n'aura plus d'administrateur principal disponible. Nommez d'abord un autre administrateur principal.",
+    ownersOnly: "Réservé aux administrateurs principaux",
+    ownerRemoveHint: "Pour retirer cet administrateur principal, changez d'abord son rôle.",
     menuLabel: "Actions pour {{name}}",
     changeRole: "Changer le rôle",
-    transfer: "Transférer la propriété",
-    transferTo: "Transférer la propriété à {{name}}",
+    transfer: "Transférer l'administration principale",
+    transferTo: "Transférer l'administration principale à {{name}}",
     remove: "Retirer de l'équipe",
     changeRoleTitle: "Changer le rôle de {{name}}",
     roleGroup: "Rôle",
@@ -981,22 +985,23 @@ const fr = {
     saveRole: "Enregistrer le rôle",
     back: "Retour",
     promoteOwnerBody:
-      "{{name}} deviendra propriétaire. Cette personne pourra gérer toute l'équipe, rétrograder les autres propriétaires et archiver l'organisation. Vous resterez propriétaire.",
-    demoteOwnerBody: "{{name}} ne sera plus propriétaire. Cette personne perdra l'archivage de l'organisation et la gestion des propriétaires.",
+      "{{name}} deviendra administrateur principal. Cette personne pourra gérer toute l'équipe, changer le rôle des autres administrateurs principaux et archiver l'organisation. Vous resterez administrateur principal.",
+    demoteOwnerBody: "{{name}} ne sera plus administrateur principal. Cette personne perdra la gestion des administrateurs principaux et l'archivage de l'organisation.",
     confirmChange: "Je confirme ce changement",
     confirmRoleButton: "Confirmer le changement",
     passwordLabel: "Votre mot de passe",
     passwordHelp: "Nous vous le demandons pour protéger l'organisation. Il n'est pas conservé.",
     roleChanged: "Le rôle de {{name}} est maintenant {{role}}.",
-    transferTitle: "Transférer la propriété à {{name}}",
+    scopeLine: "Périmètre : {{scope}}",
+    transferTitle: "Transférer l'administration principale à {{name}}",
     transferBody:
-      "{{name}} deviendra propriétaire. Vous ne serez plus propriétaire et prendrez le rôle choisi ci-dessous. Vous pourrez continuer à agir dans l'organisation avec ce rôle.",
+      "{{name}} deviendra administrateur principal. Vous ne serez plus administrateur principal et prendrez le rôle choisi ci-dessous. Vous pourrez continuer à agir dans l'organisation avec ce rôle.",
     transferMyRole: "Votre rôle après le transfert",
     transferAlt:
-      "Pour garder le rôle de propriétaire tout en nommant {{name}}, utilisez plutôt « Changer le rôle » et choisissez Propriétaire.",
-    transferConfirm: "Je confirme le transfert de propriété",
-    transferButton: "Transférer la propriété",
-    transferred: "La propriété a été transférée à {{name}}.",
+      "Pour rester administrateur principal tout en nommant {{name}}, utilisez plutôt « Changer le rôle » et choisissez Administrateur principal.",
+    transferConfirm: "Je confirme le transfert d'administration principale",
+    transferButton: "Transférer l'administration principale",
+    transferred: "L'administration principale a été transférée à {{name}}.",
     removeTitle: "Retirer {{name}} de l'équipe ?",
     removeBody:
       "{{name}} perdra immédiatement l'accès à l'organisation. Son compte personnel et ses offres personnelles ne changent pas. Les offres, avis et messages de l'organisation restent à l'organisation. Les invitations qu'elle avait créées et qui ne sont pas encore utilisées sont annulées.",
@@ -1073,7 +1078,7 @@ const fr = {
       },
       member: {
         title: "Vous faites déjà partie de cette organisation",
-        body: "Cette invitation ne change pas votre rôle. Si vous voulez un autre rôle, demandez-le à un propriétaire ou à un administrateur.",
+        body: "Cette invitation ne change pas votre rôle. Si vous voulez un autre rôle, demandez-le à un administrateur principal ou à un administrateur.",
       },
       profiles: "Voir mes profils",
       security: { title: "Action temporairement impossible" },
@@ -1094,7 +1099,7 @@ const fr = {
     notPaid: "La vérification ne peut pas être achetée. Aucun abonnement ni paiement ne la fournit. Elle ne dépend pas non plus du rôle des membres.",
     privacy:
       "Vos pièces sont conservées dans un espace privé, accessibles uniquement aux personnes habilitées de l'équipe de vérification. Elles ne sont jamais publiées et jamais visibles par les autres membres de l'organisation.",
-    readOnly: "Seuls le propriétaire et les administrateurs peuvent envoyer des pièces.",
+    readOnly: "Seuls les administrateurs principaux et les administrateurs peuvent envoyer des pièces.",
     noRequirements: "Aucune pièce n'est demandée pour ce type d'organisation pour le moment.",
     state: {
       MANQUANTE: "Non envoyée",
@@ -1173,7 +1178,7 @@ const fr = {
   },
   legacy: {
     title: "Votre compte entreprise est devenu une organisation",
-    body: "« {{name}} » est maintenant une organisation dont vous êtes le propriétaire. Vos offres, vos avis et vos pièces de vérification y ont été conservés. Pour publier ou gérer vos offres, choisissez ce profil dans « Agir en tant que ».",
+    body: "« {{name}} » est maintenant une organisation dont vous êtes l'administrateur principal. Vos offres, vos avis et vos pièces de vérification y ont été conservés. Pour publier ou gérer vos offres, choisissez ce profil dans « Agir en tant que ».",
     contact:
       "Pour l'instant, les acheteurs contactent l'organisation par message dans Connecte+. L'appel et WhatsApp ne sont pas repris : votre numéro personnel n'est jamais transmis au nom de l'organisation.",
     action: "Agir sous ce profil",
@@ -1204,9 +1209,11 @@ const fr = {
     readOnlyOffers: "Votre rôle permet de consulter ces offres, pas de les modifier.",
     providerArchived: "Votre profil prestataire est désactivé. Réactivez-le pour publier.",
     providerArchivedLink: "Mes profils",
-    messagesDenied: "Les messages de l'organisation sont réservés au propriétaire et aux administrateurs.",
-    notMember: "Vous ne faites plus partie de l'organisation propriétaire de cette offre.",
+    messagesDenied: "Les messages de l'organisation sont réservés aux administrateurs principaux et aux administrateurs.",
+    notMember: "Vous ne faites plus partie de l'organisation qui a publié cette offre.",
     requestersHidden: "Votre rôle ne permet pas de voir qui a demandé à contacter l'organisation.",
+    ORGANIZATION: "Toute l'organisation",
+    limited: "Périmètre limité",
   },
   contact: {
     orgMessageOnly: "Cette organisation se contacte par message dans Connecte+.",
@@ -1470,7 +1477,18 @@ const fr = {
       day: "Jour",
       views: "Vues",
     },
+    roleRestricted: {
+      title: "Cette section n'est pas disponible pour votre rôle",
+      body: "Votre rôle ne donne pas accès aux statistiques ni aux offres de ce profil.",
+      bodyMember:
+        "Avec le rôle Membre dans « {{name}} », vous voyez l'espace interne de l'organisation et son équipe, mais pas les statistiques ni les offres.",
+      openOrganization: "Ouvrir l'espace de l'organisation",
+      team: "Voir l'équipe",
+      changeProfile: "Changer de profil",
+    },
+    statsError: "Impossible de charger les statistiques.",
     myPosts: {
+      denied: "Votre rôle ne permet pas de voir les offres de ce profil.",
       title: "Mes annonces",
       online_one: "{{count}} annonce en ligne",
       online_other: "{{count}} annonces en ligne",

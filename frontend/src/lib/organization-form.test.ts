@@ -156,4 +156,9 @@ describe("capabilityLabelKeys", () => {
     expect(capabilityLabelKeys(["offer.publish", "org.edit_profile"])).toEqual(["capability.edit_profile", "capability.offers"]);
     expect(capabilityLabelKeys([])).toEqual([]);
   });
+  it("rôle Membre (org.leave, org.view_internal) : une ligne « Consulter l'espace… » plutôt qu'une liste vide", () => {
+    expect(capabilityLabelKeys(["org.leave", "org.view_internal"])).toEqual(["capability.view_internal"]);
+    // Les autres rôles gardent leur liste, sans ligne ajoutée
+    expect(capabilityLabelKeys(["org.view_internal", "stats.view"])).toEqual(["capability.stats"]);
+  });
 });

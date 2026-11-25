@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useChangeMemberRole } from "@/hooks/use-organization-team";
-import { assignableRoles, classifyTeamError, isSensitiveConfirmComplete, needsReauthentication, type SensitiveConfirmValue } from "@/lib/team";
+import { assignableRoles, classifyTeamError, isSensitiveConfirmComplete, needsReauthentication, scopeLabel, type SensitiveConfirmValue } from "@/lib/team";
 import { cn } from "@/lib/utils";
 import { SensitiveConfirmFields } from "./SensitiveConfirmFields";
 import { useRateBlock } from "./use-rate-block";
@@ -27,8 +27,9 @@ interface ChangeRoleDialogProps {
 const EMPTY: SensitiveConfirmValue = { confirmed: false, password: "" };
 
 /**
- * E6b : changer le rôle d'un membre. Étape 2 (case et mot de passe) seulement pour une promotion vers Propriétaire
- * ou la rétrogradation d'un Propriétaire. Un mot de passe inutile n'est jamais envoyé.
+ * E6b : changer le rôle d'un membre. Étape 2 (case et mot de passe) seulement pour une promotion vers Administrateur
+ * principal ou la rétrogradation d'un Administrateur principal. Un mot de passe inutile n'est jamais envoyé.
+ * Le périmètre est affiché sous le titre (spec D2 §2.4) mais jamais choisi ni envoyé : le serveur le laisse inchangé.
  */
 export function ChangeRoleDialog({ orgId, member, actorRole, online, onClose, onAnnounce }: ChangeRoleDialogProps) {
   const { t } = useTranslation();
@@ -109,6 +110,7 @@ export function ChangeRoleDialog({ orgId, member, actorRole, online, onClose, on
   return (
     <ResponsiveDialog open onOpenChange={(next) => !next && !pending && onClose()} title={t("team.changeRoleTitle", { name: member.display_name })}>
       <form onSubmit={(event) => void submit(event)} className="space-y-4" noValidate>
+        {member.scope && <p className="text-sm text-muted-foreground">{t("team.scopeLine", { scope: scopeLabel(member.scope, t) })}</p>}
         {step === 1 ? (
           <div className="space-y-2">
             <RadioGroup

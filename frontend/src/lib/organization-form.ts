@@ -138,6 +138,11 @@ const CAPABILITY_LABELS: [capability: string, key: string][] = [
   ["org.archive", "capability.archive"],
 ];
 
+/**
+ * Clés i18n de la liste « Ce que vous pouvez faire ». Rôle Membre (`org.view_internal` et `org.leave` seulement) :
+ * une ligne « Consulter l'espace… » plutôt qu'une liste vide.
+ */
 export function capabilityLabelKeys(capabilities: string[]): string[] {
-  return CAPABILITY_LABELS.filter(([capability]) => capabilities.includes(capability)).map(([, key]) => key);
+  const keys = CAPABILITY_LABELS.filter(([capability]) => capabilities.includes(capability)).map(([, key]) => key);
+  return keys.length === 0 && capabilities.includes("org.view_internal") ? ["capability.view_internal"] : keys;
 }

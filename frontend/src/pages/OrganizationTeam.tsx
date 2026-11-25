@@ -1,7 +1,6 @@
 import { Suspense, lazy, useRef, useState } from "react";
 import { UserPlus } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { OrganizationRole } from "@/api/types";
 import { PageHeader, RoleBadge } from "@/components/common";
 import { LeaveOrganizationCard } from "@/components/organizations/OrganizationActions";
 import { OrganizationPage } from "@/components/organizations/OrganizationPage";
@@ -11,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useOnlineStatus } from "@/hooks/use-online-status";
+import { ORGANIZATION_ROLES } from "@/lib/team";
 import { cn } from "@/lib/utils";
 
 // Le dialogue est chargé à l'ouverture, pas avec la page (réseau faible)
@@ -18,10 +18,8 @@ const InviteDialog = lazy(() => import("@/components/team/InviteDialog").then((m
 
 type TeamTab = "members" | "invitations";
 
-const ROLES: OrganizationRole[] = ["OWNER", "ADMIN", "EDITOR", "ANALYST"];
-
 /**
- * Équipe d'une organisation (L1-01, E6) : membres, changement de rôle, retrait, transfert de propriété.
+ * Équipe d'une organisation (L1-01, E6) : membres, changement de rôle, retrait, transfert d'administration principale.
  * Pour les rôles qui gèrent les membres (`org.manage_members`) : bouton « Inviter une personne » et onglet « Invitations »
  * (requête à l'ouverture de l'onglet seulement). Une seule région `aria-live` annonce le résultat des actions.
  */
@@ -122,7 +120,7 @@ const OrganizationTeam = () => {
               </h2>
               <CollapsibleContent>
                 <ul className="mt-3 divide-y">
-                  {ROLES.map((role) => {
+                  {ORGANIZATION_ROLES.map((role) => {
                     const mine = role === org.my_role;
                     return (
                       <li key={role} aria-current={mine ? "true" : undefined} className={cn("flex flex-col gap-1 py-3 sm:flex-row sm:items-start sm:gap-4", mine && "-mx-2 rounded-lg bg-primary/5 px-2")}>

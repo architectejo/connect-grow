@@ -98,7 +98,7 @@ export function LeaveOrganizationCard({ org, titleKey = "org.home.leaveTitle", b
   );
 }
 
-/** Carte « Archiver l'organisation » (propriétaire seulement : capacité `org.archive`). Consentement explicite requis. */
+/** Carte « Archiver l'organisation » (administrateur principal seulement : capacité `org.archive`). Consentement explicite requis. */
 export function ArchiveOrganizationCard({ org }: { org: OrganizationInternal }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -107,7 +107,7 @@ export function ArchiveOrganizationCard({ org }: { org: OrganizationInternal }) 
   const [open, setOpen] = useState(false);
   const [understood, setUnderstood] = useState(false);
   const [error, setError] = useState<string>();
-  // Archivage voulu par le propriétaire : retour silencieux au profil personnel, la vue « Archivée » explique l'état (pas d'alerte de perte)
+  // Archivage voulu par un administrateur principal : retour silencieux au profil personnel, la vue « Archivée » explique l'état (pas d'alerte de perte)
   const archive = useArchiveOrganization(org.id, () => {
     if (active.type === "ORGANIZATION" && active.id === org.id) switchToPersonal();
   });

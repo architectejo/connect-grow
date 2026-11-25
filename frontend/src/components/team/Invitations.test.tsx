@@ -98,9 +98,9 @@ describe("InviteDialog (E6a)", () => {
     expect(radios).toHaveLength(2);
     expect(within(dialog).getByRole("radio", { name: /Éditeur/ })).not.toBeChecked();
     expect(within(dialog).getByRole("radio", { name: /Analyste/ })).not.toBeChecked();
-    expect(within(dialog).queryByRole("radio", { name: /Propriétaire|Administrateur/ })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("radio", { name: /Administrateur/ })).not.toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Créer le lien" })).toBeDisabled();
-    expect(within(dialog).getByText(/Pour donner le rôle Administrateur ou Propriétaire/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Pour donner le rôle Administrateur ou Administrateur principal/)).toBeInTheDocument();
     // Aucune recherche de compte : ni téléphone, ni e-mail, ni identifiant
     expect(within(dialog).queryByLabelText(/téléphone|e-mail|identifiant/i)).not.toBeInTheDocument();
     expect(within(dialog).getAllByRole("textbox")).toHaveLength(1);

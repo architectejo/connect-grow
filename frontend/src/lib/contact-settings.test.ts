@@ -38,8 +38,8 @@ describe("contactSettingsErrorMessage", () => {
     expect(contactSettingsErrorMessage(apiError(403, code, "texte serveur"), { inOrganization: true })).toContain(expected);
   });
 
-  it("DENY_PERMISSION dans une organisation : demandez à un propriétaire", () => {
-    expect(contactSettingsErrorMessage(apiError(403, "DENY_PERMISSION"), { inOrganization: true })).toContain("propriétaire");
+  it("DENY_PERMISSION dans une organisation : demandez à un administrateur principal", () => {
+    expect(contactSettingsErrorMessage(apiError(403, "DENY_PERMISSION"), { inOrganization: true })).toContain("administrateur principal");
   });
 
   it("code inconnu : détail du serveur ; sans réponse : message générique", () => {

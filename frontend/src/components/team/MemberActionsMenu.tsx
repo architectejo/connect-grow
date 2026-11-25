@@ -20,7 +20,7 @@ interface MemberActionsMenuProps {
 
 /**
  * Menu `⋯` d'une ligne. Les entrées suivent la matrice rôle de l'acteur / rôle de la cible (`memberActions`) :
- * aucun menu sur sa propre ligne, « Retirer » absent sur un propriétaire. Les fenêtres sont montées par la page, hors du menu,
+ * aucun menu sur sa propre ligne, « Retirer » absent sur un administrateur principal. Les fenêtres sont montées par la page, hors du menu,
  * pour que le focus revienne au bouton à la fermeture.
  */
 export function MemberActionsMenu({ actorRole, capabilities, target, disabled, describedBy, triggerRef, onAction }: MemberActionsMenuProps) {

@@ -73,7 +73,7 @@ describe("Messages : boîte selon le profil actif (T7)", () => {
     activeMock.active = organization(["offer.view_internal"]);
     const get = mockApi([], []);
     renderPage();
-    expect(await screen.findByText(/réservés au propriétaire et aux administrateurs/)).toBeInTheDocument();
+    expect(await screen.findByText(/réservés aux administrateurs principaux et aux administrateurs/)).toBeInTheDocument();
     expect(get).not.toHaveBeenCalled();
   });
 

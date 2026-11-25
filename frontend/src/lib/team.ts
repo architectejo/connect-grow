@@ -1,4 +1,4 @@
-import type { OrganizationMember, OrganizationRole } from "@/api/types";
+import type { MembershipScope, OrganizationMember, OrganizationRole } from "@/api/types";
 import i18n from "@/i18n";
 import { describeApiError, getApiErrorCode, isNetworkError } from "@/lib/api-errors";
 import { apiErrorMessage, httpStatus, isRateLimited, retryAfterSeconds } from "@/lib/errors";
@@ -6,7 +6,8 @@ import { apiErrorMessage, httpStatus, isRateLimited, retryAfterSeconds } from "@
 /** Actions possibles sur la ligne d'un membre (écran Équipe, L1-01). */
 export type TeamAction = "changeRole" | "transfer" | "remove";
 
-export const ORGANIZATION_ROLES: readonly OrganizationRole[] = ["OWNER", "ADMIN", "EDITOR", "ANALYST"];
+/** Ordre d'affichage des rôles (contrat L1-01 §7.1) : du plus large au plus restreint, Membre en dernier. */
+export const ORGANIZATION_ROLES: readonly OrganizationRole[] = ["OWNER", "ADMIN", "EDITOR", "ANALYST", "MEMBER"];
 
 interface Actor {
   role: OrganizationRole;
@@ -15,7 +16,8 @@ interface Actor {
 
 /**
  * Actions proposées à l'acteur sur un membre. Le serveur reste l'arbitre : ce tri évite seulement de proposer une action
- * vouée au refus. Aucun blocage préventif sur le « dernier propriétaire » (`last_owner`, `last_effective_owner` : refus serveur).
+ * vouée au refus. Seuls un administrateur principal (OWNER) et un administrateur gèrent l'équipe : éditeur, analyste et
+ * membre n'ont aucun menu. Aucun blocage préventif sur le « dernier administrateur principal » (`last_owner`, `last_effective_owner` : refus serveur).
  * Aucune notion de plan ou de paiement : seuls le rôle et les capacités comptent (règle 2).
  */
 export function memberActions(actor: Actor, target: Pick<OrganizationMember, "role" | "is_self">): TeamAction[] {
@@ -25,7 +27,7 @@ export function memberActions(actor: Actor, target: Pick<OrganizationMember, "ro
   const actions: TeamAction[] = [];
   if (actor.role === "OWNER") {
     if (canRoles) actions.push("changeRole", "transfer");
-    // Un propriétaire ne se retire pas : il faut d'abord le rétrograder (409 owner_must_be_demoted)
+    // Un administrateur principal ne se retire pas : il faut d'abord changer son rôle (409 owner_must_be_demoted)
     if (canMembers && target.role !== "OWNER") actions.push("remove");
   } else if (actor.role === "ADMIN") {
     if (target.role === "OWNER") return [];
@@ -35,7 +37,7 @@ export function memberActions(actor: Actor, target: Pick<OrganizationMember, "ro
   return actions;
 }
 
-/** Un administrateur voit la ligne d'un propriétaire sans menu : le texte « Réservé aux propriétaires » l'explique. */
+/** Un administrateur voit la ligne d'un administrateur principal sans menu : le texte « Réservé aux administrateurs principaux » l'explique. */
 export const isOwnersOnlyRow = (actor: Actor, target: Pick<OrganizationMember, "role" | "is_self">) =>
   actor.role === "ADMIN" && target.role === "OWNER" && !target.is_self;
 
@@ -46,6 +48,13 @@ export const assignableRoles = (actorRole: OrganizationRole): OrganizationRole[]
 /** Mot de passe et confirmation exigés : promotion vers OWNER ou rétrogradation d'un OWNER (contrat §1.2). */
 export const needsReauthentication = (currentRole: OrganizationRole, newRole: OrganizationRole) =>
   newRole !== currentRole && (newRole === "OWNER" || currentRole === "OWNER");
+
+/**
+ * Libellé du périmètre d'une adhésion (spec D2 §2.4) : `ORGANIZATION` → « Toute l'organisation » ; toute autre valeur
+ * (inatteignable en V1) → « Périmètre limité », sans inventer de détail. Affiché seulement, jamais choisi en V1.
+ */
+export const scopeLabel = (scope: Pick<MembershipScope, "type">, t: (key: string) => string): string =>
+  scope.type === "ORGANIZATION" ? t("scope.ORGANIZATION") : t("scope.limited");
 
 /** Issue d'un échec, telle que les fenêtres de l'écran Équipe la traitent. */
 export type TeamFailure =

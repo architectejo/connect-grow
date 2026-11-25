@@ -244,7 +244,7 @@ describe("ContactSettingsSection", () => {
       activeMock.active = organizationProfile(["offer.view_internal", "stats.view"]) as typeof activeMock.active;
       const get = vi.mocked(apiClient.get);
       renderSection();
-      expect(await screen.findByText("Seuls le propriétaire et les administrateurs gèrent les moyens de contact.")).toBeInTheDocument();
+      expect(await screen.findByText("Seuls les administrateurs principaux et les administrateurs gèrent les moyens de contact.")).toBeInTheDocument();
       expect(get).not.toHaveBeenCalled();
     });
   });

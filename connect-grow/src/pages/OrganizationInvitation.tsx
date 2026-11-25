@@ -1,6 +1,7 @@
-import { Suspense, lazy, useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, MailOpen, XCircle } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { InvitationAccepted, InvitationPreview } from "@/api/types";
 import { RoleBadge, SellerTypeBadge, UserAvatar } from "@/components/common";
@@ -10,11 +11,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOnlineStatus } from "@/hooks/use-online-status";
-import { useAcceptInvitation, useDeclineInvitation, useInvitationPreview } from "@/hooks/use-organization-team";
+import { INVITATION_PREVIEW_KEY, useAcceptInvitation, useDeclineInvitation, useInvitationPreview } from "@/hooks/use-organization-team";
 import { useRateBlock } from "@/components/team/use-rate-block";
 import { loginPath } from "@/lib/auth-paths";
 import { formatLongDate } from "@/lib/format";
-import { INVITATION_PATH, clearInvitationToken, ingestInvitationToken } from "@/lib/invitation-token";
+import { INVITATION_PATH, clearInvitationToken, hasTokenParam, ingestInvitationToken, readInvitationToken } from "@/lib/invitation-token";
 import { classifyInvitationError, clearsTokenOnFailure, type InvitationFailure } from "@/lib/invitations";
 
 // Le dialogue de refus est chargé à son ouverture (réseau faible)
@@ -49,21 +50,57 @@ const OrganizationInvitation = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const online = useOnlineStatus();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { contexts, setActive } = useActiveContext();
+  const location = useLocation();
+  const queryClient = useQueryClient();
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
+  const { contexts, setActive, refetch: refetchContexts } = useActiveContext();
   useNoReferrer();
 
   // Avant tout rendu et tout appel : fragment -> sessionStorage -> adresse nettoyée. On ne garde ici qu'un booléen.
   // Initialiseur (et non effet) volontaire : il s'exécute avant le premier rendu, donc avant le premier appel d'aperçu, qui
   // partirait sinon sans jeton. Relancé par StrictMode, il reste sûr : le jeton est alors relu depuis le stockage.
-  const [hasToken, setHasToken] = useState(() => ingestInvitationToken() !== null);
+  const [hasToken, setHasToken] = useState(() => ingestInvitationToken() !== null || readInvitationToken() !== null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [declineOpen, setDeclineOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [rateBlocked, blockRate] = useRateBlock();
   const headingRef = useRef<HTMLHeadingElement>(null);
 
-  const preview = useInvitationPreview(!authLoading && isAuthenticated && hasToken && !outcome);
+  // Jeton utilisable par CE compte : expiré (60 min) ou lié à un autre compte, il est effacé à la lecture (audit S2)
+  const accountId = user?.id;
+  const tokenUsable = hasToken && (!accountId || readInvitationToken(accountId) !== null);
+
+  /**
+   * Un fragment `#token=` (arrivée, ou second lien ouvert dans le même onglet) : rangé, puis la location du routeur est
+   * réalignée (`replace`) pour que le jeton ne reste ni dans l'historique ni dans l'état de React Router.
+   */
+  const takeLinkFromHash = useCallback(
+    (hash: string) => {
+      if (!hasTokenParam(hash)) return;
+      const fresh = ingestInvitationToken(hash);
+      if (fresh) {
+        // Nouveau lien : on repart de zéro (aucun aperçu, aucune issue d'un lien précédent)
+        queryClient.removeQueries({ queryKey: INVITATION_PREVIEW_KEY });
+        setOutcome(null);
+        setDeclineOpen(false);
+        setHasToken(true);
+      }
+      navigate(INVITATION_PATH, { replace: true });
+    },
+    [navigate, queryClient],
+  );
+  // Effet passif volontaire : React Router v6 ignore un `navigate()` lancé dans un effet de mise en page au premier rendu.
+  // Le jeton est déjà rangé (initialiseur ci-dessus) et la barre d'adresse nettoyée avant tout appel d'aperçu.
+  useEffect(() => {
+    takeLinkFromHash(location.hash);
+  }, [location.hash, takeLinkFromHash]);
+  useEffect(() => {
+    const onHashChange = () => takeLinkFromHash(window.location.hash);
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, [takeLinkFromHash]);
+
+  const preview = useInvitationPreview(!authLoading && isAuthenticated && tokenUsable && !outcome);
   const accept = useAcceptInvitation();
   const decline = useDeclineInvitation();
 
@@ -90,17 +127,19 @@ const OrganizationInvitation = () => {
   if (outcome?.kind === "joined") view = { name: "joined", data: outcome.data };
   else if (outcome?.kind === "declined") view = { name: "declined" };
   else if (failure && !asGuest) view = { name: "error" };
-  else if (!hasToken) view = { name: "missing" };
+  else if (!tokenUsable) view = { name: "missing" };
   else if (authLoading) view = { name: "loading" };
   else if (asGuest) view = { name: "guest" };
   else if (preview.isPending || !preview.data) view = { name: "loading" };
   else view = { name: "preview", data: preview.data };
   const viewName = view.name;
+  // Une erreur qui en remplace une autre change aussi d'écran : le focus suit
+  const focusKey = viewName === "error" ? `error:${failure?.kind}` : viewName;
 
   // Le titre reçoit le focus à chaque changement d'état (lecteurs d'écran, clavier)
   useEffect(() => {
-    if (viewName !== "loading") headingRef.current?.focus();
-  }, [viewName]);
+    if (focusKey !== "loading") headingRef.current?.focus();
+  }, [focusKey]);
   useEffect(() => {
     if (viewName === "joined") setAnnouncement(t("invitation.joined.announce"));
   }, [viewName, t]);
@@ -136,9 +175,21 @@ const OrganizationInvitation = () => {
     void preview.refetch();
   };
 
+  // Après l'acceptation, le nouveau profil doit figurer dans la liste du serveur avant de pouvoir être ouvert
+  const joinedId = view.name === "joined" ? view.data.organization_id : null;
+  const joinedReady = !!joinedId && contexts.some((c) => c.type === "ORGANIZATION" && c.id === joinedId);
+  const contextsRequested = useRef(false);
+  useEffect(() => {
+    if (joinedId && !joinedReady && !contextsRequested.current) {
+      contextsRequested.current = true;
+      refetchContexts();
+    }
+  }, [joinedId, joinedReady, refetchContexts]);
+
   const openOrganization = (organizationId: string) => {
     // Le profil actif ne change qu'à cet appui (l'utilisateur sait sous quelle identité il agit)
-    if (contexts.some((c) => c.type === "ORGANIZATION" && c.id === organizationId)) setActive({ type: "ORGANIZATION", id: organizationId });
+    if (!joinedReady) return;
+    setActive({ type: "ORGANIZATION", id: organizationId });
     navigate(`/organizations/${organizationId}`);
   };
 
@@ -209,7 +260,8 @@ const OrganizationInvitation = () => {
           {heading(t("invitation.joined.title", { name: data.organization_name }), <CheckCircle2 className="h-10 w-10 text-primary" aria-hidden />)}
           <p className="mt-3 text-center text-sm text-muted-foreground">{t("invitation.joined.body", { role: t(`role.${data.role}`) })}</p>
           <div className="mt-6 flex flex-col gap-2">
-            <Button type="button" className="min-h-12 w-full" onClick={() => openOrganization(data.organization_id)}>
+            <Button type="button" className="min-h-12 w-full" disabled={!joinedReady} aria-busy={!joinedReady || undefined} onClick={() => openOrganization(data.organization_id)}>
+              {!joinedReady && <Loader2 className="animate-spin" aria-hidden />}
               {t("invitation.joined.open")}
             </Button>
             <Button asChild variant="ghost" className="min-h-12 w-full">
@@ -282,6 +334,9 @@ const OrganizationInvitation = () => {
       switch (failure?.kind) {
         case "invalid":
           content = errorCard(t("invitation.err.invalid.title"), t("invitation.err.invalid.body"), homeButton);
+          break;
+        case "missing":
+          content = errorCard(t("invitation.err.missing.title"), t("invitation.err.missing.body"), homeButton);
           break;
         case "phone":
           content = errorCard(

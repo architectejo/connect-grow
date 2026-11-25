@@ -10,10 +10,17 @@ export function ScrollManager() {
   const navigationType = useNavigationType();
 
   useEffect(() => {
-    if (hash) {
+    // Un fragment porteur de paramètres (`#token=…` d'une invitation) n'est pas une ancre : on ne le lit pas
+    if (hash && !hash.includes("=")) {
       // Laisse la page cible se rendre avant de chercher l'ancre
       const timer = window.setTimeout(() => {
-        document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ behavior: "smooth" });
+        let id: string;
+        try {
+          id = decodeURIComponent(hash.slice(1));
+        } catch {
+          return; // fragment mal encodé : aucune ancre
+        }
+        document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
       }, 50);
       return () => window.clearTimeout(timer);
     }

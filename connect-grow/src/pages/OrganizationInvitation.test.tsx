@@ -1,22 +1,26 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "@/i18n";
 import apiClient from "@/api/client";
-import { INVITATION_TOKEN_KEY, clearInvitationToken } from "@/lib/invitation-token";
+import { INVITATION_TOKEN_KEY, clearInvitationToken, readInvitationToken, storeInvitationToken } from "@/lib/invitation-token";
 import OrganizationInvitation from "./OrganizationInvitation";
 
-const auth = vi.hoisted(() => ({ isAuthenticated: true, isLoading: false }));
+const auth = vi.hoisted(() => ({ isAuthenticated: true, isLoading: false, user: { id: "compte-A" } as { id: string } | null }));
 vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => auth }));
-const active = vi.hoisted(() => ({ setActive: vi.fn(), contexts: [] as unknown[] }));
+const active = vi.hoisted(() => ({ setActive: vi.fn(), refetch: vi.fn(), contexts: [] as unknown[] }));
 vi.mock("@/contexts/ActiveContextContext", () => ({ useActiveContext: () => active }));
 const online = vi.hoisted(() => ({ value: true }));
 vi.mock("@/hooks/use-online-status", () => ({ useOnlineStatus: () => online.value }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 vi.mock("@/components/layout/AppShell", () => ({ AppShell: ({ children }: { children: ReactNode }) => <main>{children}</main> }));
+
+// Rendu jsdom + Radix + fenêtres chargées à la demande : 1 à 3 s par cas sur la machine de développement, davantage
+// quand toute la suite tourne en parallèle. Délai explicite propre à ce fichier (ne dépend pas de vitest.config.ts).
+vi.setConfig({ testTimeout: 20_000 });
 
 beforeAll(async () => {
   configure({ asyncUtilTimeout: 5000 });
@@ -44,20 +48,35 @@ const apiError = (status: number, code?: string, data: Record<string, unknown> =
 const NETWORK = { isAxiosError: true, message: "Network Error" };
 
 let client: QueryClient;
+/** Locations vues par le routeur (sans rien écrire dans le DOM). */
+const routerLocations: string[] = [];
+function LocationProbe() {
+  const location = useLocation();
+  useEffect(() => {
+    routerLocations.push(`${location.pathname}${location.search}${location.hash}|${JSON.stringify(location.state)}`);
+  }, [location]);
+  return null;
+}
 const openLink = (hash = `#token=${TOKEN}`) => window.history.replaceState(null, "", `/organization-invitation${hash}`);
+/** Comme `BrowserRouter`, le routeur part de l'adresse courante (fragment compris). */
 const renderPage = () => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(
-    <MemoryRouter initialEntries={["/organization-invitation"]}>
+  const initial = `/organization-invitation${window.location.hash}`;
+  // Arbre reconstruit à chaque rendu : React ne saute pas le nouveau rendu (même client, même routeur monté)
+  const ui = () => (
+    <MemoryRouter initialEntries={[initial]}>
       <QueryClientProvider client={client}>
+        <LocationProbe />
         <Routes>
           <Route path="/organization-invitation" element={<OrganizationInvitation />} />
           <Route path="/organizations/:id" element={<p>Espace de l'organisation</p>} />
           <Route path="/dashboard" element={<p>Tableau de bord</p>} />
         </Routes>
       </QueryClientProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  const view = render(ui());
+  return { ...view, rerenderPage: () => view.rerender(ui()) };
 };
 const postsTo = (suffix: string) => vi.mocked(apiClient.post).mock.calls.filter((c) => String(c[0]).endsWith(suffix));
 
@@ -76,7 +95,10 @@ beforeEach(() => {
   auth.isLoading = false;
   online.value = true;
   active.setActive.mockClear();
+  active.refetch.mockClear();
   active.contexts = [];
+  auth.user = { id: "compte-A" };
+  routerLocations.length = 0;
   sessionStorage.clear();
   localStorage.clear();
   vi.mocked(toast.success).mockClear();
@@ -94,7 +116,7 @@ describe("gestion du jeton à l'arrivée", () => {
   it("range le jeton du fragment en sessionStorage, efface la barre d'adresse, jamais en localStorage", async () => {
     mockApi();
     renderPage();
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN);
+    expect(readInvitationToken()).toBe(TOKEN);
     expect(window.location.hash).toBe("");
     expect(window.location.href).not.toContain(TOKEN);
     expect(JSON.stringify({ ...localStorage })).not.toContain(TOKEN);
@@ -131,7 +153,7 @@ describe("gestion du jeton à l'arrivée", () => {
 
   it("retour après connexion : sans fragment, le jeton rangé est relu", async () => {
     openLink("");
-    sessionStorage.setItem(INVITATION_TOKEN_KEY, TOKEN);
+    storeInvitationToken(TOKEN);
     const post = mockApi();
     renderPage();
     await screen.findByText("Boutique Lumière");
@@ -150,7 +172,7 @@ describe("visiteur non connecté (E15, 4.4.1)", () => {
     renderPage();
     expect(screen.getByRole("heading", { level: 1, name: "Vous avez reçu une invitation" })).toBeInTheDocument();
     expect(screen.getByText(/Connectez-vous ou créez un compte pour voir de quelle organisation il s'agit/)).toBeInTheDocument();
-    expect(screen.getByText("N'acceptez que les invitations de personnes que vous connaissez.")).toBeInTheDocument();
+    expect(screen.getByText(/N'acceptez que les invitations de personnes que vous connaissez. N'ouvrez pas ce lien sur un appareil partagé/)).toBeInTheDocument();
     expect(post).not.toHaveBeenCalled();
     expect(get).not.toHaveBeenCalled();
     expect(document.body.textContent).not.toMatch(/Éditeur|Analyste|Boutique|2026/);
@@ -161,7 +183,7 @@ describe("visiteur non connecté (E15, 4.4.1)", () => {
     renderPage();
     expect(screen.getByRole("link", { name: "Se connecter" })).toHaveAttribute("href", "/login?next=%2Forganization-invitation");
     expect(screen.getByRole("link", { name: "Créer un compte" })).toHaveAttribute("href", "/register?next=%2Forganization-invitation");
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN);
+    expect(readInvitationToken()).toBe(TOKEN);
   });
 
   it("session en cours de vérification : squelette, ni écran visiteur ni appel (même après un délai)", async () => {
@@ -235,7 +257,7 @@ describe("hors ligne (4.6)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rejoindre l'organisation" }));
     expect(postsTo("/accept/")).toHaveLength(0);
     expect(post).toHaveBeenCalledTimes(1);
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN);
+    expect(readInvitationToken()).toBe(TOKEN);
   });
 });
 
@@ -248,11 +270,34 @@ describe("accepter (4.4.3)", () => {
     expect(postsTo("/accept/")[0][1]).toEqual({ token: TOKEN });
     expect(screen.getByText("Vous avez le rôle Éditeur.")).toBeInTheDocument();
     await waitFor(() => expect(title).toHaveFocus());
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBeNull();
+    expect(readInvitationToken()).toBeNull();
     const live = screen.getAllByRole("status");
     expect(live).toHaveLength(1);
     await waitFor(() => expect(live[0]).toHaveTextContent("Vous avez rejoint l'organisation."));
     expect(live[0].textContent).not.toContain(TOKEN);
+  });
+
+  it("profil pas encore dans la liste au moment de l'appui : bouton désactivé (indicateur), liste rechargée, puis ouverture", async () => {
+    active.contexts = [];
+    mockApi();
+    const { rerenderPage } = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Rejoindre l'organisation" }));
+    await screen.findByRole("heading", { level: 1, name: /Vous avez rejoint/ });
+    const open = screen.getByRole("button", { name: "Ouvrir l'organisation" });
+    expect(open).toBeDisabled();
+    expect(open).toHaveAttribute("aria-busy", "true");
+    fireEvent.click(open);
+    expect(active.setActive).not.toHaveBeenCalled();
+    expect(screen.queryByText("Espace de l'organisation")).not.toBeInTheDocument();
+    await waitFor(() => expect(active.refetch).toHaveBeenCalledTimes(1));
+
+    active.contexts = [{ type: "ORGANIZATION", id: ORG, name: "Boutique Lumière" }];
+    rerenderPage();
+    const ready = screen.getByRole("button", { name: "Ouvrir l'organisation" });
+    expect(ready).toBeEnabled();
+    fireEvent.click(ready);
+    expect(active.setActive).toHaveBeenCalledWith({ type: "ORGANIZATION", id: ORG });
+    expect(await screen.findByText("Espace de l'organisation")).toBeInTheDocument();
   });
 
   it("le profil actif ne change pas tout seul ; « Ouvrir l'organisation » le sélectionne puis ouvre l'organisation", async () => {
@@ -307,7 +352,7 @@ describe("refuser (4.4.4)", () => {
     expect(postsTo("/decline/")[0][1]).toEqual({ token: TOKEN });
     expect(screen.getByText("Le lien ne peut plus être utilisé.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Retour à l'accueil" })).toBeInTheDocument();
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBeNull();
+    expect(readInvitationToken()).toBeNull();
   });
 
   it("« Garder l'invitation » ferme sans appel", async () => {
@@ -317,7 +362,7 @@ describe("refuser (4.4.4)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Garder l'invitation" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
     expect(postsTo("/decline/")).toHaveLength(0);
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN);
+    expect(readInvitationToken()).toBe(TOKEN);
   });
 });
 
@@ -334,14 +379,14 @@ describe("erreurs (4.5) : neutres, jamais le nom de l'organisation", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Cette invitation n'est plus valable" })).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Le lien a peut-être expiré, été annulé ou déjà été utilisé.");
     expect(screen.getByRole("link", { name: "Retour à l'accueil" })).toBeInTheDocument();
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBeNull();
+    expect(readInvitationToken()).toBeNull();
     expect(document.body.textContent).not.toContain("Boutique");
   });
 
   it("404 invitation_invalid à l'acceptation : même message neutre, jeton supprimé", async () => {
     await failOnAccept(apiError(404, "invitation_invalid"));
     expect(await screen.findByRole("heading", { level: 1, name: "Cette invitation n'est plus valable" })).toBeInTheDocument();
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBeNull();
+    expect(readInvitationToken()).toBeNull();
     expect(document.body.textContent).not.toContain("Boutique");
   });
 
@@ -356,7 +401,7 @@ describe("erreurs (4.5) : neutres, jamais le nom de l'organisation", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Vérifiez d'abord votre numéro" })).toBeInTheDocument();
     expect(screen.getByText(/Votre invitation reste valable/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Vérifier mon numéro" })).toHaveAttribute("href", "/settings?tab=contact");
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN);
+    expect(readInvitationToken()).toBe(TOKEN);
   });
 
   it("409 organization_limit_reached : « Voir mes profils », jeton conservé, texte propre à l'acceptation", async () => {
@@ -364,7 +409,7 @@ describe("erreurs (4.5) : neutres, jamais le nom de l'organisation", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Vous avez atteint la limite d'organisations" })).toBeInTheDocument();
     expect(screen.queryByText(/pour en créer une nouvelle/)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Voir mes profils" })).toHaveAttribute("href", "/profiles");
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN);
+    expect(readInvitationToken()).toBe(TOKEN);
   });
 
   it("409 already_member : message, « Voir mes profils », jeton supprimé", async () => {
@@ -372,7 +417,7 @@ describe("erreurs (4.5) : neutres, jamais le nom de l'organisation", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Vous faites déjà partie de cette organisation" })).toBeInTheDocument();
     expect(screen.getByText(/Cette invitation ne change pas votre rôle/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Voir mes profils" })).toBeInTheDocument();
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBeNull();
+    expect(readInvitationToken()).toBeNull();
   });
 
   it("403 DENY_SECURITY : « Action temporairement impossible »", async () => {
@@ -387,7 +432,7 @@ describe("erreurs (4.5) : neutres, jamais le nom de l'organisation", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Trop de tentatives" })).toBeInTheDocument();
     expect(screen.getByText("Patientez quelques minutes puis rouvrez le lien.")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Réessayer" })).toBeDisabled());
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN);
+    expect(readInvitationToken()).toBe(TOKEN);
   });
 
   it("429 sans délai lisible : « Réessayer » reste actif", async () => {
@@ -400,7 +445,7 @@ describe("erreurs (4.5) : neutres, jamais le nom de l'organisation", () => {
     await failOnAccept(NETWORK);
     expect(await screen.findByRole("heading", { level: 1, name: "Connexion perdue" })).toBeInTheDocument();
     expect(screen.getByText("Votre invitation n'a pas été modifiée. Réessayez quand vous êtes reconnecté.")).toBeInTheDocument();
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN);
+    expect(readInvitationToken()).toBe(TOKEN);
     expect(postsTo("/accept/")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Réessayer" }));
     expect(await screen.findByRole("heading", { level: 2, name: "Boutique Lumière" })).toBeInTheDocument();
@@ -411,20 +456,20 @@ describe("erreurs (4.5) : neutres, jamais le nom de l'organisation", () => {
     mockApi({ preview: NETWORK });
     renderPage();
     expect(await screen.findByRole("heading", { level: 1, name: "Connexion perdue" })).toBeInTheDocument();
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN);
+    expect(readInvitationToken()).toBe(TOKEN);
   });
 
   it("401 (session expirée) : retour à l'écran visiteur, jeton conservé", async () => {
     mockApi({ preview: apiError(401) });
     renderPage();
     expect(await screen.findByRole("heading", { level: 1, name: "Vous avez reçu une invitation" })).toBeInTheDocument();
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN);
+    expect(readInvitationToken()).toBe(TOKEN);
   });
 
   it("erreur inconnue (500) : message générique et « Réessayer », jeton conservé", async () => {
     await failOnAccept(apiError(500));
     expect(await screen.findByRole("heading", { level: 1, name: "Une erreur est survenue" })).toBeInTheDocument();
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN);
+    expect(readInvitationToken()).toBe(TOKEN);
   });
 
   it("l'erreur est annoncée (role=alert) et le titre reçoit le focus", async () => {
@@ -441,7 +486,7 @@ describe("erreurs (4.5) : neutres, jamais le nom de l'organisation", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Refuser l'invitation" }));
     fireEvent.click(await screen.findByRole("button", { name: "Refuser" }));
     expect(await screen.findByRole("heading", { level: 1, name: "Cette invitation n'est plus valable" })).toBeInTheDocument();
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBeNull();
+    expect(readInvitationToken()).toBeNull();
   });
 });
 
@@ -471,7 +516,7 @@ describe("le jeton ne fuit dans aucun canal", () => {
     renderPage();
     await screen.findByText("Boutique Lumière");
     assertNoLeak(spies);
-    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBe(TOKEN); // seul canal autorisé
+    expect(readInvitationToken()).toBe(TOKEN); // seul canal autorisé
     fireEvent.click(screen.getByRole("button", { name: "Rejoindre l'organisation" }));
     await screen.findByRole("heading", { level: 1, name: /Vous avez rejoint/ });
     assertNoLeak(spies);
@@ -511,5 +556,88 @@ describe("le jeton ne fuit dans aucun canal", () => {
       expect(call[1]).toEqual({ token: TOKEN });
       expect(call).toHaveLength(2); // aucun en-tête ni paramètre portant le jeton
     }
+  });
+});
+
+describe("location du routeur et second lien (relecture F2)", () => {
+  const OTHER = "zZ9-_otherTokenOtherTokenOtherTokenOther00";
+
+  it("après l'arrivée, la location de React Router ne porte plus le jeton (remplacée, pas empilée)", async () => {
+    mockApi();
+    renderPage();
+    await screen.findByText("Boutique Lumière");
+    expect(routerLocations[0]).toContain(TOKEN); // point de départ, comme BrowserRouter
+    expect(routerLocations[routerLocations.length - 1]).toBe("/organization-invitation|null");
+    expect(routerLocations.slice(1).join()).not.toContain(TOKEN);
+  });
+
+  it("un second lien ouvert dans le même onglet (hashchange) remplace le premier et relance l'aperçu", async () => {
+    const post = mockApi();
+    renderPage();
+    await screen.findByText("Boutique Lumière");
+    window.history.replaceState(null, "", `/organization-invitation#token=${OTHER}`);
+    act(() => {
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    await waitFor(() => expect(post).toHaveBeenLastCalledWith("accounts/organization-invitations/preview/", { token: OTHER }));
+    expect(readInvitationToken()).toBe(OTHER);
+    expect(window.location.hash).toBe("");
+    expect(routerLocations[routerLocations.length - 1]).not.toContain(OTHER);
+  });
+
+  it("un second lien après un refus réussi : on repart de l'aperçu", async () => {
+    mockApi();
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Refuser l'invitation" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Refuser" }));
+    await screen.findByRole("heading", { level: 1, name: "Invitation refusée" });
+    window.history.replaceState(null, "", `/organization-invitation#token=${OTHER}`);
+    act(() => {
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    expect(await screen.findByRole("heading", { level: 2, name: "Boutique Lumière" })).toBeInTheDocument();
+  });
+});
+
+describe("onglet partagé (audit S2)", () => {
+  it("jeton lié au compte A : le compte B connecté ensuite voit « Lien incomplet », sans appel, jeton effacé", async () => {
+    const post = mockApi();
+    const first = renderPage();
+    await screen.findByText("Boutique Lumière");
+    first.unmount();
+    post.mockClear();
+
+    auth.user = { id: "compte-B" };
+    openLink("");
+    renderPage();
+    expect(await screen.findByRole("heading", { level: 1, name: "Lien incomplet" })).toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+    expect(readInvitationToken()).toBeNull();
+  });
+
+  it("jeton rangé depuis plus de 60 minutes : « Lien incomplet », sans appel", () => {
+    openLink("");
+    storeInvitationToken(TOKEN, Date.now() - 61 * 60 * 1000);
+    const post = mockApi();
+    renderPage();
+    expect(screen.getByRole("heading", { level: 1, name: "Lien incomplet" })).toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(INVITATION_TOKEN_KEY)).toBeNull();
+  });
+});
+
+describe("focus", () => {
+  it("une erreur remplacée directement par une autre (429 puis 404 au nouvel essai) redonne le focus au titre", async () => {
+    const post = mockApi({ preview: apiError(429) });
+    renderPage();
+    const first = await screen.findByRole("heading", { level: 1, name: "Trop de tentatives" });
+    await waitFor(() => expect(first).toHaveFocus());
+    first.blur();
+    post.mockImplementation(async () => {
+      throw apiError(404, "invitation_invalid");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Réessayer" }));
+    const second = await screen.findByRole("heading", { level: 1, name: "Cette invitation n'est plus valable" });
+    await waitFor(() => expect(second).toHaveFocus());
   });
 });

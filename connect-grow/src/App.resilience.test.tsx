@@ -1,9 +1,19 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { configure, render, screen, waitFor } from "@testing-library/react";
 import { AxiosError, type AxiosAdapter, type InternalAxiosRequestConfig } from "axios";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import apiClient from "@/api/client";
 import { tokenStorage } from "@/lib/tokens";
 import App from "./App";
+
+// Premier rendu jsdom (transformations à froid, Radix, i18n) : il dépasse les 5 s par défaut quand toute la suite tourne
+// en parallèle sur la machine de développement. Délai explicite propre à ce fichier (ne dépend pas de vitest.config.ts).
+vi.setConfig({ testTimeout: 20_000 });
+
+beforeAll(async () => {
+  configure({ asyncUtilTimeout: 5000 });
+  // Préchauffe la page d'accueil (chargée par le premier test) : le premier cas ne paie plus l'import à froid
+  await import("./pages/Index.tsx");
+}, 60_000);
 
 const original = apiClient.defaults.adapter;
 

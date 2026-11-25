@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { configure, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "@/i18n";
 import apiClient from "@/api/client";
 import type { SellerProfileData } from "@/api/types";
@@ -66,6 +66,14 @@ const renderAt = (path: string) =>
       </QueryClientProvider>
     </MemoryRouter>,
   );
+
+// Premier rendu jsdom (transformations à froid, Radix, i18n) : il dépasse les 5 s par défaut quand toute la suite tourne
+// en parallèle sur la machine de développement. Délai explicite propre à ce fichier (ne dépend pas de vitest.config.ts).
+vi.setConfig({ testTimeout: 20_000 });
+
+beforeAll(() => {
+  configure({ asyncUtilTimeout: 5000 });
+});
 
 describe("Profil public d'un vendeur (E9)", () => {
   it("organisation : nom, type, mentions précises, présentation, compteur d'offres et offres du vendeur", async () => {

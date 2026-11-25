@@ -106,7 +106,7 @@ Suppression de `User.trust_score`, `User.reviews_count`. Dans `services.py` : su
 | Clés d'API | voir 7.4 |
 | Front | `TrustScore.tsx`, `lib/trust.ts` (ses fonctions utiles `sellerDisplayName` et `getPostBadges` sont déplacées), `StatusBadge kind="reliable"`, type de badge `reliable`, clés i18n `trust.*` liées au score, textes « Trust Score », « Vendeur fiable », « Trust & Engage », « affaire conclue » |
 
-Vérification : `grep -rniE "trust_?score|trust_factor|is_trusted|Deal\b|set_reputation|reputation|comments_count|recompute_trust" backend/apps connect-grow/src` ne renvoie rien (hors commentaires d'historique des ADR).
+Vérification : `grep -rniE "trust_?score|trust_factor|is_trusted|Deal\b|set_reputation|reputation|comments_count|recompute_trust" backend/apps frontend/src` ne renvoie rien (hors commentaires d'historique des ADR).
 
 ## 5. Événements (outbox, ADR 0003)
 
@@ -269,7 +269,7 @@ Contenu : lecture de tous les seuils dans `ReviewSettings` (délai contact -> av
 Critères : AC de L0-10-a, b, c ; test de chaque ligne du tableau d'erreurs de 7.2 ; le délai est réglable (0 puis 24 h) ; un contact `CALL` ou `WHATSAPP` (créé directement via le service) ouvre le droit ; masquer un avis fait sortir ses notes des moyennes et reconcile le drapeau.
 
 ### T4 — dev-frontend : retrait et nouveaux blocs de notes (L0-07 front, L0-10 front), parallèle
-Branche `feat/L0-07-front-notes`. Zone : `connect-grow/src/**` uniquement (`api/types.ts`, `components/common/{TrustScore,StatusBadge,SellerCard,PostCard,index}`, `lib/trust.ts`, `components/post/ReviewsSection.tsx`, `hooks/use-reviews.ts`, `pages/{Dashboard,SellerProfile,PostDetail,Index,DesignSystem,Settings}.tsx`, `components/landing/*`, `i18n/locales/fr.ts`).
+Branche `feat/L0-07-front-notes`. Zone : `frontend/src/**` uniquement (`api/types.ts`, `components/common/{TrustScore,StatusBadge,SellerCard,PostCard,index}`, `lib/trust.ts`, `components/post/ReviewsSection.tsx`, `hooks/use-reviews.ts`, `pages/{Dashboard,SellerProfile,PostDetail,Index,DesignSystem,Settings}.tsx`, `components/landing/*`, `i18n/locales/fr.ts`).
 Contenu : section 7 ; deux blocs « Note de l'offre » / « Note du vendeur » avec « Pas encore d'avis », nombre d'avis et « Sur Connecte+ depuis <mois année> » ; libellé accessible « Note de l'offre : 4,2 sur 5, 5 avis » ; carte d'offre = note d'offre seulement ; formulaire à deux notes et commentaire 10-500 ; bouton « Donner mon avis » piloté par `eligibility` (jamais déduit côté client) ; affichage des codes d'erreur 7.2 ; mention « modifié » et libellé « Avis après contact » ; tableau de bord (`avg_rating` nullable) ; suppression de tout ce qui figure au tableau de la section 4 ; textes d'accueil réécrits sans « Trust Score » ni « affaire conclue ». Mocks MSW ou fixtures jusqu'à ce que T1 soit fusionnée, puis intégration réelle.
 Critères : `npm run lint && npm run test && npm run build` verts ; `grep` de la section 4 vide côté front ; tests des composants (seuil, `null`, accessibilité).
 

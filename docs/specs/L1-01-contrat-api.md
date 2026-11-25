@@ -313,7 +313,7 @@ Changement de comportement existant : `POST organizations/<id>/leave/` peut main
 
 `POST ID organizations/<uuid:pk>/primary-admin-nominations/<uuid:nomination_id>/cancel/` — initiateur ou Administrateur principal effectif ; pas de corps ; `204`. Erreurs : `404 nomination_not_found` ; `409 nomination_not_pending` ; `403 DENY_PERMISSION` ; `429`.
 
-#### 7.3.5 Revue par l'équipe Vérification (personnel ; aucun écran `connect-grow` en V1)
+#### 7.3.5 Revue par l'équipe Vérification (personnel ; aucun écran `frontend` en V1)
 
 - `GET ID staff/primary-admin-nominations/?status=PENDING_REVIEW` — permission `identity.review_primaryadminnomination`. Paginé. Élément : `PrimaryAdminNomination` **plus** `"organization": {"id", "name", "org_type", "assurance_level"}`.
 - `POST ID staff/primary-admin-nominations/<uuid:nomination_id>/decision/` — corps `{"decision": "APPROVE | REJECT", "reason_code": "authority_confirmed | authority_not_established | documents_required | conflict_detected | other"}`. `200` + objet. Erreurs : `403 DENY_PERMISSION` (permission absente **ou conflit d'intérêts** : réviseur membre actif de l'organisation, initiateur ou cible) ; `404 nomination_not_found` ; `409 nomination_not_pending` ; `400 {"decision": [...]}`, `400 {"reason_code": [...]}` ; `409 last_owner`, `409 last_effective_owner` ; `429`.

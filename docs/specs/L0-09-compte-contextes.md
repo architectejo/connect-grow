@@ -4,7 +4,7 @@
 - **Auteur :** analyste-fonctionnel
 - **Statut :** proposition, à valider par le chef de projet (CP) puis à planifier par l'architecte-technique (ADR 0006 attendu)
 - **Réf. :** CDC v1.2 §3.1, §3.2, §3.3, §3.4, §3.15, §3.17, §4.2, §5.4, §11.1, §11.2, §11.4 ; règles verrouillées 1, 2, 3, 4, 10, 11, 12 ; dossier client : IAM-001 à IAM-008, ORG-001/002/003 (doc 01), UF-02 à UF-04 (doc 02), doc 06 (rôles et permissions, §2, §3, §6, §7, §19 à §22), doc 07 (§3 à §5), doc 09 §8, doc 10 (IAM-01 à IAM-08), doc 13 §4 à §6 et invariants.
-- **Sources lues dans le code (lecture seule) :** `backend/apps/identity` (models, services, serializers, views, urls, admin), `backend/apps/marketplace` (models, services, views, serializers), `backend/apps/reviews`, `backend/apps/visibility`, `backend/apps/common/contexts.py`, `connect-grow/src` (branche `frontend`).
+- **Sources lues dans le code (lecture seule) :** `backend/apps/identity` (models, services, serializers, views, urls, admin), `backend/apps/marketplace` (models, services, views, serializers), `backend/apps/reviews`, `backend/apps/visibility`, `backend/apps/common/contexts.py`, `frontend/src` (branche `frontend`).
 
 ---
 
@@ -526,7 +526,7 @@ Comptage indicatif par recherche de `user_type|BusinessProfile|business_profile|
 - Outbox : nouvel événement `MembershipChanged` (ADR 0003).
 - `DomainBoundariesTests` : tout rester vert ; les services `identity` exposent par lot : `get_contexts_for_user`, `acts_for_context`, `resolve_acting_context`, `can(user, context, capacity)`, `get_context_recipients(context, capacity)`, `get_seller_summaries` (nouvelle forme).
 
-### 7.3. Front (`connect-grow`, branche `frontend`)
+### 7.3. Front (`frontend`, branche `frontend`)
 
 Fichiers qui lisent `user_type`, `business_profile` ou `is_verified` du compte ou du vendeur : `pages/Register.tsx`, `Settings.tsx`, `Verification.tsx`, `Dashboard.tsx`, `PostEditor.tsx`, `SellerProfile.tsx`, `Businesses.tsx`, `DesignSystem.tsx`, `components/layout/Navbar.tsx`, `AccountShell.tsx`, `components/common/SellerCard.tsx`, `PostCard.tsx`, `lib/post.ts`, `lib/validation.ts` (erreurs imbriquées), `api/types.ts`, `api/backend-contract.test.ts`, `hooks/use-marketplace.ts`, `hooks/use-account.ts`, `contexts/AuthContext.tsx`. Nouveau : fournisseur de contexte actif, en-tête de requête dans `api/client.ts`, sélecteur, écrans de création d'organisation et d'activation prestataire (spec `designer-ux` à produire).
 

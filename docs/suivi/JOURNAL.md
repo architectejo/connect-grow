@@ -196,3 +196,9 @@ Une entrée par tâche terminée ou décision prise, la plus récente en haut.
 - **D2** : `docs/specs/L1-01-ecrans-gouvernance.md` (13 composants, ~150 clés). Décisions : pas de lien d'aide tant que le module Aide n'existe pas ; pas d'historique des nominations closes en V1 ; pas d'alerte de nomination sur l'aperçu.
 - **B5** (10e5b00) : « Administrateur principal » dans tous les textes backend, code `OWNER` et codes d'erreur inchangés, migration 0017 cosmétique (no-op). Relue : approuvée. Suggestions reportées à B6 (balayage de test non vide, schémas OpenAPI, harmonisation du contrat §1-§5).
 - **Environnement** : l'interpréteur du projet est `D:\Projects\cp\.env\Scripts\python.exe` (le `python` du PATH pointe ailleurs). À préciser dans CLAUDE.md §7.
+
+## 2026-11-25 (suite 2) — DEV-01 : dossier du front renommé `connect-grow/` → `frontend/`
+
+- **Livré (devops)** : `git mv connect-grow frontend` (historique conservé, `node_modules/` et `dist/` déplacés avec le dossier). Chemins mis à jour dans `CLAUDE.md`, les agents (`designer-ux`, `dev-frontend`, `devops`, `qa-testeur`), `.github/workflows/frontend-ci.yml` (filtres `paths`, `working-directory`, cache npm), `.gitignore`, le README du front, le CDC (deux exports), les ADR 0004 et 0006, les specs, et les chemins du front cités par les tests de recette backend (`common/tests_recette_contact.py`, `tests_recette_lot0.py`) et `backend/scripts/recette_contrat_http.py`.
+- **Inchangé** : nom du paquet npm, textes d'interface, URL du dépôt GitHub `architectejo/connect-grow`. Les entrées passées de ce journal gardent l'ancien chemin `connect-grow/` (historique).
+- **Pour les développeurs** : fermer les terminaux et serveurs Vite ouverts sur l'ancien dossier ; travailler désormais depuis `frontend/`.

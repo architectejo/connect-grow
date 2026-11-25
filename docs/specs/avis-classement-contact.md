@@ -2,7 +2,7 @@
 
 Auteur : analyste-fonctionnel. Date : 09/10/2026. Statut : proposition, en attente d'arbitrage (section 2).
 
-Sources : CLAUDE.md §4 (règles 3, 4, 5, 10, 11, 12) ; CDC v1.2 §3.4, §3.5, §3.9, §3.15 ; dossier client doc07 (§8 « Avis, notes et preuve d'interaction », §17 « Protection des données sensibles », TRU-AC-05/06) ; doc12 (LEG-PRV) ; doc13 (`ContactPoint`, `ContactAction`) ; code lu dans `cp-wt-backend/backend/apps` (`reviews`, `visibility`, `marketplace`, `identity`) et `connect-grow/src`.
+Sources : CLAUDE.md §4 (règles 3, 4, 5, 10, 11, 12) ; CDC v1.2 §3.4, §3.5, §3.9, §3.15 ; dossier client doc07 (§8 « Avis, notes et preuve d'interaction », §17 « Protection des données sensibles », TRU-AC-05/06) ; doc12 (LEG-PRV) ; doc13 (`ContactPoint`, `ContactAction`) ; code lu dans `cp-wt-backend/backend/apps` (`reviews`, `visibility`, `marketplace`, `identity`) et `frontend/src`.
 
 Remarque de numérotation : les commentaires du code citent encore « CDC 3.7 / 3.8 » (v1.0). Dans la v1.2 ce sont §3.4 (avis) et §3.5 (classement). À corriger au passage.
 

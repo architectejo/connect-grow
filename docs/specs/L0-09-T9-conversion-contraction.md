@@ -33,7 +33,7 @@ Autres constats qui corrigent l'énoncé ou l'ADR :
 
 ## 1. Inventaire exhaustif des vestiges (relevé du 24/10/2026)
 
-Recherche : `user_type|BusinessProfile|business_profile` (hors migrations) et rattachement `seller` (FK) dans `backend/` et `connect-grow/src/`.
+Recherche : `user_type|BusinessProfile|business_profile` (hors migrations) et rattachement `seller` (FK) dans `backend/` et `frontend/src/`.
 
 ### 1.1 Code applicatif backend
 
@@ -87,7 +87,7 @@ Occurrences du rattachement `seller=` / `.seller` / `Offer(...)` / `Offer.object
 
 Règle : **le nombre de tests ne baisse pas** (ADR §12). Un test des routes KYC historiques est réécrit contre la route d'organisation équivalente ou remplacé par un test de conversion ; il n'est jamais simplement supprimé. Un test qui garantit qu'un champ retiré n'a aucun effet (`tests_l021`, `tests_recette_lot0` 405-412) est **conservé** (il garde la non-régression d'API), seul son jeu de données change.
 
-### 1.4 Front (`connect-grow/src`) : déjà quasi propre
+### 1.4 Front (`frontend/src`) : déjà quasi propre
 
 | Élément | Constat | Traitement |
 |---|---|---|

@@ -845,7 +845,7 @@ Noms des intervenants : \[à compléter\].
 | dev-backend | Django, DRF, migrations, commandes planifiées |
 | dev-paiements | Agrégateur Mobile Money, webhooks, remboursements, billets |
 | dev-temps-reel | Django Channels, WebSocket |
-| dev-frontend | React, connect-grow |
+| dev-frontend | React, frontend |
 | designer-ux | Spécifications d'écran et parcours |
 | devops | Docker, CI, déploiement en fin de projet |
 | qa-testeur | Tests de recette et rapports d'anomalies |

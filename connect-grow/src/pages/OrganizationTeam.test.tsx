@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import "@/i18n";
@@ -18,7 +18,12 @@ vi.mock("@/components/organizations/OrganizationPage", () => ({
 }));
 vi.mock("@/contexts/ActiveContextContext", () => ({ useActiveContext: () => ({ leaveActive: vi.fn(), switchToPersonal: vi.fn(), active: { type: "USER", id: "u" } }) }));
 
+// Rendu jsdom + Radix + fenêtres chargées à la demande : 1 à 3 s par cas sur la machine de développement, davantage
+// quand toute la suite tourne en parallèle. Délai explicite propre à ce fichier (ne dépend pas de vitest.config.ts).
+vi.setConfig({ testTimeout: 20_000 });
+
 beforeAll(async () => {
+  configure({ asyncUtilTimeout: 5000 });
   // Le dialogue d'invitation est chargé à l'ouverture (React.lazy) : on réchauffe le module
   await Promise.all([
     import("@/components/team/InviteDialog"),
@@ -129,5 +134,27 @@ describe("écran Équipe", () => {
     const urls = vi.mocked(apiClient.get).mock.calls.map((c) => String(c[0]));
     expect(urls.every((u) => u.endsWith("/members/"))).toBe(true);
     expect(urls.some((u) => u.endsWith("/invitations/"))).toBe(false);
+  });
+
+  it("onglets : cibles de 44 px", async () => {
+    renderPage(owner);
+    await screen.findByText("Marie K.");
+    for (const tab of screen.getAllByRole("tab")) expect(tab.className).toContain("min-h-11");
+  });
+
+  it("fenêtre ouverte depuis l'état vide de l'onglet Invitations : le focus revient à ce bouton à l'annulation", async () => {
+    renderPage(owner);
+    await screen.findByText("Marie K.");
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Invitations" }), { button: 0 });
+    fireEvent.click(screen.getByRole("tab", { name: "Invitations" }));
+    await screen.findByText("Aucune invitation en attente.");
+    const panel = screen.getByRole("tabpanel");
+    const emptyAction = within(panel).getByRole("button", { name: "Inviter une personne" });
+    emptyAction.focus();
+    fireEvent.click(emptyAction);
+    const dialog = await screen.findByRole("dialog", { name: "Inviter une personne" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Annuler" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(emptyAction).toHaveFocus());
   });
 });

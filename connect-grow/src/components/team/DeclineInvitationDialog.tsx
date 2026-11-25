@@ -28,8 +28,8 @@ export function DeclineInvitationDialog({ pending, onKeep, onDecline }: DeclineI
           <AlertDialogDescription>{t("invitation.declineBody")}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>{t("invitation.keep")}</AlertDialogCancel>
-          <Button type="button" variant="destructive" disabled={pending} onClick={onDecline}>
+          <AlertDialogCancel className="min-h-11" disabled={pending}>{t("invitation.keep")}</AlertDialogCancel>
+          <Button type="button" variant="destructive" className="min-h-11" disabled={pending} onClick={onDecline}>
             {pending && <Loader2 className="animate-spin" aria-hidden />}
             {t("invitation.declineConfirm")}
           </Button>

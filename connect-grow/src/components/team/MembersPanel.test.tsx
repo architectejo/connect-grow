@@ -12,6 +12,10 @@ const online = vi.hoisted(() => ({ value: true }));
 vi.mock("@/hooks/use-online-status", () => ({ useOnlineStatus: () => online.value }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
+// Rendu jsdom + Radix + fenêtres chargées à la demande : 1 à 3 s par cas sur la machine de développement, davantage
+// quand toute la suite tourne en parallèle. Délai explicite propre à ce fichier (ne dépend pas de vitest.config.ts).
+vi.setConfig({ testTimeout: 20_000 });
+
 beforeAll(async () => {
   // Les fenêtres sont chargées à l'ouverture (React.lazy) : on réchauffe les modules pour ne pas dépendre de la charge de la machine
   configure({ asyncUtilTimeout: 5000 });

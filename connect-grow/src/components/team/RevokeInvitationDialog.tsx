@@ -75,8 +75,8 @@ export function RevokeInvitationDialog({ orgId, invitation, online, onClose, onR
         <FormAlert message={formError} />
         {!online && <p className="text-xs text-muted-foreground">{t("common.offlineAction")}</p>}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>{t("team.invitations.keep")}</AlertDialogCancel>
-          <Button type="button" variant="destructive" disabled={pending || blocked || !online} onClick={() => void confirm()}>
+          <AlertDialogCancel className="min-h-11" disabled={pending}>{t("team.invitations.keep")}</AlertDialogCancel>
+          <Button type="button" variant="destructive" className="min-h-11" disabled={pending || blocked || !online} onClick={() => void confirm()}>
             {pending && <Loader2 className="animate-spin" aria-hidden />}
             {t("team.invitations.revoke")}
           </Button>

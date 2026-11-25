@@ -49,7 +49,7 @@ export function InvitationRow({ invitation, layout, canRevoke, online, offlineHi
         className="min-h-11"
         disabled={!online}
         aria-describedby={!online ? offlineHintId : undefined}
-        aria-label={t("team.invitations.revokeLabel", { label: labelText })}
+        aria-label={t("team.invitations.revokeLabel", { label: labelText, role: t(`role.${invitation.role}`), date })}
         onClick={() => onRevoke(invitation)}
       >
         <X aria-hidden />

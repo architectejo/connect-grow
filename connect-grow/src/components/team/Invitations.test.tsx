@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "@/i18n";
@@ -12,6 +12,10 @@ vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ isAuthenticated: tr
 const online = vi.hoisted(() => ({ value: true }));
 vi.mock("@/hooks/use-online-status", () => ({ useOnlineStatus: () => online.value }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+
+// Rendu jsdom + Radix + fenêtres chargées à la demande : 1 à 3 s par cas sur la machine de développement, davantage
+// quand toute la suite tourne en parallèle. Délai explicite propre à ce fichier (ne dépend pas de vitest.config.ts).
+vi.setConfig({ testTimeout: 20_000 });
 
 beforeAll(async () => {
   configure({ asyncUtilTimeout: 5000 });
@@ -47,6 +51,14 @@ const inv = (id: string, extra: Partial<OrganizationInvitation> = {}): Organizat
   ...extra,
 });
 const page = (results: OrganizationInvitation[], next: string | null = null) => ({ data: { count: results.length, next, previous: null, results } });
+
+/** Clic hors de la fenêtre, après un tick : Radix n'écoute les clics extérieurs qu'après son montage. */
+const clickOutside = async () => {
+  await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  fireEvent.pointerDown(document.body);
+  fireEvent.click(document.body);
+  await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+};
 
 const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 const wrap = (node: React.ReactNode, client = newClient()) => render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
@@ -107,8 +119,6 @@ describe("InviteDialog (E6a)", () => {
   });
 
   it("durée de validité lue de limits/ ; omise si le serveur ne la renvoie pas", async () => {
-    const { unmount } = render(<div />);
-    unmount();
     renderDialog({ invitation_ttl_days: 7 });
     expect(await screen.findByText("Le lien est valable 7 jours.")).toBeInTheDocument();
   });
@@ -154,14 +164,20 @@ describe("InviteDialog (E6a)", () => {
     expect(within(dialog).getByText("Vous n'avez pas encore copié le lien.")).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Partager" })).not.toBeInTheDocument();
 
-    // Clic extérieur : la fenêtre reste ouverte
-    fireEvent.pointerDown(document.body);
-    fireEvent.click(document.body);
+    // Clic extérieur : la fenêtre reste ouverte (le témoin ci-dessous montre que ce même geste ferme l'étape 1)
+    await clickOutside();
     expect(screen.getByLabelText("Lien d'invitation")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Terminer" }));
     expect(onClose).toHaveBeenCalledWith(true);
+  });
+
+  it("témoin : à l'étape 1, le même clic extérieur ferme la fenêtre", async () => {
+    const { onClose } = renderDialog();
+    await screen.findByRole("dialog", { name: "Inviter une personne" });
+    await clickOutside();
+    await waitFor(() => expect(onClose).toHaveBeenCalledWith(false));
   });
 
   it("le jeton n'est ni dans un stockage, ni dans un toast, ni dans la console, ni dans l'URL", async () => {
@@ -415,7 +431,7 @@ describe("InvitationsPanel (onglet Invitations)", () => {
   describe("annuler une invitation (E6e)", () => {
     const open = async () => {
       const view = renderPanel();
-      fireEvent.click(await screen.findByRole("button", { name: "Annuler l'invitation : Jean, comptable" }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Annuler l'invitation : Jean, comptable, Éditeur, expire le 16 novembre 2099$/ }));
       const dialog = await screen.findByRole("alertdialog");
       return { dialog, ...view };
     };
@@ -484,7 +500,7 @@ describe("InvitationsPanel (onglet Invitations)", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Garder l'invitation" }));
       await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
       expect(del).not.toHaveBeenCalled();
-      await waitFor(() => expect(screen.getByRole("button", { name: "Annuler l'invitation : Jean, comptable" })).toHaveFocus());
+      await waitFor(() => expect(screen.getByRole("button", { name: /^Annuler l'invitation : Jean, comptable, Éditeur, expire le 16 novembre 2099$/ })).toHaveFocus());
     });
   });
 });

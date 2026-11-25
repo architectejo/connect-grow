@@ -33,6 +33,12 @@ const OrganizationTeam = () => {
   const [inviteOpen, setInviteOpen] = useState(false);
   const online = useOnlineStatus();
   const inviteButton = useRef<HTMLButtonElement>(null);
+  /** Vrai déclencheur de la fenêtre (bouton d'en-tête ou action de l'état vide) : il récupère le focus à la fermeture. */
+  const opener = useRef<HTMLElement | null>(null);
+  const openInvite = () => {
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setInviteOpen(true);
+  };
   const invitations = useRef<InvitationsPanelHandle>(null);
 
   const closeInvite = (created: boolean) => {
@@ -41,7 +47,11 @@ const OrganizationTeam = () => {
       // La nouvelle ligne apparaît dans l'onglet Invitations (rechargé par la création)
       setTab("invitations");
       requestAnimationFrame(() => requestAnimationFrame(() => invitations.current?.focusHeading()));
-    } else requestAnimationFrame(() => inviteButton.current?.focus());
+    } else
+      requestAnimationFrame(() => {
+        const target = opener.current?.isConnected ? opener.current : inviteButton.current;
+        target?.focus();
+      });
   };
 
   return (
@@ -54,7 +64,7 @@ const OrganizationTeam = () => {
               title={t("team.title")}
               actions={
                 canInvite && (
-                  <Button ref={inviteButton} type="button" className="min-h-11 w-full md:w-auto" disabled={!online} onClick={() => setInviteOpen(true)}>
+                  <Button ref={inviteButton} type="button" className="min-h-11 w-full md:w-auto" disabled={!online} onClick={openInvite}>
                     <UserPlus aria-hidden />
                     {t("team.invite.open")}
                   </Button>
@@ -67,11 +77,11 @@ const OrganizationTeam = () => {
 
             {canInvite ? (
               <Tabs value={tab} onValueChange={(next) => setTab(next as TeamTab)}>
-                <TabsList className="mb-4 h-11 w-full sm:w-auto" aria-label={t("team.tabs.label")}>
-                  <TabsTrigger value="members" className="min-h-9 flex-1 sm:flex-none">
+                <TabsList className="mb-4 h-auto w-full sm:w-auto" aria-label={t("team.tabs.label")}>
+                  <TabsTrigger value="members" className="min-h-11 flex-1 sm:flex-none">
                     {t("team.tabs.members")}
                   </TabsTrigger>
-                  <TabsTrigger value="invitations" className="min-h-9 flex-1 sm:flex-none">
+                  <TabsTrigger value="invitations" className="min-h-11 flex-1 sm:flex-none">
                     {t("team.tabs.invitations")}
                   </TabsTrigger>
                 </TabsList>
@@ -79,7 +89,7 @@ const OrganizationTeam = () => {
                   <MembersPanel org={org} onAnnounce={setAnnouncement} />
                 </TabsContent>
                 <TabsContent value="invitations">
-                  <InvitationsPanel ref={invitations} org={org} onAnnounce={setAnnouncement} onInvite={() => setInviteOpen(true)} />
+                  <InvitationsPanel ref={invitations} org={org} onAnnounce={setAnnouncement} onInvite={openInvite} />
                 </TabsContent>
               </Tabs>
             ) : (

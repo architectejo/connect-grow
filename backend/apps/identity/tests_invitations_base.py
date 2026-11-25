@@ -168,6 +168,15 @@ class InvitationAdminTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, SENTINEL_LABEL)
         self.assertNotContains(response, invitation.token_hash)
+        # Code de rattachement (L1-01-B7) : ni l'empreinte ni le compteur ne sont affichés.
+        form_fields = set(response.context['adminform'].form.fields)
+        for hidden in (
+            'token_hash', 'label', 'created_by', 'closed_by', 'accepted_by', 'confirmed_by', 'confirmation_code_hash',
+            'confirmation_code_failures',
+        ):
+            self.assertNotIn(hidden, form_fields)
+            self.assertNotContains(response, f'name="{hidden}"')
+            self.assertNotContains(response, f'field-{hidden}')  # ni en lecture seule
         listing = self.client.get(reverse('admin:identity_organizationinvitation_changelist'))
         self.assertNotContains(listing, SENTINEL_LABEL)
         self.assertEqual(self.client.get(reverse('admin:identity_organizationinvitation_add')).status_code, 403)

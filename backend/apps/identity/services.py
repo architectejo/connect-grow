@@ -21,7 +21,8 @@ from .acting import (  # noqa: F401
 from .organizations import (  # noqa: F401
     OrganizationError, SUSPENSION_REASONS, add_member, assert_account_removable, assert_provider_removable,
     archive_organization, change_member_role, change_role, count_effective_owners, list_members, remove_member,
-    sole_effective_owner_id, transfer_ownership_to, TeamList,
+    sole_effective_owner_id, transfer_ownership_to, TeamList, reject_awaiting_invitations_of_account,
+    reject_awaiting_invitations_of_unavailable_inviters,
     count_active_owners, create_organization, get_active_role, get_identity_settings, get_organization_for_member,
     leave_organization, reactivate_organization, revoke_member, suspend_organization, transfer_ownership,
     update_organization,

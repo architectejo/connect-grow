@@ -6,7 +6,10 @@
 2. Les lignes closes depuis plus de `IdentitySettings.invitation_history_days` jours sont supprimées, par lots.
 3. Une trace `INVITATION_EXPIRED` (`count=<n>`, et `awaiting=<m>` si m > 0) par exécution, seulement si n > 0, sans
    donnée personnelle.
-Aucun événement de domaine n'est émis (pas de notification de masse)."""
+4. Filet (décision S3, L1-01-B7) : les attentes de confirmation vivantes dont l'émetteur est inactif ou sous
+   sanction bloquante sont rejetées (`INVITATION_REJECTED`, `reason=authority_lost`, acteur nul).
+L'expiration n'émet aucun événement de domaine (pas de notification de masse) ; seul le filet 4 en émet un
+(`rejected`) par attente rejetée, pour prévenir la personne."""
 from datetime import timedelta
 
 from django.core.management.base import BaseCommand
@@ -15,6 +18,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.identity.models import IdentitySettings, OrganizationInvitation
+from apps.identity.services import reject_awaiting_invitations_of_unavailable_inviters
 from apps.moderation.services import record_audit
 
 PURGE_BATCH_SIZE = 500
@@ -68,6 +72,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         now = timezone.now()
         expired = expire_invitations(now)
+        rejected = reject_awaiting_invitations_of_unavailable_inviters()
         purged = purge_closed_invitations(now)
         if options['verbosity'] > 0:
-            self.stdout.write(self.style.SUCCESS(f"{expired} invitation(s) expirée(s), {purged} purgée(s)."))
+            self.stdout.write(self.style.SUCCESS(
+                f"{expired} invitation(s) expirée(s), {rejected} attente(s) rejetée(s), {purged} purgée(s).",
+            ))

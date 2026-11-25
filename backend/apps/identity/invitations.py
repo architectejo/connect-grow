@@ -163,9 +163,19 @@ def _code_hash(invitation_id, code) -> str:
     return salted_hmac(_CODE_SALT, f"{invitation_id}:{code}", algorithm='sha256').hexdigest()
 
 
+_CODE_PATTERN = re.compile(r'^[0-9]{%d}\Z' % CONFIRMATION_CODE_LENGTH)
+
+
+def _code_is_missing(code) -> bool:
+    """Code absent : `None`, chaîne vide ou blanche. Toute autre valeur (nombre, chaîne mal formée) est un ESSAI,
+    jugé par `_code_matches` (décision de la relecture : un code mal formé compte comme un code faux)."""
+    return code is None or (isinstance(code, str) and not code.strip())
+
+
 def _code_matches(invitation, code) -> bool:
-    """Comparaison à temps constant ; une invitation sans empreinte (antérieure au code) ne se confirme pas."""
-    if not invitation.confirmation_code_hash or not isinstance(code, str):
+    """Exactement six chiffres, puis comparaison à temps constant ; une invitation sans empreinte (antérieure au code)
+    ne se confirme pas."""
+    if not invitation.confirmation_code_hash or not isinstance(code, str) or not _CODE_PATTERN.match(code):
         return False
     return constant_time_compare(_code_hash(invitation.pk, code), invitation.confirmation_code_hash)
 
@@ -745,12 +755,13 @@ def confirm_invitation(
     chargé.
 
     Code de rattachement (décision S3) : `code` obligatoire (400 `confirmation_code_required` s'il manque, avant la
-    ressaisie), comparé à temps constant APRÈS la ressaisie et sous verrou. Faux : 400 `confirmation_code_invalid`,
+    ressaisie), comparé à temps constant APRÈS la ressaisie et sous verrou. Faux ou mal formé (pas exactement six
+    chiffres) : 400 `confirmation_code_invalid`,
     compteur de l'invitation incrémenté (la trace et le compteur sont conservés : l'erreur est levée après la
     transaction) ; au 5e code faux, l'invitation est rejetée et la réponse est 409 `confirmation_code_exhausted`."""
     organization = _get_organization(organization_id)
     _resolve_awaiting(actor, organization, invitation_id, timezone.now())
-    if not isinstance(code, str) or not code.strip():
+    if _code_is_missing(code):
         raise _code_required_error()
     _require_reauthentication(actor, organization, confirm, password, REAUTH_CONFIRM_ADMIN_INVITATION)
     code_error = None
@@ -758,7 +769,7 @@ def confirm_invitation(
         organization = _lock_organization(organization_id)
         now = timezone.now()
         invitation, basis = _resolve_awaiting(actor, organization, invitation_id, now)
-        if not _code_matches(invitation, code.strip()):
+        if not _code_matches(invitation, code):
             # Le compteur et la trace doivent survivre au refus : l'erreur est levée APRÈS la transaction.
             exhausted = _record_code_failure(actor, organization, invitation, now)
             code_error = _code_exhausted_error() if exhausted else _code_invalid_error()
@@ -884,7 +895,6 @@ def regenerate_confirmation_code(user, invitation_id):
         if not done:
             raise _not_awaiting_error()
         _audit_invitation(user, 'INVITATION_CONFIRMATION_CODE_REGENERATED', organization, invitation)
-    invitation.refresh_from_db(fields=['confirmation_expires_at'])
     return invitation, code
 
 

@@ -18,6 +18,7 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import SimpleTestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework.throttling import SimpleRateThrottle
@@ -965,7 +966,7 @@ class ConfirmationCodeTests(V2Base):
 
     def test_the_code_is_required_before_the_password_is_checked(self):
         invitation, _ = self.awaiting()
-        for code in (None, '', '   ', 123456):
+        for code in (None, '', '   '):
             with self.subTest(code=code):
                 body = {'confirm': True, 'password': 'mauvais'}
                 if code is not None:
@@ -1203,6 +1204,105 @@ class OpenInvitationCapTests(V2Base):
         self.assertEqual(self.create(OWNER, EDITOR).status_code, 201)
 
 
+# --- Relecture de B7 (aller-retour 3) ------------------------------------------------------------------------------
+
+class ReviewRoundThreeTests(V2Base):
+    def test_deactivation_in_the_django_admin_rejects_the_waits_of_the_account(self):
+        from .tests_admin import make_admin_user
+
+        invitation, _ = self.awaiting(inviter_role=ADMIN)
+        inviter = self.users[ADMIN]
+        staff = make_admin_user('staff-b7@example.com', perms=['view_user', 'change_user'])
+        self.client.force_login(staff)
+        response = self.client.post(reverse('admin:identity_user_change', args=[inviter.pk]), {
+            'full_name': inviter.full_name, 'email': inviter.email,  # `is_active` absent : case décochée
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(User.objects.get(pk=inviter.pk).is_active)
+        row = self.fresh(invitation)
+        self.assertEqual((row.status, row.closed_by), ('REJECTED', staff))
+        entry = AuditLog.objects.get(action='INVITATION_REJECTED')
+        self.assertEqual(entry.actor, staff)
+        self.assertTrue(entry.details.endswith('reason=authority_lost'))
+
+    def test_an_inviter_demoted_then_removed_has_his_waits_rejected(self):
+        invitation, _ = self.awaiting(inviter_role=ADMIN)
+        membership = self.memberships[ADMIN]
+        services.change_role(self.owner, self.org.pk, membership.pk, EDITOR)
+        self.assertEqual(self.fresh(invitation).status, 'AWAITING_CONFIRMATION')  # rétrogradation : l'attente reste
+        self.assertEqual(self.as_role(OWNER).delete(team.url_member(self.org, membership)).status_code, 204)
+        self.assertEqual(self.fresh(invitation).status, 'REJECTED')
+        self.assertTrue(AuditLog.objects.get(action='INVITATION_REJECTED').details.endswith('reason=authority_lost'))
+
+    def test_an_already_lapsed_wait_is_left_to_the_cron(self):
+        invitation, _ = self.awaiting(inviter_role=ADMIN)
+        set_deadline(invitation, -timedelta(seconds=1))
+        response = self.as_role(OWNER).delete(team.url_member(self.org, self.memberships[ADMIN]))
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.fresh(invitation).status, 'AWAITING_CONFIRMATION')
+        self.assertFalse(AuditLog.objects.filter(action='INVITATION_REJECTED').exists())
+        call_command('expire_invitations', verbosity=0)
+        self.assertEqual(self.fresh(invitation).status, 'EXPIRED')
+
+    def test_the_cron_rejects_waits_of_inactive_or_restricted_inviters(self):
+        live_inactive, _ = self.awaiting(inviter_role=ADMIN)
+        restricted_inviter, _ = self.add('restricted-inviter', ADMIN)
+        _, token = services.create_invitation(restricted_inviter, self.org.pk, ADMIN)
+        live_restricted = self.accept_service(team.make_user('guest-restricted'), token).invitation
+        _, token = services.create_invitation(self.owner, self.org.pk, ADMIN)
+        healthy = self.accept_service(team.make_user('guest-healthy'), token).invitation
+        # Contournement du chemin direct : écriture en base et sanction sans `apply()`.
+        User.objects.filter(pk=self.users[ADMIN].pk).update(is_active=False)
+        Sanction.objects.create(
+            user=restricted_inviter, sanction_type=Sanction.TYPE_BANNISSEMENT, reason='T', issued_by=self.owner,
+        )
+        self.deliver()
+        Notification.objects.all().delete()
+        call_command('expire_invitations', verbosity=0)
+        self.assertEqual(self.fresh(live_inactive).status, 'REJECTED')
+        self.assertEqual(self.fresh(live_restricted).status, 'REJECTED')
+        self.assertEqual(self.fresh(healthy).status, 'AWAITING_CONFIRMATION')
+        entries = AuditLog.objects.filter(action='INVITATION_REJECTED')
+        self.assertEqual(entries.count(), 2)
+        self.assertTrue(all(e.actor is None and e.details.endswith('reason=authority_lost') for e in entries))
+        self.deliver()
+        self.assertEqual(Notification.objects.filter(title='Demande non confirmée').count(), 2)
+        call_command('expire_invitations', verbosity=0)  # idempotent
+        self.assertEqual(AuditLog.objects.filter(action='INVITATION_REJECTED').count(), 2)
+
+    def test_the_cron_lets_a_lapsed_wait_expire_rather_than_reject_it(self):
+        invitation, _ = self.awaiting(inviter_role=ADMIN)
+        set_deadline(invitation, -timedelta(seconds=1))
+        User.objects.filter(pk=self.users[ADMIN].pk).update(is_active=False)
+        call_command('expire_invitations', verbosity=0)
+        self.assertEqual(self.fresh(invitation).status, 'EXPIRED')
+        self.assertFalse(AuditLog.objects.filter(action='INVITATION_REJECTED').exists())
+
+    def test_a_malformed_code_is_an_invalid_attempt(self):
+        invitation, _ = self.awaiting()
+        malformed = ['1234567', 'abcdef', 123456]
+        bodies = []
+        for code in malformed:
+            with self.subTest(code=code):
+                response = self.confirm(OWNER, invitation, code=code)
+                self.assertEqual(response.status_code, 400, response.content)
+                bodies.append(response.json())
+        wrong = self.confirm(OWNER, invitation, code='000000' if self.code_of(invitation) != '000000' else '111111')
+        self.assertEqual(bodies, [wrong.json()] * len(malformed))  # même réponse qu'un code faux
+        self.assertEqual(wrong.json()['code'], 'confirmation_code_invalid')
+        row = self.fresh(invitation)
+        self.assertEqual((row.status, row.confirmation_code_failures), ('AWAITING_CONFIRMATION', 4))
+        self.assertDenied(self.confirm(OWNER, invitation, code='12345'), 'confirmation_code_exhausted', 409)
+        self.assertEqual(self.fresh(invitation).status, 'REJECTED')  # 5e essai mal formé : épuisé aussi
+
+    def test_surrounding_spaces_make_a_code_malformed(self):
+        invitation, _ = self.awaiting()
+        code = self.code_of(invitation)
+        self.assertDenied(self.confirm(OWNER, invitation, code=f' {code} '), 'confirmation_code_invalid', 400)
+        self.assertEqual(self.fresh(invitation).confirmation_code_failures, 1)
+        self.assertEqual(self.confirm(OWNER, invitation, code=code).status_code, 200)
+
+
 # --- Fonctions pures ----------------------------------------------------------------------------------------------
 
 class PureTests(SimpleTestCase):
@@ -1262,7 +1362,16 @@ class InvitationConfirmationMigrationTests(TransactionTestCase):
 
     def test_0020_then_0019_are_reversible_with_a_guard_on_the_new_statuses(self):
         org = Organization.objects.create(name='Atelier Migration 0019', org_type='ENTREPRISE')
-        # 0020 (code de rattachement) : simple retrait des deux colonnes.
+        # 0020 (code de rattachement) : garde tant qu'une attente est ouverte (elle deviendrait confirmable sans code).
+        wait = make_invitation(
+            org, 'mig-0020', role=ADMIN, status='AWAITING_CONFIRMATION',
+            confirmation_expires_at=timezone.now() + timedelta(hours=1),
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            self.migrate(('identity', '0019_invitation_confirmation'))
+        self.assertIn('identity.0020', str(ctx.exception))
+        self.assertIn('confirmation_code_hash', self.columns('identity_organizationinvitation'))
+        wait.delete()
         self.migrate(('identity', '0019_invitation_confirmation'))
         columns = self.columns('identity_organizationinvitation')
         self.assertNotIn('confirmation_code_hash', columns)

@@ -58,6 +58,10 @@ class UserAdmin(admin.ModelAdmin):
             if change and 'is_active' in form.changed_data:
                 # Modification directe de `is_active` : la visibilité des offres suit (ADR 0006, A7/A9).
                 services.announce_account_status(obj.pk, obj.is_active, request.user)
+        if change and 'is_active' in form.changed_data and not obj.is_active:
+            # Même effet que `set_account_active` (décision S3, L1-01-B7) : les attentes de confirmation créées par ce
+            # compte sont rejetées, après la transaction, organisation par organisation.
+            services.reject_awaiting_invitations_of_account(obj.pk, actor=request.user)
         if change and form.changed_data:
             record_audit(
                 request.user, 'USER_ADMIN_CHANGED', target=obj,
@@ -300,7 +304,10 @@ class OrganizationInvitationAdmin(ReadOnlyAdmin):
 
     list_display = ('organization', 'role', 'status', 'expires_at', 'confirmation_expires_at', 'closed_at')
     list_filter = ('status', 'role')
-    exclude = ('token_hash', 'label', 'created_by', 'closed_by', 'accepted_by', 'confirmed_by')
+    exclude = (
+        'token_hash', 'label', 'created_by', 'closed_by', 'accepted_by', 'confirmed_by', 'confirmation_code_hash',
+        'confirmation_code_failures',
+    )
 
 
 @admin.register(ProviderProfile)

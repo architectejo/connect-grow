@@ -910,16 +910,17 @@ def reject_awaiting_invitations_of_inviter(actor, organization, inviter_id, reas
     pouvoir entrer sur la foi d'un émetteur écarté. Dans la transaction de l'appelant, organisation verrouillée.
     Une trace `INVITATION_REJECTED` (`reason=`) et un événement `rejected` (la personne est prévenue, sans nom) par
     invitation. Une simple rétrogradation n'appelle pas cette fonction (un administrateur principal peut toujours
-    confirmer). Renvoie le nombre d'attentes rejetées."""
+    confirmer). Seules les attentes VIVANTES sont rejetées : une attente échue reste au cron (`EXPIRED`). Renvoie le
+    nombre d'attentes rejetées."""
     now = timezone.now()
     rejected = 0
+    live = {
+        'status': OrganizationInvitation.STATUS_AWAITING_CONFIRMATION, 'confirmation_expires_at__gt': now,
+    }
     for invitation in OrganizationInvitation.objects.filter(
-        organization=organization, created_by_id=inviter_id,
-        status=OrganizationInvitation.STATUS_AWAITING_CONFIRMATION,
+        organization=organization, created_by_id=inviter_id, **live,
     ).only('id', 'role', 'created_by', 'accepted_by'):
-        done = OrganizationInvitation.objects.filter(
-            pk=invitation.pk, status=OrganizationInvitation.STATUS_AWAITING_CONFIRMATION,
-        ).update(
+        done = OrganizationInvitation.objects.filter(pk=invitation.pk, **live).update(
             status=OrganizationInvitation.STATUS_REJECTED, closed_at=now, closed_by=actor, confirmed_by=actor,
             confirmation_code_hash='', updated_at=now,
         )
@@ -942,6 +943,7 @@ def reject_awaiting_invitations_of_account(user_id, actor=None, reason=REJECT_RE
     total = 0
     organization_ids = set(OrganizationInvitation.objects.filter(
         created_by_id=user_id, status=OrganizationInvitation.STATUS_AWAITING_CONFIRMATION,
+        confirmation_expires_at__gt=timezone.now(),
     ).values_list('organization_id', flat=True))
     for organization_id in sorted(organization_ids, key=str):
         with transaction.atomic():
@@ -950,6 +952,32 @@ def reject_awaiting_invitations_of_account(user_id, actor=None, reason=REJECT_RE
             except ContextDenied:
                 continue
             total += reject_awaiting_invitations_of_inviter(actor, organization, user_id, reason)
+    return total
+
+
+def reject_awaiting_invitations_of_unavailable_inviters() -> int:
+    """Filet du cron (`expire_invitations`, décision S3) : rejette (`authority_lost`, acteur nul) les attentes vivantes
+    dont l'émetteur est inactif ou sous sanction bloquante, au cas où le chemin direct (`set_account_active`, admin
+    Django) aurait été contourné (écriture en base, sanction échue puis reprise…). Deux requêtes de lecture, puis une
+    transaction par couple (organisation, émetteur). Renvoie le nombre d'attentes rejetées."""
+    now = timezone.now()
+    pairs = set(OrganizationInvitation.objects.filter(
+        status=OrganizationInvitation.STATUS_AWAITING_CONFIRMATION, confirmation_expires_at__gt=now,
+        created_by__isnull=False,
+    ).values_list('organization_id', 'created_by_id', 'created_by__is_active'))
+    if not pairs:
+        return 0
+    restricted = moderation_services.get_restricted_user_ids({inviter for _, inviter, _ in pairs})
+    total = 0
+    for organization_id, inviter_id, is_active in sorted(pairs, key=lambda row: (str(row[0]), str(row[1]))):
+        if is_active and inviter_id not in restricted:
+            continue
+        with transaction.atomic():
+            try:
+                organization = _lock_organization(organization_id)
+            except ContextDenied:
+                continue
+            total += reject_awaiting_invitations_of_inviter(None, organization, inviter_id)
     return total
 
 
@@ -1133,9 +1161,10 @@ def _end_membership(actor, organization, membership, end_reason, audit_action):
     if capabilities.role_has_capability(old_role, 'org.manage_members'):
         # Retiré ou parti : ses invitations en attente sont révoquées dans la même transaction (ADR 0008 §5.1).
         sweep_invitations_of_inviter(actor, organization, membership.user_id)
-        if end_reason == Membership.END_REMOVED:
-            # Retiré (pas parti de lui-même) : ses attentes de confirmation sont rejetées (décision S3, L1-01-B7).
-            reject_awaiting_invitations_of_inviter(actor, organization, membership.user_id)
+    if end_reason == Membership.END_REMOVED:
+        # Retiré (pas parti de lui-même), QUEL QUE SOIT son rôle actuel (un émetteur rétrogradé puis retiré garde des
+        # attentes) : ses attentes de confirmation sont rejetées (décision S3, L1-01-B7).
+        reject_awaiting_invitations_of_inviter(actor, organization, membership.user_id)
     if old_role == ROLE_OWNER:
         _publish_owners_changed(organization, actor)
     return membership

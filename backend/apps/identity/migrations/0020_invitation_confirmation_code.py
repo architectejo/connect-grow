@@ -2,9 +2,25 @@
 
 """Code de rattachement des invitations Administrateur (L1-01-B7, correction S3 ; ADR 0010 QG-2).
 
-Ajout pur : empreinte HMAC du code (vide par défaut) et compteur des codes faux (0). Retour arrière : simple retrait
-des deux colonnes ; une attente encore ouverte redevient confirmable sans code (comportement de 0019)."""
+Ajout pur : empreinte HMAC du code (vide par défaut) et compteur des codes faux (0). Retour arrière : la garde de
+données (dernière opération, donc exécutée en premier à l'inverse) refuse de revenir en 0019 tant qu'une invitation
+est `AWAITING_CONFIRMATION` : sans 0020, elle redeviendrait confirmable SANS code. Puis retrait des deux colonnes."""
 from django.db import migrations, models
+
+
+def forwards_noop(apps, schema_editor):
+    """Rien à écrire : les défauts de colonne suffisent."""
+
+
+def refuse_rollback_with_open_waits(apps, schema_editor):
+    OrganizationInvitation = apps.get_model('identity', 'OrganizationInvitation')
+    blocking = OrganizationInvitation.objects.filter(status='AWAITING_CONFIRMATION').count()
+    if blocking:
+        raise RuntimeError(
+            "Retour arrière de identity.0020 impossible : "
+            f"{blocking} invitation(s) attendent une confirmation (protégées par un code de rattachement). Laissez-les "
+            "expirer, ou rejetez-les, puis relancez la migration inverse."
+        )
 
 
 class Migration(migrations.Migration):
@@ -24,4 +40,6 @@ class Migration(migrations.Migration):
             name='confirmation_code_hash',
             field=models.CharField(blank=True, default='', max_length=64),
         ),
+        # Garde de données : sans effet à l'aller ; à l'inverse, exécutée AVANT le retrait des colonnes.
+        migrations.RunPython(forwards_noop, refuse_rollback_with_open_waits, elidable=False),
     ]

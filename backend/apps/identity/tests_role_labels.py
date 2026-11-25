@@ -8,10 +8,12 @@ import ast
 import json
 import re
 from pathlib import Path
+from unittest import mock
 
 from django.test import TestCase
 from drf_spectacular.generators import SchemaGenerator
 
+from apps.common.contexts import DENY_PERMISSION, ContextDenied
 from apps.notifications.models import Notification
 from apps.platform_core.testing import dispatch_outbox_now
 
@@ -74,11 +76,19 @@ class RoleLabelTests(TestCase):
 
 class ExposedTextTests(TestCase):
     def test_no_exposed_literal_mentions_proprietaire(self):
-        offenders = [f'{where}: {text!r}' for where, text in _exposed_literals() if FORBIDDEN.search(text)]
+        literals = list(_exposed_literals())
+        # Le balayage n'est pas vide (chemin ou filtre cassé) : il voit des littéraux connus des deux applications.
+        self.assertGreater(len(literals), 100)
+        texts = {text for _, text in literals}
+        self.assertIn(PRIMARY_ADMIN, texts)  # `capabilities.ROLE_CHOICES`
+        self.assertIn('Membre', texts)
+        self.assertTrue(any(where.startswith('notifications/') for where, _ in literals))
+        offenders = [f'{where}: {text!r}' for where, text in literals if FORBIDDEN.search(text)]
         self.assertEqual(offenders, [])
 
     def test_openapi_descriptions_of_identity_and_notifications_do_not_mention_proprietaire(self):
-        paths = SchemaGenerator().get_schema(request=None, public=True)['paths']
+        schema = SchemaGenerator().get_schema(request=None, public=True)
+        paths = schema['paths']
         scanned = {
             path: item for path, item in paths.items()
             if path.startswith('/api/v1/accounts/') or 'notifications' in path
@@ -86,6 +96,16 @@ class ExposedTextTests(TestCase):
         self.assertTrue(any('organizations' in path for path in scanned))
         offenders = [
             path for path, item in scanned.items() if FORBIDDEN.search(json.dumps(item, ensure_ascii=False))
+        ]
+        self.assertEqual(offenders, [])
+
+    def test_openapi_component_schemas_do_not_mention_proprietaire(self):
+        """Les composants (`components.schemas`) portent les descriptions et les énumérations de champs."""
+        components = SchemaGenerator().get_schema(request=None, public=True)['components']['schemas']
+        self.assertIn('Member', components)  # balayage non vide : un composant connu de l'équipe est présent
+        self.assertIn('scope', components['Member']['properties'])
+        offenders = [
+            name for name, item in components.items() if FORBIDDEN.search(json.dumps(item, ensure_ascii=False))
         ]
         self.assertEqual(offenders, [])
 
@@ -125,6 +145,31 @@ class ErrorMessageTests(TestCase):
         with self.assertRaises(services.OrganizationError) as ctx:
             services.assert_account_removable(self.owner)
         self.assertMessage(ctx.exception, 'last_owner_account')
+
+    def test_last_effective_owner(self):
+        """Seul administrateur principal EFFECTIF (l'autre a un compte désactivé), organisation avec offres actives :
+        se rétrograder est refusé (`last_effective_owner`)."""
+        inactive = make_user('admin-principal-inactif')
+        Membership.objects.create(organization=self.org, user=inactive, role='OWNER')
+        User.objects.filter(pk=inactive.pk).update(is_active=False)
+        with mock.patch('apps.marketplace.services.seller_has_active_offers', return_value=True), \
+                self.assertRaises(services.OrganizationError) as ctx:
+            services.change_member_role(self.owner, self.org.pk, self.owner.pk, 'ADMIN')
+        self.assertMessage(ctx.exception, 'last_effective_owner')
+
+    def test_invalid_transfer(self):
+        with self.assertRaises(services.OrganizationError) as ctx:
+            services.transfer_ownership_to(
+                self.owner, self.org.pk, self.owner_membership.pk, confirm=True, password='x',
+            )
+        self.assertMessage(ctx.exception, 'invalid_transfer')
+
+    def test_transfer_refused_to_a_non_primary_administrator(self):
+        admin = make_user('admin-transfert')
+        Membership.objects.create(organization=self.org, user=admin, role='ADMIN')
+        with self.assertRaises(ContextDenied) as ctx:
+            services.transfer_ownership_to(admin, self.org.pk, self.owner_membership.pk, confirm=True, password='x')
+        self.assertMessage(ctx.exception, DENY_PERMISSION)
 
 
 class NotificationLabelTests(TestCase):

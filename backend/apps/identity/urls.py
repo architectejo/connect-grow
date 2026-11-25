@@ -26,7 +26,8 @@ from .views_organizations import (
     OrganizationTransferOwnershipView, OrganizationViewSet,
 )
 from .views_invitations import (
-    InvitationAcceptView, InvitationDeclineView, InvitationPreviewView, InvitationWithdrawView,
+    InvitationAcceptView, InvitationConfirmationCodeView, InvitationDeclineView, InvitationPreviewView,
+    InvitationWithdrawView,
     MyAwaitingInvitationsView, OrganizationInvitationConfirmView, OrganizationInvitationDetailView,
     OrganizationInvitationRejectView, OrganizationInvitationsView,
 )
@@ -88,6 +89,8 @@ urlpatterns = [
          name='organization_invitations_awaiting'),
     path('organization-invitations/<uuid:invitation_id>/withdraw/', InvitationWithdrawView.as_view(),
          name='organization_invitation_withdraw'),
+    path('organization-invitations/<uuid:invitation_id>/confirmation-code/', InvitationConfirmationCodeView.as_view(),
+         name='organization_invitation_confirmation_code'),
 
     # Prestataire individuel (ADR 0006, 9.3)
     path('provider/', ProviderDetailView.as_view(), name='provider_detail'),

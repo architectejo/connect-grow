@@ -40,7 +40,10 @@ OWNER, ADMIN, EDITOR, ANALYST, MEMBER = team.OWNER, team.ADMIN, team.EDITOR, tea
 ORGS = team.ORGS
 INVITEE_PHONE = '+243812345647'
 HINT = '••47'
-ACCEPTED_202_KEYS = {'status', 'invitation_id', 'organization_name', 'role', 'confirmation_expires_at'}
+ACCEPTED_202_KEYS = {
+    'status', 'invitation_id', 'organization_name', 'role', 'confirmation_expires_at', 'confirmation_code',
+}
+CODE_RE = r'^[0-9]{6}$'
 AWAITING_ITEM_KEYS = {
     'invitation_id', 'organization_name', 'org_type', 'role', 'scope', 'accepted_at', 'confirmation_expires_at',
     'status',
@@ -71,6 +74,7 @@ def set_deadline(invitation, delta):
 class V2Base(InvBase):
     def setUp(self):
         super().setUp()
+        self.codes = {}  # code de rattachement par invitation (montré à la seule personne qui a accepté)
         User.objects.filter(pk=self.invitee.pk).update(phone=INVITEE_PHONE)
         self.invitee = User.objects.get(pk=self.invitee.pk)
         self.invitee_client = team.login(self.invitee)
@@ -80,13 +84,31 @@ class V2Base(InvBase):
         invitation, token = self.make(role=inviter_role, invite_role=ADMIN, org=org, label=SENTINEL_LABEL)
         response = self.accept(token, client)
         self.assertEqual(response.status_code, 202, response.content)
+        self.codes[invitation.pk] = response.json()['confirmation_code']
         return self.fresh(invitation), token
 
-    def confirm(self, role, invitation, password=team.PASSWORD, confirm=True, org=None):
+    def accept_service(self, user, token):
+        """Acceptation par le service (attente) : retient le code pour les confirmations suivantes."""
+        result = services.accept_invitation(user, token)
+        if result.confirmation_code:
+            self.codes[result.invitation.pk] = result.confirmation_code
+        return result
+
+    def code_of(self, invitation):
+        return self.codes[invitation.pk]
+
+    def confirm(self, role, invitation, password=team.PASSWORD, confirm=True, org=None, code='auto'):
         body = {'confirm': confirm}
         if password is not None:
             body['password'] = password
+        if code == 'auto':
+            code = self.codes.get(invitation.pk)
+        if code is not None:
+            body['code'] = code
         return self.as_role(role).post(url_confirm(org or self.org, invitation.pk), body, format='json')
+
+    def confirm_body(self, invitation):
+        return {**CONFIRM_BODY, 'code': self.codes.get(invitation.pk, '000000')}
 
     def reject(self, role, invitation, org=None):
         return self.as_role(role).post(url_reject(org or self.org, invitation.pk))
@@ -175,6 +197,7 @@ class AwaitingAcceptanceTests(V2Base):
         self.assertEqual(body['organization_name'], self.org.name)
         self.assertNotIn('organization_id', body)
         self.assertNotIn('membership_id', body)
+        self.assertRegex(body['confirmation_code'], CODE_RE)
         self.assertEqual(response['Cache-Control'], 'private, no-store')
         row = self.fresh(invitation)
         self.assertEqual(
@@ -236,7 +259,7 @@ class AwaitingAcceptanceTests(V2Base):
         self.assertEqual(reasons, ['already_awaiting', 'already_awaiting'])
         # Ailleurs : aucune restriction (une attente par organisation).
         other, other_owner, _ = self.fresh_org()
-        other_invitation, other_token = services.create_invitation(other_owner, other.pk, ADMIN)
+        _, other_token = services.create_invitation(other_owner, other.pk, ADMIN)
         self.assertEqual(self.accept(other_token).status_code, 202)
         # La première échue : une nouvelle attente est possible.
         set_deadline(first, -timedelta(minutes=1))
@@ -414,10 +437,11 @@ class ConfirmTests(V2Base):
         for role in (EDITOR, ANALYST):
             self.assertDenied(self.confirm(role, invitation), DENY_PERMISSION)
         stranger = team.login(team.make_user('stranger-c'))
-        response = stranger.post(url_confirm(self.org, invitation.pk), CONFIRM_BODY, format='json')
+        body = self.confirm_body(invitation)
+        response = stranger.post(url_confirm(self.org, invitation.pk), body, format='json')
         self.assertDenied(response, DENY_RELATION)
-        # La personne qui a accepté n'est pas membre : elle ne peut pas se confirmer elle-même.
-        response = self.invitee_client.post(url_confirm(self.org, invitation.pk), CONFIRM_BODY, format='json')
+        # La personne qui a accepté n'est pas membre : elle ne peut pas se confirmer elle-même, même avec son code.
+        response = self.invitee_client.post(url_confirm(self.org, invitation.pk), body, format='json')
         self.assertDenied(response, DENY_RELATION)
         self.assertEqual(self.fresh(invitation).status, 'AWAITING_CONFIRMATION')
         self.assertFalse(self.is_member())
@@ -427,20 +451,18 @@ class ConfirmTests(V2Base):
         invitation, _ = self.awaiting(inviter_role=ADMIN)
         Membership.objects.filter(pk=self.memberships[ADMIN].pk).update(role=EDITOR)
         self.assertDenied(self.confirm(ADMIN, invitation), DENY_PERMISSION)
-        Membership.objects.filter(pk=self.memberships[ADMIN].pk).update(role=ADMIN)
-        Sanction.objects.create(
-            user=self.users[ADMIN], sanction_type=Sanction.TYPE_BANNISSEMENT, reason='T', issued_by=self.owner,
-        ).apply()
-        self.assertDenied(self.confirm(ADMIN, invitation), DENY_SECURITY)
+        # Simple rétrogradation : l'attente reste, un administrateur principal confirme.
+        self.assertEqual(self.fresh(invitation).status, 'AWAITING_CONFIRMATION')
         self.assertEqual(self.confirm(OWNER, invitation).status_code, 200)
 
     def test_idor_and_unknown_invitations_are_404(self):
         other, other_owner, _ = self.fresh_org()
         foreign, foreign_token = services.create_invitation(other_owner, other.pk, ADMIN)
-        services.accept_invitation(self.invitee, foreign_token)
+        self.accept_service(self.invitee, foreign_token)
         for target in (foreign.pk, uuid.uuid4()):
             with self.subTest(target=target):
-                response = self.as_role(OWNER).post(url_confirm(self.org, target), CONFIRM_BODY, format='json')
+                body = {**CONFIRM_BODY, 'code': self.codes[foreign.pk]}
+                response = self.as_role(OWNER).post(url_confirm(self.org, target), body, format='json')
                 self.assertDenied(response, 'invitation_not_found', 404)
                 self.assertDenied(self.as_role(OWNER).post(url_reject(self.org, target)), 'invitation_not_found', 404)
         self.assertEqual(self.fresh(foreign).status, 'AWAITING_CONFIRMATION')
@@ -569,7 +591,9 @@ class ConfirmConcurrencyTests(V2Base):
     def test_two_confirmations_one_wins(self):
         invitation, _ = self.awaiting(inviter_role=ADMIN)
         def rival():
-            services.confirm_invitation(self.owner, self.org.pk, invitation.pk, True, team.PASSWORD)
+            services.confirm_invitation(
+                self.owner, self.org.pk, invitation.pk, True, team.PASSWORD, code=self.code_of(invitation),
+            )
 
         with self.race(rival):
             response = self.confirm(ADMIN, invitation)
@@ -595,7 +619,7 @@ class ConfirmConcurrencyTests(V2Base):
                 inviter, membership = self.add(f'inviter-{how}', ADMIN)
                 invitation, token = services.create_invitation(inviter, self.org.pk, ADMIN)
                 guest = team.make_user(f'guest-{how}')
-                services.accept_invitation(guest, token)
+                self.accept_service(guest, token)
 
                 def action():
                     if how == 'removed':
@@ -605,13 +629,18 @@ class ConfirmConcurrencyTests(V2Base):
 
                 with self.race(action):
                     response = team.login(inviter).post(
-                        url_confirm(self.org, invitation.pk), CONFIRM_BODY, format='json',
+                        url_confirm(self.org, invitation.pk), self.confirm_body(invitation), format='json',
                     )
                 self.assertDenied(response, DENY_RELATION if how == 'removed' else DENY_PERMISSION)
-                self.assertEqual(self.fresh(invitation).status, 'AWAITING_CONFIRMATION')
                 self.assertFalse(Membership.objects.filter(organization=self.org, user=guest).exists())
-                # Un administrateur principal peut toujours confirmer.
-                self.assertEqual(self.confirm(OWNER, invitation).status_code, 200)
+                if how == 'removed':
+                    # Émetteur retiré : son attente est rejetée dans la même transaction (décision S3).
+                    self.assertEqual(self.fresh(invitation).status, 'REJECTED')
+                    self.assertDenied(self.confirm(OWNER, invitation), 'invitation_not_awaiting_confirmation', 409)
+                else:
+                    # Simple rétrogradation : un administrateur principal peut toujours confirmer.
+                    self.assertEqual(self.fresh(invitation).status, 'AWAITING_CONFIRMATION')
+                    self.assertEqual(self.confirm(OWNER, invitation).status_code, 200)
 
     def test_confirmation_against_the_person_reaching_the_limit_elsewhere(self):
         invitation, _ = self.awaiting()
@@ -679,7 +708,7 @@ class RejectTests(V2Base):
         # L'émetteur ADMIN peut rejeter sa propre invitation en attente.
         guest = team.make_user('guest-r2')
         _, token = services.create_invitation(self.users[ADMIN], self.org.pk, ADMIN)
-        services.accept_invitation(guest, token)
+        self.accept_service(guest, token)
         own = OrganizationInvitation.objects.get(accepted_by=guest)
         self.assertEqual(self.reject(ADMIN, own).status_code, 204)
         self.assertEqual(self.fresh(mine).status, 'PENDING')
@@ -703,7 +732,7 @@ class MyAwaitingTests(V2Base):
         other_person = team.make_user('other-person')
         other_org, other_owner, _ = self.fresh_org('Org B')
         _, token = services.create_invitation(other_owner, other_org.pk, ADMIN)
-        services.accept_invitation(other_person, token)
+        self.accept_service(other_person, token)
         response = self.mine()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Cache-Control'], 'private, no-store')
@@ -716,7 +745,10 @@ class MyAwaitingTests(V2Base):
             (row['invitation_id'], row['organization_name'], row['org_type'], row['role'], row['scope'], row['status']),
             (str(invitation.pk), self.org.name, 'ENTREPRISE', ADMIN, ORG_SCOPE, 'AWAITING_CONFIRMATION'),
         )
-        for secret in ('label', 'phone', 'hint', SENTINEL_LABEL, INVITEE_PHONE, 'created_by', 'inviter'):
+        for secret in (
+            'label', 'phone', 'hint', SENTINEL_LABEL, INVITEE_PHONE, 'created_by', 'inviter', 'code',
+            self.code_of(invitation),
+        ):
             self.assertNotIn(secret, json.dumps(body))
         self.assertEqual(APIClient().get(f'{BASE}awaiting/').status_code, 401)
 
@@ -780,7 +812,7 @@ class AwaitingExpiryCommandTests(V2Base):
         set_deadline(overdue, -timedelta(minutes=1))
         other, other_owner, _ = self.fresh_org()
         _, token = services.create_invitation(other_owner, other.pk, ADMIN)
-        services.accept_invitation(self.invitee, token)
+        self.accept_service(self.invitee, token)
         live = OrganizationInvitation.objects.get(organization=other)
         # Le lien d'origine est échu mais la confirmation ne l'est pas : l'attente reste.
         OrganizationInvitation.objects.filter(pk=live.pk).update(expires_at=timezone.now() - timedelta(days=1))
@@ -850,8 +882,12 @@ class NotificationAndPrivacyTests(V2Base):
         Notification.objects.all().delete()
         self.assertEqual(self.confirm(OWNER, invitation).status_code, 200)
         self.deliver()
-        person = Notification.objects.filter(user=self.invitee, title='Accès confirmé').get()
+        # UNE seule notification pour la personne (décision du chef de projet) : pas de « Vous avez rejoint… ».
+        person = Notification.objects.get(user=self.invitee)
+        self.assertEqual(person.title, 'Accès confirmé')
         self.assertEqual(person.content, f"Votre accès à « {self.org.name} » est confirmé.")
+        changed = OutboxEvent.objects.get(event_type='identity.membership_changed')
+        self.assertIs(changed.payload['confirmed'], True)
         inviter = Notification.objects.filter(user=self.users[ADMIN]).get()
         self.assertEqual(
             inviter.content, f"Une invitation comme Administrateur pour « {self.org.name} » a été confirmée.",
@@ -872,7 +908,8 @@ class NotificationAndPrivacyTests(V2Base):
             self.confirm(OWNER, invitation)
             second, second_token = self.make(invite_role=ADMIN)
             other = team.make_user('other-sentinel', phone='+243899990011', full_name='Autre Sentinelle')
-            services.accept_invitation(other, second_token)
+            self.accept_service(other, second_token)
+            self.confirm(OWNER, second, code='999999' if self.code_of(second) != '999999' else '888888')
             services.reject_invitation(self.owner, self.org.pk, second.pk)
             self.deliver()
         finally:
@@ -886,7 +923,8 @@ class NotificationAndPrivacyTests(V2Base):
         text = '\n'.join(blobs)
         for secret in (
             HINT, '••', INVITEE_PHONE, '345647', '+243899990011', team.SECRET_NAME, self.invitee.full_name,
-            'Autre Sentinelle', SENTINEL_LABEL, token, second_token, self.invitee.email,
+            'Autre Sentinelle', SENTINEL_LABEL, token, second_token, self.invitee.email, self.code_of(invitation),
+            self.code_of(second),
         ):
             self.assertNotIn(secret, text)
 
@@ -896,10 +934,273 @@ class NotificationAndPrivacyTests(V2Base):
         for function in (
             invitations.confirm_invitation, invitations.reject_invitation, invitations.list_my_awaiting_invitations,
             invitations.withdraw_awaiting_invitation, invitations.get_invitation_confirmer_ids,
-            invitations.create_invitation,
+            invitations.create_invitation, invitations.regenerate_confirmation_code,
         ):
             for name in inspect.signature(function).parameters:
                 self.assertFalse(any(word in name.lower() for word in forbidden), (function.__name__, name))
+
+
+# --- Code de rattachement (décision S3, ADR 0010 QG-2) ----------------------------------------------------------
+
+class ConfirmationCodeTests(V2Base):
+    def wrong_code(self, invitation):
+        right = self.code_of(invitation)
+        return '000000' if right != '000000' else '111111'
+
+    def test_the_code_is_shown_once_to_the_person_and_only_its_hmac_is_stored(self):
+        invitation, _ = self.awaiting()
+        code = self.code_of(invitation)
+        self.assertRegex(code, CODE_RE)
+        row = self.fresh(invitation)
+        self.assertEqual(len(row.confirmation_code_hash), 64)
+        self.assertNotEqual(row.confirmation_code_hash, code)
+        stored = ' '.join(str(v) for v in OrganizationInvitation.objects.values().get(pk=invitation.pk).values())
+        self.assertNotIn(code, stored.replace(row.confirmation_code_hash, ''))
+        # Ni la liste de l'équipe ni « mes demandes » ne le renvoient.
+        listing = self.as_role(OWNER).get(f'{ORGS}{self.org.pk}/invitations/', {'status': 'AWAITING_CONFIRMATION'})
+        mine = self.invitee_client.get(f'{BASE}awaiting/')
+        for response in (listing, mine):
+            self.assertNotIn(code, response.content.decode())
+            self.assertNotIn('confirmation_code', response.content.decode())
+
+    def test_the_code_is_required_before_the_password_is_checked(self):
+        invitation, _ = self.awaiting()
+        for code in (None, '', '   ', 123456):
+            with self.subTest(code=code):
+                body = {'confirm': True, 'password': 'mauvais'}
+                if code is not None:
+                    body['code'] = code
+                response = self.as_role(OWNER).post(url_confirm(self.org, invitation.pk), body, format='json')
+                self.assertDenied(response, 'confirmation_code_required', 400)
+        self.assertFalse(AuditLog.objects.filter(action='ORG_SENSITIVE_REAUTH_FAILED').exists())
+        self.assertEqual(self.fresh(invitation).confirmation_code_failures, 0)
+
+    def test_a_wrong_code_is_refused_counted_and_journaled_without_the_code(self):
+        invitation, _ = self.awaiting()
+        wrong = self.wrong_code(invitation)
+        response = self.confirm(OWNER, invitation, code=wrong)
+        self.assertEqual(
+            response.json(), {'detail': "Le code de confirmation est incorrect.", 'code': 'confirmation_code_invalid'},
+        )
+        self.assertEqual(response.status_code, 400)
+        row = self.fresh(invitation)
+        self.assertEqual((row.status, row.confirmation_code_failures), ('AWAITING_CONFIRMATION', 1))
+        entry = AuditLog.objects.get(action='INVITATION_CONFIRMATION_CODE_FAILED')
+        self.assertEqual(entry.actor, self.owner)
+        self.assertEqual(entry.details, f'organization={self.org.pk}; role={ADMIN}; failures=1')
+        self.assertFalse(self.is_member())
+        self.assertEqual(self.confirm(OWNER, invitation).status_code, 200)  # le bon code reste valable
+
+    def test_a_wrong_password_does_not_consume_a_code_attempt(self):
+        invitation, _ = self.awaiting()
+        self.assertDenied(self.confirm(OWNER, invitation, password='mauvais'), 'reauthentication_failed', 403)
+        self.assertEqual(self.fresh(invitation).confirmation_code_failures, 0)
+
+    def test_five_wrong_codes_reject_the_request_and_notify_the_person_neutrally(self):
+        invitation, _ = self.awaiting(inviter_role=ADMIN)
+        wrong = self.wrong_code(invitation)
+        self.deliver()
+        Notification.objects.all().delete()
+        statuses = []
+        for attempt in range(5):
+            role = ADMIN if attempt % 2 else OWNER  # le compteur est porté par l'invitation, pas par le confirmateur
+            statuses.append((self.confirm(role, invitation, code=wrong).json()['code']))
+        self.assertEqual(statuses, ['confirmation_code_invalid'] * 4 + ['confirmation_code_exhausted'])
+        row = self.fresh(invitation)
+        self.assertEqual((row.status, row.confirmation_code_failures, row.confirmation_code_hash), ('REJECTED', 5, ''))
+        rejected = AuditLog.objects.get(action='INVITATION_REJECTED')
+        self.assertTrue(rejected.details.endswith('reason=code_failed'))
+        # Le bon code arrive trop tard.
+        self.assertDenied(self.confirm(OWNER, invitation), 'invitation_not_awaiting_confirmation', 409)
+        self.assertFalse(self.is_member())
+        self.deliver()
+        note = Notification.objects.get(user=self.invitee)
+        self.assertEqual(note.content, f"Votre demande pour rejoindre « {self.org.name} » n'a pas été confirmée.")
+
+    def test_comparison_is_constant_time(self):
+        invitation, _ = self.awaiting()
+        with mock.patch.object(invitations, 'constant_time_compare', wraps=invitations.constant_time_compare) as spy:
+            self.assertEqual(self.confirm(OWNER, invitation).status_code, 200)
+        spy.assert_called()
+
+    def test_regeneration_invalidates_the_previous_code_and_keeps_the_counter(self):
+        invitation, _ = self.awaiting()
+        old = self.code_of(invitation)
+        self.confirm(OWNER, invitation, code=self.wrong_code(invitation))
+        response = self.invitee_client.post(f'{BASE}{invitation.pk}/confirmation-code/')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response['Cache-Control'], 'private, no-store')
+        body = response.json()
+        self.assertEqual(set(body), {'invitation_id', 'confirmation_code', 'confirmation_expires_at'})
+        self.assertRegex(body['confirmation_code'], CODE_RE)
+        new = body['confirmation_code']
+        self.assertEqual(self.fresh(invitation).confirmation_code_failures, 1)
+        entry = AuditLog.objects.get(action='INVITATION_CONFIRMATION_CODE_REGENERATED')
+        self.assertEqual((entry.actor, entry.details), (self.invitee, f'organization={self.org.pk}; role={ADMIN}'))
+        if new != old:
+            self.assertDenied(self.confirm(OWNER, invitation, code=old), 'confirmation_code_invalid', 400)
+        self.assertEqual(self.confirm(OWNER, invitation, code=new).status_code, 200)
+
+    def test_regeneration_is_reserved_to_the_person_and_to_an_open_wait(self):
+        invitation, _ = self.awaiting()
+        intruder = team.login(team.make_user('intruder-code'))
+        foreign = intruder.post(f'{BASE}{invitation.pk}/confirmation-code/')
+        unknown = intruder.post(f'{BASE}{uuid.uuid4()}/confirmation-code/')
+        self.assertEqual((foreign.status_code, foreign.json()), (unknown.status_code, unknown.json()))
+        self.assertDenied(foreign, 'invitation_not_found', 404)
+        response = self.as_role(OWNER).post(f'{BASE}{invitation.pk}/confirmation-code/')
+        self.assertDenied(response, 'invitation_not_found', 404)
+        set_deadline(invitation, -timedelta(seconds=1))
+        response = self.invitee_client.post(f'{BASE}{invitation.pk}/confirmation-code/')
+        self.assertDenied(response, 'invitation_not_awaiting_confirmation', 409)
+        self.assertEqual(APIClient().post(f'{BASE}{invitation.pk}/confirmation-code/').status_code, 401)
+        self.assertEqual(self.invitee_client.get(f'{BASE}{invitation.pk}/confirmation-code/').status_code, 405)
+
+    def test_regeneration_uses_the_org_write_throttle(self):
+        invitation, _ = self.awaiting()
+        rates = {**SimpleRateThrottle.THROTTLE_RATES, 'org_write': '1/hour'}
+        with mock.patch.object(SimpleRateThrottle, 'THROTTLE_RATES', rates):
+            self.assertEqual(self.invitee_client.post(f'{BASE}{invitation.pk}/confirmation-code/').status_code, 200)
+            self.assertEqual(self.invitee_client.post(f'{BASE}{invitation.pk}/confirmation-code/').status_code, 429)
+
+    def test_the_code_and_password_are_masked_from_error_reports(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+
+        from . import views_invitations as v
+        invitation, _ = self.awaiting()
+        request = APIRequestFactory().post('/x/', self.confirm_body(invitation), format='json')
+        force_authenticate(request, user=self.owner)
+        v.OrganizationInvitationConfirmView.as_view()(request, pk=self.org.pk, invitation_id=invitation.pk)
+        self.assertEqual(set(request.sensitive_post_parameters), {'password', 'code'})
+
+    def test_closing_the_wait_erases_the_code_hash(self):
+        cases = ('confirmed', 'rejected', 'withdrawn', 'expired')
+        for how in cases:
+            with self.subTest(how=how):
+                OrganizationInvitation.objects.all().delete()
+                Membership.objects.filter(organization=self.org, user=self.invitee).delete()
+                invitation, _ = self.awaiting()
+                if how == 'confirmed':
+                    self.assertEqual(self.confirm(OWNER, invitation).status_code, 200)
+                elif how == 'rejected':
+                    self.assertEqual(self.reject(OWNER, invitation).status_code, 204)
+                elif how == 'withdrawn':
+                    self.assertEqual(self.withdraw(invitation).status_code, 204)
+                else:
+                    set_deadline(invitation, -timedelta(seconds=1))
+                    expire_invitations()
+                self.assertEqual(self.fresh(invitation).confirmation_code_hash, '')
+
+
+# --- Autorité de l'émetteur (décision S3) -------------------------------------------------------------------------
+
+class InviterAuthorityTests(V2Base):
+    def awaiting_rows(self, role=OWNER):
+        response = self.as_role(role).get(f'{ORGS}{self.org.pk}/invitations/', {'status': 'AWAITING_CONFIRMATION'})
+        return {row['invitation_id']: row for row in response.json()['results']}
+
+    def test_the_list_flags_an_inviter_who_lost_the_authority(self):
+        mine, _ = self.awaiting(inviter_role=ADMIN)
+        pending, _ = self.make(role=ADMIN, invite_role=EDITOR)
+        self.assertTrue(self.awaiting_rows()[str(mine.pk)]['inviter_has_authority'])
+        pending_rows = self.as_role(OWNER).get(f'{ORGS}{self.org.pk}/invitations/').json()['results']
+        self.assertTrue(pending_rows[0]['inviter_has_authority'])
+        Membership.objects.filter(pk=self.memberships[ADMIN].pk).update(role=EDITOR)  # rétrogradation : l'attente reste
+        row = self.awaiting_rows()[str(mine.pk)]
+        self.assertEqual((row['inviter_has_authority'], row['can_confirm']), (False, True))
+        orphan = make_invitation(
+            self.org, 'orphan', role=ADMIN, status='AWAITING_CONFIRMATION', created_by=None,
+            accepted_by=team.make_user('orphan-guest'), accepted_at=timezone.now(),
+            confirmation_expires_at=timezone.now() + timedelta(hours=3),
+        )
+        self.assertFalse(self.awaiting_rows()[str(orphan.pk)]['inviter_has_authority'])
+
+    def test_removing_the_inviter_rejects_his_waits(self):
+        invitation, _ = self.awaiting(inviter_role=ADMIN)
+        other_inviter_wait, other_token = self.make(role=OWNER, invite_role=ADMIN)
+        guest = team.make_user('guest-other')
+        self.accept_service(guest, other_token)
+        self.deliver()
+        Notification.objects.all().delete()
+        response = self.as_role(OWNER).delete(team.url_member(self.org, self.memberships[ADMIN]))
+        self.assertEqual(response.status_code, 204)
+        row = self.fresh(invitation)
+        self.assertEqual((row.status, row.closed_by, row.confirmation_code_hash), ('REJECTED', self.owner, ''))
+        self.assertEqual(self.fresh(other_inviter_wait).status, 'AWAITING_CONFIRMATION')
+        entry = AuditLog.objects.get(action='INVITATION_REJECTED')
+        self.assertEqual(entry.details, (
+            f'organization={self.org.pk}; role={ADMIN}; accepted_by={self.invitee.pk}; reason=authority_lost'
+        ))
+        event = OutboxEvent.objects.filter(payload__change='rejected').get()
+        self.assertEqual(event.payload['accepted_by_id'], str(self.invitee.pk))
+        self.deliver()
+        self.assertEqual(
+            Notification.objects.get(user=self.invitee).content,
+            f"Votre demande pour rejoindre « {self.org.name} » n'a pas été confirmée.",
+        )
+
+    def test_leaving_keeps_the_waits_for_a_primary_admin(self):
+        invitation, _ = self.awaiting(inviter_role=ADMIN)
+        self.assertEqual(self.as_role(ADMIN).post(f'{ORGS}{self.org.pk}/leave/').status_code, 204)
+        self.assertEqual(self.fresh(invitation).status, 'AWAITING_CONFIRMATION')
+
+    def test_a_sanctioned_or_deactivated_inviter_has_his_waits_rejected_everywhere(self):
+        for how in ('sanction', 'deactivation'):
+            with self.subTest(how=how):
+                inviter, _ = self.add(f'inviter-{how}', ADMIN)
+                other, other_owner, _ = self.fresh_org(f'Autre {how}')
+                Membership.objects.create(organization=other, user=inviter, role=ADMIN)
+                waits = []
+                for org in (self.org, other):
+                    _, token = services.create_invitation(inviter, org.pk, ADMIN)
+                    waits.append(self.accept_service(team.make_user(f'g-{how}-{org.pk.hex[:6]}'), token).invitation)
+                if how == 'sanction':
+                    Sanction.objects.create(
+                        user=inviter, sanction_type=Sanction.TYPE_BANNISSEMENT, reason='T', issued_by=self.owner,
+                    ).apply()
+                else:
+                    services.set_account_active(inviter.pk, False, actor=self.owner)
+                for wait in waits:
+                    self.assertEqual(self.fresh(wait).status, 'REJECTED')
+                    confirmer = self.as_role(OWNER) if wait.organization_id == self.org.pk else team.login(other_owner)
+                    url = url_confirm(wait.organization, wait.pk)
+                    response = confirmer.post(url, self.confirm_body(wait), format='json')
+                    self.assertDenied(response, 'invitation_not_awaiting_confirmation', 409)
+                reasons = AuditLog.objects.filter(action='INVITATION_REJECTED', target_id__in=[w.pk for w in waits])
+                self.assertEqual(reasons.count(), 2)
+                self.assertTrue(all(e.details.endswith('reason=authority_lost') for e in reasons))
+
+    def test_reactivation_does_not_reject_anything(self):
+        invitation, _ = self.awaiting(inviter_role=ADMIN)
+        services.set_account_active(self.users[ADMIN].pk, True)
+        self.assertEqual(self.fresh(invitation).status, 'AWAITING_CONFIRMATION')
+
+    def test_the_authority_flag_costs_a_constant_number_of_queries(self):
+        self.awaiting(inviter_role=ADMIN)
+        with CaptureQueriesContext(connection) as small:
+            self.awaiting_rows()
+        for index in range(4):
+            inviter, _ = self.add(f'inv-q{index}', ADMIN)
+            make_invitation(
+                self.org, f'awq{index}', role=ADMIN, status='AWAITING_CONFIRMATION', created_by=inviter,
+                accepted_by=team.make_user(f'gq{index}'), accepted_at=timezone.now(),
+                confirmation_expires_at=timezone.now() + timedelta(hours=5),
+            )
+        with CaptureQueriesContext(connection) as large:
+            self.assertEqual(len(self.awaiting_rows()), 5)
+        self.assertEqual(len(small), len(large))
+
+
+# --- Plafond d'invitations ouvertes (décision S3) ------------------------------------------------------------------
+
+class OpenInvitationCapTests(V2Base):
+    def test_waits_for_confirmation_count_in_the_cap_until_they_lapse(self):
+        set_settings(max_pending_invitations=2)
+        invitation, _ = self.awaiting()
+        self.make(invite_role=EDITOR)
+        self.assertDenied(self.create(OWNER, EDITOR), 'invitation_limit_reached', 409)
+        set_deadline(invitation, -timedelta(seconds=1))
+        self.assertEqual(self.create(OWNER, EDITOR).status_code, 201)
 
 
 # --- Fonctions pures ----------------------------------------------------------------------------------------------
@@ -940,6 +1241,8 @@ class PureTests(SimpleTestCase):
 # --- Migration 0019 : réversible, avec garde -----------------------------------------------------------------------
 
 class InvitationConfirmationMigrationTests(TransactionTestCase):
+    """Migrations 0019 et 0020 : aller, retour, garde."""
+
     serialized_rollback = True
 
     def _fixture_setup(self):
@@ -957,11 +1260,23 @@ class InvitationConfirmationMigrationTests(TransactionTestCase):
         with connection.cursor() as cursor:
             return [c.name for c in connection.introspection.get_table_description(cursor, table)]
 
-    def test_rollback_is_refused_while_awaiting_or_rejected_rows_exist_then_allowed(self):
+    def test_0020_then_0019_are_reversible_with_a_guard_on_the_new_statuses(self):
         org = Organization.objects.create(name='Atelier Migration 0019', org_type='ENTREPRISE')
+        # 0020 (code de rattachement) : simple retrait des deux colonnes.
+        self.migrate(('identity', '0019_invitation_confirmation'))
+        columns = self.columns('identity_organizationinvitation')
+        self.assertNotIn('confirmation_code_hash', columns)
+        self.assertNotIn('confirmation_code_failures', columns)
+        # 0019 : garde de données, lignes écrites par le modèle HISTORIQUE de 0019.
+        state = MigrationExecutor(connection).loader.project_state(('identity', '0019_invitation_confirmation'))
+        historical = state.apps.get_model('identity', 'OrganizationInvitation')
         for status_value in ('AWAITING_CONFIRMATION', 'REJECTED'):
             with self.subTest(status=status_value):
-                row = make_invitation(org, f'mig-{status_value}', role=ADMIN, status=status_value)
+                row = historical.objects.create(
+                    organization_id=org.pk, role=ADMIN, status=status_value,
+                    token_hash=status_value.lower().ljust(64, 'x'),
+                    expires_at=timezone.now() + timedelta(days=1),
+                )
                 with self.assertRaises(RuntimeError) as ctx:
                     self.migrate(('identity', '0018_membership_scope_member_role'))
                 self.assertIn('identity.0019', str(ctx.exception))
@@ -970,5 +1285,7 @@ class InvitationConfirmationMigrationTests(TransactionTestCase):
         self.migrate(('identity', '0018_membership_scope_member_role'))
         self.assertNotIn('accepted_by_id', self.columns('identity_organizationinvitation'))
         self.assertNotIn('admin_invitation_confirmation_hours', self.columns('identity_identitysettings'))
-        self.migrate(('identity', '0019_invitation_confirmation'))
-        self.assertIn('confirmation_expires_at', self.columns('identity_organizationinvitation'))
+        self.migrate(('identity', '0020_invitation_confirmation_code'))
+        columns = self.columns('identity_organizationinvitation')
+        self.assertIn('confirmation_expires_at', columns)
+        self.assertIn('confirmation_code_hash', columns)

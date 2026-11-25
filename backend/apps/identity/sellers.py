@@ -24,7 +24,7 @@ from apps.platform_core.services import publish_event
 
 from . import capabilities, verification
 from .models import Membership, Organization, ProviderProfile, User
-from .organizations import effective_owner_ids_by_organization
+from .organizations import effective_owner_ids_by_organization, reject_awaiting_invitations_of_account
 
 NO_CLAIMS_SUMMARY = {'complete': False, 'label': None}
 
@@ -392,7 +392,11 @@ def set_account_active(user_id, active: bool, actor=None) -> bool:
     """Point unique de changement de `User.is_active` (ADR 0006, 7.1) : écrit le drapeau puis publie
     `identity.seller_context_status_changed` pour le contexte personnel et, s'il existe, pour le profil
     prestataire (les offres suivent par `marketplace.sync_seller_visibility`). Idempotent : sans changement,
-    aucun événement. Renvoie vrai si l'état a changé. Les sanctions (modération) passent par ici."""
+    aucun événement. Renvoie vrai si l'état a changé. Les sanctions (modération) passent par ici.
+
+    Désactivation (sanction bloquante comprise) : les attentes de confirmation d'invitation créées par ce compte sont
+    ensuite rejetées (décision S3, L1-01-B7), organisation par organisation, hors de cette transaction (ordre de
+    verrouillage : organisation d'abord)."""
     parsed = parse_uuid(user_id)
     if parsed is None:
         return False
@@ -403,6 +407,8 @@ def set_account_active(user_id, active: bool, actor=None) -> bool:
         user.is_active = bool(active)
         user.save(update_fields=['is_active'])
         announce_account_status(parsed, bool(active), actor)
+    if not active:
+        reject_awaiting_invitations_of_account(parsed, actor=actor)
     return True
 
 

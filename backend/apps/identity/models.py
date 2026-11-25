@@ -624,6 +624,10 @@ class OrganizationInvitation(BaseModel):
     confirmed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
     )
+    # Code de rattachement (ADR 0010 QG-2, décision S3) : six chiffres montrés à la seule personne qui a accepté,
+    # ressaisis par le confirmateur. Seule l'empreinte HMAC est stockée (comme le jeton) ; compteur des codes faux.
+    confirmation_code_hash = models.CharField(max_length=64, blank=True, default='')
+    confirmation_code_failures = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
         constraints = [

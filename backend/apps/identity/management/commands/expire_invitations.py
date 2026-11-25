@@ -37,7 +37,7 @@ def expire_invitations(now=None) -> int:
             status=OrganizationInvitation.STATUS_AWAITING_CONFIRMATION,
         ).update(
             status=OrganizationInvitation.STATUS_EXPIRED, closed_at=now, closed_by=None, label='',
-            updated_at=now,
+            confirmation_code_hash='', updated_at=now,
         )
         count = pending + awaiting
         if count:

@@ -263,9 +263,11 @@ def _get_membership(organization, user_id) -> Membership:
     return membership
 
 
-def _event_payload(organization, membership, change, old_role, new_role, actor, via=None):
+def _event_payload(organization, membership, change, old_role, new_role, actor, via=None, confirmed=False):
     """Charge utile de `identity.membership_changed` (v1). `via` (clé additive, ADR 0008 §6) n'est présente que
-    pour une appartenance obtenue par invitation."""
+    pour une appartenance obtenue par invitation ; `confirmed` (clé additive, L1-01-B7) seulement pour une entrée
+    après confirmation d'une invitation Administrateur (la personne reçoit alors la seule notification « accès
+    confirmé », pas celle d'ajout)."""
     payload = {
         'organization_id': str(organization.pk), 'user_id': str(membership.user_id), 'change': change,
         'old_role': old_role or None, 'new_role': new_role or None,
@@ -273,13 +275,19 @@ def _event_payload(organization, membership, change, old_role, new_role, actor, 
     }
     if via:
         payload['via'] = via
+    if confirmed:
+        payload['confirmed'] = True
     return payload
 
 
-def _publish_membership_change(organization, membership, change, old_role, new_role, actor, via=None):
+def _publish_membership_change(
+    organization, membership, change, old_role, new_role, actor, via=None, confirmed=False,
+):
     publish_event(
         'identity.membership_changed', aggregate_type='organization', aggregate_id=organization.pk,
-        payload=_event_payload(organization, membership, change, old_role, new_role, actor, via=via),
+        payload=_event_payload(
+            organization, membership, change, old_role, new_role, actor, via=via, confirmed=confirmed,
+        ),
     )
 
 
@@ -799,13 +807,14 @@ def _publish_status_change(organization, reason, actor):
 # --- Équipe -------------------------------------------------------------------------------
 
 def _activate_membership(
-    actor, organization, target, role, added_by=None, via=None, invited_by=None, scope=None,
+    actor, organization, target, role, added_by=None, via=None, invited_by=None, scope=None, confirmed=False,
 ):
     """Noyau interne, JAMAIS exposé : crée l'appartenance `ACTIVE` ou réactive la même ligne (R12), puis audit
     `MEMBERSHIP_ADDED` (acteur = `actor`) et événement `identity.membership_changed` (acteur = `added_by`, par défaut
     `actor`). Aucune autorisation ici : l'appelant l'a faite sous verrou. Déjà membre actif : 409 `already_member`.
     `via='invitation'` et `invited_by` tracent l'origine dans l'audit et l'événement (ADR 0008 §5.1, §6). `scope` :
-    périmètre de l'appartenance (défaut : organisation entière ; une réactivation repart du périmètre donné)."""
+    périmètre de l'appartenance (défaut : organisation entière ; une réactivation repart du périmètre donné).
+    `confirmed` : entrée après confirmation d'une invitation Administrateur (marqueur de l'événement)."""
     added_by = added_by or actor
     scope = scope or capabilities.ORGANIZATION_SCOPE
     membership = Membership.objects.filter(organization=organization, user=target).first()
@@ -827,7 +836,7 @@ def _activate_membership(
         change = CHANGE_REACTIVATED
     extra = f"via={via}; invited_by={invited_by}" if via else ''
     _audit_membership(actor, 'MEMBERSHIP_ADDED', organization, membership, None, role, extra=extra)
-    _publish_membership_change(organization, membership, change, None, role, added_by, via=via)
+    _publish_membership_change(organization, membership, change, None, role, added_by, via=via, confirmed=confirmed)
     return membership
 
 
@@ -869,6 +878,79 @@ def _audit_invitation(actor, action, organization, invitation, **extra):
     record_audit(
         actor, action, target=invitation, details=details, context=(CONTEXT_ORGANIZATION, organization.pk),
     )
+
+
+# Types de changement portés par `identity.organization_invitation_changed` qui ajoutent `accepted_by_id`
+# (ADR 0010 §7).
+INVITATION_CHANGES_WITH_ACCEPTED_BY = ('awaiting_confirmation', 'confirmed', 'rejected')
+INVITATION_CHANGE_REJECTED = 'rejected'
+# Raisons de rejet automatique d'une attente de confirmation (audit `INVITATION_REJECTED`, `reason=`).
+REJECT_REASON_AUTHORITY_LOST = 'authority_lost'
+
+
+def publish_invitation_change(organization, invitation, change, actor, accepted_by_id=None):
+    """Événement `identity.organization_invitation_changed` (v1) : UUID et codes seulement (jamais nom, téléphone,
+    indice, jeton, code de rattachement ni étiquette)."""
+    payload = {
+        'organization_id': str(organization.pk), 'invitation_id': str(invitation.pk), 'change': change,
+        'role': invitation.role, 'actor_id': str(actor.pk) if actor is not None else None,
+        'inviter_id': str(invitation.created_by_id) if invitation.created_by_id else None,
+    }
+    if change in INVITATION_CHANGES_WITH_ACCEPTED_BY:
+        payload['accepted_by_id'] = str(accepted_by_id) if accepted_by_id else None
+    publish_event(
+        'identity.organization_invitation_changed', aggregate_type='organization', aggregate_id=organization.pk,
+        payload=payload,
+    )
+
+
+def reject_awaiting_invitations_of_inviter(actor, organization, inviter_id, reason=REJECT_REASON_AUTHORITY_LOST):
+    """Rejette (`AWAITING_CONFIRMATION -> REJECTED`, conditionnel) les attentes de confirmation créées par un émetteur
+    retiré de l'organisation ou sanctionné (décision S3, L1-01-B7) : la personne qui a accepté son lien ne doit pas
+    pouvoir entrer sur la foi d'un émetteur écarté. Dans la transaction de l'appelant, organisation verrouillée.
+    Une trace `INVITATION_REJECTED` (`reason=`) et un événement `rejected` (la personne est prévenue, sans nom) par
+    invitation. Une simple rétrogradation n'appelle pas cette fonction (un administrateur principal peut toujours
+    confirmer). Renvoie le nombre d'attentes rejetées."""
+    now = timezone.now()
+    rejected = 0
+    for invitation in OrganizationInvitation.objects.filter(
+        organization=organization, created_by_id=inviter_id,
+        status=OrganizationInvitation.STATUS_AWAITING_CONFIRMATION,
+    ).only('id', 'role', 'created_by', 'accepted_by'):
+        done = OrganizationInvitation.objects.filter(
+            pk=invitation.pk, status=OrganizationInvitation.STATUS_AWAITING_CONFIRMATION,
+        ).update(
+            status=OrganizationInvitation.STATUS_REJECTED, closed_at=now, closed_by=actor, confirmed_by=actor,
+            confirmation_code_hash='', updated_at=now,
+        )
+        if done:
+            rejected += 1
+            _audit_invitation(
+                actor, 'INVITATION_REJECTED', organization, invitation, accepted_by=invitation.accepted_by_id,
+                reason=reason,
+            )
+            publish_invitation_change(
+                organization, invitation, INVITATION_CHANGE_REJECTED, actor, accepted_by_id=invitation.accepted_by_id,
+            )
+    return rejected
+
+
+def reject_awaiting_invitations_of_account(user_id, actor=None, reason=REJECT_REASON_AUTHORITY_LOST) -> int:
+    """Compte désactivé ou sanctionné (appelé par `sellers.set_account_active`, APRÈS sa transaction) : rejette ses
+    attentes de confirmation dans chaque organisation, une transaction par organisation, verrou d'organisation en
+    premier (ordre unique de l'ADR 0010 §11)."""
+    total = 0
+    organization_ids = set(OrganizationInvitation.objects.filter(
+        created_by_id=user_id, status=OrganizationInvitation.STATUS_AWAITING_CONFIRMATION,
+    ).values_list('organization_id', flat=True))
+    for organization_id in sorted(organization_ids, key=str):
+        with transaction.atomic():
+            try:
+                organization = _lock_organization(organization_id)
+            except ContextDenied:
+                continue
+            total += reject_awaiting_invitations_of_inviter(actor, organization, user_id, reason)
+    return total
 
 
 def sweep_invitations_of_inviter(actor, organization, inviter_id, new_role=None, new_scope=None):
@@ -1051,6 +1133,9 @@ def _end_membership(actor, organization, membership, end_reason, audit_action):
     if capabilities.role_has_capability(old_role, 'org.manage_members'):
         # Retiré ou parti : ses invitations en attente sont révoquées dans la même transaction (ADR 0008 §5.1).
         sweep_invitations_of_inviter(actor, organization, membership.user_id)
+        if end_reason == Membership.END_REMOVED:
+            # Retiré (pas parti de lui-même) : ses attentes de confirmation sont rejetées (décision S3, L1-01-B7).
+            reject_awaiting_invitations_of_inviter(actor, organization, membership.user_id)
     if old_role == ROLE_OWNER:
         _publish_owners_changed(organization, actor)
     return membership

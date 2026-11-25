@@ -22,7 +22,8 @@ from .models import INVITABLE_ROLES, OrganizationInvitation
 from .services import (
     ACCEPTANCE_ACTIVE, accept_invitation, confirm_invitation, create_invitation, decline_invitation, effective_status,
     list_invitations, list_my_awaiting_invitations, phone_hint, preview_invitation, public_display_name,
-    reject_invitation, requires_confirmation, revoke_invitation, sole_effective_owner_id, withdraw_awaiting_invitation,
+    regenerate_confirmation_code, reject_invitation, requires_confirmation, revoke_invitation, sole_effective_owner_id,
+    withdraw_awaiting_invitation,
 )
 from .throttles import (
     InvitationCreateOrgThrottle, InvitationCreateThrottle, InvitationRedeemIpThrottle, InvitationRedeemUserThrottle,
@@ -53,6 +54,7 @@ def _invitation_schema(**kwargs):
         'accepted_by_display_name': serializers.CharField(allow_null=True),
         'accepted_by_phone_hint': serializers.CharField(allow_null=True),
         'can_confirm': serializers.BooleanField(),
+        'inviter_has_authority': serializers.BooleanField(),
     }, **kwargs)
 
 
@@ -102,10 +104,17 @@ AWAITING_ACCEPTED_SCHEMA = inline_serializer('InvitationAwaitingConfirmation', {
     'organization_name': serializers.CharField(),
     'role': serializers.ChoiceField(choices=capabilities.ROLES),
     'confirmation_expires_at': serializers.DateTimeField(),
+    'confirmation_code': serializers.CharField(),
 })
 CONFIRM_SCHEMA = inline_serializer('InvitationConfirm', {
     'confirm': serializers.BooleanField(),
     'password': serializers.CharField(write_only=True),
+    'code': serializers.CharField(write_only=True),
+})
+CONFIRMATION_CODE_SCHEMA = inline_serializer('InvitationConfirmationCode', {
+    'invitation_id': serializers.UUIDField(),
+    'confirmation_code': serializers.CharField(),
+    'confirmation_expires_at': serializers.DateTimeField(),
 })
 MY_AWAITING_PAGE_SCHEMA = inline_serializer('MyAwaitingInvitationPage', {
     'count': serializers.IntegerField(),
@@ -124,10 +133,11 @@ MY_AWAITING_PAGE_SCHEMA = inline_serializer('MyAwaitingInvitationPage', {
 })
 
 
-def serialize_invitation(invitation, actor, now, listing=None):
+def serialize_invitation(invitation, actor, now, listing=None, authority=None):
     """`Invitation` (contrat §0 et §7.4) : statut EFFECTIF, étiquette vide hors `PENDING`, jamais le jeton ni son
     empreinte. Nom abrégé et indice de téléphone de la personne qui a accepté : SEULEMENT si l'invitation attend une
-    confirmation que l'appelant peut donner (`can_confirm`) ; `null` sinon."""
+    confirmation que l'appelant peut donner (`can_confirm`) ; `null` sinon. `inviter_has_authority` : l'émetteur
+    peut-il toujours déléguer ce rôle (calculé par lot pour la page, `authority`) ? Jamais le code de rattachement."""
     current = effective_status(invitation, now)
     author = invitation.created_by
     can_confirm = listing.can_confirm(invitation, now) if listing is not None else False
@@ -150,6 +160,7 @@ def serialize_invitation(invitation, actor, now, listing=None):
         'accepted_by_display_name': public_display_name(accepted.full_name) if accepted is not None else None,
         'accepted_by_phone_hint': phone_hint(accepted) if accepted is not None else None,
         'can_confirm': can_confirm,
+        'inviter_has_authority': bool((authority or {}).get(invitation.pk, False)),
     }
 
 
@@ -183,8 +194,9 @@ class OrganizationInvitationsView(APIView):
         paginator = StandardPagination()
         page = paginator.paginate_queryset(listing.queryset, request, view=self)
         now = timezone.now()
+        authority = listing.inviter_authority(page)
         return _private(paginator.get_paginated_response(
-            [serialize_invitation(invitation, request.user, now, listing) for invitation in page],
+            [serialize_invitation(invitation, request.user, now, listing, authority) for invitation in page],
         ))
 
     @extend_schema(
@@ -220,11 +232,11 @@ class OrganizationInvitationDetailView(APIView):
         return _private(Response(status=status.HTTP_204_NO_CONTENT))
 
 
-@method_decorator(sensitive_post_parameters('password'), name='dispatch')
+@method_decorator(sensitive_post_parameters('password', 'code'), name='dispatch')
 class OrganizationInvitationConfirmView(APIView):
     """`POST organizations/<uuid>/invitations/<uuid>/confirm/` : confirmation d'une invitation Administrateur en
-    attente, par l'émetteur habilité ou un administrateur principal effectif, avec ressaisie du mot de passe
-    (contrat §7.4.6). Réponse : `Member` de la personne entrée."""
+    attente, par l'émetteur habilité ou un administrateur principal effectif, avec ressaisie du mot de passe et le
+    code de rattachement communiqué par la personne (contrat §7.4.6). Réponse : `Member` de la personne entrée."""
 
     acting_context_exempt = EXEMPT_REASON
     permission_classes = [permissions.IsAuthenticated]
@@ -236,6 +248,7 @@ class OrganizationInvitationConfirmView(APIView):
         data = _body(request)
         membership = confirm_invitation(
             request.user, pk, invitation_id, confirm=data.get('confirm') is True, password=data.get('password'),
+            code=data.get('code'),
         )
         # L'appelant a `org.manage_members` (sinon refusé) : `is_last_effective_owner` lui est révélé.
         return _private(Response(serialize_member(membership, request.user, True, sole_effective_owner_id(pk))))
@@ -305,6 +318,8 @@ class InvitationAcceptView(_RedeemView):
             'status': result.status, 'invitation_id': str(result.invitation.pk),
             'organization_name': result.organization.name, 'role': result.role,
             'confirmation_expires_at': _iso(result.confirmation_expires_at),
+            # Montré à la seule personne qui a accepté ; elle le communique au confirmateur.
+            'confirmation_code': result.confirmation_code,
         }, status=status.HTTP_202_ACCEPTED))
 
 
@@ -350,6 +365,26 @@ class MyAwaitingInvitationsView(APIView):
         page = paginator.paginate_queryset(list_my_awaiting_invitations(request.user), request, view=self)
         now = timezone.now()
         return _private(paginator.get_paginated_response([serialize_my_awaiting(row, now) for row in page]))
+
+
+class InvitationConfirmationCodeView(APIView):
+    """`POST organization-invitations/<uuid>/confirmation-code/` : la personne qui a accepté obtient un nouveau code
+    de rattachement (l'ancien ne vaut plus). Réponse `private, no-store` ; le code n'est relisible nulle part."""
+
+    acting_context_exempt = EXEMPT_REASON
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [OrganizationWriteThrottle]
+    http_method_names = ['post', 'options']
+
+    @extend_schema(
+        operation_id='organization_invitations_confirmation_code', request=None, responses=CONFIRMATION_CODE_SCHEMA,
+    )
+    def post(self, request, invitation_id):
+        invitation, code = regenerate_confirmation_code(request.user, invitation_id)
+        return _private(Response({
+            'invitation_id': str(invitation.pk), 'confirmation_code': code,
+            'confirmation_expires_at': _iso(invitation.confirmation_expires_at),
+        }))
 
 
 class InvitationWithdrawView(APIView):

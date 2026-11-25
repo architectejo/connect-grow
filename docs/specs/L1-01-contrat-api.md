@@ -334,7 +334,8 @@ Changement de comportement existant : `POST organizations/<id>/leave/` peut main
   "confirmation_expires_at": null,
   "accepted_by_display_name": null,
   "accepted_by_phone_hint": null,
-  "can_confirm": false
+  "can_confirm": false,
+  "inviter_has_authority": true
 }
 ```
 
@@ -343,10 +344,12 @@ Changement de comportement existant : `POST organizations/<id>/leave/` peut main
 - `accepted_by_display_name` (« Marie K. ») et `accepted_by_phone_hint` (`"••47"`) : **seulement** si `status = AWAITING_CONFIRMATION` **et** `can_confirm = true` ; `null` sinon.
 - `can_confirm` : l'appelant est l'émetteur et peut toujours déléguer ce rôle, ou un Administrateur principal effectif, et l'invitation est `AWAITING_CONFIRMATION` non échue.
 - `status` effectif : une `AWAITING_CONFIRMATION` dont `confirmation_expires_at` est passée est présentée `EXPIRED`.
+- `inviter_has_authority` (B7, décision S3) : l'émetteur est toujours membre actif, compte actif et non sanctionné, et peut toujours déléguer ce rôle sur ce périmètre (calculé par lot, sans requête par ligne). Le front affiche un avertissement sur une ligne `AWAITING_CONFIRMATION` où il vaut `false` (« l'émetteur n'a plus l'autorité ; un administrateur principal peut encore confirmer ou rejeter »). Un émetteur **retiré** ou **sanctionné / désactivé** voit ses attentes rejetées automatiquement (`REJECTED`) ; une simple rétrogradation ou un départ volontaire les laisse en attente.
+- Le code de rattachement n'apparaît **jamais** dans cet objet.
 
 #### 7.4.1 Créer (2.1 amendé)
 
-Corps : `{"role": "ADMIN", "label": "...", "scope": {"type": "ORGANIZATION", "id": null}}` (`scope` facultatif). `role` parmi `ADMIN`, `EDITOR`, `ANALYST`, `MEMBER`, **dans la limite de ce que l'appelant peut déléguer** ; `OWNER` ou rôle non délégable : `400 invitation_role_not_allowed`. Réponse `201` : clés de la section 2.1 **plus** `scope` et `requires_confirmation`. Pas de ressaisie du mot de passe à la création.
+Corps : `{"role": "ADMIN", "label": "...", "scope": {"type": "ORGANIZATION", "id": null}}` (`scope` facultatif). `role` parmi `ADMIN`, `EDITOR`, `ANALYST`, `MEMBER`, **dans la limite de ce que l'appelant peut déléguer** ; `OWNER` ou rôle non délégable : `400 invitation_role_not_allowed`. Réponse `201` : clés de la section 2.1 **plus** `scope` et `requires_confirmation`. Pas de ressaisie du mot de passe à la création. Le plafond `409 invitation_limit_reached` compte les invitations **ouvertes non échues** : `PENDING` et `AWAITING_CONFIRMATION` (décision S3).
 
 #### 7.4.2 Lister (2.2 amendé)
 
@@ -373,15 +376,17 @@ Inchangé : seulement `PENDING`. Sur une `AWAITING_CONFIRMATION` : `409 invitati
 #### 7.4.5 Accepter (2.5 amendé)
 
 - Rôle sans confirmation : `200 {"status": "ACTIVE", "organization_id", "organization_name", "role", "membership_id"}` (clé `status` **ajoutée**, toujours `ACTIVE`).
-- Rôle `ADMIN` : **`202`** `{"status": "AWAITING_CONFIRMATION", "invitation_id": "uuid", "organization_name": "...", "role": "ADMIN", "confirmation_expires_at": "..."}`. Ni `organization_id` ni `membership_id` ; l'organisation **n'apparaît pas** dans `contexts/`.
+- Rôle `ADMIN` : **`202`** `{"status": "AWAITING_CONFIRMATION", "invitation_id": "uuid", "organization_name": "...", "role": "ADMIN", "confirmation_expires_at": "...", "confirmation_code": "482913"}`. Ni `organization_id` ni `membership_id` ; l'organisation **n'apparaît pas** dans `contexts/`.
+- **`confirmation_code`** (décision S3, ADR 0010 QG-2) : code de rattachement de **6 chiffres**, montré à la **seule** personne qui a accepté, dans cette réponse (et dans celle de 7.4.7 « nouveau code »). Il n'est relisible nulle part (seule une empreinte est stockée). Le front l'affiche en grand avec la consigne : « Communiquez ce code à la personne qui vous a invité(e), de vive voix ou par un canal que vous partagez déjà. Elle en a besoin pour vous ouvrir l'accès. Ne le communiquez à personne d'autre. »
 - Erreurs : celles de la section 2.5, avec **`409 organization_limit_reached` remplacé par `409 account_review_required`** (7.5), plus `409 already_awaiting_confirmation` (la personne attend déjà une confirmation pour cette organisation ; l'invitation reste `PENDING`).
 
 #### 7.4.6 Confirmer, rejeter (émetteur habilité ou Administrateur principal effectif)
 
-`POST ID organizations/<uuid:pk>/invitations/<uuid:invitation_id>/confirm/` — corps `{"confirm": true, "password": "..."}`. Throttle `org_sensitive`.
+`POST ID organizations/<uuid:pk>/invitations/<uuid:invitation_id>/confirm/` — corps `{"confirm": true, "password": "...", "code": "482913"}`. Throttle `org_sensitive`. `password` et `code` sont masqués des rapports d'erreur.
 
 - `200` + `Member` de la personne entrée (appartenance `ACTIVE` créée au rôle de l'invitation, avec `scope`). La personne est notifiée ; son contexte apparaît dans `contexts/` à l'appel suivant.
-- Erreurs : `403 DENY_*` (ordre de la section 0) ; `403 DENY_PERMISSION` (ni émetteur habilité, ni Administrateur principal effectif) ; `400 confirmation_required` ; `400 password_required` ; `403 reauthentication_failed` ; `404 invitation_not_found` ; `409 invitation_not_awaiting_confirmation` (autre statut ou échue) ; `400 user_unavailable` (la personne n'est plus éligible : compte inactif ou restreint, téléphone non vérifié, plafond technique ; réponse neutre, l'invitation reste `AWAITING_CONFIRMATION`) ; `409 already_member` ; `429`.
+- Erreurs, dans cet ordre : `403 DENY_*` (ordre de la section 0) ; `404 invitation_not_found` ; `403 DENY_PERMISSION` (ni émetteur habilité, ni Administrateur principal effectif) ; `409 invitation_not_awaiting_confirmation` (autre statut ou échue) ; **`400 confirmation_code_required`** (`code` absent ou vide ; aucun essai décompté) ; `400 confirmation_required` ; `400 password_required` ; `403 reauthentication_failed` (un mot de passe faux ne décompte aucun essai de code) ; **`400 confirmation_code_invalid`** (code faux : un essai décompté sur l'invitation, quel que soit le confirmateur) ; **`409 confirmation_code_exhausted`** (5e code faux : l'invitation passe à `REJECTED`, la personne est prévenue sans nom ; il faut une nouvelle invitation) ; `400 user_unavailable` (la personne n'est plus éligible : compte inactif ou restreint, téléphone non vérifié, plafond technique ; réponse neutre, l'invitation reste `AWAITING_CONFIRMATION`) ; `409 already_member` ; `429`.
+- Le confirmateur obtient le code **de la personne elle-même**, par un canal qu'il maîtrise (appel, rencontre) : c'est la preuve que la personne entrée est celle avec qui il communique (parade au lien transmis à un tiers). Le nom abrégé et l'indice de téléphone ne sont que des indices (l'indice est relu en direct sur le compte, au moment de la liste).
 
 `POST ID organizations/<uuid:pk>/invitations/<uuid:invitation_id>/reject/` — pas de corps ; `204` ; mêmes acteurs. Erreurs : `404 invitation_not_found` ; `409 invitation_not_awaiting_confirmation` ; `403 DENY_*` ; `429`.
 
@@ -389,6 +394,7 @@ Inchangé : seulement `PENDING`. Sur une `AWAITING_CONFIRMATION` : `409 invitati
 
 - `GET ID organization-invitations/awaiting/` — authentifié ; paginé. Élément : `{"invitation_id", "organization_name", "org_type", "role", "scope", "accepted_at", "confirmation_expires_at", "status": "AWAITING_CONFIRMATION | EXPIRED"}` ; ses seules invitations `AWAITING_CONFIRMATION` (et `EXPIRED` depuis moins de 7 jours, pour information).
 - `POST ID organization-invitations/<uuid:invitation_id>/withdraw/` — authentifié, la personne qui a accepté seulement ; `204` (`AWAITING_CONFIRMATION -> DECLINED`). `404 invitation_not_found` pour toute autre invitation (y compris celle d'autrui : réponse identique) ; `409 invitation_not_awaiting_confirmation` ; `429`.
+- **Nouveau code** (décision S3) : `POST ID organization-invitations/<uuid:invitation_id>/confirmation-code/` — authentifié, la personne qui a accepté seulement, pas de corps ; throttle `org_write`. `200 {"invitation_id": "uuid", "confirmation_code": "123456", "confirmation_expires_at": "..."}` ; l'ancien code cesse de valoir ; le compteur d'essais faux n'est **pas** remis à zéro. Erreurs : `404 invitation_not_found` (identique pour l'attente d'autrui) ; `409 invitation_not_awaiting_confirmation` ; `429`. Le front propose ce bouton (« Obtenir un nouveau code ») sur chaque carte `AWAITING_CONFIRMATION` d'E17 : la liste `awaiting/` ne renvoie **jamais** de code (il n'est pas stocké en clair).
 
 ### 7.5 Création d'organisation et limites (B8 ; amende ADR 0006 §9.2 et §17.2 B)
 
@@ -432,6 +438,9 @@ Le front ne garde aucune valeur par défaut de plafond d'organisations (`lib/org
 | 409 | `nomination_not_pending` | 7.3.3 à 7.3.5 | nouveau |
 | 409 | `invitation_not_awaiting_confirmation` | 7.4.6, 7.4.7 | nouveau |
 | 409 | `already_awaiting_confirmation` | 7.4.5 | nouveau |
+| 400 | `confirmation_code_required` | 7.4.6 | nouveau (décision S3) |
+| 400 | `confirmation_code_invalid` | 7.4.6 | nouveau (décision S3) |
+| 409 | `confirmation_code_exhausted` | 7.4.6 | nouveau (décision S3) |
 | 409 | `account_review_required` | `POST organizations/`, 7.4.5 | **remplace** `organization_limit_reached` |
 | 409 | `organization_limit_reached` | — | **supprimé** |
 | — | route `POST organizations/<id>/transfer-ownership/` | — | **supprimée** (7.3, genre `TRANSFER`) |

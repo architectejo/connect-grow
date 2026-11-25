@@ -38,7 +38,8 @@ _TYPES = (
     # ADR 0010 §7 (L1-01-B7), additif en v1 : `change` vaut aussi `awaiting_confirmation`, `confirmed`, `rejected`, avec
     # la clé `accepted_by_id` (UUID ; jamais nom, téléphone ni indice) ; l'abonné prévient alors les comptes qui
     # peuvent confirmer, ou la personne qui a accepté.
-    # `identity.membership_changed` porte en plus la clé additive `via` (« invitation » ou absente).
+    # `identity.membership_changed` porte en plus la clé additive `via` (« invitation » ou absente) et, pour une
+    # entrée après confirmation d'une invitation Administrateur, la clé additive `confirmed: true` (L1-01-B7).
     EventType('identity.organization_invitation_changed'),
     # Identité d'une organisation modifiée (T8) : noms de champs seulement, aucune valeur.
     EventType('identity.organization_updated', no_subscriber=True),

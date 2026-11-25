@@ -17,8 +17,9 @@ Règles clés :
   `AWAITING_CONFIRMATION` SANS appartenance (donc sans aucun droit) jusqu'à la confirmation, avec ressaisie du mot de
   passe, par l'émetteur s'il peut toujours déléguer ce rôle ou par un administrateur principal effectif (parade au
   lien porteur, décision U2). Le confirmateur voit le nom abrégé et les deux derniers chiffres du téléphone vérifié
-  de la personne (`phone_hint`), annoncés à celle-ci avant qu'elle accepte ; ces données ne vont jamais dans l'audit,
-  l'outbox, les notifications ni les journaux.
+  de la personne (`phone_hint`), annoncés à celle-ci avant qu'elle accepte, ET ressaisit le code de rattachement à
+  six chiffres que seule cette personne a reçu (décision S3, ADR 0010 QG-2) ; ces données ne vont jamais dans
+  l'audit, l'outbox, les notifications ni les journaux.
 
 Ce module est exposé par `identity.services` ; les autres domaines n'importent jamais ce sous-module.
 """
@@ -31,7 +32,8 @@ from datetime import timedelta
 from typing import Optional
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q
+from django.utils.crypto import constant_time_compare, salted_hmac
 from django.utils import timezone
 from rest_framework import serializers, status
 
@@ -39,16 +41,15 @@ from apps.common.contexts import CONTEXT_ORGANIZATION, DENY_PERMISSION, DENY_SEC
 from apps.common.utils import parse_uuid
 from apps.moderation import services as moderation_services
 from apps.moderation.services import record_audit
-from apps.platform_core.services import publish_event
 
 from . import capabilities
 from .models import (
     CONFIRMATION_REQUIRED_ROLES, INVITABLE_ROLES, Membership, Organization, OrganizationInvitation, User,
 )
 from .organizations import (
-    OrganizationError, _activate_membership, _audit_invitation, _authorize_member, _effective_owner_ids,
-    _ensure_under_limit, _get_organization, _lock_organization, _require_reauthentication, _unavailable_user_error,
-    _validate_scope, get_identity_settings, membership_scope,
+    INVITATION_CHANGE_REJECTED, OrganizationError, _activate_membership, _audit_invitation, _authorize_member,
+    _effective_owner_ids, _ensure_under_limit, _get_organization, _lock_organization, _require_reauthentication,
+    _unavailable_user_error, _validate_scope, get_identity_settings, membership_scope, publish_invitation_change,
 )
 from .throttles import FailureLimiter
 
@@ -63,8 +64,15 @@ CHANGE_REVOKED = 'revoked'
 # ADR 0010 §7 : valeurs additives (charge utile enrichie de `accepted_by_id`).
 CHANGE_AWAITING_CONFIRMATION = 'awaiting_confirmation'
 CHANGE_CONFIRMED = 'confirmed'
-CHANGE_REJECTED = 'rejected'
-_CHANGES_WITH_ACCEPTED_BY = (CHANGE_AWAITING_CONFIRMATION, CHANGE_CONFIRMED, CHANGE_REJECTED)
+CHANGE_REJECTED = INVITATION_CHANGE_REJECTED
+
+# Code de rattachement (décision S3, ADR 0010 QG-2) : six chiffres tirés par `secrets`, empreinte HMAC (clé du
+# projet, sel propre, identifiant de l'invitation) seule stockée ; au-delà de 5 codes faux sur une invitation, elle
+# est rejetée. Seuil de sécurité (comme les limiteurs d'échecs), pas une règle de marché.
+CONFIRMATION_CODE_LENGTH = 6
+CONFIRMATION_CODE_MAX_FAILURES = 5
+_CODE_SALT = 'identity.organization_invitation.confirmation_code'
+REJECT_REASON_CODE_FAILED = 'code_failed'
 
 # Ressaisie du mot de passe (ADR 0010 §8, action de `ORG_SENSITIVE_REAUTH_FAILED`).
 REAUTH_CONFIRM_ADMIN_INVITATION = 'confirm_admin_invitation'
@@ -127,7 +135,12 @@ def _live_awaiting_q(now):
 def phone_hint(user) -> Optional[str]:
     """Indice de téléphone (ADR 0010 §6.2, règle 10) : « •• » suivi des deux derniers chiffres du téléphone de
     connexion VÉRIFIÉ ; `None` sinon. Servi SEULEMENT dans la liste des invitations en attente de confirmation, à qui
-    peut confirmer CETTE invitation ; jamais dans l'audit, l'outbox, une notification ni un journal."""
+    peut confirmer CETTE invitation ; jamais dans l'audit, l'outbox, une notification ni un journal.
+
+    L'indice est RELU EN DIRECT sur le compte au moment de la liste (jamais figé à l'acceptation) : si la personne
+    change de numéro entre-temps, le confirmateur voit le nouveau. Ce n'est qu'un indice d'identification ; la preuve
+    que la personne entrée est bien celle avec qui le confirmateur communique est le code de rattachement
+    (décision S3), qu'elle seule a reçu."""
     if user is None or not user.phone_verified:
         return None
     digits = [ch for ch in (user.phone or '') if ch.isdigit()]
@@ -136,19 +149,25 @@ def phone_hint(user) -> Optional[str]:
     return '••' + ''.join(digits[-2:])
 
 
-def _publish_invitation_change(organization, invitation, change, actor, accepted_by_id=None):
-    payload = {
-        'organization_id': str(organization.pk), 'invitation_id': str(invitation.pk), 'change': change,
-        'role': invitation.role, 'actor_id': str(actor.pk) if actor is not None else None,
-        'inviter_id': str(invitation.created_by_id) if invitation.created_by_id else None,
-    }
-    if change in _CHANGES_WITH_ACCEPTED_BY:
-        # Clé additive (ADR 0010 §7) : UUID seulement, jamais nom, téléphone ni indice.
-        payload['accepted_by_id'] = str(accepted_by_id) if accepted_by_id else None
-    publish_event(
-        'identity.organization_invitation_changed', aggregate_type='organization', aggregate_id=organization.pk,
-        payload=payload,
-    )
+# Émission partagée avec `organizations` (rejets automatiques) : UUID et codes seulement.
+_publish_invitation_change = publish_invitation_change
+
+
+def _new_confirmation_code() -> str:
+    return f"{secrets.randbelow(10 ** CONFIRMATION_CODE_LENGTH):0{CONFIRMATION_CODE_LENGTH}d}"
+
+
+def _code_hash(invitation_id, code) -> str:
+    """Empreinte HMAC-SHA256 du code, liée à l'invitation : sans la clé du projet, la table ne permet pas de
+    retrouver un code par essais hors ligne (un million de valeurs seulement)."""
+    return salted_hmac(_CODE_SALT, f"{invitation_id}:{code}", algorithm='sha256').hexdigest()
+
+
+def _code_matches(invitation, code) -> bool:
+    """Comparaison à temps constant ; une invitation sans empreinte (antérieure au code) ne se confirme pas."""
+    if not invitation.confirmation_code_hash or not isinstance(code, str):
+        return False
+    return constant_time_compare(_code_hash(invitation.pk, code), invitation.confirmation_code_hash)
 
 
 # Caractères de format refusés (contrôle de direction et BOM : usurpation visuelle) ; ZWJ et ZWNJ restent permis
@@ -202,8 +221,10 @@ def create_invitation(actor, organization_id, role, label='', scope=None, after_
         label = _clean_label(label)
         settings_row = get_identity_settings()
         now = timezone.now()
+        # Invitations OUVERTES non échues (décision S3) : en attente d'acceptation ou de confirmation.
         pending = OrganizationInvitation.objects.filter(
-            organization=organization, status=OrganizationInvitation.STATUS_PENDING, expires_at__gt=now,
+            Q(status=OrganizationInvitation.STATUS_PENDING, expires_at__gt=now) | _live_awaiting_q(now),
+            organization=organization,
         ).count()
         if pending >= settings_row.max_pending_invitations:
             raise OrganizationError(
@@ -232,6 +253,38 @@ class InvitationList:
     actor_id: object
     actor_role: str
     actor_scope: capabilities.Scope
+    organization_id: object = None
+
+    def inviter_authority(self, invitations) -> dict:
+        """`{invitation_id: bool}` : l'émetteur peut-il toujours déléguer le rôle et le périmètre de l'invitation
+        (même règle que `_inviter_has_authority`) ? Calcul PAR LOT pour une page : au plus 3 requêtes, quel que
+        soit le nombre de lignes. Sert à l'avertissement du front sur une attente dont l'émetteur a perdu
+        l'autorité (un administrateur principal peut encore confirmer)."""
+        invitations = list(invitations)
+        inviter_ids = {row.created_by_id for row in invitations if row.created_by_id is not None}
+        if not inviter_ids:
+            return {row.pk: False for row in invitations}
+        memberships = {
+            user_id: (role, capabilities.Scope.of(scope_type, scope_id))
+            for user_id, role, scope_type, scope_id in Membership.objects.filter(
+                organization_id=self.organization_id, user_id__in=inviter_ids, status=Membership.STATUS_ACTIVE,
+            ).values_list('user_id', 'role', 'scope_type', 'scope_id')
+        }
+        usable = set()
+        if memberships:
+            usable = set(
+                User.objects.filter(pk__in=list(memberships), is_active=True).values_list('pk', flat=True)
+            ) - moderation_services.get_restricted_user_ids(set(memberships))
+        result = {}
+        for row in invitations:
+            held = memberships.get(row.created_by_id)
+            result[row.pk] = bool(
+                held is not None and row.created_by_id in usable
+                and capabilities.role_has_capability(held[0], 'org.manage_members')
+                and capabilities.scope_allows(held[1], 'org.manage_members')
+                and capabilities.can_delegate(held[0], held[1], row.role, membership_scope(row))
+            )
+        return result
 
     def can_confirm(self, invitation, now=None) -> bool:
         """Contrat §7.4 : l'invitation est `AWAITING_CONFIRMATION` non échue ET l'appelant est l'émetteur qui peut
@@ -286,7 +339,9 @@ def list_invitations(actor, organization_id, status_filter=None) -> InvitationLi
         'created_by', 'accepted_by', 'accepted_at', 'confirmation_expires_at', 'created_by__full_name',
         'accepted_by__full_name', 'accepted_by__phone', 'accepted_by__phone_verified',
     ).order_by('-created_at', '-id')
-    return InvitationList(queryset, actor.pk, actor_membership.role, membership_scope(actor_membership))
+    return InvitationList(
+        queryset, actor.pk, actor_membership.role, membership_scope(actor_membership), organization.pk,
+    )
 
 
 def revoke_invitation(actor, organization_id, invitation_id):
@@ -433,6 +488,8 @@ class InvitationAcceptance:
     membership: Optional[Membership] = None
     invitation: Optional[OrganizationInvitation] = None
     confirmation_expires_at: Optional[object] = None
+    # Code de rattachement en clair : renvoyé UNE fois, à la seule personne qui a accepté (réponse 202).
+    confirmation_code: Optional[str] = None
 
 
 def _already_member_error():
@@ -458,13 +515,15 @@ def _accept_locked(user, invitation) -> InvitationAcceptance:
         raise _Refusal('org_inactive', invitation_invalid_error())
     now = timezone.now()
     awaiting = requires_confirmation(invitation.role)
-    confirmation_expires_at = None
+    confirmation_expires_at = code = None
     if awaiting:
         hours = get_identity_settings().admin_invitation_confirmation_hours
         confirmation_expires_at = now + timedelta(hours=hours)
+        code = _new_confirmation_code()
         changes = {
             'status': OrganizationInvitation.STATUS_AWAITING_CONFIRMATION, 'accepted_by': user, 'accepted_at': now,
             'confirmation_expires_at': confirmation_expires_at,
+            'confirmation_code_hash': _code_hash(invitation.pk, code), 'confirmation_code_failures': 0,
         }
     else:
         changes = {'status': OrganizationInvitation.STATUS_ACCEPTED, 'closed_at': now, 'closed_by': user}
@@ -514,7 +573,7 @@ def _accept_locked(user, invitation) -> InvitationAcceptance:
         )
         return InvitationAcceptance(
             ACCEPTANCE_AWAITING_CONFIRMATION, organization, invitation.role, invitation=invitation,
-            confirmation_expires_at=confirmation_expires_at,
+            confirmation_expires_at=confirmation_expires_at, confirmation_code=code,
         )
 
     inviter = User.objects.get(pk=invitation.created_by_id)
@@ -624,7 +683,57 @@ def _eligible_accepted_person(organization, invitation) -> User:
     return target
 
 
-def confirm_invitation(actor, organization_id, invitation_id, confirm=False, password=None) -> Membership:
+def _code_required_error():
+    return OrganizationError(
+        "Saisissez le code de confirmation communiqué par la personne.", 'confirmation_code_required',
+        status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def _code_invalid_error():
+    return OrganizationError(
+        "Le code de confirmation est incorrect.", 'confirmation_code_invalid', status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def _code_exhausted_error():
+    return OrganizationError(
+        "Trop de codes incorrects : la demande a été rejetée. Une nouvelle invitation est nécessaire.",
+        'confirmation_code_exhausted',
+    )
+
+
+def _record_code_failure(actor, organization, invitation, now) -> bool:
+    """Code faux (sous verrou) : compteur incrémenté par mise à jour conditionnelle ; trace
+    `INVITATION_CONFIRMATION_CODE_FAILED` (jamais le code). Au seuil, l'invitation est REJETÉE (`reason=code_failed`,
+    événement `rejected` : la personne est prévenue sans nom). Renvoie vrai si l'invitation vient d'être rejetée."""
+    OrganizationInvitation.objects.filter(_live_awaiting_q(now), pk=invitation.pk).update(
+        confirmation_code_failures=F('confirmation_code_failures') + 1, updated_at=now,
+    )
+    failures = OrganizationInvitation.objects.filter(pk=invitation.pk).values_list(
+        'confirmation_code_failures', flat=True,
+    ).first() or 0
+    _audit_invitation(actor, 'INVITATION_CONFIRMATION_CODE_FAILED', organization, invitation, failures=failures)
+    if failures < CONFIRMATION_CODE_MAX_FAILURES:
+        return False
+    done = OrganizationInvitation.objects.filter(_live_awaiting_q(now), pk=invitation.pk).update(
+        status=OrganizationInvitation.STATUS_REJECTED, confirmed_by=actor, closed_at=now, closed_by=actor,
+        confirmation_code_hash='', updated_at=now,
+    )
+    if done:
+        _audit_invitation(
+            actor, 'INVITATION_REJECTED', organization, invitation, accepted_by=invitation.accepted_by_id,
+            reason=REJECT_REASON_CODE_FAILED,
+        )
+        _publish_invitation_change(
+            organization, invitation, CHANGE_REJECTED, actor, accepted_by_id=invitation.accepted_by_id,
+        )
+    return True
+
+
+def confirm_invitation(
+    actor, organization_id, invitation_id, confirm=False, password=None, code=None,
+) -> Membership:
     """Confirme une invitation `AWAITING_CONFIRMATION` : l'appartenance active est créée (ou réactivée) au rôle et au
     périmètre de l'invitation. Acteur : l'émetteur s'il peut toujours déléguer ce rôle, ou un administrateur principal
     effectif ; ressaisie du mot de passe (`confirm` vrai et `password`) AVANT le verrou, même limiteur d'échecs que
@@ -632,33 +741,56 @@ def confirm_invitation(actor, organization_id, invitation_id, confirm=False, pas
     autorité du confirmateur, état et échéance de l'invitation, éligibilité de la personne). Mise à jour
     conditionnelle `AWAITING_CONFIRMATION -> ACCEPTED` : une seule confirmation (ou un seul rejet, ou un seul retrait)
     gagne. Audit `INVITATION_CONFIRMED` (confirmateur) et `MEMBERSHIP_ADDED` ; événements `confirmed` et
-    `membership_changed` (`actor_id` = émetteur, `via = invitation`). Renvoie l'appartenance, compte chargé."""
+    `membership_changed` (`actor_id` = émetteur, `via = invitation`, `confirmed`). Renvoie l'appartenance, compte
+    chargé.
+
+    Code de rattachement (décision S3) : `code` obligatoire (400 `confirmation_code_required` s'il manque, avant la
+    ressaisie), comparé à temps constant APRÈS la ressaisie et sous verrou. Faux : 400 `confirmation_code_invalid`,
+    compteur de l'invitation incrémenté (la trace et le compteur sont conservés : l'erreur est levée après la
+    transaction) ; au 5e code faux, l'invitation est rejetée et la réponse est 409 `confirmation_code_exhausted`."""
     organization = _get_organization(organization_id)
     _resolve_awaiting(actor, organization, invitation_id, timezone.now())
+    if not isinstance(code, str) or not code.strip():
+        raise _code_required_error()
     _require_reauthentication(actor, organization, confirm, password, REAUTH_CONFIRM_ADMIN_INVITATION)
+    code_error = None
     with transaction.atomic():
         organization = _lock_organization(organization_id)
         now = timezone.now()
         invitation, basis = _resolve_awaiting(actor, organization, invitation_id, now)
-        done = OrganizationInvitation.objects.filter(_live_awaiting_q(now), pk=invitation.pk).update(
-            status=OrganizationInvitation.STATUS_ACCEPTED, confirmed_by=actor, closed_at=now, closed_by=actor,
-            updated_at=now,
-        )
-        if not done:
-            raise _not_awaiting_error()
-        target = _eligible_accepted_person(organization, invitation)
-        inviter = User.objects.filter(pk=invitation.created_by_id).first() if invitation.created_by_id else None
-        membership = _activate_membership(
-            actor, organization, target, invitation.role, added_by=inviter or actor, via='invitation',
-            invited_by=invitation.created_by_id, scope=membership_scope(invitation),
-        )
-        _audit_invitation(
-            actor, 'INVITATION_CONFIRMED', organization, invitation, accepted_by=target.pk,
-            invited_by=invitation.created_by_id, confirmer_basis=basis, reauth='true',
-        )
-        _publish_invitation_change(organization, invitation, CHANGE_CONFIRMED, actor, accepted_by_id=target.pk)
+        if not _code_matches(invitation, code.strip()):
+            # Le compteur et la trace doivent survivre au refus : l'erreur est levée APRÈS la transaction.
+            exhausted = _record_code_failure(actor, organization, invitation, now)
+            code_error = _code_exhausted_error() if exhausted else _code_invalid_error()
+        else:
+            membership, target = _confirm_locked(actor, organization, invitation, basis, now)
+    if code_error is not None:
+        raise code_error
     membership.user = target
     return membership
+
+
+def _confirm_locked(actor, organization, invitation, basis, now):
+    """Corps de la confirmation, code vérifié, sous verrou : prise conditionnelle, éligibilité de la personne,
+    appartenance, audit, événement. Renvoie `(appartenance, compte entré)`."""
+    done = OrganizationInvitation.objects.filter(_live_awaiting_q(now), pk=invitation.pk).update(
+        status=OrganizationInvitation.STATUS_ACCEPTED, confirmed_by=actor, closed_at=now, closed_by=actor,
+        confirmation_code_hash='', updated_at=now,
+    )
+    if not done:
+        raise _not_awaiting_error()
+    target = _eligible_accepted_person(organization, invitation)
+    inviter = User.objects.filter(pk=invitation.created_by_id).first() if invitation.created_by_id else None
+    membership = _activate_membership(
+        actor, organization, target, invitation.role, added_by=inviter or actor, via='invitation',
+        invited_by=invitation.created_by_id, scope=membership_scope(invitation), confirmed=True,
+    )
+    _audit_invitation(
+        actor, 'INVITATION_CONFIRMED', organization, invitation, accepted_by=target.pk,
+        invited_by=invitation.created_by_id, confirmer_basis=basis, reauth='true',
+    )
+    _publish_invitation_change(organization, invitation, CHANGE_CONFIRMED, actor, accepted_by_id=target.pk)
+    return membership, target
 
 
 def reject_invitation(actor, organization_id, invitation_id):
@@ -671,7 +803,7 @@ def reject_invitation(actor, organization_id, invitation_id):
         invitation, _ = _resolve_awaiting(actor, organization, invitation_id, now)
         done = OrganizationInvitation.objects.filter(_live_awaiting_q(now), pk=invitation.pk).update(
             status=OrganizationInvitation.STATUS_REJECTED, confirmed_by=actor, closed_at=now, closed_by=actor,
-            updated_at=now,
+            confirmation_code_hash='', updated_at=now,
         )
         if not done:
             raise _not_awaiting_error()
@@ -717,11 +849,43 @@ def withdraw_awaiting_invitation(user, invitation_id):
         now = timezone.now()
         done = OrganizationInvitation.objects.filter(
             _live_awaiting_q(now), pk=invitation.pk, accepted_by_id=user.pk,
-        ).update(status=OrganizationInvitation.STATUS_DECLINED, closed_at=now, closed_by=user, updated_at=now)
+        ).update(
+            status=OrganizationInvitation.STATUS_DECLINED, closed_at=now, closed_by=user, confirmation_code_hash='',
+            updated_at=now,
+        )
         if not done:
             raise _not_awaiting_error()
         _audit_invitation(user, 'INVITATION_WITHDRAWN', organization, invitation)
         _publish_invitation_change(organization, invitation, CHANGE_DECLINED, user)
+
+
+def regenerate_confirmation_code(user, invitation_id):
+    """La personne qui a accepté obtient un NOUVEAU code de rattachement (l'ancien cesse de valoir) : code perdu,
+    ou montré à un tiers. Même périmètre que le retrait : sa propre attente non échue, sinon 404
+    `invitation_not_found` (y compris l'attente d'autrui) ou 409 `invitation_not_awaiting_confirmation`. Le compteur
+    de codes faux n'est PAS remis à zéro. Trace `INVITATION_CONFIRMATION_CODE_REGENERATED` (jamais le code), aucun
+    événement. Renvoie `(invitation, code en clair)`."""
+    parsed = parse_uuid(invitation_id)
+    invitation = (
+        OrganizationInvitation.objects.filter(pk=parsed, accepted_by_id=user.pk).first() if parsed is not None else None
+    )
+    if invitation is None:
+        raise _not_found_error()
+    with transaction.atomic():
+        try:
+            organization = _lock_organization(invitation.organization_id)
+        except ContextDenied:
+            raise _not_found_error()
+        now = timezone.now()
+        code = _new_confirmation_code()
+        done = OrganizationInvitation.objects.filter(
+            _live_awaiting_q(now), pk=invitation.pk, accepted_by_id=user.pk,
+        ).update(confirmation_code_hash=_code_hash(invitation.pk, code), updated_at=now)
+        if not done:
+            raise _not_awaiting_error()
+        _audit_invitation(user, 'INVITATION_CONFIRMATION_CODE_REGENERATED', organization, invitation)
+    invitation.refresh_from_db(fields=['confirmation_expires_at'])
+    return invitation, code
 
 
 # --- Lecture pour les notifications ------------------------------------------------------------------------------

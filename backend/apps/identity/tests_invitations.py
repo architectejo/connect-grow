@@ -41,7 +41,7 @@ INVITATION_KEYS = {
     'invitation_id', 'role', 'status', 'label', 'created_at', 'expires_at', 'created_by_display_name', 'is_mine',
     # Invitations v2 (contrat §7.4)
     'scope', 'requires_confirmation', 'accepted_at', 'confirmation_expires_at', 'accepted_by_display_name',
-    'accepted_by_phone_hint', 'can_confirm',
+    'accepted_by_phone_hint', 'can_confirm', 'inviter_has_authority',
 }
 CREATED_KEYS = {
     'invitation_id', 'role', 'status', 'label', 'created_at', 'expires_at', 'link_token', 'scope',
@@ -1072,6 +1072,7 @@ class InvitationRouteGuardTests(TestCase):
             v.OrganizationInvitationsView, v.OrganizationInvitationDetailView, v.InvitationPreviewView,
             v.InvitationAcceptView, v.InvitationDeclineView, v.OrganizationInvitationConfirmView,
             v.OrganizationInvitationRejectView, v.MyAwaitingInvitationsView, v.InvitationWithdrawView,
+            v.InvitationConfirmationCodeView,
         ):
             self.assertTrue(view.acting_context_exempt, view)
 
@@ -1088,7 +1089,8 @@ class InvitationRouteGuardTests(TestCase):
 
         walk(get_resolver())
         invitation_routes = [r for r in routes if r.startswith('api/v1/') and 'invitation' in r]
-        self.assertEqual(len(invitation_routes), 9, invitation_routes)  # + confirm, reject, awaiting, withdraw (B7)
+        # + confirm, reject, awaiting, withdraw, confirmation-code (B7)
+        self.assertEqual(len(invitation_routes), 10, invitation_routes)
         self.assertFalse([r for r in invitation_routes if 'token' in r])
 
     def test_no_view_imports_add_member(self):
@@ -1119,7 +1121,7 @@ class InvitationRouteGuardTests(TestCase):
         from drf_spectacular.generators import SchemaGenerator
         paths = SchemaGenerator().get_schema(request=None, public=True)['paths']
         found = {p: sorted(m for m in ops if m in ('get', 'post', 'patch', 'delete')) for p, ops in paths.items() if 'invitation' in p}
-        self.assertEqual(len(found), 9, found)
+        self.assertEqual(len(found), 10, found)
         self.assertEqual(
-            sorted(found.values()), [['delete'], ['get'], ['get', 'post']] + [['post']] * 6,
+            sorted(found.values()), [['delete'], ['get'], ['get', 'post']] + [['post']] * 7,
         )

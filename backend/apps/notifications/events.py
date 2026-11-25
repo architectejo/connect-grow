@@ -215,6 +215,10 @@ def notify_membership_change(event):
     target = _user_id(user_id)
     if payload.get('actor_id') == user_id:
         return
+    if payload.get('confirmed'):
+        # Entrée après confirmation d'une invitation Administrateur : la personne reçoit la seule notification
+        # « Votre accès … est confirmé. » (`notify_invitation_outcome`, décision du chef de projet, L1-01-B7).
+        return
     name = _organization_name(organization)
     role = identity_services.get_role_label(payload.get('new_role'))
     context = (CONTEXT_ORGANIZATION, organization)

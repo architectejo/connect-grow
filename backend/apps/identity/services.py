@@ -31,7 +31,8 @@ from .organizations import (  # noqa: F401
 from .invitations import (  # noqa: F401
     ACCEPTANCE_ACTIVE, ACCEPTANCE_AWAITING_CONFIRMATION, InvitationAcceptance, InvitationList, accept_invitation,
     confirm_invitation, create_invitation, decline_invitation, effective_status, get_invitation_confirmer_ids,
-    list_invitations, list_my_awaiting_invitations, phone_hint, preview_invitation, reject_invitation,
+    list_invitations, list_my_awaiting_invitations, phone_hint, preview_invitation, regenerate_confirmation_code,
+    reject_invitation,
     requires_confirmation, revoke_invitation, withdraw_awaiting_invitation,
 )
 

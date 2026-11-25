@@ -17,7 +17,7 @@ import {
   useRevokeInvitation,
 } from "./use-organization-team";
 
-const auth = vi.hoisted(() => ({ isAuthenticated: true, user: null as { id: string } | null }));
+const auth = vi.hoisted(() => ({ isAuthenticated: true, user: { id: "compte-A" } as { id: string } | null }));
 vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => auth }));
 
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -235,7 +235,7 @@ describe("échange du jeton (aperçu, acceptation, refus)", () => {
 
   describe("jeton lié au compte (audit S2)", () => {
     afterEach(() => {
-      auth.user = null;
+      auth.user = { id: "compte-A" };
     });
 
     it("l'aperçu réussi lie le jeton au compte : un autre compte ne peut plus s'en servir, il est effacé", async () => {
@@ -262,5 +262,21 @@ describe("échange du jeton (aperçu, acceptation, refus)", () => {
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
       expect(readInvitationToken("compte-A")).toBe(TOKEN);
     });
+  });
+
+  it("compte inconnu : ni aperçu, ni acceptation, ni refus (le jeton ne peut être lié à personne)", async () => {
+    auth.user = null;
+    const post = vi.spyOn(apiClient, "post");
+    const { result } = renderHook(() => useInvitationPreview(true), { wrapper: wrapperFor(newClient()) });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    const accept = renderHook(() => useAcceptInvitation(), { wrapper: wrapperFor(newClient()) });
+    const decline = renderHook(() => useDeclineInvitation(), { wrapper: wrapperFor(newClient()) });
+    await act(async () => {
+      await accept.result.current.mutateAsync().catch(() => undefined);
+      await decline.result.current.mutateAsync().catch(() => undefined);
+    });
+    expect(post).not.toHaveBeenCalled();
+    expect(readInvitationToken()).toBe(TOKEN);
+    auth.user = { id: "compte-A" };
   });
 });

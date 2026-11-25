@@ -200,6 +200,8 @@ export function useRevokeInvitation(orgId: Uuid) {
  * Lu pour le compte connecté : un jeton lié à un autre compte, ou de plus de 60 minutes, est effacé et l'appel n'a pas lieu.
  */
 function tokenBody(accountId: string | undefined): { token: string } {
+  // Sans compte identifié, le jeton ne peut être lié à personne : aucun appel
+  if (!accountId) throw new InvitationTokenMissingError();
   const token = readInvitationToken(accountId);
   if (!token) throw new InvitationTokenMissingError();
   return { token };
@@ -223,7 +225,8 @@ export function useInvitationPreview(enabled: boolean) {
     enabled,
     staleTime: 0,
     gcTime: 0,
-    retry: shouldRetryQuery,
+    // Sans jeton utilisable, rien n'est parti au réseau : un nouvel essai ne changerait rien
+    retry: (count, error) => !(error instanceof InvitationTokenMissingError) && shouldRetryQuery(count, error),
     refetchOnWindowFocus: false,
   });
 }

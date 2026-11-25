@@ -60,7 +60,7 @@ export type InvitationFailureKind =
   | "limit"
   | "member"
   | "security"
-  /** 401 : retour à l'écran visiteur (une fin de session efface le jeton : voir `AuthContext`). */
+  /** 401 : session expirée. `clearSession` efface alors le jeton (audit S2) : la page affiche « Lien incomplet » (lien à rouvrir). */
   | "unauthenticated"
   | "rate"
   | "network"

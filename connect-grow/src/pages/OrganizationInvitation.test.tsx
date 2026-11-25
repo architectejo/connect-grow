@@ -9,9 +9,9 @@ import apiClient from "@/api/client";
 import { INVITATION_TOKEN_KEY, clearInvitationToken, readInvitationToken, storeInvitationToken } from "@/lib/invitation-token";
 import OrganizationInvitation from "./OrganizationInvitation";
 
-const auth = vi.hoisted(() => ({ isAuthenticated: true, isLoading: false, user: { id: "compte-A" } as { id: string } | null }));
+const auth = vi.hoisted(() => ({ isAuthenticated: true, isLoading: false, user: { id: "compte-A" } as { id: string } | null, refreshUser: vi.fn() }));
 vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => auth }));
-const active = vi.hoisted(() => ({ setActive: vi.fn(), refetch: vi.fn(), contexts: [] as unknown[] }));
+const active = vi.hoisted(() => ({ setActive: vi.fn(), isError: false, contexts: [] as unknown[] }));
 vi.mock("@/contexts/ActiveContextContext", () => ({ useActiveContext: () => active }));
 const online = vi.hoisted(() => ({ value: true }));
 vi.mock("@/hooks/use-online-status", () => ({ useOnlineStatus: () => online.value }));
@@ -95,9 +95,10 @@ beforeEach(() => {
   auth.isLoading = false;
   online.value = true;
   active.setActive.mockClear();
-  active.refetch.mockClear();
+  active.isError = false;
   active.contexts = [];
   auth.user = { id: "compte-A" };
+  auth.refreshUser.mockClear();
   routerLocations.length = 0;
   sessionStorage.clear();
   localStorage.clear();
@@ -136,7 +137,7 @@ describe("gestion du jeton à l'arrivée", () => {
     const post = mockApi();
     renderPage();
     expect(screen.getByRole("heading", { level: 1, name: "Lien incomplet" })).toBeInTheDocument();
-    expect(screen.getByText("Ouvrez à nouveau le lien tel que vous l'avez reçu, en entier.")).toBeInTheDocument();
+    expect(screen.getByText(/^Ouvrez à nouveau le lien tel que vous l'avez reçu, en entier\./)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Retour à l'accueil" })).toHaveAttribute("href", "/");
     expect(post).not.toHaveBeenCalled();
   });
@@ -277,19 +278,44 @@ describe("accepter (4.4.3)", () => {
     expect(live[0].textContent).not.toContain(TOKEN);
   });
 
-  it("profil pas encore dans la liste au moment de l'appui : bouton désactivé (indicateur), liste rechargée, puis ouverture", async () => {
+  it("profil pas encore dans la liste : bouton désactivé avec indicateur pendant le rechargement de contexts/", async () => {
+    active.contexts = [];
+    mockApi();
+    renderPage();
+    // 1er rechargement : celui de l'acceptation (résolu) ; 2e : celui de l'écran de succès, retenu pour observer l'attente
+    let release: () => void = () => undefined;
+    const invalidate = vi
+      .spyOn(client, "invalidateQueries")
+      .mockResolvedValueOnce(undefined)
+      .mockReturnValueOnce(new Promise<void>((resolve) => (release = resolve)));
+    fireEvent.click(await screen.findByRole("button", { name: "Rejoindre l'organisation" }));
+    await screen.findByRole("heading", { level: 1, name: /Vous avez rejoint/ });
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2));
+    const open = screen.getByRole("button", { name: "Ouvrir l'organisation" });
+    expect(open).toBeDisabled();
+    expect(open).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    release();
+  });
+
+  it("rechargement terminé sans l'organisation : message, « Réessayer » relance, puis ouverture une fois le profil présent", async () => {
     active.contexts = [];
     mockApi();
     const { rerenderPage } = renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Rejoindre l'organisation" }));
     await screen.findByRole("heading", { level: 1, name: /Vous avez rejoint/ });
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Votre nouveau profil n'est pas encore disponible.");
     const open = screen.getByRole("button", { name: "Ouvrir l'organisation" });
     expect(open).toBeDisabled();
-    expect(open).toHaveAttribute("aria-busy", "true");
+    expect(open).not.toHaveAttribute("aria-busy");
     fireEvent.click(open);
     expect(active.setActive).not.toHaveBeenCalled();
     expect(screen.queryByText("Espace de l'organisation")).not.toBeInTheDocument();
-    await waitFor(() => expect(active.refetch).toHaveBeenCalledTimes(1));
+
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    fireEvent.click(within(alert).getByRole("button", { name: "Réessayer" }));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["contexts"] }));
 
     active.contexts = [{ type: "ORGANIZATION", id: ORG, name: "Boutique Lumière" }];
     rerenderPage();
@@ -459,10 +485,29 @@ describe("erreurs (4.5) : neutres, jamais le nom de l'organisation", () => {
     expect(readInvitationToken()).toBe(TOKEN);
   });
 
-  it("401 (session expirée) : retour à l'écran visiteur, jeton conservé", async () => {
-    mockApi({ preview: apiError(401) });
+  it("401 (session expirée) : `clearSession` efface le jeton, la page affiche « Lien incomplet » (lien à rouvrir)", async () => {
+    vi.spyOn(apiClient, "post").mockImplementation(async () => {
+      // Ce que fait réellement l'application sur une session expirée : AUTH_EXPIRED_EVENT -> clearSession
+      clearInvitationToken();
+      auth.isAuthenticated = false;
+      throw apiError(401);
+    });
     renderPage();
-    expect(await screen.findByRole("heading", { level: 1, name: "Vous avez reçu une invitation" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Lien incomplet" })).toBeInTheDocument();
+    expect(screen.getByText(/rouvrez-le depuis le message reçu/)).toBeInTheDocument();
+    expect(readInvitationToken()).toBeNull();
+    expect(screen.queryByRole("link", { name: "Se connecter" })).not.toBeInTheDocument();
+  });
+
+  it("compte inconnu (accounts/me/ en échec) : aucun aperçu, erreur générique, « Réessayer » recharge le compte", async () => {
+    auth.user = null;
+    const post = mockApi();
+    renderPage();
+    expect(await screen.findByRole("heading", { level: 1, name: "Une erreur est survenue" })).toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Réessayer" }));
+    expect(auth.refreshUser).toHaveBeenCalledTimes(1);
+    expect(post).not.toHaveBeenCalled();
     expect(readInvitationToken()).toBe(TOKEN);
   });
 

@@ -1047,6 +1047,7 @@ const fr = {
       open: "Ouvrir l'organisation",
       stay: "Rester sur mon profil",
       announce: "Vous avez rejoint l'organisation.",
+      contextsError: "Votre nouveau profil n'est pas encore disponible. Réessayez dans un instant.",
     },
     declined: { title: "Invitation refusée", body: "Le lien ne peut plus être utilisé." },
     backHome: "Retour à l'accueil",
@@ -1057,7 +1058,10 @@ const fr = {
         title: "Cette invitation n'est plus valable",
         body: "Le lien a peut-être expiré, été annulé ou déjà été utilisé. Demandez un nouveau lien à la personne qui vous l'a envoyé.",
       },
-      missing: { title: "Lien incomplet", body: "Ouvrez à nouveau le lien tel que vous l'avez reçu, en entier." },
+      missing: {
+        title: "Lien incomplet",
+        body: "Ouvrez à nouveau le lien tel que vous l'avez reçu, en entier. S'il a été ouvert il y a longtemps ou si votre session a expiré, rouvrez-le depuis le message reçu.",
+      },
       phone: {
         title: "Vérifiez d'abord votre numéro",
         body: "Pour rejoindre une organisation, votre numéro de téléphone de connexion doit être vérifié. Votre invitation reste valable : revenez ensuite sur ce lien.",

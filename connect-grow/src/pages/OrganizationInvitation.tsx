@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOnlineStatus } from "@/hooks/use-online-status";
+import { invalidateContexts } from "@/hooks/use-contexts";
 import { INVITATION_PREVIEW_KEY, useAcceptInvitation, useDeclineInvitation, useInvitationPreview } from "@/hooks/use-organization-team";
 import { useRateBlock } from "@/components/team/use-rate-block";
 import { loginPath } from "@/lib/auth-paths";
@@ -52,8 +53,8 @@ const OrganizationInvitation = () => {
   const online = useOnlineStatus();
   const location = useLocation();
   const queryClient = useQueryClient();
-  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
-  const { contexts, setActive, refetch: refetchContexts } = useActiveContext();
+  const { isAuthenticated, isLoading: authLoading, user, refreshUser } = useAuth();
+  const { contexts, setActive, isError: contextsError } = useActiveContext();
   useNoReferrer();
 
   // Avant tout rendu et tout appel : fragment -> sessionStorage -> adresse nettoyée. On ne garde ici qu'un booléen.
@@ -66,9 +67,14 @@ const OrganizationInvitation = () => {
   const [rateBlocked, blockRate] = useRateBlock();
   const headingRef = useRef<HTMLHeadingElement>(null);
 
-  // Jeton utilisable par CE compte : expiré (60 min) ou lié à un autre compte, il est effacé à la lecture (audit S2)
+  // Jeton utilisable par CE compte : expiré (60 min), lié à un autre compte ou effacé par une fin de session (401 →
+  // `clearSession`), il n'est plus utilisable et la page affiche « Lien incomplet » (lien à rouvrir).
+  // Lecture pendant le rendu volontaire : `readInvitationToken` est idempotente (un jeton périmé est effacé une fois,
+  // les lectures suivantes renvoient null) et ne lit qu'une petite entrée de `sessionStorage`.
   const accountId = user?.id;
-  const tokenUsable = hasToken && (!accountId || readInvitationToken(accountId) !== null);
+  const tokenUsable = hasToken && readInvitationToken(accountId) !== null;
+  // Session ouverte mais compte inconnu (`accounts/me/` en échec) : aucun aperçu sans compte à qui lier le jeton
+  const accountUnknown = isAuthenticated && !authLoading && !user;
 
   /**
    * Un fragment `#token=` (arrivée, ou second lien ouvert dans le même onglet) : rangé, puis la location du routeur est
@@ -89,8 +95,7 @@ const OrganizationInvitation = () => {
     },
     [navigate, queryClient],
   );
-  // Effet passif volontaire : React Router v6 ignore un `navigate()` lancé dans un effet de mise en page au premier rendu.
-  // Le jeton est déjà rangé (initialiseur ci-dessus) et la barre d'adresse nettoyée avant tout appel d'aperçu.
+  // Effet normal : la barre d'adresse est déjà nettoyée par l'initialiseur ; ici on réaligne seulement la location du routeur.
   useEffect(() => {
     takeLinkFromHash(location.hash);
   }, [location.hash, takeLinkFromHash]);
@@ -100,12 +105,19 @@ const OrganizationInvitation = () => {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, [takeLinkFromHash]);
 
-  const preview = useInvitationPreview(!authLoading && isAuthenticated && tokenUsable && !outcome);
+  const preview = useInvitationPreview(!authLoading && isAuthenticated && !!user && tokenUsable && !outcome);
   const accept = useAcceptInvitation();
   const decline = useDeclineInvitation();
 
-  const failure: InvitationFailure | null = outcome?.kind === "error" ? outcome.failure : preview.isError ? classifyInvitationError(preview.error) : null;
-  // 401 : la session a expiré, retour à l'écran visiteur (le jeton reste rangé)
+  const failure: InvitationFailure | null =
+    outcome?.kind === "error"
+      ? outcome.failure
+      : accountUnknown
+        ? { kind: "generic" }
+        : preview.isError
+          ? classifyInvitationError(preview.error)
+          : null;
+  // 401 : la session a expiré. `clearSession` a effacé le jeton (audit S2) : la page tombe sur « Lien incomplet » ci-dessous.
   const asGuest = !isAuthenticated || failure?.kind === "unauthenticated";
 
   // Le jeton est supprimé après un jeton invalide ou une appartenance existante ; conservé sur toute autre erreur
@@ -172,19 +184,26 @@ const OrganizationInvitation = () => {
 
   const retry = () => {
     setOutcome(null);
-    void preview.refetch();
+    // Compte inconnu : on recharge le compte, l'aperçu partira ensuite de lui-même
+    if (accountUnknown) void refreshUser();
+    else void preview.refetch();
   };
 
   // Après l'acceptation, le nouveau profil doit figurer dans la liste du serveur avant de pouvoir être ouvert
   const joinedId = view.name === "joined" ? view.data.organization_id : null;
   const joinedReady = !!joinedId && contexts.some((c) => c.type === "ORGANIZATION" && c.id === joinedId);
-  const contextsRequested = useRef(false);
+  // Rechargement de `contexts/` attendu jusqu'au bout : un échec, ou une liste sans l'organisation, n'est jamais un chargement infini
+  const [contextsReload, setContextsReload] = useState<"idle" | "loading" | "done">("idle");
+  const reloadContexts = useCallback(async () => {
+    setContextsReload("loading");
+    await invalidateContexts(queryClient);
+    setContextsReload("done");
+  }, [queryClient]);
   useEffect(() => {
-    if (joinedId && !joinedReady && !contextsRequested.current) {
-      contextsRequested.current = true;
-      refetchContexts();
-    }
-  }, [joinedId, joinedReady, refetchContexts]);
+    if (joinedId && !joinedReady && contextsReload === "idle") void reloadContexts();
+  }, [joinedId, joinedReady, contextsReload, reloadContexts]);
+  const joinedFailed = !!joinedId && !joinedReady && (contextsReload === "done" || (contextsReload !== "idle" && contextsError));
+  const joinedWaiting = !!joinedId && !joinedReady && !joinedFailed;
 
   const openOrganization = (organizationId: string) => {
     // Le profil actif ne change qu'à cet appui (l'utilisateur sait sous quelle identité il agit)
@@ -260,8 +279,16 @@ const OrganizationInvitation = () => {
           {heading(t("invitation.joined.title", { name: data.organization_name }), <CheckCircle2 className="h-10 w-10 text-primary" aria-hidden />)}
           <p className="mt-3 text-center text-sm text-muted-foreground">{t("invitation.joined.body", { role: t(`role.${data.role}`) })}</p>
           <div className="mt-6 flex flex-col gap-2">
-            <Button type="button" className="min-h-12 w-full" disabled={!joinedReady} aria-busy={!joinedReady || undefined} onClick={() => openOrganization(data.organization_id)}>
-              {!joinedReady && <Loader2 className="animate-spin" aria-hidden />}
+            {joinedFailed && (
+              <div role="alert" className="space-y-2 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm">
+                <p>{t("invitation.joined.contextsError")}</p>
+                <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => void reloadContexts()}>
+                  {t("invitation.retry")}
+                </Button>
+              </div>
+            )}
+            <Button type="button" className="min-h-12 w-full" disabled={!joinedReady} aria-busy={joinedWaiting || undefined} onClick={() => openOrganization(data.organization_id)}>
+              {joinedWaiting && <Loader2 className="animate-spin" aria-hidden />}
               {t("invitation.joined.open")}
             </Button>
             <Button asChild variant="ghost" className="min-h-12 w-full">

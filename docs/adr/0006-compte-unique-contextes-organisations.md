@@ -305,7 +305,7 @@ Sur un profil déjà actif, le corps d'`activate/` est ignoré sans validation (
 
 | Appel | Permission | Détail |
 |---|---|---|
-| `GET ID organizations/<uuid>/kyc/documents/` | `org.view_internal` | pièces de l'organisation, paginé : `{id, document_type, document_type_label, status, rejection_reason, uploaded_at, reviewed_at}` ; **jamais** l'URL ni le contenu du fichier |
+| `GET ID organizations/<uuid>/kyc/documents/` | `org.verification_submit` (décision L1-01-B6, 25/11/2026 ; les autres rôles reçoivent 403 `DENY_PERMISSION`) | pièces de l'organisation, paginé : `{id, document_type, document_type_label, status, rejection_reason, uploaded_at, reviewed_at}` ; **jamais** l'URL ni le contenu du fichier |
 | `POST ID organizations/<uuid>/kyc/documents/` | `org.verification_submit` | multipart `{document_type, file}` ; mêmes contrôles de type et taille qu'aujourd'hui ; `201` ; `400` si le type n'est pas exigé pour ce `org_type` ; throttle `KycWriteThrottle` existant |
 | `DELETE ID organizations/<uuid>/kyc/documents/<uuid>/` | `org.verification_submit` | seulement `EN_ATTENTE` ou `REFUSE` ; `204` ; `409` si `VALIDE` |
 | `GET ID organizations/<uuid>/verification/` | `org.view_internal` | bloc `verification` de `OrganizationInternal` |

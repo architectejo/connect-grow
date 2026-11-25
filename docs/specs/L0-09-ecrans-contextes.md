@@ -576,7 +576,7 @@ Déposer les pièces de l'organisation et lire exactement ce qui a été vérifi
 | `VALIDE` | `CheckCircle2`, ton success | `Validée` + mention (ex. « RCCM vérifié ») | aucune (serveur : 409 si suppression) |
 | `REFUSE` | `XCircle`, ton destructif | `Refusée` + « Motif du refus : … » (`rejection_reason`) | « Envoyer à nouveau », « Supprimer » |
 
-Source des pièces et motifs : `GET organizations/:id/kyc/documents/` (champs `document_type_label`, `status`, `rejection_reason`, `uploaded_at`, `reviewed_at`). La pièce la plus récente par type l'emporte. Aucune URL de fichier n'est affichée (le serveur n'en renvoie pas).
+Source des pièces et motifs : `GET organizations/:id/kyc/documents/`, réservé depuis L1-01-B6 aux rôles qui ont `org.verification_submit` (administrateur principal, administrateur) ; les autres rôles ne voient que l'état agrégé et le motif n'est jamais affiché (champs `document_type_label`, `status`, `rejection_reason`, `uploaded_at`, `reviewed_at`). La pièce la plus récente par type l'emporte. Aucune URL de fichier n'est affichée (le serveur n'en renvoie pas).
 
 ### 8.5. Envoi d'une pièce
 - Contrôles locaux avant envoi (patron actuel) : PDF, JPG ou PNG ; 10 Mo maximum. Messages : « Formats acceptés : PDF, JPG ou PNG. » et « Fichier trop lourd ({{size}}). 10 Mo maximum. »
@@ -648,7 +648,7 @@ Le libellé de pièce `document_type` inconnu : afficher `document_type_label` d
 `<ul>` de pièces ; l'état est un texte avec icône (pas de couleur seule) ; le bouton « Envoyer » a `aria-label="Envoyer : {{titre}}"` (patron existant) ; l'`<input type="file">` reste `sr-only` avec `tabIndex={-1}` et la même étiquette ; après suppression, le focus revient au titre de la ligne. `AlertDialog` de suppression : patron existant (`kyc.deleteConfirm*`, `common.cancel`).
 
 ### 8.9. Réseau faible
-Deux requêtes (`verification/` incluse dans `OrganizationInternal`, `kyc/documents/`). Aucune image. Fichiers jusqu'à 10 Mo : message d'attente explicite et possibilité de renvoyer.
+Deux requêtes (`verification/` incluse dans `OrganizationInternal`, `kyc/documents/` seulement avec `org.verification_submit`). Aucune image. Fichiers jusqu'à 10 Mo : message d'attente explicite et possibilité de renvoyer.
 
 ---
 

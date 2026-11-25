@@ -34,7 +34,7 @@ from . import capabilities
 from .models import INVITABLE_ROLES, Membership, Organization, OrganizationInvitation, User
 from .organizations import (
     OrganizationError, _activate_membership, _audit_invitation, _authorize_member, _ensure_under_limit,
-    _lock_organization, get_identity_settings, get_organization_for_member,
+    _lock_organization, get_identity_settings, get_organization_for_member, membership_scope,
 )
 from .throttles import FailureLimiter
 
@@ -124,7 +124,10 @@ def create_invitation(actor, organization_id, role, label='', after_authorizatio
             after_authorization()
         if not isinstance(role, str) or role not in capabilities.ROLES:
             raise serializers.ValidationError({'role': ["Rôle inconnu ou manquant."]})
-        if role not in INVITABLE_ROLES or not capabilities.can_manage_role_of(actor_membership.role, role):
+        # Périmètre de l'invitation : organisation entière en V1 (le champ `scope` d'entrée arrive avec B7).
+        if role not in INVITABLE_ROLES or not capabilities.can_delegate(
+            actor_membership.role, membership_scope(actor_membership), role, capabilities.ORGANIZATION_SCOPE,
+        ):
             raise OrganizationError(
                 "Ce rôle ne peut pas être attribué par invitation.", 'invitation_role_not_allowed',
                 status.HTTP_400_BAD_REQUEST,
@@ -233,17 +236,22 @@ def _find_invitation(user, token):
 
 
 def _inviter_has_authority(invitation, organization) -> bool:
-    """L'inviteur est toujours membre actif avec `org.manage_members`, peut gérer le rôle invité, et son compte est
-    actif et non restreint. Relu à chaque aperçu et acceptation (la garantie de sécurité, ADR 0008 §3.3)."""
+    """L'inviteur est toujours membre actif avec `org.manage_members` au niveau de l'organisation (périmètre entier,
+    ADR 0010 D3), peut déléguer le rôle ET le périmètre de l'invitation (`can_delegate`), et son compte est actif et
+    non restreint. Relu à chaque aperçu et acceptation (la garantie de sécurité, ADR 0008 §3.3)."""
     inviter_id = invitation.created_by_id
     if inviter_id is None:
         return False
     membership = Membership.objects.filter(
         organization=organization, user_id=inviter_id, status=Membership.STATUS_ACTIVE,
     ).first()
-    if membership is None or not (
+    if membership is None:
+        return False
+    inviter_scope = membership_scope(membership)
+    if not (
         capabilities.role_has_capability(membership.role, 'org.manage_members')
-        and capabilities.can_manage_role_of(membership.role, invitation.role)
+        and capabilities.scope_allows(inviter_scope, 'org.manage_members')
+        and capabilities.can_delegate(membership.role, inviter_scope, invitation.role, membership_scope(invitation))
     ):
         return False
     return (
@@ -327,7 +335,7 @@ def _accept_locked(user, invitation):
     try:
         membership = _activate_membership(
             user, organization, user, invitation.role, added_by=inviter, via='invitation',
-            invited_by=invitation.created_by_id,
+            invited_by=invitation.created_by_id, scope=membership_scope(invitation),
         )
     except OrganizationError as error:
         raise _Refusal('already_member', error)

@@ -24,6 +24,7 @@ from rest_framework.exceptions import ErrorDetail
 from apps.common.contexts import CONTEXT_ORGANIZATION, DENY_RELATION, ContextDenied
 from apps.moderation.services import record_audit
 
+from . import capabilities
 from .kyc_files import detect_kyc_file_type, sanitize_kyc_image, validate_kyc_file
 from .models import KycDocument, Organization, OrganizationDocumentRequirement
 from .organizations import OrganizationError, _authorize_member, _lock_organization
@@ -148,26 +149,38 @@ def _audit(actor, action, document, organization, details):
     )
 
 
+# Détail des pièces (liste, motif de refus) : réservé aux rôles qui déposent les pièces (décision L1-01-B6, audit
+# M2). Les autres membres ne voient que l'état agrégé (`get_organization_verification` sans motif).
+KYB_DETAIL_CAPABILITY = 'org.verification_submit'
+
+
 def list_kyb_documents(actor, organization_id):
-    """Pièces de l'organisation (capacité `org.view_internal`), de la plus récente à la plus ancienne."""
-    organization = _load_for_read(actor, organization_id)
+    """Pièces de l'organisation (capacité `org.verification_submit`), de la plus récente à la plus ancienne."""
+    organization, _ = _load_for_read(actor, organization_id, KYB_DETAIL_CAPABILITY)
     return organization.kyc_documents.order_by('-created_at', 'pk')
 
 
-def _load_for_read(actor, organization_id) -> Organization:
+def _load_for_read(actor, organization_id, capability='org.view_internal'):
+    """`(organisation, appartenance)` après autorisation."""
     try:
         organization = Organization.objects.get(pk=organization_id)
     except (Organization.DoesNotExist, ValueError, TypeError, DjangoValidationError):
         # Même refus qu'un non-membre : aucun oracle d'existence.
         raise ContextDenied(DENY_RELATION, "Vous n'êtes pas membre de cette organisation.")
     # Lecture permise aussi pour une organisation suspendue ou archivée (les écritures restent refusées).
-    _authorize_member(actor, organization, 'org.view_internal', allow_inactive=True)
-    return organization
+    membership = _authorize_member(actor, organization, capability, allow_inactive=True)
+    return organization, membership
 
 
 def get_organization_verification(actor, organization_id) -> dict:
-    """Lecture de l'état de vérification (capacité `org.view_internal`)."""
-    return get_verification_state(_load_for_read(actor, organization_id))
+    """Lecture de l'état de vérification (capacité `org.view_internal`). Le motif de refus (`rejection_reason`) n'est
+    rendu qu'aux rôles qui ont `org.verification_submit` ; les autres reçoivent l'état agrégé, motif vide."""
+    organization, membership = _load_for_read(actor, organization_id)
+    state = get_verification_state(organization)
+    if not capabilities.role_has_capability(membership.role, KYB_DETAIL_CAPABILITY):
+        for item in state['requirements']:
+            item['rejection_reason'] = ''
+    return state
 
 
 def _discard_file(stored_file):

@@ -237,7 +237,9 @@ Changement de comportement existant : `POST organizations/<id>/leave/` peut main
 
 - **Valeurs de `role`** partout (`Member`, `Invitation`, aperçu, `contexts/`, `internal/`) : `OWNER | ADMIN | EDITOR | ANALYST | MEMBER`. Les codes ne changent pas ; **libellés français imposés** (front, i18n) : `OWNER` = « Administrateur principal », `ADMIN` = « Administrateur », `EDITOR` = « Éditeur », `ANALYST` = « Analyste », `MEMBER` = « Membre ». Le mot « propriétaire » disparaît de toute interface et de tout message d'erreur (`detail`).
 - **Capacités de `MEMBER`** : `["org.leave", "org.view_internal"]` (liste triée renvoyée par `contexts/` et `internal/`).
-- **Objet `Scope`** (nouveau, clés exactes) : `{"type": "ORGANIZATION", "id": null}`. V1 : seule valeur produite et acceptée. Toute autre valeur en entrée : erreur de champ `400 {"scope": ["Ce périmètre n'est pas encore disponible."]}`.
+- **Objet `Scope`** (nouveau, clés exactes) : `{"type": "ORGANIZATION", "id": null}`. V1 : seule valeur produite et acceptée, avec **exactement** ces deux clés. Toute autre valeur en entrée (type `CITY` ou `UNIT`, identifiant non nul, clé manquante ou en trop) : erreur de champ `400 {"scope": ["Ce périmètre n'est pas encore disponible."]}`.
+- **Périmètre fermé par défaut (B6)** : une appartenance dont le périmètre n'est pas l'organisation entière (inatteignable par l'API en V1) n'exerce aucune capacité de niveau organisation (`403 DENY_PERMISSION`), sauf `org.leave` ; `contexts/` ne lui liste que `["org.leave"]`.
+- **Vérification (B6, décision du chef de projet)** : la liste des pièces (`GET organizations/<id>/kyc/documents/`) et le motif de refus (`rejection_reason` de `verification/`) sont réservés à `org.verification_submit` (Administrateur principal, administrateur) ; les autres rôles reçoivent `403 DENY_PERMISSION` sur la liste et l'état agrégé avec `rejection_reason` vide.
 - **Objet `Member`** (section 0) : **ajout** de `"scope": Scope`. Les six clés existantes ne changent pas. Ordre de la liste : Administrateurs principaux, administrateurs, éditeurs, analystes, **membres**, puis `joined_at`, puis `membership_id`.
 - **Messages** des codes existants (`last_owner`, `last_effective_owner`, `owner_must_be_demoted`, `last_owner_account`) : codes inchangés, `detail` réécrit avec « administrateur principal ». Le front affiche ses propres textes par code (i18n).
 
@@ -249,7 +251,7 @@ Changement de comportement existant : `POST organizations/<id>/leave/` peut main
 {"role": "ADMIN", "scope": {"type": "ORGANIZATION", "id": null}, "confirm": true, "password": "..."}
 ```
 
-- `role` obligatoire parmi `ADMIN`, `EDITOR`, `ANALYST`, `MEMBER` (et `OWNER`, refusé ci-dessous). `scope` facultatif (défaut : organisation entière).
+- `role` obligatoire parmi `ADMIN`, `EDITOR`, `ANALYST`, `MEMBER` (et `OWNER`, refusé ci-dessous). `scope` facultatif : **absent ou `null`, le périmètre actuel du membre est conservé** (décision B6) ; fourni, il remplace le périmètre (V1 : organisation entière seulement). Un changement de périmètre est tracé (`old_scope`, `new_scope`) dans l'audit `MEMBERSHIP_ROLE_CHANGED`.
 - `role = "OWNER"` (B9) : **`400 {"detail": "Pour nommer un administrateur principal, utilisez une nomination.", "code": "use_primary_admin_nomination"}`**, après les contrôles d'autorisation (un éditeur reçoit toujours `403 DENY_PERMISSION`) et avant toute ressaisie.
 - Cible actuellement `OWNER` :
   - soi-même : `confirm` + `password` obligatoires (inchangé) ;

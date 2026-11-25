@@ -188,7 +188,9 @@ def _ensure_organization_usable(organization, allow_archived=False, allow_inacti
 def _authorize_member(actor, organization, capability, allow_inactive=False, allow_archived=False) -> Membership:
     """Appartenance active de l'acteur, état de l'organisation, état du compte puis capacité, dans cet
     ordre. Un acteur désactivé ou restreint est refusé (`DENY_SECURITY`), sauf pour la sortie volontaire
-    (`org.leave`). `is_staff` et `is_superuser` n'ouvrent rien (ADR 0006, A5)."""
+    (`org.leave`). `is_staff` et `is_superuser` n'ouvrent rien (ADR 0006, A5). Périmètre (ADR 0010 D3, fermé par
+    défaut) : une appartenance limitée à une ville ou une unité n'exerce aucune capacité de niveau organisation
+    (`DENY_PERMISSION`), sauf `org.leave`."""
     membership = Membership.objects.filter(
         organization=organization, user_id=actor.pk, status=Membership.STATUS_ACTIVE,
     ).first()
@@ -199,6 +201,8 @@ def _authorize_member(actor, organization, capability, allow_inactive=False, all
         raise ContextDenied(DENY_SECURITY, "Votre compte ne permet pas cette action.")
     if not capabilities.role_has_capability(membership.role, capability):
         raise ContextDenied(DENY_PERMISSION, "Votre rôle ne permet pas cette action.")
+    if not capabilities.scope_allows(membership_scope(membership), capability):
+        raise ContextDenied(DENY_PERMISSION, "Votre périmètre ne permet pas cette action.")
     return membership
 
 
@@ -226,14 +230,15 @@ SCOPE_NOT_AVAILABLE_MESSAGE = "Ce périmètre n'est pas encore disponible."
 
 
 def _validate_scope(scope) -> capabilities.Scope:
-    """Périmètre demandé en entrée d'API (contrat L1-01 §7.1). Absent ou nul : organisation entière. Seule valeur
-    acceptée en V1 : `{"type": "ORGANIZATION", "id": null}` ; toute autre valeur (type réservé `CITY` ou `UNIT`,
-    identifiant non nul, forme invalide) : erreur de champ 400 `{"scope": [...]}` (ADR 0010 §6.1)."""
+    """Périmètre fourni en entrée d'API (contrat L1-01 §7.1 et §7.2). `None` (absent ou nul) : renvoie `None`, à
+    l'appelant de choisir le défaut. Seule valeur acceptée en V1 : exactement `{"type": "ORGANIZATION", "id": null}`
+    (les deux clés, rien d'autre) ; toute autre valeur (type réservé `CITY` ou `UNIT`, identifiant non nul, clé
+    manquante ou en trop, forme invalide) : erreur de champ 400 `{"scope": [...]}` (ADR 0010 §6.1)."""
     if scope is None:
-        return capabilities.ORGANIZATION_SCOPE
+        return None
     if (
-        isinstance(scope, dict) and set(scope) <= {'type', 'id'}
-        and scope.get('type') in capabilities.ACTIVE_SCOPE_TYPES and scope.get('id') is None
+        isinstance(scope, dict) and set(scope) == {'type', 'id'}
+        and scope['type'] in capabilities.ACTIVE_SCOPE_TYPES and scope['id'] is None
     ):
         return capabilities.Scope(scope['type'], None)
     raise serializers.ValidationError({'scope': [SCOPE_NOT_AVAILABLE_MESSAGE]})
@@ -278,8 +283,14 @@ def _publish_membership_change(organization, membership, change, old_role, new_r
     )
 
 
+def _scope_code(scope) -> str:
+    """`TYPE:uuid` ou `ORGANIZATION:-` pour l'audit (codes et UUID seulement)."""
+    return f"{scope.type}:{scope.id or '-'}"
+
+
 def _audit_membership(
     actor, action, organization, membership, old_role, new_role, reauth=False, orphaned=False, extra='',
+    old_scope=None,
 ):
     details = (
         f"organization={organization.pk}; user={membership.user_id}; "
@@ -289,6 +300,9 @@ def _audit_membership(
     if new_role and scope_type != capabilities.SCOPE_ORGANIZATION:
         # ADR 0010 §8 : le périmètre n'est tracé que s'il n'est pas l'organisation entière (codes et UUID seulement).
         details += f"; scope_type={scope_type}; scope_id={membership.scope_id}"
+    if old_scope is not None and old_scope != membership_scope(membership):
+        # Changement de périmètre : ancien et nouveau toujours tracés (ADR 0010 §8).
+        details += f"; old_scope={_scope_code(old_scope)}; new_scope={_scope_code(membership_scope(membership))}"
     if reauth:
         details += "; reauth=true"
     if orphaned:
@@ -857,9 +871,11 @@ def _audit_invitation(actor, action, organization, invitation, **extra):
     )
 
 
-def sweep_invitations_of_inviter(actor, organization, inviter_id, new_role=None):
+def sweep_invitations_of_inviter(actor, organization, inviter_id, new_role=None, new_scope=None):
     """Révoque (`authority_lost`) les invitations `PENDING` d'un inviteur qui perd son autorité : retiré ou parti
-    (`new_role=None` : toutes), ou rétrogradé (`new_role` : seules celles qu'il ne peut plus gérer). Dans la
+    (`new_role=None` : toutes), ou rétrogradé ou déplacé (`new_role`, `new_scope` : seules celles qu'il ne peut plus
+    déléguer, `can_delegate` sur le rôle et le périmètre de l'invitation ; `new_scope=None` = organisation entière ;
+    un périmètre partiel n'a plus `org.manage_members` au niveau de l'organisation). Dans la
     transaction de l'appelant ; mise à jour conditionnelle `PENDING -> REVOKED`, étiquette vidée, une trace par
     invitation, aucun événement. C'est du nettoyage : la garantie de sécurité reste la revérification de l'autorité
     à l'acceptation (ADR 0008 §5.1). Renvoie le nombre d'invitations révoquées."""
@@ -867,10 +883,12 @@ def sweep_invitations_of_inviter(actor, organization, inviter_id, new_role=None)
     revoked = 0
     for invitation in OrganizationInvitation.objects.filter(
         organization=organization, created_by_id=inviter_id, status=OrganizationInvitation.STATUS_PENDING,
-    ).only('id', 'role'):
+    ).only('id', 'role', 'scope_type', 'scope_id'):
+        inviter_scope = new_scope or capabilities.ORGANIZATION_SCOPE
         if (
             new_role is not None and capabilities.role_has_capability(new_role, 'org.manage_members')
-            and capabilities.can_manage_role_of(new_role, invitation.role)
+            and capabilities.scope_allows(inviter_scope, 'org.manage_members')
+            and capabilities.can_delegate(new_role, inviter_scope, invitation.role, membership_scope(invitation))
         ):
             continue
         done = OrganizationInvitation.objects.filter(
@@ -938,19 +956,22 @@ def _apply_role_change(
         if count_active_owners(organization.pk) < 1:
             raise _last_owner_error(organization)
         orphaned = _ensure_not_orphaned(organization, effective_before)
-    _audit_membership(actor, audit_action, organization, membership, old_role, new_role, reauth, orphaned)
+    _audit_membership(
+        actor, audit_action, organization, membership, old_role, new_role, reauth, orphaned, old_scope=old_scope,
+    )
     _publish_membership_change(organization, membership, CHANGE_ROLE_CHANGED, old_role, new_role, actor)
     if capabilities.role_has_capability(old_role, 'org.manage_members'):
         # Il a pu inviter : ses invitations en attente sont revues dans la même transaction (ADR 0008 §5.1).
-        sweep_invitations_of_inviter(actor, organization, membership.user_id, new_role=new_role)
+        sweep_invitations_of_inviter(actor, organization, membership.user_id, new_role=new_role, new_scope=scope)
     if publish_owners and ROLE_OWNER in (old_role, new_role):
         _publish_owners_changed(organization, actor)
     return membership
 
 
 def change_member_role(actor, organization_id, user_id, new_role) -> Membership:
-    """Change le rôle d'un membre actif. `org.manage_roles` ; l'administrateur ne manipule que ADMIN, EDITOR
-    et ANALYST (R9, R10) ; seul un propriétaire attribue ou retire OWNER ; jamais zéro propriétaire (R8)."""
+    """Change le rôle d'un membre actif (périmètre inchangé). `org.manage_roles` ; l'administrateur ne manipule que
+    ADMIN, EDITOR, ANALYST et MEMBER (R9, R10) ; seul un administrateur principal attribue ou retire OWNER ; jamais
+    zéro administrateur principal (R8). Délégation vérifiée sur le rôle et le périmètre (`can_delegate`)."""
     _validate_role(new_role)
     with transaction.atomic():
         organization = _lock_organization(organization_id)
@@ -1144,14 +1165,23 @@ def _require_reauthentication(actor, organization, confirm, password, action):
     REAUTH_FAILURES.success(key)
 
 
+def _target_scope(membership, new_role, new_scope) -> capabilities.Scope:
+    """Périmètre résultant d'un changement de rôle : organisation entière pour OWNER ; sinon celui demandé ; sinon
+    (champ absent) le périmètre actuel, inchangé (décision L1-01-B6, contrat §7.2)."""
+    if new_role == ROLE_OWNER:
+        return capabilities.ORGANIZATION_SCOPE
+    return new_scope or membership_scope(membership)
+
+
 def _resolve_role_change(actor, organization, membership_id, new_role, new_scope):
     """Acteur autorisé (`org.manage_roles`), cible de CETTE organisation, délégation permise sur le rôle et le
-    périmètre actuels de la cible comme sur le rôle et le périmètre visés (`can_delegate`, ADR 0010 §9.1)."""
+    périmètre actuels de la cible comme sur le rôle et le périmètre résultants (`can_delegate`, ADR 0010 §9.1)."""
     actor_membership = _authorize_member(actor, organization, 'org.manage_roles')
     membership = _get_member(organization, membership_id)
     actor_scope = membership_scope(actor_membership)
+    target_scope = _target_scope(membership, new_role, new_scope)
     if not (_can_manage_member(actor_membership, membership)
-            and capabilities.can_delegate(actor_membership.role, actor_scope, new_role, new_scope)):
+            and capabilities.can_delegate(actor_membership.role, actor_scope, new_role, target_scope)):
         raise ContextDenied(DENY_PERMISSION, "Vous ne pouvez pas modifier ce rôle.")
     _ensure_target_available(membership.user_id)
     return membership
@@ -1167,13 +1197,13 @@ def change_role(
     """Change le rôle d'un membre actif de l'organisation (`org.manage_roles`). L'administrateur ne touche jamais
     un administrateur principal et n'attribue jamais OWNER. Promotion vers OWNER ou rétrogradation d'un OWNER :
     `confirm` et ressaisie du mot de passe. Invariants `last_owner` et `last_effective_owner` vérifiés sous verrou. Même
-    rôle et même périmètre : aucun effet, aucune trace. `scope` (contrat §7.2) : périmètre visé, organisation entière
-    par défaut ; seul `ORGANIZATION` est accepté en V1 (sinon 400 `{"scope": [...]}`)."""
+    rôle et même périmètre : aucun effet, aucune trace. `scope` (contrat §7.2) : périmètre visé ; absent ou nul, le
+    périmètre actuel est conservé ; seul `ORGANIZATION` est accepté en V1 (sinon 400 `{"scope": [...]}`)."""
     _validate_role(new_role)
     new_scope = _validate_scope(scope)
     organization = _get_organization(organization_id)
     membership = _resolve_role_change(actor, organization, membership_id, new_role, new_scope)
-    if membership.role == new_role and membership_scope(membership) == new_scope:
+    if membership.role == new_role and membership_scope(membership) == _target_scope(membership, new_role, new_scope):
         return membership  # même rôle : ni ressaisie, ni quota, ni trace (l'autorisation a déjà été vérifiée)
     reauth = _role_change_needs_reauth(membership, new_role)
     if reauth:

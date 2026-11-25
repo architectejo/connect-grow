@@ -45,6 +45,9 @@ class ActingContext:
     type: str
     id: uuid.UUID
     role: Optional[str] = None
+    # Périmètre de l'appartenance (organisation seulement ; ADR 0010 D3). Codes et UUID, sans dépendance à `identity`.
+    scope_type: str = 'ORGANIZATION'
+    scope_id: Optional[uuid.UUID] = None
 
 
 class ContextDenied(CodedAPIException):

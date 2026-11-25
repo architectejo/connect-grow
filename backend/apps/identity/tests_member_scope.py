@@ -240,13 +240,13 @@ class ScopeServiceTests(TestCase):
         self.admin_membership = Membership.objects.create(organization=self.org, user=self.admin, role=ADMIN)
         self.editor_membership = Membership.objects.create(organization=self.org, user=self.editor, role=EDITOR)
 
-    def test_validate_scope_accepts_only_the_whole_organization(self):
-        self.assertEqual(organizations._validate_scope(None), ORGANIZATION_SCOPE)
+    def test_validate_scope_accepts_only_the_exact_whole_organization_object(self):
+        self.assertIsNone(organizations._validate_scope(None))  # absent : à l'appelant de choisir (inchangé)
         self.assertEqual(organizations._validate_scope({'type': 'ORGANIZATION', 'id': None}), ORGANIZATION_SCOPE)
-        self.assertEqual(organizations._validate_scope({'type': 'ORGANIZATION'}), ORGANIZATION_SCOPE)
         for bad in (
             {'type': 'CITY', 'id': str(KINSHASA.id)}, {'type': 'UNIT', 'id': str(uuid.uuid4())},
             {'type': 'ORGANIZATION', 'id': str(uuid.uuid4())}, {'type': 'PLANETE', 'id': None}, {},
+            {'type': 'ORGANIZATION'}, {'id': None},  # clés exactes (contrat §7.1)
             {'type': 'ORGANIZATION', 'id': None, 'extra': 1}, 'ORGANIZATION', ['ORGANIZATION'], 42,
         ):
             with self.subTest(bad=bad), self.assertRaises(ValidationError) as ctx:
@@ -268,6 +268,7 @@ class ScopeServiceTests(TestCase):
         self.assertEqual((self.editor_membership.scope_type, self.editor_membership.scope_id), KINSHASA)
         log = AuditLog.objects.get(action='MEMBERSHIP_ROLE_CHANGED')
         self.assertIn(f'scope_type=CITY; scope_id={KINSHASA.id}', log.details)
+        self.assertIn(f'old_scope=ORGANIZATION:-; new_scope=CITY:{KINSHASA.id}', log.details)
 
     def test_primary_administrator_scope_is_forced_to_whole_organization(self):
         force_scope(self.editor_membership, KINSHASA)
@@ -292,15 +293,23 @@ class ScopeServiceTests(TestCase):
         self.editor_membership.refresh_from_db()
         self.assertEqual((self.editor_membership.role, self.editor_membership.status), (EDITOR, Membership.STATUS_ACTIVE))
 
-    def test_branch_administrator_manages_a_member_of_his_branch(self):
+    def test_branch_administrator_is_closed_by_default_even_inside_his_branch(self):
+        """Fermé par défaut (relecture et audit de B6) : tant que CITY/UNIT ne sont pas actifs, une appartenance à
+        périmètre partiel n'exerce aucune capacité de niveau organisation, même sur un membre de sa ville."""
         force_scope(self.admin_membership, KINSHASA)
         force_scope(self.editor_membership, KINSHASA)
-        # Le PATCH n'accepte que l'organisation entière en V1 : le noyau (périmètre inchangé) est exercé directement.
-        membership = services.change_member_role(self.admin, self.org.pk, self.editor.pk, MEMBER)
-        self.assertEqual((membership.role, membership.scope_type), (MEMBER, SCOPE_CITY))
-        # Le PATCH avec le périmètre par défaut (organisation entière) reste refusé : il élargirait le périmètre.
-        with self.assertRaises(ContextDenied):
-            services.change_role(self.admin, self.org.pk, self.editor_membership.pk, ANALYST)
+        for call in (
+            lambda: services.change_member_role(self.admin, self.org.pk, self.editor.pk, MEMBER),
+            lambda: services.change_role(self.admin, self.org.pk, self.editor_membership.pk, ANALYST),
+            lambda: services.list_members(self.admin, self.org.pk),
+            lambda: services.get_organization_for_member(self.admin, self.org.pk),
+        ):
+            with self.assertRaises(ContextDenied) as ctx:
+                call()
+            self.assertEqual(ctx.exception.detail.code, DENY_PERMISSION)
+        # Seule exception : quitter.
+        services.leave_organization(self.admin, self.org.pk)
+        self.assertEqual(Membership.objects.get(pk=self.admin_membership.pk).status, Membership.STATUS_REVOKED)
 
     def test_reactivation_resets_the_scope(self):
         force_scope(self.editor_membership, KINSHASA)
@@ -314,6 +323,169 @@ class ScopeServiceTests(TestCase):
         with self.assertRaises(services.OrganizationError) as ctx:
             services.create_invitation(self.owner, self.org.pk, MEMBER)
         self.assertEqual(ctx.exception.detail.code, 'invitation_role_not_allowed')
+
+
+# --- Fermé par défaut : chaque chemin de lecture des rôles (relecture et audit de B6) -----------------------------
+
+class ClosedByDefaultScopeTests(TestCase):
+    """Un périmètre CITY forcé en base n'ouvre aucune capacité de niveau organisation, par aucun chemin."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(name='Atelier Fermé', org_type='ENTREPRISE')
+        self.owner = make_user('owner-ferme')
+        Membership.objects.create(organization=self.org, user=self.owner, role=OWNER)
+        self.admin = make_user('admin-ville')
+        self.admin_m = force_scope(
+            Membership.objects.create(organization=self.org, user=self.admin, role=ADMIN), KINSHASA,
+        )
+
+    def test_header_context_resolution_carries_the_scope_and_authorize_refuses(self):
+        ctx = services.resolve_acting_context(self.admin, f'ORGANIZATION:{self.org.pk}')
+        self.assertEqual((ctx.scope_type, ctx.scope_id), (SCOPE_CITY, KINSHASA.id))
+        for capability in ('offer.publish', 'stats.view', 'org.view_internal', 'message.reply'):
+            with self.subTest(capability=capability), self.assertRaises(ContextDenied) as denied:
+                services.authorize(ctx, capability)
+            self.assertEqual(denied.exception.detail.code, DENY_PERMISSION)
+        services.authorize(ctx, capabilities.CAP_ORG_LEAVE)
+        services.authorize(ctx, 'offer.publish', target_scope=KINSHASA)  # périmètre visé couvert
+
+    def test_authorize_on_and_can_refuse_without_target_but_allow_leave(self):
+        self.assertFalse(services.can(self.admin.pk, CONTEXT_ORGANIZATION, self.org.pk, 'offer.publish'))
+        self.assertTrue(services.can(self.admin.pk, CONTEXT_ORGANIZATION, self.org.pk, capabilities.CAP_ORG_LEAVE))
+
+    def test_http_route_under_x_context_is_refused(self):
+        response = login(self.admin).get(
+            '/api/v1/marketplace/stats/dashboard/', HTTP_X_CONTEXT=f'ORGANIZATION:{self.org.pk}',
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()['code'], DENY_PERMISSION)
+
+    def test_batch_readers_give_no_organization_capability(self):
+        roles = services.get_user_context_roles(self.admin.pk)
+        self.assertIn((CONTEXT_ORGANIZATION, self.org.pk), roles)  # toujours membre…
+        self.assertIsNone(roles[(CONTEXT_ORGANIZATION, self.org.pk)])  # …sans capacité
+        self.assertNotIn(
+            (CONTEXT_ORGANIZATION, self.org.pk), services.get_capable_contexts(self.admin.pk, 'offer.publish'),
+        )
+        self.assertNotIn(self.admin.pk, services.get_organization_recipients(self.org.pk, 'message.reply'))
+        self.assertIn(self.admin.pk, services.get_organization_recipients(self.org.pk, capabilities.CAP_ORG_LEAVE))
+        self.assertNotIn(self.admin.pk, services.get_context_recipients(CONTEXT_ORGANIZATION, self.org.pk, 'message.reply'))
+        self.assertNotIn(self.org.pk, services.get_accessible_organization_ids(self.admin.pk, 'message.reply'))
+
+    def test_contexts_list_only_offers_leave(self):
+        response = login(self.admin).get(CONTEXTS)
+        item = next(i for i in response.json()['results'] if i['type'] == CONTEXT_ORGANIZATION)
+        self.assertEqual((item['role'], item['capabilities']), (ADMIN, [capabilities.CAP_ORG_LEAVE]))
+
+    def test_branch_administrator_cannot_invite(self):
+        with self.assertRaises(ContextDenied) as ctx:
+            services.create_invitation(self.admin, self.org.pk, EDITOR)
+        self.assertEqual(ctx.exception.detail.code, DENY_PERMISSION)
+
+
+class InvitationScopeTests(TestCase):
+    """Invitations : délégation par `can_delegate` avec le périmètre de l'émetteur et celui de l'invitation."""
+
+    def setUp(self):
+        cache.clear()
+        self.org = Organization.objects.create(name='Atelier Invitations Périmètre', org_type='ENTREPRISE')
+        self.owner = make_user('owner-inv')
+        Membership.objects.create(organization=self.org, user=self.owner, role=OWNER)
+        self.admin = make_user('admin-inv')
+        self.admin_m = Membership.objects.create(organization=self.org, user=self.admin, role=ADMIN)
+        self.guest = make_user('invite')
+
+    def invite(self, inviter, role=EDITOR):
+        return services.create_invitation(inviter, self.org.pk, role)
+
+    def test_created_invitation_covers_the_whole_organization(self):
+        invitation, _ = self.invite(self.admin)
+        self.assertEqual((invitation.scope_type, invitation.scope_id), (SCOPE_ORGANIZATION, None))
+
+    def test_accept_refused_when_the_inviter_moved_to_a_partial_scope(self):
+        invitation, token = self.invite(self.admin)
+        force_scope(self.admin_m, KINSHASA)
+        with self.assertRaises(Exception) as ctx:
+            services.accept_invitation(self.guest, token)
+        self.assertEqual(ctx.exception.detail.code, 'invitation_invalid')
+        self.assertFalse(Membership.objects.filter(organization=self.org, user=self.guest).exists())
+
+    def test_accept_refused_when_the_invitation_scope_is_wider_than_a_branch_inviter(self):
+        """Émetteur et invitation forcés en base : une invitation sur une autre ville n'est pas déléguable."""
+        invitation, token = self.invite(self.admin)
+        OrganizationInvitation.objects.filter(pk=invitation.pk).update(scope_type=SCOPE_CITY, scope_id=LUBUMBASHI.id)
+        force_scope(self.admin_m, KINSHASA)
+        with self.assertRaises(Exception) as ctx:
+            services.accept_invitation(self.guest, token)
+        self.assertEqual(ctx.exception.detail.code, 'invitation_invalid')
+
+    def test_accept_propagates_the_invitation_scope_to_the_membership(self):
+        invitation, token = self.invite(self.owner)
+        OrganizationInvitation.objects.filter(pk=invitation.pk).update(scope_type=SCOPE_CITY, scope_id=KINSHASA.id)
+        membership = services.accept_invitation(self.guest, token)
+        membership.refresh_from_db()
+        self.assertEqual((membership.scope_type, membership.scope_id), (SCOPE_CITY, KINSHASA.id))
+
+    def test_sweep_revokes_invitations_when_the_inviter_moves_to_a_partial_scope(self):
+        invitation, _ = self.invite(self.admin)
+        organization = Organization.objects.get(pk=self.org.pk)
+        organizations._apply_role_change(self.owner, organization, self.admin_m, ADMIN, new_scope=KINSHASA)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, OrganizationInvitation.STATUS_REVOKED)
+        self.assertTrue(AuditLog.objects.filter(
+            action='INVITATION_REVOKED', target_id=invitation.pk, details__contains='authority_lost',
+        ).exists())
+
+    def test_sweep_keeps_invitations_still_delegable(self):
+        invitation, _ = self.invite(self.admin)
+        services.change_role(self.owner, self.org.pk, self.admin_m.pk, ADMIN, scope=ORG_SCOPE_JSON)  # sans effet
+        organization = Organization.objects.get(pk=self.org.pk)
+        organizations.sweep_invitations_of_inviter(self.owner, organization, self.admin.pk, new_role=ADMIN)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, OrganizationInvitation.STATUS_PENDING)
+
+
+class MalformedTargetScopeTests(TestCase):
+    def test_can_refuses_a_malformed_target_scope_instead_of_raising(self):
+        org = Organization.objects.create(name='Atelier Mal Formé', org_type='ENTREPRISE')
+        user = make_user('malforme')
+        Membership.objects.create(organization=org, user=user, role=EDITOR)
+        for bad in (Scope(SCOPE_CITY, 'pas-un-uuid'), 'CITY', ('CITY',), 42):
+            with self.subTest(bad=bad):
+                self.assertFalse(services.can(user.pk, CONTEXT_ORGANIZATION, org.pk, 'offer.edit', target_scope=bad))
+                with self.assertRaises(ContextDenied):
+                    services.authorize_on(user, CONTEXT_ORGANIZATION, org.pk, 'offer.edit', target_scope=bad)
+
+
+class VerificationDetailForMemberTests(TestCase):
+    """Un Membre (et tout rôle sans `org.verification_submit`) ne voit que l'état agrégé de vérification."""
+
+    def setUp(self):
+        from .models import KycDocument
+        self.org = Organization.objects.create(name='Atelier KYB', org_type='ENTREPRISE')
+        self.owner, self.member = make_user('owner-kyb'), make_user('membre-kyb')
+        Membership.objects.create(organization=self.org, user=self.owner, role=OWNER)
+        Membership.objects.create(organization=self.org, user=self.member, role=MEMBER)
+        requirement = services.get_organization_verification(self.owner, self.org.pk)['requirements'][0]
+        KycDocument.objects.create(
+            organization=self.org, document_type=requirement['document_type'], file='kyc/x.pdf',
+            status=KycDocument.STATUS_REFUSE, rejection_reason='Motif sentinelle',
+        )
+
+    def test_member_gets_the_state_without_reason_and_no_document_list(self):
+        state = services.get_organization_verification(self.member, self.org.pk)
+        self.assertEqual(state['requirements'][0]['status'], 'REFUSE')
+        self.assertEqual(state['requirements'][0]['rejection_reason'], '')
+        self.assertEqual(
+            services.get_organization_verification(self.owner, self.org.pk)['requirements'][0]['rejection_reason'],
+            'Motif sentinelle',
+        )
+        with self.assertRaises(ContextDenied) as ctx:
+            services.list_kyb_documents(self.member, self.org.pk)
+        self.assertEqual(ctx.exception.detail.code, DENY_PERMISSION)
+        response = login(self.member).get(f'{ORGS}{self.org.pk}/kyc/documents/')
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn('Motif sentinelle', response.content.decode())
 
 
 # --- API ----------------------------------------------------------------------------------------------------------
@@ -359,6 +531,25 @@ class MemberScopeApiTests(TestCase):
                     'membership_id', 'display_name', 'role', 'joined_at', 'is_self', 'is_last_effective_owner', 'scope',
                 })
 
+    def test_patch_without_scope_keeps_the_current_scope(self):
+        """Décision L1-01-B6 : `scope` absent ou nul = périmètre inchangé (pas de défaut à l'organisation entière)."""
+        force_scope(self.member_m, KINSHASA)
+        for body in ({'role': ANALYST}, {'role': EDITOR, 'scope': None}):
+            with self.subTest(body=body):
+                response = self.patch(self.owner, self.member_m, body)
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertEqual(response.json()['scope'], {'type': 'CITY', 'id': str(KINSHASA.id)})
+        self.assertFalse(AuditLog.objects.filter(details__contains='old_scope').exists())
+
+    def test_patch_with_explicit_organization_scope_widens_and_traces_both_scopes(self):
+        force_scope(self.member_m, KINSHASA)
+        response = self.patch(self.owner, self.member_m, {'role': MEMBER, 'scope': ORG_SCOPE_JSON})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['scope'], ORG_SCOPE_JSON)
+        log = AuditLog.objects.get(action='MEMBERSHIP_ROLE_CHANGED')
+        self.assertIn(f'old_scope=CITY:{KINSHASA.id}; new_scope=ORGANIZATION:-', log.details)
+        self.assertIn('old_role=MEMBER; new_role=MEMBER', log.details)
+
     def test_patch_member_back_to_editor(self):
         response = self.patch(self.owner, self.member_m, {'role': EDITOR})
         self.assertEqual(response.status_code, 200, response.content)
@@ -368,6 +559,7 @@ class MemberScopeApiTests(TestCase):
         for scope in (
             {'type': 'CITY', 'id': str(KINSHASA.id)}, {'type': 'UNIT', 'id': str(uuid.uuid4())},
             {'type': 'ORGANIZATION', 'id': str(uuid.uuid4())}, 'ORGANIZATION', {'type': 'X'},
+            {'type': 'ORGANIZATION'},
         ):
             with self.subTest(scope=scope):
                 response = self.patch(self.owner, self.editor_m, {'role': ANALYST, 'scope': scope})
@@ -436,6 +628,14 @@ def _applied():
 
 
 class MigrationRollbackGuardTests(TransactionTestCase):
+    serialized_rollback = True  # restaure les données semées par les migrations (exigences KYB…) pour la suite
+
+    def _fixture_setup(self):
+        # Un TransactionTestCase précédent (conversion legacy) vide la base par `flush` AVEC le signal post_migrate,
+        # qui recrée les types de contenu : la restauration sérialisée entrerait en conflit (unicité). On vide donc
+        # sans ce signal, comme le fait Django lui-même entre deux tests à `serialized_rollback`.
+        call_command('flush', verbosity=0, interactive=False, inhibit_post_migrate=True)
+        super()._fixture_setup()
     def tearDown(self):
         call_command('migrate', verbosity=0)
 

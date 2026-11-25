@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Iterable, Optional
 
 from django.db import transaction
+from django.db.models import Q
 
 from apps.common.contexts import (
     CONTEXT_ORGANIZATION, CONTEXT_PROVIDER, CONTEXT_USER, DENY_OBJECT_STATE, DENY_SECURITY, ContextDenied,
@@ -159,10 +160,21 @@ def is_seller_context_public(context_type, context_id) -> bool:
 
 # --- Contextes de l'utilisateur ---------------------------------------------------------------------------
 
+def org_capability_scope_q(capability):
+    """Filtre ORM des appartenances dont le périmètre permet d'exercer `capability` au niveau de l'organisation
+    (ADR 0010 D3, fermé par défaut, même règle que `capabilities.scope_allows` sans périmètre visé) : organisation
+    entière seulement, sauf `org.leave` (tous périmètres)."""
+    if capability == capabilities.CAP_ORG_LEAVE:
+        return Q()
+    return Q(scope_type=capabilities.SCOPE_ORGANIZATION)
+
+
 def get_user_context_roles(user_id) -> dict:
     """Contextes dans lesquels le compte peut agir, avec son rôle : `{(type, id): rôle ou None}`. `USER` (rôle
     nul), `PROVIDER` s'il est actif (rôle nul), organisations ACTIVE dont il est membre actif. Deux requêtes,
-    sans cache. Sert à calculer « le demandeur peut modifier cette offre » pour toute une page sans N+1."""
+    sans cache. Sert à calculer « le demandeur peut modifier cette offre » pour toute une page sans N+1.
+    Une appartenance limitée à une ville ou une unité (ADR 0010 D3) figure avec un rôle NUL : la personne reste
+    membre (clé présente), mais aucune capacité de niveau organisation ne lui est reconnue (fermé par défaut)."""
     parsed = parse_uuid(user_id)
     if parsed is None:
         return {}
@@ -172,10 +184,12 @@ def get_user_context_roles(user_id) -> dict:
     ).values_list('pk', flat=True).first()
     if provider_id is not None:
         roles[(CONTEXT_PROVIDER, provider_id)] = None
-    for organization_id, role in Membership.objects.filter(
+    for organization_id, role, scope_type in Membership.objects.filter(
         user_id=parsed, status=Membership.STATUS_ACTIVE, organization__status=Organization.STATUS_ACTIVE,
-    ).values_list('organization_id', 'role'):
-        roles[(CONTEXT_ORGANIZATION, organization_id)] = role
+    ).values_list('organization_id', 'role', 'scope_type'):
+        roles[(CONTEXT_ORGANIZATION, organization_id)] = (
+            role if scope_type == capabilities.SCOPE_ORGANIZATION else None
+        )
     return roles
 
 
@@ -200,6 +214,7 @@ def get_context_recipients(context_type, context_id, capability) -> list:
         roles = [role for role in capabilities.ROLES if capabilities.role_has_capability(role, capability)]
         accounts = sorted(
             Membership.objects.filter(
+                org_capability_scope_q(capability),
                 organization_id=parsed, status=Membership.STATUS_ACTIVE, role__in=roles,
                 organization__status=Organization.STATUS_ACTIVE, user__is_active=True,
             ).values_list('user_id', flat=True),
@@ -243,6 +258,7 @@ def _organizations_with_team(org_ids) -> set:
     roles = [role for role in capabilities.ROLES if capabilities.role_has_capability(role, 'message.reply')]
     return set(
         Membership.objects.filter(
+            org_capability_scope_q('message.reply'),
             organization_id__in=org_ids, status=Membership.STATUS_ACTIVE, role__in=roles,
             organization__status=Organization.STATUS_ACTIVE, user__is_active=True,
         ).values_list('organization_id', flat=True)
@@ -363,6 +379,7 @@ def get_accessible_organization_ids(user_id, capability) -> set:
     roles = [role for role in capabilities.ROLES if capabilities.role_has_capability(role, capability)]
     return set(
         Membership.objects.filter(
+            org_capability_scope_q(capability),
             user_id=parsed, status=Membership.STATUS_ACTIVE, role__in=roles,
             organization__status=Organization.STATUS_ACTIVE,
         ).values_list('organization_id', flat=True)

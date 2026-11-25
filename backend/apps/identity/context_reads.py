@@ -14,7 +14,7 @@ from apps.moderation.services import is_user_restricted
 
 from . import capabilities
 from .models import KycDocument, Membership, Organization, ProviderProfile, User
-from .sellers import get_user_context_roles
+from .sellers import get_user_context_roles, org_capability_scope_q
 
 _ROLE_LABELS = dict(capabilities.ROLE_CHOICES)
 _DOCUMENT_LABELS = dict(KycDocument.DOC_TYPE_CHOICES)
@@ -78,6 +78,7 @@ def get_organization_recipients(organization_id, capability) -> list:
     roles = [role for role in capabilities.ROLES if capabilities.role_has_capability(role, capability)]
     return sorted(
         Membership.objects.filter(
+            org_capability_scope_q(capability),
             organization_id=parsed, status=Membership.STATUS_ACTIVE, role__in=roles, user__is_active=True,
         ).values_list('user_id', flat=True),
         key=str,

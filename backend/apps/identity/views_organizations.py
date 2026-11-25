@@ -13,7 +13,7 @@ aucune réponse publique (seulement dans le détail interne, réservé aux membr
 """
 from django.utils.decorators import method_decorator
 from django.views.decorators.debug import sensitive_post_parameters
-from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
+from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_serializer, inline_serializer
 from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.fields import DateTimeField
 from rest_framework.response import Response
@@ -228,24 +228,30 @@ class OrganizationLeaveView(APIView):
 
 # --- Équipe (ADR 0008, contrat L1-01 §1) ----------------------------------------------------------------------
 
-def _scope_schema(**kwargs):
+# Composants OpenAPI définis UNE fois (une seule classe par nom de composant : aucune collision `Member`/`Scope`).
+@extend_schema_serializer(component_name='Scope')
+class ScopeSchemaSerializer(serializers.Serializer):
     """Objet `Scope` (contrat §7.1, clés exactes) : V1, seule valeur `{"type": "ORGANIZATION", "id": null}`."""
-    return inline_serializer('Scope', {
-        'type': serializers.ChoiceField(choices=capabilities.SCOPE_TYPES),
-        'id': serializers.UUIDField(allow_null=True),
-    }, **kwargs)
+
+    type = serializers.ChoiceField(choices=capabilities.SCOPE_TYPES)
+    id = serializers.UUIDField(allow_null=True)
+
+
+@extend_schema_serializer(component_name='Member')
+class MemberSchemaSerializer(serializers.Serializer):
+    """Objet `Member` (contrat §0 et §7.1, clés exactes)."""
+
+    membership_id = serializers.UUIDField()
+    display_name = serializers.CharField()
+    role = serializers.ChoiceField(choices=capabilities.ROLES)
+    joined_at = serializers.DateTimeField()
+    is_self = serializers.BooleanField()
+    is_last_effective_owner = serializers.BooleanField(allow_null=True)
+    scope = ScopeSchemaSerializer()
 
 
 def _member_schema(**kwargs):
-    return inline_serializer('Member', {
-        'membership_id': serializers.UUIDField(),
-        'display_name': serializers.CharField(),
-        'role': serializers.ChoiceField(choices=capabilities.ROLES),
-        'joined_at': serializers.DateTimeField(),
-        'is_self': serializers.BooleanField(),
-        'is_last_effective_owner': serializers.BooleanField(allow_null=True),
-        'scope': _scope_schema(),
-    }, **kwargs)
+    return MemberSchemaSerializer(**kwargs)
 
 
 MEMBER_SCHEMA = _member_schema()
@@ -257,7 +263,7 @@ MEMBER_PAGE_SCHEMA = inline_serializer('MemberPage', {
 })
 ROLE_CHANGE_SCHEMA = inline_serializer('MemberRoleChange', {
     'role': serializers.ChoiceField(choices=capabilities.ROLES),
-    'scope': _scope_schema(required=False, allow_null=True),
+    'scope': ScopeSchemaSerializer(required=False, allow_null=True),
     'confirm': serializers.BooleanField(required=False),
     'password': serializers.CharField(required=False, write_only=True),
 })

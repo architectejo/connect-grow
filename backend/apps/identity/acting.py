@@ -130,9 +130,9 @@ def resolve_acting_context(user, raw_header=None, allow_restricted=False) -> Act
     state = _membership_state(user.pk, context_id)
     if state is None:
         raise ContextDenied(DENY_RELATION, MSG_NOT_MEMBER)
-    role, org_status = state[0], state[1]
+    role, org_status, scope_type, scope_id = state
     _check_organization_status(org_status)
-    return ActingContext(user.pk, CONTEXT_ORGANIZATION, context_id, role)
+    return ActingContext(user.pk, CONTEXT_ORGANIZATION, context_id, role, scope_type=scope_type, scope_id=scope_id)
 
 
 def get_acting_context(request, allow_restricted=False) -> ActingContext:
@@ -151,11 +151,17 @@ def get_acting_context(request, allow_restricted=False) -> ActingContext:
     return ctx
 
 
-def authorize(ctx: ActingContext, capability) -> ActingContext:
-    """Refus `DENY_PERMISSION` si le rôle du contexte n'a pas la capacité. Capacité inconnue : erreur de
+def authorize(ctx: ActingContext, capability, target_scope=None) -> ActingContext:
+    """Refus `DENY_PERMISSION` si le rôle du contexte n'a pas la capacité, puis, pour une organisation, si le
+    périmètre de l'appartenance ne couvre pas `target_scope` (`capabilities.scope_allows` ; `None` = organisation
+    entière : un périmètre `CITY` ou `UNIT` est refusé par défaut, sauf `org.leave`). Capacité inconnue : erreur de
     programmation (`UnknownCapability`), pas un refus."""
     if not capabilities.context_has_capability(ctx.type, ctx.role, capability):
         raise ContextDenied(DENY_PERMISSION, MSG_FORBIDDEN)
+    if ctx.type == CONTEXT_ORGANIZATION:
+        holder = capabilities.Scope.of(ctx.scope_type, ctx.scope_id)
+        if not capabilities.scope_allows(holder, capability, target_scope):
+            raise ContextDenied(DENY_PERMISSION, MSG_FORBIDDEN)
     return ctx
 
 
@@ -168,8 +174,8 @@ def authorize_on(
 
     `target_scope` (ADR 0010 §6.1) : périmètre de l'objet visé (`capabilities.Scope`), `None` = organisation entière.
     Pour une organisation, refus `DENY_PERMISSION` si le périmètre de l'appartenance ne le couvre pas
-    (`scope_covers`), après le contrôle de capacité. Sans objet pour les contextes personnel et prestataire (leur
-    titulaire couvre tout son contexte).
+    (`authorize`), après le contrôle de capacité ; un `target_scope` mal formé est un refus. Sans objet pour les
+    contextes personnel et prestataire (leur titulaire couvre tout son contexte).
 
     ÉCRITURES SENSIBLES : cette vérification se fait AVANT l'écriture, donc avant tout verrou. Un service qui
     modifie des données sensibles doit la refaire sous `transaction.atomic()`, juste avant d'écrire, pour
@@ -191,16 +197,14 @@ def authorize_on(
         if state is None:
             raise ContextDenied(DENY_RELATION, MSG_NOT_MEMBER)
         _check_organization_status(state[1])
-        ctx = ActingContext(user.pk, CONTEXT_ORGANIZATION, parsed, state[0])
-        holder_scope = capabilities.Scope.of(state[2], state[3])
+        ctx = ActingContext(
+            user.pk, CONTEXT_ORGANIZATION, parsed, state[0], scope_type=state[2], scope_id=state[3],
+        )
     else:
         raise ContextDenied(DENY_CONTEXT, MSG_MALFORMED)
     if not allow_restricted:
         _ensure_actor_usable(user, capability)
-    authorize(ctx, capability)
-    if context_type == CONTEXT_ORGANIZATION and not capabilities.scope_covers(holder_scope, target_scope):
-        raise ContextDenied(DENY_PERMISSION, MSG_FORBIDDEN)
-    return ctx
+    return authorize(ctx, capability, target_scope=target_scope)
 
 
 def can(user_id, context_type, context_id, capability, target_scope=None) -> bool:
@@ -214,7 +218,8 @@ def can(user_id, context_type, context_id, capability, target_scope=None) -> boo
         return False
     try:
         authorize_on(stub, context_type, context_id, capability, target_scope=target_scope)
-    except ContextDenied:
+    except (ContextDenied, ValueError, TypeError):
+        # `ValueError`/`TypeError` : périmètre visé mal formé (défense en profondeur ; `scope_allows` refuse déjà).
         return False
     return True
 
@@ -283,11 +288,19 @@ class AvailableContext:
     status: str  # `results` : toujours ACTIVE ; `unavailable` : SUSPENDED ou ARCHIVED (explicite à la construction)
 
 
-# Colonnes lues pour décrire un contexte d'organisation (rien d'autre : ni périmètre, ni réglage interne).
+# Colonnes lues pour décrire un contexte d'organisation (rien d'autre ; le type de périmètre règle les capacités affichées).
 _CONTEXT_FIELDS = (
-    'role', 'organization__id', 'organization__name', 'organization__org_type', 'organization__logo',
+    'role', 'scope_type', 'organization__id', 'organization__name', 'organization__org_type', 'organization__logo',
     'organization__legacy_business_profile_id', 'organization__status',
 )
+
+
+def _membership_capabilities(membership) -> list:
+    """Capacités affichées pour une appartenance : celles du rôle si le périmètre couvre toute l'organisation ;
+    sinon seulement celles que `scope_allows` laisse passer sans périmètre visé (`org.leave`)."""
+    granted = capabilities.capabilities_for_context(CONTEXT_ORGANIZATION, membership.role)
+    holder = capabilities.Scope(membership.scope_type, None)  # seul le type compte sans périmètre visé
+    return [c for c in granted if capabilities.scope_allows(holder, c)]
 
 
 def get_contexts_for_user(user) -> list:
@@ -317,7 +330,7 @@ def get_contexts_for_user(user) -> list:
         result.append(AvailableContext(
             type=CONTEXT_ORGANIZATION, id=org.pk, name=org.name, role=membership.role, org_type=org.org_type,
             photo=org.logo.url if org.logo else None,
-            capabilities=tuple(capabilities.capabilities_for_context(CONTEXT_ORGANIZATION, membership.role)),
+            capabilities=tuple(_membership_capabilities(membership)),
             migrated_from_business=org.legacy_business_profile_id is not None, status=Organization.STATUS_ACTIVE,
         ))
     return result

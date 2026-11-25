@@ -305,7 +305,7 @@ _STATUS_MESSAGES = {
 @subscribe('identity.seller_context_status_changed', name='notifications.notify_organization_status')
 def notify_organization_status(event):
     """Annonce la suspension, l'archivage ou la réactivation d'une organisation à toute son équipe active
-    (administrateurs principaux, administrateurs, éditeurs, analystes ; hors auteur de l'action). Texte neutre,
+    (administrateurs principaux, administrateurs, éditeurs, analystes, membres ; hors auteur de l'action). Texte neutre,
     sans motif ni auteur ; le lien mène à la page de l'organisation. Les autres contextes (compte, prestataire)
     ne produisent aucune notification ici. Aucun membre actif : rien n'est envoyé."""
     payload = event.payload

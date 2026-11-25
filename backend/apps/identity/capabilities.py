@@ -152,14 +152,41 @@ class Scope(NamedTuple):
 ORGANIZATION_SCOPE = Scope(SCOPE_ORGANIZATION, None)
 
 
+def _normalize_scope(scope) -> Scope:
+    """Périmètre bien formé, ou `ValueError` : `None` = organisation entière ; sinon couple (type connu, identifiant),
+    identifiant nul si et seulement si le type est `ORGANIZATION` (même règle que la contrainte en base)."""
+    if scope is None:
+        return ORGANIZATION_SCOPE
+    if not isinstance(scope, tuple) or len(scope) != 2 or scope[0] not in SCOPE_TYPES:
+        raise ValueError(f"Périmètre mal formé : {scope!r}")
+    normalized = Scope.of(*scope)
+    if (normalized.type == SCOPE_ORGANIZATION) != (normalized.id is None):
+        raise ValueError(f"Périmètre mal formé : {scope!r}")
+    return normalized
+
+
 def scope_covers(holder_scope, target_scope) -> bool:
     """Vrai si le périmètre détenu couvre le périmètre visé. `ORGANIZATION` couvre tout ; sinon il faut l'égalité
-    (aucune hiérarchie d'unités en V1). `None` vaut organisation entière, des deux côtés."""
-    holder = holder_scope or ORGANIZATION_SCOPE
-    target = target_scope or ORGANIZATION_SCOPE
+    (aucune hiérarchie d'unités en V1). `None` vaut organisation entière, des deux côtés. Un périmètre mal formé lève
+    `ValueError` (les appelants d'autorisation passent par `scope_allows`, qui en fait un refus)."""
+    holder = _normalize_scope(holder_scope)
+    target = _normalize_scope(target_scope)
     if holder.type == SCOPE_ORGANIZATION:
         return True
-    return Scope.of(*holder) == Scope.of(*target)
+    return holder == target
+
+
+def scope_allows(holder_scope, capability, target_scope=None) -> bool:
+    """Règle unique « le périmètre détenu permet d'exercer cette capacité sur ce périmètre visé » (ADR 0010 D3,
+    fermée par défaut) : sans périmètre visé, la capacité s'exerce sur l'organisation entière, donc un périmètre
+    `CITY` ou `UNIT` ne la couvre pas. Seule exception : `org.leave` (quitter sa propre appartenance ne vise aucun
+    périmètre). Un périmètre visé mal formé est un refus, jamais une erreur."""
+    if capability == CAP_ORG_LEAVE:
+        return True
+    try:
+        return scope_covers(holder_scope, target_scope)
+    except (ValueError, TypeError, AttributeError):
+        return False
 
 
 def can_delegate(actor_role, actor_scope, target_role, target_scope) -> bool:

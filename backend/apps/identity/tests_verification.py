@@ -203,18 +203,24 @@ class SubmissionTests(VerificationBase):
 
 
 class ListAndDeleteTests(VerificationBase):
-    def test_every_role_lists_own_organization_documents_paginated_without_urls(self):
+    def test_submitting_roles_list_own_organization_documents_paginated_without_urls(self):
+        """La liste des pièces est réservée à `org.verification_submit` (décision L1-01-B6, audit M2) : éditeur et
+        analyste n'ont que l'état agrégé (`verification/`)."""
         for document_type in (RCCM, IDN, REP):
             self.make_doc(document_type=document_type)
         other = services.create_organization(self.outsider, 'Autre', 'ENTREPRISE')
         self.make_doc(org=other, uploader=self.outsider)
-        for who in (self.owner, self.admin, self.editor, self.analyst):
+        for who in (self.owner, self.admin):
             self.client.force_authenticate(who)
             response = self.client.get(self.base)
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.data['count'], 3)
             self.assertEqual(set(response.data['results'][0]), DOC_KEYS)
             self.assertNotIn('private_media', json.dumps(response.data, default=str))
+        for who in (self.editor, self.analyst):
+            self.client.force_authenticate(who)
+            response = self.client.get(self.base)
+            self.assertEqual((response.status_code, response.data['code']), (403, 'DENY_PERMISSION'))
 
     def test_non_member_and_unknown_organization_get_the_same_refusal(self):
         self.client.force_authenticate(self.outsider)
@@ -356,14 +362,15 @@ class ClaimsTests(VerificationBase):
         self.decide(self.make_doc(RCCM), reviewer())
         self.make_doc(IDN, status='REFUSE')
         KycDocument.objects.filter(document_type=IDN).update(rejection_reason='Flou')
-        for who in (self.owner, self.analyst):
+        # Motif de refus : seulement pour `org.verification_submit` (décision L1-01-B6) ; l'analyste a l'état agrégé.
+        for who, reason in ((self.owner, 'Flou'), (self.analyst, '')):
             self.client.force_authenticate(who)
             response = self.client.get(self.verification_url)
             self.assertEqual(response.status_code, 200)
             self.assertEqual(set(response.data), {'verified_claims', 'summary', 'requirements'})
             states = {r['document_type']: r['status'] for r in response.data['requirements']}
             self.assertEqual(states, {RCCM: 'VALIDE', IDN: 'REFUSE', REP: 'MANQUANTE'})
-            self.assertEqual(response.data['requirements'][1]['rejection_reason'], 'Flou')
+            self.assertEqual(response.data['requirements'][1]['rejection_reason'], reason)
             self.assertEqual(response.data['summary'], {'complete': False, 'label': None})
             self.assertNotIn('private_media', json.dumps(response.data, default=str))
         self.client.force_authenticate(self.outsider)

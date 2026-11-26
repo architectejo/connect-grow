@@ -52,7 +52,7 @@ Le code existant a été écrit sur la base du CDC v1.0. Ces tâches l'alignent 
 | L1-01-B5 | Libellé « Administrateur principal » côté backend | dev-backend | Fait (10e5b00 ; 2025 tests) | ADR 0010 |
 | L1-01-D2 | Spécifications d'écran de la gouvernance | designer-ux | Fait (`docs/specs/L1-01-ecrans-gouvernance.md`) | ADR 0010 |
 | L1-01-B6 | Rôle Membre et périmètre sur l'appartenance | dev-backend | Fait (relu, audité ; périmètre fermé par défaut ; 2091 tests) | ADR 0010 |
-| L1-01-B7 | Invitations v2 (Administrateur avec confirmation, aperçu enrichi) + revue sécurité S3 | dev-backend, auditeur-securite | En cours | ADR 0010, Q23 |
+| L1-01-B7 | Invitations v2 (Administrateur avec confirmation, aperçu enrichi) + revue sécurité S3 | dev-backend, auditeur-securite | Fait (code de rattachement, rejets automatiques ; relu, audité S3 ; 2176 tests) | ADR 0010, Q23 |
 | L1-01-B8 | Anti-abus de création d'organisations (fin du plafond de 10) + S5 | dev-backend, auditeur-securite | À faire | ADR 0010, Q22 |
 | L1-01-B9 | Nominations d'Administrateur principal, niveau d'assurance, groupe Vérification + S4 | dev-backend, auditeur-securite | À faire | ADR 0010, Q21, Q26, Q30 |
 | L1-01-B10 | État « administration à régulariser » et commande `sync_organization_governance` | dev-backend | À faire | ADR 0010, Q17 |

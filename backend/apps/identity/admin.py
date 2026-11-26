@@ -245,16 +245,28 @@ class SuspensionReasonForm(forms.Form):
 class OrganizationAdmin(ReadOnlyAdmin):
     """Lecture seule (ADR 0006, 11.4). Le personnel suspend et réactive par les actions ci-dessous, qui
     passent par les services (journal d'audit et événement de statut), réservées à la permission
-    `identity.suspend_organization`. Le nom et les coordonnées des membres ne sont pas affichés."""
+    `identity.suspend_organization`. Le nom et les coordonnées des membres ne sont pas affichés.
 
-    list_display = ('name', 'org_type', 'status', 'created_at')
-    list_filter = ('status', 'org_type')
+    File de revue de création (ADR 0010 D8) : filtre « Revue de création : En revue » ; levée par l'action dédiée
+    (permission `identity.review_organization_creation`, service audité). Le refus d'une organisation douteuse passe
+    par la suspension (motif « Modération »). Le nombre de créations du compte n'est pas affiché."""
+
+    list_display = ('name', 'org_type', 'status', 'creation_review_status', 'created_at')
+    list_filter = ('status', 'creation_review_status', 'org_type')
     search_fields = ('name',)
     exclude = ('logo', 'nif', 'created_by', 'legacy_business_profile_id')
-    actions = ['suspend_selected', 'reactivate_selected']
+    actions = ['suspend_selected', 'reactivate_selected', 'clear_creation_review_selected']
 
     def has_suspend_permission(self, request):
         return request.user.has_perm('identity.suspend_organization')
+
+    def has_review_creation_permission(self, request):
+        return request.user.has_perm(services.REVIEW_CREATION_PERMISSION)
+
+    @admin.action(description="Lever la revue de création des organisations sélectionnées",
+                  permissions=['review_creation'])
+    def clear_creation_review_selected(self, request, queryset):
+        self._run(request, queryset, lambda org: services.clear_organization_creation_review(request.user, org.pk))
 
     @admin.action(description="Suspendre les organisations sélectionnées", permissions=['suspend'])
     def suspend_selected(self, request, queryset):
@@ -351,7 +363,7 @@ class OrganizationDocumentRequirementAdmin(admin.ModelAdmin):
 @admin.register(IdentitySettings)
 class IdentitySettingsAdmin(SingletonSettingsAdminMixin, admin.ModelAdmin):
     list_display = (
-        'max_organizations_per_account', 'max_categories_per_context', 'org_phone_channels_enabled',
+        'max_memberships_hard_limit', 'max_categories_per_context', 'org_phone_channels_enabled',
         'kyb_file_retention_days', 'invitation_ttl_days', 'max_pending_invitations', 'invitation_history_days',
         'admin_invitation_confirmation_hours',
     )

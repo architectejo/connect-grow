@@ -567,21 +567,23 @@ class AccountDeletionTests(RecetteBase):
 # --- Règle 11 : réglages configurables -----------------------------------------------------------------
 
 class SettingsTests(RecetteBase):
-    def test_organization_limit_comes_from_the_settings(self):
+    def test_hard_limit_comes_from_the_settings_and_is_never_published(self):
         solo = User.objects.create_user(email='solo@example.com', password='x', full_name='Solo', phone_verified=True)
         settings_row = IdentitySettings.get_solo()
-        settings_row.max_organizations_per_account = 2
+        settings_row.max_memberships_hard_limit = 2
         settings_row.save()
         client = self.api(solo)
         limits = client.get(f'{ORGS}limits/')
         self.assertEqual(limits.status_code, 200)
-        self.assertIn('2', json.dumps(limits.json()))
+        # Q22 (L1-01-B8) : le plafond technique n'est jamais publié.
+        self.assertNotIn('max_memberships_hard_limit', limits.json())
+        self.assertNotIn('max_organizations_per_account', limits.json())
         for i in range(2):
             self.assertEqual(client.post(ORGS, {'name': f'Orga numero {i}', 'org_type': 'ONG'}, format='json').status_code, 201)
         refused = client.post(ORGS, {'name': 'Orga numero 3', 'org_type': 'ONG'}, format='json')
         self.assertEqual(refused.status_code, 409, refused.content)
-        self.assertEqual(self.code(refused), 'organization_limit_reached')
-        settings_row.max_organizations_per_account = 3
+        self.assertEqual(self.code(refused), 'account_review_required')
+        settings_row.max_memberships_hard_limit = 3
         settings_row.save()
         self.assertEqual(client.post(ORGS, {'name': 'Orga numero 3', 'org_type': 'ONG'}, format='json').status_code, 201)
 

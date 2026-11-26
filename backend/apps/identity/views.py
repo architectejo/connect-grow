@@ -26,7 +26,7 @@ from .serializers import (
 )
 from .services import (
     ActingContextMixin, ContactSettingsError, get_acting_context, KycError, decide_kyc_document, get_contact_settings,
-    get_contexts_for_user, get_unavailable_organizations,
+    get_contexts_for_user, get_unavailable_organizations, governance_block,
     get_document_for_download,
     revoke_all_sessions, set_channel_consent, set_contact_phone, validate_new_password, verify_contact_phone,
 )
@@ -140,7 +140,13 @@ class ContextListView(APIView):
                 'status': item.status,
             }
 
-        results = [serialize(item) for item in get_contexts_for_user(request.user)]
+        def serialize_result(item):
+            data = serialize(item)
+            if item.type == CONTEXT_ORGANIZATION:
+                data['governance'] = governance_block(item.under_review)  # contrat §7.6 ; jamais de seuil
+            return data
+
+        results = [serialize_result(item) for item in get_contexts_for_user(request.user)]
         unavailable = [serialize(item) for item in get_unavailable_organizations(request.user)]
         response = Response({
             'count': len(results), 'next': None, 'previous': None, 'results': results, 'unavailable': unavailable,

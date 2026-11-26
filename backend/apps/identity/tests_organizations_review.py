@@ -192,11 +192,11 @@ class ActorAndTargetTests(TeamTestBase):
 
     def test_quota_counts_only_active_organizations(self):
         row = IdentitySettings.get_solo()
-        row.max_organizations_per_account = 1
+        row.max_memberships_hard_limit = 1
         row.save()
         user = make_user('quota')
         first = services.create_organization(user, 'Une', 'ONG')
-        self.assertBusiness('organization_limit_reached', services.create_organization, user, 'Deux', 'ONG')
+        self.assertBusiness('account_review_required', services.create_organization, user, 'Deux', 'ONG')
         services.archive_organization(user, first.pk)
         self.assertEqual(services.create_organization(user, 'Deux', 'ONG').name, 'Deux')
 

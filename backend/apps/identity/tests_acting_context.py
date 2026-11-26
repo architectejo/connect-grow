@@ -432,7 +432,9 @@ class ContextsEndpointTests(TestCase):
         self.assertEqual([r['type'] for r in results], ['USER', 'PROVIDER', 'ORGANIZATION', 'ORGANIZATION', 'ORGANIZATION'])
         self.assertEqual([r['name'] for r in results[2:]], ['alpha', 'Beta', 'Zeta'])
         for item in results:
-            self.assertEqual(set(item), self.EXPECTED_KEYS)
+            # Contrat §7.6 (L1-01-B8) : `governance` sur les seuls éléments ORGANIZATION.
+            extra = {'governance'} if item['type'] == 'ORGANIZATION' else set()
+            self.assertEqual(set(item), self.EXPECTED_KEYS | extra)
         provider = results[1]
         self.assertEqual(provider['id'], str(profile.pk))
         self.assertEqual(provider['capabilities'], sorted(capabilities.PERSONAL_CAPABILITIES))

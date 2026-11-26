@@ -393,6 +393,44 @@ def notify_organization_status(event):
         )
 
 
+@subscribe('identity.organization_governance_changed', name='notifications.notify_governance_change')
+def notify_governance_change(event):
+    """Gouvernance d'une organisation (ADR 0010 §7). Textes neutres : jamais la cause de la revue, ni un nombre, ni un
+    seuil (Q22), ni le nom d'un membre ou du personnel ; destinataires résolus À LA LIVRAISON.
+    - `creation_review` : le créateur (auteur de l'événement), s'il est toujours membre actif ;
+    - `creation_review_cleared` : l'équipe active (hors auteur, membre du personnel).
+    Les autres valeurs (B10) ne produisent encore rien ici."""
+    payload = event.payload
+    organization_id, change = _require(payload, 'organization_id', 'change')
+    organization = _user_id(organization_id)
+    if change not in _GOVERNANCE_MESSAGES:
+        return
+    team = identity_services.get_organization_recipients(organization, CAP_LEAVE)
+    actor = payload.get('actor_id')
+    if change == 'creation_review':
+        recipients = [r for r in team if str(r) == actor]
+    else:
+        recipients = [r for r in team if str(r) != actor]
+    title, template = _GOVERNANCE_MESSAGES[change]
+    content = template.format(name=_organization_name(organization))
+    for recipient in recipients:
+        services.notify(
+            user_id=recipient, notification_type=services.SYSTEM, title=title, content=content,
+            link=f'/organizations/{organization}', context=(CONTEXT_ORGANIZATION, organization),
+        )
+
+
+_GOVERNANCE_MESSAGES = {
+    'creation_review': (
+        "Organisation en cours d'examen",
+        "« {name} » est en cours d'examen par l'équipe Connecte+. Elle n'apparaît pas encore publiquement.",
+    ),
+    'creation_review_cleared': (
+        "Examen terminé", "L'examen de « {name} » par l'équipe Connecte+ est terminé.",
+    ),
+}
+
+
 _KYB_MESSAGES = {
     'VALIDE': ("Pièce de vérification validée", "La pièce « {label} » de « {name} » a été validée."),
     'REFUSE': (

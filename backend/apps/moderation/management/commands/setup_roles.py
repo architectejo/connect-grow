@@ -28,7 +28,8 @@ ADMINISTRATOR_EXTRA_PERMISSIONS = {
     'catalog.forbiddenitem': ['add', 'change', 'delete'],
     # ADR 0006, 11.4 : organisations en lecture et suspension/réactivation (dont celles converties en SUSPENDED),
     # exigences de pièces et réglages modifiables ; appartenances en lecture seule (ni téléphone ni e-mail).
-    'identity.organization': ['view', 'suspend'],
+    # ADR 0010 D8 (L1-01-B8) : levée de la revue de création (`review_organization_creation`, codename complet).
+    'identity.organization': ['view', 'suspend', '=review_organization_creation'],
     'identity.membership': ['view'],
     'identity.organizationdocumentrequirement': ['view', 'add', 'change', 'delete'],
     'identity.identitysettings': ['view', 'change'],
@@ -49,7 +50,8 @@ def _permissions_for(spec):
     for label, actions in spec.items():
         app_label, model = label.split('.')
         for action in actions:
-            codename = f'{action}_{model}'
+            # `=codename` : permission personnalisée dont le nom ne suit pas `<action>_<modèle>`.
+            codename = action[1:] if action.startswith('=') else f'{action}_{model}'
             try:
                 permissions.append(Permission.objects.get(content_type__app_label=app_label, codename=codename))
             except Permission.DoesNotExist:

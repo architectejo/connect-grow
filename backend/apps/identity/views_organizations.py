@@ -26,12 +26,14 @@ from apps.common.utils import parse_uuid
 from . import capabilities
 from .services import (
     archive_organization, change_role, create_organization, get_active_role, get_category_ids_by_organization,
-    get_internal_verification, get_organization_for_member, get_organization_limits, get_verification_data,
+    get_internal_verification, get_organization_for_member, get_organization_governance, get_organization_limits,
+    get_verification_data,
     leave_organization, list_members, public_display_name, public_organizations_queryset, remove_member,
     sole_effective_owner_id, transfer_ownership_to, update_organization,
 )
 from .throttles import (
-    OrganizationCreateThrottle, OrganizationListThrottle, OrganizationSensitiveThrottle, OrganizationWriteThrottle,
+    OrganizationCreateBurstThrottle, OrganizationCreateThrottle, OrganizationListThrottle, OrganizationSensitiveThrottle,
+    OrganizationWriteThrottle,
 )
 
 EXEMPT_REASON = (
@@ -103,6 +105,7 @@ def serialize_internal(request, organization, role):
         'status': organization.status, 'created_at': _iso(organization.created_at),
         'my_role': role, 'capabilities': capabilities.capabilities_for_role(role),
         'migrated_from_business': organization.legacy_business_profile_id is not None,
+        'governance': get_organization_governance(organization),
         'verification': {
             'required': verification['required'],
             'verified_claims': [_claim(c) for c in verification['verified_claims']],
@@ -136,10 +139,13 @@ class OrganizationViewSet(viewsets.ViewSet):
     acting_context_exempt = EXEMPT_REASON
 
     def get_throttles(self):
-        """Défauts du projet (anonyme/utilisateur) + un throttle propre à l'action : lecture publique par IP
-        pour `list`, plafond de création par compte pour `create`."""
-        specific = OrganizationListThrottle if self.action == 'list' else OrganizationCreateThrottle
-        return [throttle() for throttle in api_settings.DEFAULT_THROTTLE_CLASSES] + [specific()]
+        """Défauts du projet (anonyme/utilisateur) + les throttles propres à l'action : lecture publique par IP
+        pour `list` ; pour `create`, quota journalier et quota en rafale par compte (ADR 0010 §9.3)."""
+        if self.action == 'list':
+            specific = [OrganizationListThrottle]
+        else:
+            specific = [OrganizationCreateThrottle, OrganizationCreateBurstThrottle]
+        return [throttle() for throttle in [*api_settings.DEFAULT_THROTTLE_CLASSES, *specific]]
 
     def get_permissions(self):
         if self.action == 'list':
@@ -156,6 +162,16 @@ class OrganizationViewSet(viewsets.ViewSet):
         ]
         return paginator.get_paginated_response(results)
 
+    @extend_schema(
+        operation_id='organizations_create',
+        description=(
+            "Crée une organisation dont l'appelant devient administrateur principal (201 + `OrganizationInternal`, "
+            "dont `governance.under_review`). Une création retenue en revue par l'équipe Connecte+ répond aussi 201. "
+            "Erreurs : 400 par champ ; 403 `phone_verification_required`, `DENY_SECURITY` ; "
+            "409 `account_review_required` (refus neutre, sans valeur) ; 429 (`org_create`, `org_create_burst`, "
+            "`Retry-After`, message générique)."
+        ),
+    )
     def create(self, request):
         # Un champ absent vaut `None` : le service le refuse par un 400 (jamais une erreur 500 sur un corps vide).
         values = {'name': None, 'org_type': None, **_extract(request, CREATE_FIELDS)}
@@ -165,12 +181,24 @@ class OrganizationViewSet(viewsets.ViewSet):
         ))
 
 
+LIMITS_SCHEMA = inline_serializer('OrganizationLimits', fields={
+    'max_categories_per_context': serializers.IntegerField(),
+    'name_min_length': serializers.IntegerField(),
+    'name_max_length': serializers.IntegerField(),
+    'description_max_length': serializers.IntegerField(),
+    'invitation_ttl_days': serializers.IntegerField(),
+    'max_pending_invitations': serializers.IntegerField(),
+})
+
+
 class OrganizationLimitsView(APIView):
-    """`GET organizations/limits/` : limites lues dans les réglages (le front ne code aucune limite)."""
+    """`GET organizations/limits/` : limites lues dans les réglages (le front ne code aucune limite). Aucun seuil
+    anti-abus (plafond technique, revue de création) n'y figure : contrat §7.5, Q22."""
 
     acting_context_exempt = EXEMPT_REASON
     permission_classes = [permissions.IsAuthenticated]
 
+    @extend_schema(operation_id='organizations_limits', responses=LIMITS_SCHEMA)
     def get(self, request):
         return _private(Response(get_organization_limits()))
 

@@ -3,6 +3,12 @@
 Tests par `MigrationExecutor` : état historique avant `identity 0011`, jeu de données fabriqué, migration en avant
 puis retour arrière.
 
+Indépendance du schéma courant (L1-01-B8) : les données converties sont lues par les seuls modèles HISTORIQUES de
+l'état `NEW` (`hist`, `self.new_apps`) ; le code courant (services, API) ne s'exécute jamais sur la base figée à
+`identity 0011`. Son comportement sur des organisations converties est vérifié dans
+`ConvertedWorldOnCurrentSchemaTests`, après conversion PUIS application de toutes les migrations suivantes (le chemin réel de la production), sans aucun
+contournement de colonnes. Une nouvelle colonne d'un modèle courant ne casse donc plus ces tests.
+
 Coût maîtrisé : les scénarios en lecture seule partagent UN monde (migration et jeu de données construits une fois
 par classe, `_fixture_teardown` neutralisé) ; seuls les scénarios qui modifient l'état (retour arrière, rejeu,
 garde, base vierge, volume) reconstruisent le leur.
@@ -17,18 +23,14 @@ from django.core.cache import cache
 from django.core.management import call_command
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.db.models import Q
 from django.test import SimpleTestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.identity import acting, capabilities
 from apps.identity import legacy_conversion as rules
+from apps.identity import models as current_models
 from apps.identity import services as identity_services
-from apps.identity.models import (
-    ContactConsent, ContactPoint, IdentitySettings, KycDocument, LegacyAccountMapping, Membership, Organization, OrganizationCategory,
-)
 from apps.identity.verification import get_verification_summaries
 from apps.moderation.services import get_restricted_user_ids
 
@@ -153,8 +155,16 @@ class Builder:
         return profile
 
 
+def hist(name, app='identity'):
+    """Modèle HISTORIQUE à l'état converti (`NEW`, identity 0011). Les assertions sur les données converties ne lisent
+    jamais un modèle courant : ses colonnes ajoutées depuis (périmètre, revue de création…) n'existent pas à ce schéma,
+    et chaque nouvelle colonne casserait ces tests sans rapport avec la conversion. Le comportement du code courant sur
+    des données converties est vérifié à part, au dernier schéma (`ConvertedWorldOnCurrentSchemaTests`)."""
+    return state(NEW).get_model(app, name)
+
+
 def org_of(profile):
-    return Organization.objects.get(legacy_business_profile_id=profile.pk)
+    return hist('Organization').objects.get(legacy_business_profile_id=profile.pk)
 
 
 class SharedStateTestCase(TransactionTestCase):
@@ -278,18 +288,17 @@ class ConvertedWorldTests(SharedStateTestCase):
         )
         self.assertEqual(org.created_at, w.full.created_at)
         self.assertEqual(
-            set(OrganizationCategory.objects.filter(organization=org).values_list('category_id', flat=True)),
+            set(hist('OrganizationCategory').objects.filter(organization=org).values_list('category_id', flat=True)),
             w.categories)
-        # Colonnes explicites : la base est à l'état `identity 0011`, sans les colonnes ajoutées depuis (périmètre, 0018).
-        members = list(Membership.objects.filter(organization=org).values_list(
+        members = list(hist('Membership').objects.filter(organization=org).values_list(
             'user_id', 'role', 'status', 'added_by_id', 'ended_at', 'joined_at',
         ))
         self.assertEqual(len(members), 1)
         self.assertEqual(members[0][:5], (w.owner_id, 'OWNER', 'ACTIVE', None, None))
         self.assertEqual(members[0][5], w.full.created_at)
-        mapping = LegacyAccountMapping.objects.get(user_id=w.owner_id)
+        mapping = hist('LegacyAccountMapping').objects.get(user_id=w.owner_id)
         self.assertEqual(mapping.organization_id, org.pk)
-        docs = KycDocument.objects.filter(organization=org)
+        docs = hist('KycDocument').objects.filter(organization=org)
         self.assertEqual(docs.count(), 3)
         for doc in docs:
             self.assertEqual(doc.uploaded_by_id, w.owner_id)
@@ -301,22 +310,25 @@ class ConvertedWorldTests(SharedStateTestCase):
         self.assertEqual(self.new_apps.get_model('identity', 'BusinessProfile').objects.count(), w.profile_count)
 
     def test_account_address_is_never_copied(self):
-        self.assertFalse(Organization.objects.filter(legacy_business_profile_id__isnull=False)
+        self.assertFalse(hist('Organization').objects.filter(legacy_business_profile_id__isnull=False)
                          .exclude(city_id=None, commune_id=None).exists())
 
     def test_conversion_criterion_is_the_profile_not_user_type(self):
         w = self.w
-        self.assertTrue(Organization.objects.filter(legacy_business_profile_id=w.particulier.pk).exists())
-        self.assertEqual(Organization.objects.filter(legacy_business_profile_id__isnull=False).count(), w.profile_count)
-        self.assertFalse(LegacyAccountMapping.objects.filter(user_id__in=[w.no_profile.pk, w.person.pk]).exists())
+        self.assertTrue(hist('Organization').objects.filter(legacy_business_profile_id=w.particulier.pk).exists())
+        self.assertEqual(
+            hist('Organization').objects.filter(legacy_business_profile_id__isnull=False).count(), w.profile_count)
+        self.assertFalse(
+            hist('LegacyAccountMapping').objects.filter(user_id__in=[w.no_profile.pk, w.person.pk]).exists())
 
     def test_only_the_profile_owner_gets_a_role(self):
         w = self.w
-        self.assertEqual(Membership.objects.count(), w.profile_count)
-        self.assertEqual(set(Membership.objects.values_list('role', 'status', 'added_by')), {('OWNER', 'ACTIVE', None)})
-        self.assertFalse(Membership.objects.filter(user_id=w.staff_plain.pk).exists())
+        self.assertEqual(hist('Membership').objects.count(), w.profile_count)
+        self.assertEqual(
+            set(hist('Membership').objects.values_list('role', 'status', 'added_by')), {('OWNER', 'ACTIVE', None)})
+        self.assertFalse(hist('Membership').objects.filter(user_id=w.staff_plain.pk).exists())
         # Le personnel propriétaire d'un ancien profil reçoit son appartenance de propriétaire, rien de plus.
-        self.assertEqual(Membership.objects.filter(user_id=w.staff_owner.user_id).count(), 1)
+        self.assertEqual(hist('Membership').objects.filter(user_id=w.staff_owner.user_id).count(), 1)
 
     def test_profile_without_offer_is_converted_active(self):
         self.assertEqual(org_of(self.w.no_offer).status, 'ACTIVE')
@@ -341,7 +353,7 @@ class ConvertedWorldTests(SharedStateTestCase):
         self.assertFalse(org_of(self.w.no_offer).logo)
 
     def test_document_already_on_an_organization_is_left_alone(self):
-        self.assertEqual(KycDocument.objects.get(pk=self.w.mixed_doc.pk).organization_id, self.w.other_org.pk)
+        self.assertEqual(hist('KycDocument').objects.get(pk=self.w.mixed_doc.pk).organization_id, self.w.other_org.pk)
 
     # -- suspension (M1) ---------------------------------------------------------------------------------
     def test_initial_status_follows_the_state_of_the_owner(self):
@@ -376,77 +388,6 @@ class ConvertedWorldTests(SharedStateTestCase):
         self.assertTrue(status(w.sanctioned['ban']).endswith('status=SUSPENDED'))
         self.assertTrue(status(w.sanctioned['expired']).endswith('status=ACTIVE'))
 
-    def test_blocking_rule_agrees_with_moderation(self):
-        now = timezone.now()
-        cases = [
-            ('BANNISSEMENT', True, None, True), ('SUSPENSION_TEMPORAIRE', True, now + timedelta(days=1), True),
-            ('SUSPENSION_TEMPORAIRE', True, now - timedelta(days=1), False), ('BANNISSEMENT', False, None, False),
-            ('AVERTISSEMENT', True, None, False), ('MASQUAGE_ANNONCE', True, None, False),
-        ]
-        for kind, active, ends, expected in cases:
-            self.assertIs(rules.is_blocking(kind, active, ends, now), expected, (kind, active, ends))
-        self.assertTrue(rules.owner_is_suspended(False, False))
-        self.assertTrue(rules.owner_is_suspended(True, True))
-        self.assertFalse(rules.owner_is_suspended(True, False))
-        # La commande de pré-vol utilise `get_restricted_user_ids` : même résultat que `is_blocking`.
-        owners = {key: p.user_id for key, p in self.w.sanctioned.items()}
-        self.assertEqual({key for key, uid in owners.items() if uid in get_restricted_user_ids(owners.values())},
-                         {'ban', 'timed'})
-
-    # -- vérification (règle 3) ---------------------------------------------------------------------------
-    def test_derived_verification_matches_the_old_flag(self):
-        w = self.w
-        profiles = (w.full, w.two, w.refused, w.manual)
-        summaries = get_verification_summaries([org_of(p).pk for p in profiles])
-        complete = {p.business_name: summaries[org_of(p).pk]['summary']['complete'] for p in profiles}
-        self.assertEqual(complete, {'Atelier Zorglub': True, 'Deux pieces': False, 'Refusee': False,
-                                    'Drapeau manuel': False})
-        self.assertEqual({p.business_name: p.is_verified for p in profiles},
-                         {'Atelier Zorglub': True, 'Deux pieces': False, 'Refusee': False, 'Drapeau manuel': True})
-        self.assertEqual([c['code'] for c in summaries[org_of(w.full).pk]['verified_claims']],
-                         ['RCCM_VERIFIED', 'NATIONAL_ID_VERIFIED', 'REPRESENTATIVE_VERIFIED'])
-        self.assertEqual(len(summaries[org_of(w.two).pk]['verified_claims']), 2)
-        self.assertEqual(summaries[org_of(w.refused).pk]['verified_claims'], [])
-        self.assertEqual(summaries[org_of(w.manual).pk]['verified_claims'], [])
-        refused = KycDocument.objects.get(organization=org_of(w.refused), document_type='RCCM')
-        self.assertEqual((refused.status, refused.rejection_reason), ('REFUSE', 'Illisible'))
-
-    def test_converted_owner_cannot_decide_their_own_pieces(self):
-        User = get_user_model()
-        for profile in (self.w.staff_owner, self.w.revoked_owner):
-            doc = KycDocument.objects.get(organization=org_of(profile))
-            with self.assertRaises(identity_services.KycError) as ctx:
-                identity_services.decide_kyc_document(doc.pk, User.objects.get(pk=profile.user_id), 'VALIDE')
-            self.assertEqual(ctx.exception.status_code, 403)
-            self.assertEqual(KycDocument.objects.get(pk=doc.pk).status, 'EN_ATTENTE')
-
-    def test_a_revoked_owner_still_cannot_decide_nor_download(self):
-        User = get_user_model()
-        profile = self.w.revoked_owner
-        # Mise à jour d'une seule colonne : la base est à l'état `identity 0011` (sans les colonnes de périmètre, 0018).
-        membership = Membership.objects.filter(organization=org_of(profile))
-        membership.update(status=Membership.STATUS_REVOKED)
-        try:
-            doc = KycDocument.objects.get(organization=org_of(profile))
-            reviewer = User.objects.get(pk=profile.user_id)
-            with self.assertRaises(identity_services.KycError) as ctx:
-                identity_services.decide_kyc_document(doc.pk, reviewer, 'VALIDE')
-            self.assertEqual(ctx.exception.status_code, 403)
-            with self.assertRaises(identity_services.KycError) as ctx:
-                identity_services.get_document_for_download(doc.pk, reviewer)
-            self.assertEqual(ctx.exception.status_code, 403)
-            # Plus aucune route ne donne accès aux pièces à un ancien propriétaire (anciennes routes retirées : 404).
-            client = APIClient()
-            client.force_authenticate(reviewer)
-            self.assertEqual(client.get('/api/v1/accounts/kyc/documents/').status_code, 404)
-            self.assertEqual(client.post('/api/v1/accounts/kyc/documents/', {}, format='json').status_code, 404)
-            self.assertEqual(client.delete(f'/api/v1/accounts/kyc/documents/{doc.pk}/').status_code, 404)
-            # La route d'organisation (`organizations/<id>/kyc/documents/`) n'est plus appelée ici : elle exécute le code
-            # d'autorisation courant, qui lit les colonnes de périmètre (identity 0018) absentes d'une base à l'état
-            # `identity 0011`. Le refus d'un ancien membre y est couvert par `tests_verification` (DENY_RELATION).
-        finally:
-            membership.update(status=Membership.STATUS_ACTIVE)
-
     # -- offres, compteurs, avis -------------------------------------------------------------------------
     def test_offers_counters_and_reviews_follow_the_organization(self):
         w = self.w
@@ -476,12 +417,12 @@ class ConvertedWorldTests(SharedStateTestCase):
         w = self.w
         AuditLog = self.new_apps.get_model('moderation', 'AuditLog')
         lines = list(AuditLog.objects.filter(action='ORG_CONVERTED'))
-        self.assertEqual(len(lines), LegacyAccountMapping.objects.count())
+        self.assertEqual(len(lines), hist('LegacyAccountMapping').objects.count())
         self.assertEqual(len(lines), w.profile_count)
         by_org = {line.target_id: line for line in lines}
-        for mapping in LegacyAccountMapping.objects.all():
+        for mapping in hist('LegacyAccountMapping').objects.all():
             line = by_org[mapping.organization_id]
-            org = Organization.objects.get(pk=mapping.organization_id)
+            org = hist('Organization').objects.get(pk=mapping.organization_id)
             self.assertEqual((line.actor_id, line.target_type, line.context_type, line.context_id),
                              (None, 'organization', 'ORGANIZATION', org.pk))
             self.assertEqual(line.details, f'legacy_business_profile={org.legacy_business_profile_id}; status={org.status}')
@@ -490,7 +431,136 @@ class ConvertedWorldTests(SharedStateTestCase):
         for secret in (SECRET_NIF, SECRET_EMAIL, SECRET_PHONE, SECRET_FULL_NAME, 'Zorglub', SECRET_BIO_MARK):
             self.assertNotIn(secret, blob)
 
-    # -- non-fuite ---------------------------------------------------------------------------------------
+
+class ConvertedWorldOnCurrentSchemaTests(SharedStateTestCase):
+    """Code COURANT sur des organisations converties : monde construit à l'ancien schéma, converti (`NEW`), puis porté
+    au dernier schéma par toutes les migrations suivantes, comme en production. Aucune lecture de colonne n'est
+    neutralisée : une régression du code courant sur une organisation convertie fait échouer ces tests."""
+
+    @classmethod
+    def build(cls, b):
+        w = cls.w = type('World', (), {})()
+        w.full = b.complete_profile()
+        w.owner_id = w.full.user_id
+        w.public_offer = b.offer(w.full.user, 'Offre A')
+        ContactPoint, Consent = (b.apps.get_model('identity', n) for n in ('ContactPoint', 'ContactConsent'))
+        ContactPoint.objects.create(user=w.full.user, phone=SECRET_PHONE, is_verified=True)
+        for channel in ('CALL', 'WHATSAPP'):
+            Consent.objects.create(user=w.full.user, channel=channel, is_granted=True, granted_at=timezone.now(),
+                                   text_version='2026-10-v1', phone_last4=SECRET_PHONE[-4:])
+        w.two = b.profile('Deux pieces', is_verified=False)
+        for doc_type in ('RCCM', 'ID_NATIONALE'):
+            b.doc(w.two, doc_type)
+        w.refused = b.profile('Refusee', is_verified=False)
+        b.doc(w.refused, 'RCCM', status='REFUSE', rejection_reason='Illisible')
+        b.doc(w.refused, 'ID_NATIONALE', status='EN_ATTENTE')
+        w.manual = b.profile('Drapeau manuel', is_verified=True)
+        now = timezone.now()
+        scenarios = {
+            'ban': ('BANNISSEMENT', True, None),
+            'timed': ('SUSPENSION_TEMPORAIRE', True, now + timedelta(days=5)),
+            'expired': ('SUSPENSION_TEMPORAIRE', True, now - timedelta(days=5)),
+            'lifted': ('BANNISSEMENT', False, None),
+            'warning': ('AVERTISSEMENT', True, None),
+        }
+        w.sanctioned = {}
+        for key, (kind, active, ends) in scenarios.items():
+            p = b.profile(f'Sanction {key}')
+            b.sanction(p.user, kind, active, ends)
+            w.sanctioned[key] = p
+        w.staff_owner = b.profile('Chez le personnel', user=b.user(is_staff=True))
+        w.revoked_owner = b.profile('Ancien proprietaire')
+        for p in (w.staff_owner, w.revoked_owner):
+            b.doc(p, 'RCCM', status='EN_ATTENTE')
+        forward()
+        call_command('migrate', verbosity=0)  # identity 0012 et suivantes : dernier schéma
+
+    @staticmethod
+    def org_of(profile):
+        return current_models.Organization.objects.get(legacy_business_profile_id=profile.pk)
+
+    def test_converted_organizations_take_the_defaults_of_later_columns(self):
+        """Les colonnes ajoutées après la conversion prennent leur valeur par défaut : une organisation convertie reste
+        publique (aucune revue de création rétroactive, ADR 0010 §10) et ses appartenances couvrent l'organisation."""
+        org = self.org_of(self.w.full)
+        self.assertEqual(org.creation_review_status, current_models.Organization.CREATION_REVIEW_NONE)
+        self.assertEqual(
+            set(current_models.Membership.objects.filter(organization=org).values_list('scope_type', 'scope_id')),
+            {('ORGANIZATION', None)},
+        )
+        self.assertTrue(identity_services.is_seller_context_public('ORGANIZATION', org.pk))
+
+    def test_blocking_rule_agrees_with_moderation(self):
+        now = timezone.now()
+        cases = [
+            ('BANNISSEMENT', True, None, True), ('SUSPENSION_TEMPORAIRE', True, now + timedelta(days=1), True),
+            ('SUSPENSION_TEMPORAIRE', True, now - timedelta(days=1), False), ('BANNISSEMENT', False, None, False),
+            ('AVERTISSEMENT', True, None, False), ('MASQUAGE_ANNONCE', True, None, False),
+        ]
+        for kind, active, ends, expected in cases:
+            self.assertIs(rules.is_blocking(kind, active, ends, now), expected, (kind, active, ends))
+        self.assertTrue(rules.owner_is_suspended(False, False))
+        self.assertTrue(rules.owner_is_suspended(True, True))
+        self.assertFalse(rules.owner_is_suspended(True, False))
+        # La commande de pré-vol utilise `get_restricted_user_ids` : même résultat que `is_blocking`.
+        owners = {key: p.user_id for key, p in self.w.sanctioned.items()}
+        self.assertEqual({key for key, uid in owners.items() if uid in get_restricted_user_ids(owners.values())},
+                         {'ban', 'timed'})
+
+    def test_derived_verification_matches_the_old_flag(self):
+        w = self.w
+        profiles = (w.full, w.two, w.refused, w.manual)
+        summaries = get_verification_summaries([self.org_of(p).pk for p in profiles])
+        complete = {p.business_name: summaries[self.org_of(p).pk]['summary']['complete'] for p in profiles}
+        self.assertEqual(complete, {'Atelier Zorglub': True, 'Deux pieces': False, 'Refusee': False,
+                                    'Drapeau manuel': False})
+        self.assertEqual({p.business_name: p.is_verified for p in profiles},
+                         {'Atelier Zorglub': True, 'Deux pieces': False, 'Refusee': False, 'Drapeau manuel': True})
+        self.assertEqual([c['code'] for c in summaries[self.org_of(w.full).pk]['verified_claims']],
+                         ['RCCM_VERIFIED', 'NATIONAL_ID_VERIFIED', 'REPRESENTATIVE_VERIFIED'])
+        self.assertEqual(len(summaries[self.org_of(w.two).pk]['verified_claims']), 2)
+        self.assertEqual(summaries[self.org_of(w.refused).pk]['verified_claims'], [])
+        self.assertEqual(summaries[self.org_of(w.manual).pk]['verified_claims'], [])
+        refused = current_models.KycDocument.objects.get(organization=self.org_of(w.refused), document_type='RCCM')
+        self.assertEqual((refused.status, refused.rejection_reason), ('REFUSE', 'Illisible'))
+
+    def test_converted_owner_cannot_decide_their_own_pieces(self):
+        User = get_user_model()
+        for profile in (self.w.staff_owner, self.w.revoked_owner):
+            doc = current_models.KycDocument.objects.get(organization=self.org_of(profile))
+            with self.assertRaises(identity_services.KycError) as ctx:
+                identity_services.decide_kyc_document(doc.pk, User.objects.get(pk=profile.user_id), 'VALIDE')
+            self.assertEqual(ctx.exception.status_code, 403)
+            self.assertEqual(current_models.KycDocument.objects.get(pk=doc.pk).status, 'EN_ATTENTE')
+
+    def test_a_revoked_owner_still_cannot_decide_nor_download(self):
+        User = get_user_model()
+        profile = self.w.revoked_owner
+        Membership = current_models.Membership
+        membership = Membership.objects.filter(organization=self.org_of(profile))
+        membership.update(status=Membership.STATUS_REVOKED)
+        try:
+            doc = current_models.KycDocument.objects.get(organization=self.org_of(profile))
+            reviewer = User.objects.get(pk=profile.user_id)
+            with self.assertRaises(identity_services.KycError) as ctx:
+                identity_services.decide_kyc_document(doc.pk, reviewer, 'VALIDE')
+            self.assertEqual(ctx.exception.status_code, 403)
+            with self.assertRaises(identity_services.KycError) as ctx:
+                identity_services.get_document_for_download(doc.pk, reviewer)
+            self.assertEqual(ctx.exception.status_code, 403)
+            # Plus aucune route ne donne accès aux pièces à un ancien propriétaire (anciennes routes retirées : 404).
+            client = APIClient()
+            client.force_authenticate(reviewer)
+            self.assertEqual(client.get('/api/v1/accounts/kyc/documents/').status_code, 404)
+            self.assertEqual(client.post('/api/v1/accounts/kyc/documents/', {}, format='json').status_code, 404)
+            self.assertEqual(client.delete(f'/api/v1/accounts/kyc/documents/{doc.pk}/').status_code, 404)
+            # La route d'organisation refuse aussi un ancien membre (code d'autorisation courant, sans contournement).
+            organization_id = self.org_of(profile).pk
+            refused = client.get(f'/api/v1/accounts/organizations/{organization_id}/kyc/documents/')
+            self.assertEqual(refused.status_code, 403)
+        finally:
+            membership.update(status=Membership.STATUS_ACTIVE)
+
     @staticmethod
     def read_public_api(client, w, org):
         return (
@@ -501,17 +571,11 @@ class ConvertedWorldTests(SharedStateTestCase):
 
     def test_no_contact_data_is_copied_and_the_public_api_leaks_nothing(self):
         w = self.w
-        org = org_of(w.full)
-        self.assertFalse(ContactPoint.objects.filter(organization__isnull=False).exists())
-        self.assertFalse(ContactConsent.objects.filter(organization__isnull=False).exists())
-        self.assertEqual(ContactConsent.objects.filter(user_id=w.owner_id).count(), 2)
-        client = APIClient()
-        # Schéma historique (identity 0011) : les colonnes de réglages ajoutées par identity 0016 n'existent pas ;
-        # des réglages par défaut non enregistrés suffisent à ces lectures.
-        # Idem pour le périmètre (identity 0018) : le filtre des destinataires par périmètre est neutralisé.
-        with mock.patch.object(IdentitySettings, 'get_solo', return_value=IdentitySettings()), \
-                mock.patch('apps.identity.sellers.org_capability_scope_q', return_value=Q()):
-            detail, listing, page = self.read_public_api(client, w, org)
+        org = self.org_of(w.full)
+        self.assertFalse(current_models.ContactPoint.objects.filter(organization__isnull=False).exists())
+        self.assertFalse(current_models.ContactConsent.objects.filter(organization__isnull=False).exists())
+        self.assertEqual(current_models.ContactConsent.objects.filter(user_id=w.owner_id).count(), 2)
+        detail, listing, page = self.read_public_api(APIClient(), w, org)
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()['allowed_channels'], ['MESSAGE'])
         self.assertEqual(detail.json()['seller']['context_type'], 'ORGANIZATION')
@@ -530,14 +594,7 @@ class ConvertedWorldTests(SharedStateTestCase):
     def test_converted_organization_is_listed_in_the_contexts_of_its_owner(self):
         client = APIClient()
         client.force_authenticate(get_user_model().objects.get(pk=self.w.owner_id))
-        # Schéma historique (identity 0011) : pas de colonnes de périmètre (`scope_type`, `scope_id` : identity 0018) ;
-        # lecture sans elles.
-        fields = tuple(f for f in acting._CONTEXT_FIELDS if f not in ('scope_type', 'scope_id'))
-        with mock.patch.object(acting, '_CONTEXT_FIELDS', fields), mock.patch.object(
-            acting, '_membership_capabilities',
-            lambda m: capabilities.capabilities_for_context('ORGANIZATION', m.role),
-        ):
-            response = client.get('/api/v1/accounts/contexts/')
+        response = client.get('/api/v1/accounts/contexts/')
         organizations = [r for r in response.json()['results'] if r['type'] == 'ORGANIZATION']
         self.assertEqual(len(organizations), 1)
         self.assertTrue(organizations[0]['migrated_from_business'])
@@ -589,8 +646,10 @@ class RollbackAndReplayTests(TransactionTestCase):
         self.private_offer = b.offer(b.profile('Prive').user, 'Deja prive', public=False)
 
     def counts(self):
-        return (Organization.objects.count(), Membership.objects.count(), LegacyAccountMapping.objects.count(),
-                OrganizationCategory.objects.count())
+        return tuple(
+            hist(name).objects.count()
+            for name in ('Organization', 'Membership', 'LegacyAccountMapping', 'OrganizationCategory')
+        )
 
     def test_rollback_restores_the_contexts_and_deletes_nothing_then_forward_again_duplicates_nothing(self):
         self.seed()
@@ -652,18 +711,18 @@ class RollbackAndReplayTests(TransactionTestCase):
         profile = self.b.profile('Reprise')
         new = forward()
         org_id = org_of(profile).pk
-        LegacyAccountMapping.objects.all().delete()
-        Membership.objects.all().delete()
+        hist('LegacyAccountMapping').objects.all().delete()
+        hist('Membership').objects.all().delete()
         importlib.import_module(MIGRATION).convert_profiles(new, None)
-        self.assertEqual(Organization.objects.count(), 1)
-        self.assertEqual(LegacyAccountMapping.objects.get().organization_id, org_id)
-        self.assertEqual(Membership.objects.filter(organization_id=org_id, role='OWNER').count(), 1)
+        self.assertEqual(hist('Organization').objects.count(), 1)
+        self.assertEqual(hist('LegacyAccountMapping').objects.get().organization_id, org_id)
+        self.assertEqual(hist('Membership').objects.filter(organization_id=org_id, role='OWNER').count(), 1)
 
     def test_incomplete_conversion_aborts_with_a_clear_error(self):
         self.b.profile('Reprise')
         new = forward()
-        LegacyAccountMapping.objects.all().delete()
-        Membership.objects.all().delete()
+        hist('LegacyAccountMapping').objects.all().delete()
+        hist('Membership').objects.all().delete()
         # Modèle historique : à ce schéma, la table des invitations (identity 0015) n'existe pas encore.
         new.get_model('identity', 'Organization').objects.all().delete()
         Mapping = new.get_model('identity', 'LegacyAccountMapping')
@@ -686,6 +745,6 @@ class RollbackAndReplayTests(TransactionTestCase):
             b.doc(profile, 'RCCM')
         with CaptureQueriesContext(connection) as queries:
             forward()
-        self.assertEqual(Organization.objects.count(), 200)
-        self.assertEqual(Membership.objects.count(), 200)
+        self.assertEqual(hist('Organization').objects.count(), 200)
+        self.assertEqual(hist('Membership').objects.count(), 200)
         self.assertLess(len(queries), 200 * 15)

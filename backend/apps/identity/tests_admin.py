@@ -123,13 +123,15 @@ class IdentitySettingsAuditTests(TestCase):
         old = settings_row.kyb_file_retention_days
         self.client.force_login(staff)
         data = {
-            'max_organizations_per_account': settings_row.max_organizations_per_account,
+            'max_memberships_hard_limit': settings_row.max_memberships_hard_limit,
             'max_categories_per_context': settings_row.max_categories_per_context,
             'kyb_file_retention_days': old + 30,
             'invitation_ttl_days': settings_row.invitation_ttl_days,
             'max_pending_invitations': settings_row.max_pending_invitations,
             'invitation_history_days': settings_row.invitation_history_days,
             'admin_invitation_confirmation_hours': settings_row.admin_invitation_confirmation_hours,
+            'org_creation_review_window_days': settings_row.org_creation_review_window_days,
+            'org_creation_review_threshold': settings_row.org_creation_review_threshold,
         }
         if settings_row.org_phone_channels_enabled:
             data['org_phone_channels_enabled'] = 'on'

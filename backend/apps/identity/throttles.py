@@ -180,6 +180,21 @@ class OrganizationCreateThrottle(UserWriteThrottle):
     scope = 'org_create'
 
 
+# Taux de repli de `org_create_burst` (ADR 0010 §9.3, valeur provisoire QG-1) tant que
+# REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] ne le déclare pas : une entrée du réglage l'emporte toujours.
+ORG_CREATE_BURST_FALLBACK_RATE = '2/hour'
+
+
+class OrganizationCreateBurstThrottle(UserWriteThrottle):
+    """Création d'organisation en rafale : 2/heure par compte, en plus de `org_create` (ADR 0010 D8, §9.3). Le 429
+    porte `Retry-After` et un message générique, sans valeur de quota (Q22)."""
+
+    scope = 'org_create_burst'
+
+    def get_rate(self):
+        return self.THROTTLE_RATES.get(self.scope, ORG_CREATE_BURST_FALLBACK_RATE)
+
+
 class OrganizationListThrottle(IpThrottle):
     """Liste publique des organisations (recherche, filtres) : par adresse IP, anonymes compris."""
 

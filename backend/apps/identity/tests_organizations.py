@@ -257,16 +257,16 @@ class CreateOrganizationTests(TestCase):
             services.create_organization(inactive, 'Valide', 'ONG')
         self.assertEqual(Organization.objects.count(), 0)
 
-    def test_limit_comes_from_the_setting_and_counts_active_memberships(self):
-        self.assertEqual(IdentitySettings.get_solo().max_organizations_per_account, 10)
+    def test_hard_limit_comes_from_the_setting_and_counts_active_memberships(self):
+        self.assertEqual(IdentitySettings.get_solo().max_memberships_hard_limit, 200)
         settings_row = IdentitySettings.get_solo()
-        settings_row.max_organizations_per_account = 2
+        settings_row.max_memberships_hard_limit = 2
         settings_row.save()
         first = services.create_organization(self.user, 'Une', 'ONG')
         services.create_organization(self.user, 'Deux', 'ONG')
         with self.assertRaises(services.OrganizationError) as caught:
             services.create_organization(self.user, 'Trois', 'ONG')
-        self.assertEqual(caught.exception.get_codes(), 'organization_limit_reached')
+        self.assertEqual(caught.exception.get_codes(), 'account_review_required')
         self.assertEqual(caught.exception.status_code, 409)
         self.assertEqual(Organization.objects.count(), 2)
         # Une organisation quittée libère une place (seules les appartenances ACTIVE comptent).
@@ -356,11 +356,11 @@ class MembershipRulesTests(TeamTestBase):
     def test_added_member_is_subject_to_the_organization_limit(self):
         services.create_organization(self.outsider, 'Sienne', 'ONG')
         row = IdentitySettings.get_solo()
-        row.max_organizations_per_account = 1
+        row.max_memberships_hard_limit = 1
         row.save()
         self.assertBusiness('user_unavailable', services.add_member, self.owner, self.org.pk, self.outsider.pk, EDITOR)
-        # Le propriétaire déjà au plafond (1) ne peut plus rien créer.
-        self.assertBusiness('organization_limit_reached', services.create_organization, self.owner, 'Autre', 'ONG')
+        # Le propriétaire déjà au plafond technique (1) ne peut plus rien créer (refus neutre).
+        self.assertBusiness('account_review_required', services.create_organization, self.owner, 'Autre', 'ONG')
 
     def test_returning_member_reactivates_the_same_row(self):
         row_id = Membership.objects.get(organization=self.org, user=self.editor).pk
@@ -610,16 +610,14 @@ class AuditAndEventTests(TeamTestBase):
 class SchemaTests(TestCase):
     def test_default_settings_are_closed_and_configurable(self):
         row = IdentitySettings.get_solo()
-        self.assertEqual(row.max_organizations_per_account, 10)
+        self.assertEqual(row.max_memberships_hard_limit, 200)
         self.assertFalse(row.org_phone_channels_enabled)
         self.assertEqual(row.max_categories_per_context, 5)
         self.assertEqual(IdentitySettings.get_solo().pk, row.pk)
-        row.max_organizations_per_account = 0
-        with self.assertRaises(Exception):
-            row.full_clean()
-        row.max_organizations_per_account = 101
-        with self.assertRaises(Exception):
-            row.full_clean()
+        for value in (49, 1001):
+            row.max_memberships_hard_limit = value
+            with self.assertRaises(Exception):
+                row.full_clean()
 
     def test_document_requirements_seed(self):
         def types(org_type):

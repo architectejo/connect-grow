@@ -27,6 +27,8 @@ _TYPES = (
     # `notifications.purge_context_notifications` (révocation : supprime ses notifications de l'organisation).
     EventType('identity.membership_changed'),
     # Abonnés : `marketplace.sync_seller_visibility` (T5a) ; `notifications.notify_organization_status` (T6).
+    # `reason` vaut aussi `creation_review_cleared` (L1-01-B8, ADR 0010 §7) : la synchronisation recalcule sans lire le
+    # motif ; la notification de l'équipe passe par `identity.organization_governance_changed`.
     EventType('identity.seller_context_status_changed'),
     # T9-3 : un compte (contexte `USER`) ou un profil prestataire (`PROVIDER`) est supprimé ; jamais `ORGANIZATION`.
     # Charge utile : `context_type`, `context_id`, aucune donnée personnelle. Abonnés : `marketplace.purge_seller_context`,
@@ -41,6 +43,11 @@ _TYPES = (
     # `identity.membership_changed` porte en plus la clé additive `via` (« invitation » ou absente) et, pour une
     # entrée après confirmation d'une invitation Administrateur, la clé additive `confirmed: true` (L1-01-B7).
     EventType('identity.organization_invitation_changed'),
+    # ADR 0010 §7 : `organization_id`, `change`, `actor_id` ; UUID et codes seulement (jamais le nombre de créations ni
+    # un seuil). L1-01-B8 : `change` vaut `creation_review` (création retenue en revue) ou `creation_review_cleared`
+    # (revue levée par le personnel) ; B10 ajoutera `primary_admin_missing`, `primary_admin_restored`. Abonné :
+    # `notifications.notify_governance_change`.
+    EventType('identity.organization_governance_changed'),
     # Identité d'une organisation modifiée (T8) : noms de champs seulement, aucune valeur.
     EventType('identity.organization_updated', no_subscriber=True),
     # Émetteur : `decide_kyc_document` (T4) ; abonné `notifications.notify_kyb_decision` (T6).

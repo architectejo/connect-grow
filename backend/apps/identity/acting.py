@@ -287,13 +287,16 @@ class AvailableContext:
     capabilities: tuple
     migrated_from_business: bool
     status: str  # `results` : toujours ACTIVE ; `unavailable` : SUSPENDED ou ARCHIVED (explicite à la construction)
+    # Revue de création en cours (ADR 0010 D8) : lue pour la clé `governance` des seuls éléments ORGANIZATION de
+    # `results` (contrat §7.6) ; `unavailable` garde exactement ses 9 clés.
+    under_review: bool = False
 
 
 # Colonnes lues pour décrire un contexte d'organisation (rien d'autre ; le type de périmètre règle les capacités affichées).
 _CONTEXT_FIELDS = (
     'role', 'scope_type', 'scope_id', 'organization__id', 'organization__name', 'organization__org_type',
     'organization__logo',
-    'organization__legacy_business_profile_id', 'organization__status',
+    'organization__legacy_business_profile_id', 'organization__status', 'organization__creation_review_status',
 )
 
 
@@ -336,6 +339,7 @@ def get_contexts_for_user(user) -> list:
             photo=org.logo.url if org.logo else None,
             capabilities=tuple(_membership_capabilities(membership)),
             migrated_from_business=org.legacy_business_profile_id is not None, status=Organization.STATUS_ACTIVE,
+            under_review=org.creation_review_status == Organization.CREATION_REVIEW_PENDING,
         ))
     return result
 

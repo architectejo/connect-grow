@@ -450,7 +450,7 @@ class PreviewTests(InvBase):
     def test_preview_ignores_the_target_state(self):
         _, token = self.make()
         Membership.objects.create(organization=self.fresh_org()[0], user=self.invitee, role=OWNER)
-        set_settings(max_organizations_per_account=1)
+        set_settings(max_memberships_hard_limit=1)
         self.assertEqual(self.preview(token).status_code, 200)  # plafond atteint : propre à la cible, non contrôlé ici
 
 
@@ -711,24 +711,24 @@ class AcceptInvitationTests(InvBase):
 
     def test_organization_limit_at_acceptance_leaves_the_invitation_pending(self):
         invitation, token = self.make()
-        set_settings(max_organizations_per_account=1)
+        set_settings(max_memberships_hard_limit=1)
         elsewhere = self.fresh_org('Ailleurs')[0]
         Membership.objects.create(organization=elsewhere, user=self.invitee, role=ANALYST)
         response = self.accept(token)
-        self.assertDenied(response, 'organization_limit_reached', 409)
+        self.assertDenied(response, 'account_review_required', 409)
         self.assertEqual(self.fresh(invitation).status, 'PENDING')
         self.assertEqual(self.fresh(invitation).closed_at, None)
         self.assertFalse(Membership.objects.filter(organization=self.org, user=self.invitee).exists())
         self.assertFalse(self.audit('INVITATION_ACCEPTED').exists())
         refusal = self.audit('INVITATION_REFUSED').get()
-        self.assertTrue(refusal.details.endswith('reason=limit'))
+        self.assertTrue(refusal.details.endswith('reason=account_review'))
         self.assertFalse(OutboxEvent.objects.filter(payload__change='accepted').exists())
         Membership.objects.filter(organization=elsewhere, user=self.invitee).update(status='REVOKED')
         self.assertEqual(self.accept(token).status_code, 200)
 
     def test_target_errors_do_not_count_as_invalid_token_failures(self):
         _, token = self.make()
-        set_settings(max_organizations_per_account=1)
+        set_settings(max_memberships_hard_limit=1)
         Membership.objects.create(organization=self.fresh_org('Ailleurs')[0], user=self.invitee, role=ANALYST)
         for _ in range(7):
             self.assertEqual(self.accept(token).status_code, 409)
@@ -767,7 +767,7 @@ class AcceptInvitationTests(InvBase):
 
     def test_phone_check_precedes_the_organization_limit(self):
         _, token = self.make()
-        set_settings(max_organizations_per_account=1)
+        set_settings(max_memberships_hard_limit=1)
         Membership.objects.create(organization=self.fresh_org('Ailleurs')[0], user=self.invitee, role=ANALYST)
         type(self.invitee).objects.filter(pk=self.invitee.pk).update(phone_verified=False)
         client = team.login(type(self.invitee).objects.get(pk=self.invitee.pk))
@@ -870,7 +870,7 @@ class DeclineInvitationTests(InvBase):
 
     def test_decline_never_checks_cap_phone_or_membership(self):
         invitation, token = self.make()
-        set_settings(max_organizations_per_account=1)
+        set_settings(max_memberships_hard_limit=1)
         Membership.objects.create(organization=self.fresh_org('Ailleurs')[0], user=self.invitee, role=ANALYST)
         Membership.objects.create(organization=self.org, user=self.invitee, role=ANALYST)
         type(self.invitee).objects.filter(pk=self.invitee.pk).update(phone_verified=False)

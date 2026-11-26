@@ -382,9 +382,22 @@ ORG_TYPES = tuple(value for value, _ in ORG_TYPE_CHOICES)
 class IdentitySettings(SingletonSettingsModel):
     """Réglages d'identité modifiables dans le back-office (règle 11). Ligne unique."""
 
-    max_organizations_per_account = models.PositiveIntegerField(
-        default=10, validators=[MinValueValidator(1), MaxValueValidator(100)],
-        help_text="Nombre maximal d'appartenances actives à une organisation par compte (1 à 100).",
+    # Anti-abus de création (ADR 0010 D8, Q22) : seuils INTERNES, jamais renvoyés par l'API ni affichés. Valeurs
+    # provisoires, à confirmer (QG-1).
+    max_memberships_hard_limit = models.PositiveIntegerField(
+        default=200, validators=[MinValueValidator(50), MaxValueValidator(1000)],
+        help_text="Seuil de sécurité interne : ne jamais le communiquer comme une limite. Plafond technique "
+                  "d'appartenances actives par compte (50 à 1 000) ; au-delà, refus neutre « examen du compte ».",
+    )
+    org_creation_review_window_days = models.PositiveSmallIntegerField(
+        default=30, validators=[MinValueValidator(1), MaxValueValidator(365)],
+        help_text="Seuil de sécurité interne : ne jamais le communiquer comme une limite. Fenêtre glissante, en "
+                  "jours, du comptage des organisations créées par un même compte (1 à 365).",
+    )
+    org_creation_review_threshold = models.PositiveSmallIntegerField(
+        default=5, validators=[MinValueValidator(2), MaxValueValidator(100)],
+        help_text="Seuil de sécurité interne : ne jamais le communiquer comme une limite. Rang de création dans la "
+                  "fenêtre à partir duquel une nouvelle organisation est retenue en revue par l'équipe (2 à 100).",
     )
     max_categories_per_context = models.PositiveSmallIntegerField(
         default=5, validators=[MinValueValidator(1), MaxValueValidator(20)],
@@ -454,6 +467,14 @@ class Organization(BaseModel):
         (STATUS_SUSPENDED, "Suspendue"),
         (STATUS_ARCHIVED, "Archivée"),
     )
+    CREATION_REVIEW_NONE = 'NONE'
+    CREATION_REVIEW_PENDING = 'PENDING'
+    CREATION_REVIEW_CLEARED = 'CLEARED'
+    CREATION_REVIEW_CHOICES = (
+        (CREATION_REVIEW_NONE, "Aucune"),
+        (CREATION_REVIEW_PENDING, "En revue"),
+        (CREATION_REVIEW_CLEARED, "Levée"),
+    )
 
     name = models.CharField(max_length=255)
     org_type = models.CharField(max_length=30, choices=ORG_TYPE_CHOICES)
@@ -468,6 +489,11 @@ class Organization(BaseModel):
     city_id = models.UUIDField(null=True, blank=True, db_index=True)
     commune_id = models.UUIDField(null=True, blank=True, db_index=True)
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    # Revue de création (ADR 0010 D8) : état propre, indépendant du statut (règle 8) ; PENDING = absente de l'annuaire
+    # et des pages publiques jusqu'à la levée par le personnel. Jamais exposé avec sa cause (seuil caché, Q22).
+    creation_review_status = models.CharField(
+        max_length=10, choices=CREATION_REVIEW_CHOICES, default=CREATION_REVIEW_NONE,
+    )
     # Motif normalisé, jamais de texte libre.
     suspension_reason = models.CharField(max_length=30, blank=True, default='')
     created_by = models.ForeignKey(
@@ -481,8 +507,12 @@ class Organization(BaseModel):
         indexes = [
             models.Index(fields=['status', 'org_type'], name='org_status_type'),
             models.Index(fields=['name'], name='org_name'),
+            models.Index(fields=['creation_review_status'], name='org_creation_review'),
         ]
-        permissions = [('suspend_organization', "Peut suspendre et réactiver une organisation")]
+        permissions = [
+            ('suspend_organization', "Peut suspendre et réactiver une organisation"),
+            ('review_organization_creation', "Peut lever la revue de création d'une organisation"),
+        ]
 
     def save(self, *args, **kwargs):
         # Logo ré-encodé (sans EXIF/GPS, taille plafonnée) avant stockage.

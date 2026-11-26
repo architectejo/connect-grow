@@ -63,6 +63,13 @@ STATUS_REASON_SUSPENDED = 'suspended'
 STATUS_REASON_REACTIVATED = 'reactivated'
 STATUS_REASON_ARCHIVED = 'archived'
 STATUS_REASON_OWNERS_CHANGED = 'owners_changed'
+STATUS_REASON_CREATION_REVIEW_CLEARED = 'creation_review_cleared'
+
+# Changements portés par `identity.organization_governance_changed` (ADR 0010 §7 ; `primary_admin_*` : B10).
+GOVERNANCE_CREATION_REVIEW = 'creation_review'
+GOVERNANCE_CREATION_REVIEW_CLEARED = 'creation_review_cleared'
+
+REVIEW_CREATION_PERMISSION = 'identity.review_organization_creation'
 
 # Opérations qui touchent un siège de propriétaire : ressaisie du mot de passe (ADR 0008 §8.2).
 REAUTH_TRANSFER = 'transfer'
@@ -322,13 +329,35 @@ def _audit_membership(
     )
 
 
-def _ensure_under_limit(user_id):
-    """Plafond d'appartenances actives par compte (réglage, règle 11). Le compte est verrouillé pour que
-    deux créations simultanées ne dépassent pas la limite."""
+ACCOUNT_REVIEW_REQUIRED_MESSAGE = (
+    "Votre compte doit être examiné par l'équipe Connecte+ avant de créer ou de rejoindre d'autres organisations."
+)
+
+
+def account_review_required_error():
+    """Refus NEUTRE du plafond technique caché (ADR 0010 D8, Q22) : ni chiffre, ni mot « limite », ni conseil de
+    quitter une organisation (ce serait révéler un seuil). Contrat §7.5."""
+    return OrganizationError(ACCOUNT_REVIEW_REQUIRED_MESSAGE, 'account_review_required')
+
+
+def _ensure_under_hard_limit(user_id):
+    """Plafond TECHNIQUE caché d'appartenances actives par compte (`max_memberships_hard_limit`, règle 11) : borne de
+    sûreté des listes non paginées (`contexts/`), jamais présentée comme une limite. Le compte est verrouillé pour que
+    deux créations ou acceptations simultanées ne le dépassent pas ; ce verrou couvre aussi le comptage de la revue
+    de création (ADR 0010 §11)."""
     User.objects.select_for_update().filter(pk=user_id).first()
-    limit = get_identity_settings().max_organizations_per_account
-    if count_active_memberships(user_id) >= limit:
-        raise OrganizationError("Vous avez atteint le nombre maximal d'organisations.", 'organization_limit_reached')
+    if count_active_memberships(user_id) >= get_identity_settings().max_memberships_hard_limit:
+        raise account_review_required_error()
+
+
+def _creation_needs_review(creator_id, now) -> bool:
+    """Vrai si la création en cours est, sur la fenêtre glissante, au moins la N-ième du compte (N =
+    `org_creation_review_threshold`) : organisations créées par ce compte, TOUS statuts (une organisation archivée ou
+    suspendue compte : sinon créer puis archiver contournerait la revue). Appelée sous le verrou du compte."""
+    settings_row = get_identity_settings()
+    since = now - timedelta(days=settings_row.org_creation_review_window_days)
+    previous = Organization.objects.filter(created_by_id=creator_id, created_at__gte=since).count()
+    return previous + 1 >= settings_row.org_creation_review_threshold
 
 
 _FORBIDDEN_NAME_CATEGORIES = ('Cc', 'Cf', 'Zl', 'Zp')
@@ -507,7 +536,11 @@ def create_organization(
 ) -> Organization:
     """Crée une organisation dont `creator` devient propriétaire, en une seule transaction (R1 de la
     spec : si l'appartenance échoue, aucune organisation n'existe). Conditions : compte actif, téléphone
-    de connexion vérifié, absence de restriction, plafond du réglage non atteint."""
+    de connexion vérifié, absence de restriction, plafond technique caché non atteint (409 `account_review_required`,
+    neutre). Anti-abus (ADR 0010 D8) : au-delà du seuil interne de créations sur la fenêtre, l'organisation est créée
+    (201 normal) mais retenue en revue (`creation_review_status = PENDING`) : utilisable par son équipe, absente de
+    l'annuaire et des pages publiques jusqu'à la levée par le personnel. Une double soumission idempotente ne crée rien
+    et ne compte pas."""
     if not creator.is_active:
         raise ContextDenied(DENY_SECURITY, "Votre compte est désactivé.")
     if not creator.phone_verified:
@@ -527,10 +560,14 @@ def create_organization(
             duplicate = _recent_duplicate(creator, name, org_type)
             if duplicate is not None:
                 return duplicate  # double soumission : réponse idempotente, rien n'est recréé
-            _ensure_under_limit(creator.pk)
+            _ensure_under_hard_limit(creator.pk)
+            held = _creation_needs_review(creator.pk, timezone.now())
             organization = Organization(
                 name=name, org_type=org_type, description=description, nif=nif,
                 city_id=city_id, commune_id=commune_id, status=Organization.STATUS_ACTIVE, created_by=creator,
+                creation_review_status=(
+                    Organization.CREATION_REVIEW_PENDING if held else Organization.CREATION_REVIEW_NONE
+                ),
             )
             if logo:
                 organization.logo = logo
@@ -547,6 +584,13 @@ def create_organization(
                 context=(CONTEXT_ORGANIZATION, organization.pk),
             )
             _publish_membership_change(organization, membership, CHANGE_ADDED, None, ROLE_OWNER, creator)
+            if held:
+                # Ni le nombre de créations ni le seuil ne sont journalisés (Q22) : seulement le fait.
+                record_audit(
+                    creator, 'ORG_CREATION_HELD_FOR_REVIEW', target=organization, details="threshold_reached=true",
+                    context=(CONTEXT_ORGANIZATION, organization.pk),
+                )
+                _publish_governance_change(organization, GOVERNANCE_CREATION_REVIEW, creator)
     except BaseException:
         # Le fichier est écrit par `save()` avant la validation de la transaction : pas d'orphelin si elle
         # est annulée (limite : une transaction englobante annulée plus tard n'est pas détectable ici).
@@ -793,6 +837,62 @@ def reactivate_organization(actor, organization_id) -> Organization:
     return organization
 
 
+def _ensure_creation_review_permission(actor):
+    if not actor.is_active or not actor.has_perm(REVIEW_CREATION_PERMISSION):
+        raise ContextDenied(DENY_PERMISSION, "Vous n'avez pas le droit de lever la revue de création.")
+
+
+def clear_organization_creation_review(actor, organization_id) -> Organization:
+    """Levée de la revue de création par le personnel (permission `identity.review_organization_creation`, ADR 0010
+    §6.4) : `PENDING -> CLEARED` par mise à jour conditionnelle sous verrou (une seule levée gagne), audit
+    `ORG_CREATION_REVIEW_CLEARED`, événements de gouvernance (`creation_review_cleared`) et de visibilité (les offres de
+    l'organisation redeviennent publiques si elle l'est). Le refus d'une organisation douteuse passe par la suspension
+    (`suspend_organization`, motif `moderation`). Conflit d'intérêts : un acteur qui est ou a été membre de
+    l'organisation, ou qui l'a créée, ne lève pas sa revue (refus journalisé). Organisation sans revue en cours :
+    409 `invalid_status`."""
+    _ensure_creation_review_permission(actor)
+    parsed = parse_uuid(organization_id)
+    known = Organization.objects.filter(pk=parsed).first() if parsed is not None else None
+    if known is not None and (
+        known.created_by_id == actor.pk or Membership.objects.filter(organization=known, user_id=actor.pk).exists()
+    ):
+        record_audit(
+            actor, 'ORG_CREATION_REVIEW_DENIED', target=known, details="reason=interest_conflict",
+            context=(CONTEXT_ORGANIZATION, known.pk),
+        )
+        raise OrganizationError(
+            "Vous ne pouvez pas lever la revue d'une organisation dont vous êtes ou avez été membre, "
+            "ou que vous avez créée.",
+            'interest_conflict', status.HTTP_403_FORBIDDEN,
+        )
+    with transaction.atomic():
+        organization = _lock_organization(organization_id)
+        cleared = Organization.objects.filter(
+            pk=organization.pk, creation_review_status=Organization.CREATION_REVIEW_PENDING,
+        ).update(creation_review_status=Organization.CREATION_REVIEW_CLEARED, updated_at=timezone.now())
+        if not cleared:
+            raise OrganizationError("Cette organisation n'est pas en revue de création.", 'invalid_status')
+        organization.refresh_from_db()
+        record_audit(
+            actor, 'ORG_CREATION_REVIEW_CLEARED', target=organization, details=f"status={organization.status}",
+            context=(CONTEXT_ORGANIZATION, organization.pk),
+        )
+        _publish_governance_change(organization, GOVERNANCE_CREATION_REVIEW_CLEARED, actor)
+        _publish_status_change(organization, STATUS_REASON_CREATION_REVIEW_CLEARED, actor)
+    return organization
+
+
+def _publish_governance_change(organization, change, actor):
+    """`identity.organization_governance_changed` (ADR 0010 §7) : UUID et codes seulement."""
+    publish_event(
+        'identity.organization_governance_changed', aggregate_type='organization', aggregate_id=organization.pk,
+        payload={
+            'organization_id': str(organization.pk), 'change': change,
+            'actor_id': str(actor.pk) if actor is not None else None,
+        },
+    )
+
+
 def _publish_status_change(organization, reason, actor):
     publish_event(
         'identity.seller_context_status_changed', aggregate_type='organization', aggregate_id=organization.pk,
@@ -862,7 +962,7 @@ def add_member(actor, organization_id, user_id, role) -> Membership:
         if target is None or moderation_services.is_user_restricted(target.pk):
             raise _unavailable_user_error()
         try:
-            _ensure_under_limit(target.pk)
+            _ensure_under_hard_limit(target.pk)
         except OrganizationError:
             raise _unavailable_user_error()
         return _activate_membership(actor, organization, target, role)

@@ -48,7 +48,7 @@ from .models import (
 )
 from .organizations import (
     INVITATION_CHANGE_REJECTED, OrganizationError, _activate_membership, _audit_invitation, _authorize_member,
-    _effective_owner_ids, _ensure_under_limit, _get_organization, _lock_organization, _require_reauthentication,
+    _effective_owner_ids, _ensure_under_hard_limit, _get_organization, _lock_organization, _require_reauthentication,
     _unavailable_user_error, _validate_scope, get_identity_settings, membership_scope, publish_invitation_change,
 )
 from .throttles import FailureLimiter
@@ -560,9 +560,9 @@ def _accept_locked(user, invitation) -> InvitationAcceptance:
             'phone_verification_required', status.HTTP_403_FORBIDDEN,
         ))
     try:
-        _ensure_under_limit(user.pk)
+        _ensure_under_hard_limit(user.pk)
     except OrganizationError as error:
-        raise _Refusal('limit', error)
+        raise _Refusal('account_review', error)
     if Membership.objects.filter(organization=organization, user=user, status=Membership.STATUS_ACTIVE).exists():
         raise _Refusal('already_member', _already_member_error())
     # Une seule attente de confirmation par personne et par organisation (ADR 0010 §6.2), garantie sous le verrou de
@@ -683,7 +683,7 @@ def _eligible_accepted_person(organization, invitation) -> User:
     if target is None or moderation_services.is_user_restricted(target_id) or not target.phone_verified:
         raise _unavailable_user_error()
     try:
-        _ensure_under_limit(target_id)
+        _ensure_under_hard_limit(target_id)
     except OrganizationError:
         raise _unavailable_user_error()
     if Membership.objects.filter(

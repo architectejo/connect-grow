@@ -107,11 +107,13 @@ class InvitationModelTests(TestCase):
 class InvitationSettingsTests(TestCase):
     def admin_data(self, row, **extra):
         data = {
-            'max_organizations_per_account': row.max_organizations_per_account,
+            'max_memberships_hard_limit': row.max_memberships_hard_limit,
             'max_categories_per_context': row.max_categories_per_context,
             'kyb_file_retention_days': row.kyb_file_retention_days,
             'invitation_ttl_days': 7, 'max_pending_invitations': 20, 'invitation_history_days': 30,
             'admin_invitation_confirmation_hours': row.admin_invitation_confirmation_hours,
+            'org_creation_review_window_days': row.org_creation_review_window_days,
+            'org_creation_review_threshold': row.org_creation_review_threshold,
         }
         data.update(extra)
         return data

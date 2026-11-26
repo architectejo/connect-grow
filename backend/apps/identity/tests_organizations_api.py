@@ -30,7 +30,7 @@ OWNER, ADMIN, EDITOR, ANALYST = capabilities.ROLE_OWNER, capabilities.ROLE_ADMIN
 
 INTERNAL_KEYS = {
     'id', 'name', 'org_type', 'description', 'logo', 'nif', 'city_id', 'commune_id', 'category_ids', 'status',
-    'created_at', 'my_role', 'capabilities', 'migrated_from_business', 'verification',
+    'created_at', 'my_role', 'capabilities', 'migrated_from_business', 'verification', 'governance',
 }
 VERIFICATION_KEYS = {'required', 'verified_claims', 'summary'}
 PUBLIC_KEYS = {
@@ -187,12 +187,16 @@ class CreateTests(ApiBase):
         self.assertEqual(response.json()['code'], 'phone_verification_required')
         self.assertEqual(Organization.objects.count(), 0)
 
-    def test_organization_limit_is_a_setting(self):
-        IdentitySettings.objects.update_or_create(pk=IdentitySettings.get_solo().pk, defaults={'max_organizations_per_account': 2})
+    def test_hard_limit_is_a_setting_and_its_refusal_is_neutral(self):
+        IdentitySettings.objects.update_or_create(pk=IdentitySettings.get_solo().pk, defaults={'max_memberships_hard_limit': 2})
         self.assertEqual(self.create_via_api(name='Une').status_code, 201)
         self.assertEqual(self.create_via_api(name='Deux').status_code, 201)
         refused = self.create_via_api(name='Trois')
-        self.assertEqual((refused.status_code, refused.json()['code']), (409, 'organization_limit_reached'))
+        self.assertEqual((refused.status_code, refused.json()['code']), (409, 'account_review_required'))
+        self.assertEqual(refused.json()['detail'], (
+            "Votre compte doit être examiné par l'équipe Connecte+ avant de créer ou de rejoindre d'autres "
+            "organisations."
+        ))
         self.assertEqual(Organization.objects.count(), 2)
 
     def test_restricted_or_inactive_account_is_refused(self):
@@ -813,15 +817,12 @@ class LimitsTests(ApiBase):
         response = self.client.get(LIMITS)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {
-            'max_categories_per_context': 5, 'max_organizations_per_account': 10, 'name_min_length': 2,
+            'max_categories_per_context': 5, 'name_min_length': 2,
             'name_max_length': 255, 'description_max_length': 2000,
             'invitation_ttl_days': 7, 'max_pending_invitations': 20,
         })
-        IdentitySettings.objects.filter(pk=IdentitySettings.get_solo().pk).update(
-            max_categories_per_context=8, max_organizations_per_account=3,
-        )
-        body = self.client.get(LIMITS).json()
-        self.assertEqual((body['max_categories_per_context'], body['max_organizations_per_account']), (8, 3))
+        IdentitySettings.objects.filter(pk=IdentitySettings.get_solo().pk).update(max_categories_per_context=8)
+        self.assertEqual(self.client.get(LIMITS).json()['max_categories_per_context'], 8)
 
     def test_authentication_is_required_and_nothing_is_personal(self):
         self.assertEqual(APIClient().get(LIMITS).status_code, 401)

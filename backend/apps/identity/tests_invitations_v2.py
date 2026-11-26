@@ -279,9 +279,9 @@ class AwaitingAcceptanceTests(V2Base):
 
     def test_target_limit_is_checked_at_acceptance(self):
         invitation, token = self.make(invite_role=ADMIN)
-        set_settings(max_organizations_per_account=1)
+        set_settings(max_memberships_hard_limit=1)
         Membership.objects.create(organization=self.fresh_org('Ailleurs')[0], user=self.invitee, role=ANALYST)
-        self.assertDenied(self.accept(token), 'organization_limit_reached', 409)  # `account_review_required` : B8
+        self.assertDenied(self.accept(token), 'account_review_required', 409)
         self.assertEqual(self.fresh(invitation).status, 'PENDING')
 
     def test_two_concurrent_acceptances_of_the_same_admin_link_one_wins(self):
@@ -501,7 +501,7 @@ class ConfirmTests(V2Base):
                 Membership.objects.filter(user=self.invitee).delete()
                 User.objects.filter(pk=self.invitee.pk).update(is_active=True, phone_verified=True)
                 Sanction.objects.all().delete()
-                set_settings(max_organizations_per_account=10)
+                set_settings(max_memberships_hard_limit=10)
                 invitation, _ = self.awaiting()
                 if how == 'inactive':
                     User.objects.filter(pk=self.invitee.pk).update(is_active=False)
@@ -512,7 +512,7 @@ class ConfirmTests(V2Base):
                 elif how == 'phone':
                     User.objects.filter(pk=self.invitee.pk).update(phone_verified=False)
                 elif how == 'limit':
-                    set_settings(max_organizations_per_account=1)
+                    set_settings(max_memberships_hard_limit=1)
                     elsewhere = self.fresh_org(f'Ailleurs {how}')[0]
                     Membership.objects.create(organization=elsewhere, user=self.invitee, role=ANALYST)
                 else:
@@ -645,7 +645,7 @@ class ConfirmConcurrencyTests(V2Base):
 
     def test_confirmation_against_the_person_reaching_the_limit_elsewhere(self):
         invitation, _ = self.awaiting()
-        set_settings(max_organizations_per_account=1)
+        set_settings(max_memberships_hard_limit=1)
         elsewhere = self.fresh_org('Ailleurs course')[0]
         with self.race(lambda: Membership.objects.create(organization=elsewhere, user=self.invitee, role=ANALYST)):
             response = self.confirm(OWNER, invitation)

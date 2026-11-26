@@ -62,13 +62,28 @@ def get_category_ids_by_organization(organizations_list) -> dict:
     return {key: sorted(values, key=str) for key, values in result.items()}
 
 
+# État d'administration exposé tant que B10 (ADR 0010 D9) n'a pas livré `primary_admin_state` : contrat §7.6, « vaut
+# `OK` avant B10 ».
+PRIMARY_ADMIN_STATE_OK = 'OK'
+
+
+def governance_block(under_review) -> dict:
+    """Clé `governance` de `OrganizationInternal` et des éléments ORGANIZATION de `contexts/` (contrat §7.6). Réservée
+    aux membres : jamais `assurance_level`, jamais de seuil ni de cause de la revue."""
+    return {'primary_admin_state': PRIMARY_ADMIN_STATE_OK, 'under_review': bool(under_review)}
+
+
+def get_organization_governance(organization) -> dict:
+    return governance_block(organization.creation_review_status == Organization.CREATION_REVIEW_PENDING)
+
+
 def get_organization_limits() -> dict:
     """Limites informatives pour le front (il ne code aucune limite). Rien de propre à l'utilisateur ;
-    le serveur valide toujours."""
+    le serveur valide toujours. Aucun seuil anti-abus n'y figure (plafond technique, revue de création : ADR 0010 D8,
+    Q22) : un seuil de sécurité ne se publie pas."""
     settings_row = organizations.get_identity_settings()
     return {
         'max_categories_per_context': settings_row.max_categories_per_context,
-        'max_organizations_per_account': settings_row.max_organizations_per_account,
         'name_min_length': organizations.NAME_MIN_LENGTH,
         'name_max_length': organizations.NAME_MAX_LENGTH,
         'description_max_length': organizations.DESCRIPTION_MAX_LENGTH,
@@ -92,12 +107,15 @@ def public_organizations_queryset(params):
     refusée (400) plutôt qu'ignorée : un filtre perdu afficherait des organisations non vérifiées sous
     une étiquette « vérifiée »."""
     # Même règle que `is_seller_context_public` (A7) : au moins un propriétaire actif, compte actif et sans sanction
-    # bloquante ; sinon l'organisation n'est pas listée (ses offres sont masquées et sa fiche répond 404).
+    # bloquante ; sinon l'organisation n'est pas listée (ses offres sont masquées et sa fiche répond 404). Une
+    # organisation retenue en revue de création n'est pas listée non plus (ADR 0010 D8).
     led = Membership.objects.filter(
         organization_id=OuterRef('pk'), role=capabilities.ROLE_OWNER, status=Membership.STATUS_ACTIVE,
         user__is_active=True,
     ).filter(~Exists(moderation_services.blocking_sanctions_for(OuterRef('user_id'))))
-    queryset = Organization.objects.filter(status=Organization.STATUS_ACTIVE).filter(Exists(led))
+    queryset = Organization.objects.filter(status=Organization.STATUS_ACTIVE).exclude(
+        creation_review_status=Organization.CREATION_REVIEW_PENDING,
+    ).filter(Exists(led))
 
     search = params.get('search')
     if search and len(search.strip()) > SEARCH_MAX_LENGTH:

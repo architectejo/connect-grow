@@ -113,8 +113,9 @@ def _public_name(full_name) -> str:
 def get_seller_context_public_flags(contexts: Iterable) -> dict:
     """`{(type, id): bool}` : le vendeur est-il public ? Source du recalcul de `Offer.seller_is_public`.
     `USER` : compte actif et sans sanction bloquante ; `PROVIDER` : profil ACTIVE et compte titulaire public ;
-    `ORGANIZATION` : organisation ACTIVE avec au moins un propriétaire actif, compte actif et sans sanction
-    bloquante. Un contexte inconnu est non public. Par lot."""
+    `ORGANIZATION` : organisation ACTIVE, hors revue de création (`creation_review_status != PENDING`, ADR 0010 D8),
+    avec au moins un propriétaire actif, compte actif et sans sanction bloquante. Un contexte inconnu est non public.
+    Par lot."""
     grouped = _pairs(contexts)
     flags = {}
 
@@ -139,7 +140,7 @@ def get_seller_context_public_flags(contexts: Iterable) -> dict:
         active_orgs = set(
             Organization.objects.filter(
                 pk__in=grouped[CONTEXT_ORGANIZATION], status=Organization.STATUS_ACTIVE,
-            ).values_list('pk', flat=True)
+            ).exclude(creation_review_status=Organization.CREATION_REVIEW_PENDING).values_list('pk', flat=True)
         )
         # Une organisation dont tous les propriétaires actifs sont désactivés ou sous sanction bloquante n'est pas
         # publique (T9-1, audit M3) : le statut stocké de l'organisation n'est pas modifié.

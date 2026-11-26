@@ -1,5 +1,6 @@
 import type { Ref } from "react";
 import { useTranslation } from "react-i18next";
+import { useAuth } from "@/contexts/AuthContext";
 import { errorProps, Field, PasswordInput } from "@/components/auth/FormFields";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,18 @@ interface SensitiveConfirmFieldsProps {
   error?: string;
   disabled?: boolean;
   passwordRef?: Ref<HTMLInputElement>;
+  /** Faux si le formulaire rend déjà `LoginUsernameField` en tête (E6g). */
+  withUsername?: boolean;
+}
+
+/**
+ * Identifiant de connexion du compte, caché et en lecture seule, placé avant le mot de passe : les gestionnaires de mots de
+ * passe associent la ressaisie au bon compte au lieu de prendre un autre champ (code, étiquette) pour un identifiant.
+ */
+export function LoginUsernameField() {
+  const { user } = useAuth();
+  const login = user?.phone || user?.email || "";
+  return <input type="text" name="username" autoComplete="username" value={login} readOnly hidden />;
 }
 
 /**
@@ -24,12 +37,13 @@ interface SensitiveConfirmFieldsProps {
  * Administrateur principal et la rétrogradation d'un Administrateur principal. L'état reste dans la fenêtre qui l'utilise (mémoire du composant) :
  * le mot de passe n'est ni persisté, ni envoyé ailleurs que dans le corps de la requête.
  */
-export function SensitiveConfirmFields({ idPrefix, value, onChange, confirmLabel, error, disabled, passwordRef }: SensitiveConfirmFieldsProps) {
+export function SensitiveConfirmFields({ idPrefix, value, onChange, confirmLabel, error, disabled, passwordRef, withUsername = true }: SensitiveConfirmFieldsProps) {
   const { t } = useTranslation();
   const checkId = `${idPrefix}-confirm`;
   const passwordId = `${idPrefix}-password`;
   return (
     <div className="space-y-4">
+      {withUsername && <LoginUsernameField />}
       <div className="flex min-h-11 items-center gap-3">
         <Checkbox
           id={checkId}

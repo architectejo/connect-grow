@@ -71,7 +71,7 @@ export function TeamPendingActions({ org, onAnnounce, onFocusFallback }: TeamPen
           <p className="flex-1">{t("team.pending.loadError")}</p>
           <Button type="button" variant="outline" className="min-h-11" disabled={query.isFetching} onClick={() => void query.refetch()}>
             {query.isFetching && <Loader2 className="animate-spin" aria-hidden />}
-            {t("states.retry")}
+            {t("common.retry")}
           </Button>
         </div>
       ) : (

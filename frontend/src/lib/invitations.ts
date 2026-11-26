@@ -67,6 +67,11 @@ export type InvitationFailureKind =
   | "unauthenticated"
   | "rate"
   | "network"
+  /**
+   * Réseau coupé pendant l'ACCEPTATION : l'issue est inconnue (une réponse 202 avec le code a pu être perdue). On ne dit jamais
+   * « non modifiée » : renvoi vers « Mes profils », où une demande en attente propose « Obtenir un nouveau code ».
+   */
+  | "acceptLost"
   | "generic";
 
 export interface InvitationFailure {
@@ -115,7 +120,10 @@ const hasFieldError = (error: unknown) => {
 export type ConfirmInvitationFailure =
   /** 404 invitation_not_found, 409 invitation_not_awaiting_confirmation : fermeture, `toast.info`, rechargement. */
   | { kind: "gone"; message: string }
-  /** 403 DENY_PERMISSION : fermeture, toast, rechargement de l'organisation et des invitations. */
+  /**
+   * 403 DENY_PERMISSION (texte dédié) ou DENY_RELATION (plus membre : texte de `describeApiError`, comme `classifyTeamError`) :
+   * fermeture, toast, rechargement de l'organisation et des invitations.
+   */
   | { kind: "denied"; message: string }
   /** 400 confirmation_code_required : sous le champ code (inatteignable : bouton désactivé). */
   | { kind: "codeRequired"; message: string }
@@ -163,6 +171,7 @@ export function classifyConfirmInvitationError(error: unknown): ConfirmInvitatio
       return { kind: "form", message: t("errors.generic") };
   }
   if (status === 403 && code === "DENY_PERMISSION") return { kind: "denied", message: t("team.confirmInvite.denied") };
+  if (status === 403 && code === "DENY_RELATION") return { kind: "denied", message: describeApiError(error, { inOrganization: true }) };
   if (status === 400 && hasFieldError(error)) return { kind: "form", message: t("errors.generic") };
   return { kind: "form", message: describeApiError(error, { inOrganization: true }) };
 }
@@ -181,6 +190,7 @@ export function classifyRejectInvitationError(error: unknown): RejectInvitationF
   const code = getApiErrorCode(error);
   if (code === "invitation_not_found" || code === "invitation_not_awaiting_confirmation") return { kind: "gone", message: t("team.awaiting.gone") };
   if (httpStatus(error) === 403 && code === "DENY_PERMISSION") return { kind: "denied", message: t("team.confirmInvite.denied") };
+  if (httpStatus(error) === 403 && code === "DENY_RELATION") return { kind: "denied", message: describeApiError(error, { inOrganization: true }) };
   return { kind: "form", message: describeApiError(error, { inOrganization: true }) };
 }
 
@@ -201,3 +211,9 @@ export function classifyAwaitingActionError(error: unknown, action: "newCode" | 
   if (code === "invitation_not_found" || code === "invitation_not_awaiting_confirmation") return { kind: "gone", message: t("team.invitations.notPending") };
   return { kind: "form", message: describeApiError(error) };
 }
+
+/** Toute réponse `403 DENY_*` : la fenêtre sensible efface code et mot de passe, quelle que soit l'issue affichée. */
+export const isDenyResponse = (error: unknown) => {
+  const code = getApiErrorCode(error);
+  return httpStatus(error) === 403 && typeof code === "string" && code.startsWith("DENY_");
+};

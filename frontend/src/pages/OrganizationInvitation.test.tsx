@@ -468,14 +468,20 @@ describe("erreurs (4.5) : neutres, jamais le nom de l'organisation", () => {
     expect(screen.getByRole("button", { name: "Réessayer" })).toBeEnabled();
   });
 
-  it("réseau coupé : message, jeton conservé, « Réessayer » relance l'aperçu, rien n'est mis en file", async () => {
-    await failOnAccept(NETWORK);
-    expect(await screen.findByRole("heading", { level: 1, name: "Connexion perdue" })).toBeInTheDocument();
-    expect(screen.getByText("Votre invitation n'a pas été modifiée. Réessayez quand vous êtes reconnecté.")).toBeInTheDocument();
-    expect(readInvitationToken()).toBe(TOKEN);
-    expect(postsTo("/accept/")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Réessayer" }));
-    expect(await screen.findByRole("heading", { level: 2, name: "Boutique Lumière" })).toBeInTheDocument();
+  it("réseau coupé pendant l'acceptation : issue inconnue (jamais « non modifiée »), renvoi vers « Mes profils », listes invalidées, rien n'est mis en file", async () => {
+    mockApi({ accept: NETWORK });
+    renderPage();
+    await screen.findByRole("button", { name: "Rejoindre l'organisation" });
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    fireEvent.click(screen.getByRole("button", { name: "Rejoindre l'organisation" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Connexion perdue pendant l'acceptation" })).toBeInTheDocument();
+    expect(screen.getByText(/Nous ne savons pas si votre acceptation a été prise en compte/)).toBeInTheDocument();
+    expect(screen.getByText(/vous pourrez y obtenir un nouveau code/)).toBeInTheDocument();
+    expect(screen.queryByText(/n'a pas été modifiée/)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Voir mes profils" })).toHaveAttribute("href", "/profiles");
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["my-awaiting-invitations"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["contexts"] });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
     expect(postsTo("/accept/")).toHaveLength(1);
   });
 
@@ -810,6 +816,30 @@ describe("invitations v2 (spec D2 §9)", () => {
     expect(post).toHaveBeenCalledWith(`accounts/organization-invitations/${INVITATION_ID}/withdraw/`);
     expect(screen.getByText("Vous ne rejoindrez pas cette organisation. Le lien ne peut plus être utilisé.")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("482 913");
+  });
+
+  it("bfcache : à `pagehide`, le code est effacé ; l'écran dit « Code masqué » et renvoie vers « Mes profils »", async () => {
+    await acceptAdmin();
+    expect(document.body.textContent).toContain("482 913");
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(await screen.findByText("Code masqué")).toBeInTheDocument();
+    expect(screen.getByText(/obtenez-en un nouveau depuis « Mes profils »/)).toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain("482 913");
+    expect(document.body.innerHTML).not.toContain(SENTINEL);
+    expect(screen.getByRole("heading", { level: 1, name: "Demande envoyée à « Boutique Lumière »" })).toBeInTheDocument();
+  });
+
+  it("retrait alors que la demande n'est plus en attente : toast, écran sans code « n'est plus en attente »", async () => {
+    await acceptAdmin();
+    vi.mocked(apiClient.post).mockRejectedValueOnce(apiError(409, "invitation_not_awaiting_confirmation"));
+    fireEvent.click(screen.getByRole("button", { name: "Retirer ma demande" }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retirer ma demande" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Cette demande n'est plus en attente" })).toBeInTheDocument();
+    expect(toast.info).toHaveBeenCalledWith("Cette invitation n'est plus en attente.");
+    expect(document.body.innerHTML).not.toContain("482 913");
   });
 
   it("409 already_awaiting_confirmation : « Une demande est déjà en attente », « Voir mes profils », jeton conservé", async () => {

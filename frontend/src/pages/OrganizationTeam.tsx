@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useOnlineStatus } from "@/hooks/use-online-status";
-import { ORGANIZATION_ROLES } from "@/lib/team";
+import { ORGANIZATION_ROLES, invitableRoles } from "@/lib/team";
 import { cn } from "@/lib/utils";
 
 // Le dialogue est chargé à l'ouverture, pas avec la page (réseau faible)
@@ -64,7 +64,9 @@ const OrganizationTeam = () => {
   return (
     <OrganizationPage section="team">
       {(org) => {
-        const canInvite = org.capabilities.includes("org.manage_members");
+        const canManage = org.capabilities.includes("org.manage_members");
+        // Bouton et dialogue d'invitation seulement s'il existe au moins un rôle que l'acteur peut déléguer
+        const canInvite = canManage && invitableRoles(org.my_role).length > 0;
         return (
           <div className="mx-auto max-w-4xl">
             <PageHeader
@@ -84,7 +86,7 @@ const OrganizationTeam = () => {
 
             <TeamPendingActions org={org} onAnnounce={setAnnouncement} onFocusFallback={focusMembers} />
 
-            {canInvite ? (
+            {canManage ? (
               <Tabs value={tab} onValueChange={(next) => setTab(next as TeamTab)}>
                 <TabsList className="mb-4 h-auto w-full sm:w-auto" aria-label={t("team.tabs.label")}>
                   <TabsTrigger value="members" className="min-h-11 flex-1 sm:flex-none">

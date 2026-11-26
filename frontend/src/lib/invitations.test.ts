@@ -128,6 +128,7 @@ describe("classifyConfirmInvitationError (E6g, contrat §7.4.6)", () => {
     ["400 confirmation_required (inatteignable)", apiError(400, "confirmation_required"), "form"],
     ["400 password_required (inatteignable)", apiError(400, "password_required"), "form"],
     ["403 DENY_SECURITY", apiError(403, "DENY_SECURITY"), "form"],
+    ["403 DENY_RELATION", apiError(403, "DENY_RELATION"), "denied"],
     ["409 code non prévu (entitlement)", apiError(409, "team_capacity_reached"), "form"],
     ["429", apiError(429), "rate"],
     ["réseau coupé", NETWORK, "network"],
@@ -151,6 +152,7 @@ describe("classifyRejectInvitationError (E6h)", () => {
     ["404 invitation_not_found", apiError(404, "invitation_not_found"), "gone"],
     ["409 invitation_not_awaiting_confirmation", apiError(409, "invitation_not_awaiting_confirmation"), "gone"],
     ["403 DENY_PERMISSION", apiError(403, "DENY_PERMISSION"), "denied"],
+    ["403 DENY_RELATION", apiError(403, "DENY_RELATION"), "denied"],
     ["429", apiError(429), "rate"],
     ["réseau coupé", NETWORK, "form"],
   ])("%s -> %s", (_label, error, kind) => {

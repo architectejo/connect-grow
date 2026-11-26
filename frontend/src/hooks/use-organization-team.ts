@@ -1,4 +1,5 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
+import { onlineManager, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import apiClient from "@/api/client";
 import type {
   AwaitingConfirmationInvitation,
@@ -330,9 +331,27 @@ function refreshAwaiting(queryClient: QueryClient, orgId: Uuid) {
 /**
  * Confirmer l'accès d'un administrateur invité : `{confirm, password, code}`. `gcTime: 0` (mot de passe et code quittent le
  * cache de mutations dès le démontage du dialogue). **Jamais de relance automatique** : un nouvel essai décompterait un essai de code.
+ * Seule exception, transversale : l'intercepteur d'API rejoue une fois une requête refusée en 401 après rafraîchissement du jeton ;
+ * le serveur n'a alors compté aucun essai (l'authentification précède tout contrôle).
+ *
+ * Après une coupure réseau sans réponse, l'accès a peut-être été confirmé : la liste est rechargée au retour du réseau
+ * (`onlineManager`, un seul abonnement, désabonné ensuite) ou, au plus tard, à la fermeture du dialogue (démontage du hook).
  */
 export function useConfirmInvitation(orgId: Uuid) {
   const queryClient = useQueryClient();
+  const pendingRefresh = useRef<(() => void) | null>(null);
+
+  const settleRefresh = () => {
+    const unsubscribe = pendingRefresh.current;
+    if (!unsubscribe) return;
+    pendingRefresh.current = null;
+    unsubscribe();
+    refreshAwaiting(queryClient, orgId);
+  };
+  const settleRef = useRef(settleRefresh);
+  settleRef.current = settleRefresh;
+  useEffect(() => () => settleRef.current(), []);
+
   return useMutation({
     mutationFn: async ({ invitationId, body }: { invitationId: Uuid; body: ConfirmInvitationBody }) =>
       (await apiClient.post<OrganizationMember>(confirmInvitationUrl(orgId, invitationId), body)).data,
@@ -343,7 +362,11 @@ export function useConfirmInvitation(orgId: Uuid) {
       const code = getApiErrorCode(error);
       if (isNetworkError(error)) {
         // L'accès a peut-être été confirmé : la liste se réaligne au retour du réseau (aucune relance de la mutation)
-        window.addEventListener("online", () => refreshAwaiting(queryClient, orgId), { once: true });
+        if (!pendingRefresh.current) {
+          pendingRefresh.current = onlineManager.subscribe((isOnline) => {
+            if (isOnline) settleRef.current();
+          });
+        }
       } else if (code === "confirmation_code_exhausted" || code === "already_member") refreshAwaiting(queryClient, orgId);
       else if (code === "DENY_PERMISSION") {
         void queryClient.invalidateQueries({ queryKey: teamKeys.invitations(orgId) });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -36,6 +36,7 @@ export function RejectAdminInvitationDialog({ orgId, invitation, online, onClose
   const [blocked, block] = useRateBlock();
   const pending = mutation.isPending;
   const name = invitation.accepted_by_display_name;
+  const offlineId = useId();
 
   const reject = async () => {
     if (pending || blocked || !online) return;
@@ -71,12 +72,23 @@ export function RejectAdminInvitationDialog({ orgId, invitation, online, onClose
         {invitation.inviter_has_authority === false && <p className="text-sm">{t("team.rejectInvite.inviterNoAuthority")}</p>}
         <p className="text-sm">{t("team.rejectInvite.when")}</p>
         <FormAlert message={formError} />
-        {!online && <p className="text-xs text-muted-foreground">{t("common.offlineAction")}</p>}
+        {!online && (
+          <p id={offlineId} className="text-xs text-muted-foreground">
+            {t("common.offlineAction")}
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel className="min-h-11" disabled={pending}>
             {t("team.rejectInvite.keep")}
           </AlertDialogCancel>
-          <Button type="button" variant="destructive" className="min-h-11" disabled={pending || blocked || !online} onClick={() => void reject()}>
+          <Button
+            type="button"
+            variant="destructive"
+            className="min-h-11"
+            disabled={pending || blocked || !online}
+            aria-describedby={!online ? offlineId : undefined}
+            onClick={() => void reject()}
+          >
             {pending && <Loader2 className="animate-spin" aria-hidden />}
             {t("team.rejectInvite.submit")}
           </Button>

@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, CheckCircle2, Hourglass, Info, Loader2, MailOpen, UserCheck, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Hourglass, Info, KeyRound, Loader2, MailOpen, UserCheck, XCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -15,7 +15,8 @@ import { useActiveContext } from "@/contexts/ActiveContextContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { invalidateContexts } from "@/hooks/use-contexts";
-import { INVITATION_PREVIEW_KEY, useAcceptInvitation, useDeclineInvitation, useInvitationPreview } from "@/hooks/use-organization-team";
+import { INVITATION_PREVIEW_KEY, MY_AWAITING_INVITATIONS_KEY, useAcceptInvitation, useDeclineInvitation, useInvitationPreview } from "@/hooks/use-organization-team";
+import { isNetworkError } from "@/lib/api-errors";
 import { useRateBlock } from "@/components/team/use-rate-block";
 import { loginPath } from "@/lib/auth-paths";
 import { formatDateTime, formatLongDate } from "@/lib/format";
@@ -36,13 +37,16 @@ interface AwaitingOutcome {
   organizationName: string;
   role: InvitableRole;
   confirmationExpiresAt: string;
-  code: string;
+  /** `null` : code masqué (page mise en cache arrière, `pagehide`) ; il faut en obtenir un nouveau depuis « Mes profils ». */
+  code: string | null;
 }
 
 type Outcome =
   | { kind: "joined"; data: InvitationJoined }
   | { kind: "awaiting"; data: AwaitingOutcome }
   | { kind: "withdrawn" }
+  /** La demande n'était plus en attente au moment du retrait : écran sans code. */
+  | { kind: "gone" }
   | { kind: "declined" }
   | { kind: "error"; failure: InvitationFailure };
 
@@ -51,7 +55,7 @@ type View =
   | { name: "joined"; data: InvitationJoined }
   | { name: "awaiting"; data: AwaitingOutcome }
   | { name: "preview"; data: InvitationPreview }
-  | { name: "declined" | "withdrawn" | "missing" | "guest" | "loading" | "error" };
+  | { name: "declined" | "withdrawn" | "gone" | "missing" | "guest" | "loading" | "error" };
 
 const cardClass = "rounded-2xl border bg-card p-6 shadow-soft";
 
@@ -96,6 +100,7 @@ const OrganizationInvitation = () => {
   const withdrawButton = useRef<HTMLButtonElement>(null);
   const codeHeadingId = useId();
   const confirmNoteId = useId();
+  const awaitingOfflineId = useId();
   const [announcement, setAnnouncement] = useState("");
   const [rateBlocked, blockRate] = useRateBlock();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -172,6 +177,7 @@ const OrganizationInvitation = () => {
   if (outcome?.kind === "joined") view = { name: "joined", data: outcome.data };
   else if (outcome?.kind === "awaiting") view = { name: "awaiting", data: outcome.data };
   else if (outcome?.kind === "withdrawn") view = { name: "withdrawn" };
+  else if (outcome?.kind === "gone") view = { name: "gone" };
   else if (outcome?.kind === "declined") view = { name: "declined" };
   else if (failure && !asGuest) view = { name: "error" };
   else if (!tokenUsable) view = { name: "missing" };
@@ -215,9 +221,27 @@ const OrganizationInvitation = () => {
       } else setOutcome({ kind: "joined", data });
       accept.reset();
     } catch (error) {
+      if (isNetworkError(error)) {
+        // Issue inconnue : une réponse 202 (et son code) a pu être perdue. La demande éventuelle apparaîtra dans « Mes profils »,
+        // où « Obtenir un nouveau code » est proposé ; une adhésion directe, dans la liste des profils.
+        void queryClient.invalidateQueries({ queryKey: MY_AWAITING_INVITATIONS_KEY });
+        void invalidateContexts(queryClient);
+        setOutcome({ kind: "error", failure: { kind: "acceptLost" } });
+        return;
+      }
       setOutcome({ kind: "error", failure: classifyInvitationError(error) });
     }
   };
+
+  // Page mise en cache arrière (bfcache) ou quittée : le code est effacé avant que le navigateur ne fige la page.
+  // Au retour, l'écran dit que le code est masqué et renvoie vers « Mes profils » pour en obtenir un nouveau.
+  const codeShown = outcome?.kind === "awaiting" && outcome.data.code !== null;
+  useEffect(() => {
+    if (!codeShown) return;
+    const hide = () => setOutcome((current) => (current?.kind === "awaiting" ? { kind: "awaiting", data: { ...current.data, code: null } } : current));
+    window.addEventListener("pagehide", hide);
+    return () => window.removeEventListener("pagehide", hide);
+  }, [codeShown]);
 
   const onDecline = async () => {
     if (busy || !online) return;
@@ -356,17 +380,37 @@ const OrganizationInvitation = () => {
           {heading(t("invitation.awaiting.title", { name: data.organizationName }), <Hourglass className="h-10 w-10 text-primary" aria-hidden />)}
           <p className="mt-3 text-center text-sm text-muted-foreground">{t("invitation.awaiting.body", { role: t(`role.${data.role}`) })}</p>
           <div className="mt-5">
-            <ConfirmationCodeDisplay code={data.code} headingId={codeHeadingId} />
+            {data.code !== null ? (
+              <ConfirmationCodeDisplay code={data.code} headingId={codeHeadingId} />
+            ) : (
+              <Alert>
+                <KeyRound className="h-4 w-4" aria-hidden />
+                <AlertTitle>{t("invitation.awaiting.codeHiddenTitle")}</AlertTitle>
+                <AlertDescription>{t("invitation.awaiting.codeHiddenBody")}</AlertDescription>
+              </Alert>
+            )}
           </div>
           <p className="mt-4 text-center text-sm font-semibold">{t("invitation.awaiting.deadline", { date: formatDateTime(data.confirmationExpiresAt) })}</p>
           <Alert className="mt-4">
             <Info className="h-4 w-4" aria-hidden />
             <AlertDescription>{t("invitation.awaiting.noAccess")}</AlertDescription>
           </Alert>
-          {!online && <p className="mt-3 text-xs text-muted-foreground">{t("common.offlineAction")}</p>}
+          {!online && (
+            <p id={awaitingOfflineId} className="mt-3 text-xs text-muted-foreground">
+              {t("common.offlineAction")}
+            </p>
+          )}
           <div className="mt-6 flex flex-col gap-2">
             {profilesButton}
-            <Button ref={withdrawButton} type="button" variant="ghost" className="min-h-12 w-full text-destructive hover:text-destructive" disabled={!online} onClick={() => setWithdrawOpen(true)}>
+            <Button
+              ref={withdrawButton}
+              type="button"
+              variant="ghost"
+              className="min-h-12 w-full text-destructive hover:text-destructive"
+              disabled={!online}
+              aria-describedby={!online ? awaitingOfflineId : undefined}
+              onClick={() => setWithdrawOpen(true)}
+            >
               {t("invitation.awaiting.withdraw")}
             </Button>
           </div>
@@ -374,6 +418,15 @@ const OrganizationInvitation = () => {
       );
       break;
     }
+    case "gone":
+      content = (
+        <section className={cardClass}>
+          {heading(t("invitation.awaiting.goneTitle"), <Hourglass className="h-10 w-10 text-muted-foreground" aria-hidden />)}
+          <p className="mt-3 text-center text-sm text-muted-foreground">{t("invitation.awaiting.goneBody")}</p>
+          <div className="mt-6 flex flex-col gap-2">{profilesButton}</div>
+        </section>
+      );
+      break;
     case "withdrawn":
       content = (
         <section className={cardClass}>
@@ -512,6 +565,9 @@ const OrganizationInvitation = () => {
             </Button>,
           );
           break;
+        case "acceptLost":
+          content = errorCard(t("invitation.err.acceptLost.title"), t("invitation.err.acceptLost.body"), profilesButton);
+          break;
         case "network":
           content = errorCard(
             t("invitation.err.network.title"),
@@ -558,7 +614,11 @@ const OrganizationInvitation = () => {
               // Le code quitte l'état avec l'écran « Demande envoyée »
               setOutcome({ kind: "withdrawn" });
             }}
-            onGone={() => setWithdrawOpen(false)}
+            onGone={() => {
+              setWithdrawOpen(false);
+              // Plus en attente (confirmée, rejetée, échue) : le code n'a plus d'usage, il quitte l'écran
+              setOutcome({ kind: "gone" });
+            }}
           />
         )}
       </Suspense>

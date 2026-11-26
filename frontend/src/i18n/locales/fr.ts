@@ -434,6 +434,7 @@ const fr = {
   common: {
     allCommunes: "Toutes les communes",
     cancel: "Annuler",
+    retry: "Réessayer",
     offlineAction: "Reconnectez-vous pour effectuer cette action.",
     close: "Fermer",
     back: "Retour",
@@ -1175,6 +1176,11 @@ const fr = {
       announce: "Demande envoyée. Votre code de confirmation est affiché à l'écran.",
       withdrawnTitle: "Demande retirée",
       withdrawnBody: "Vous ne rejoindrez pas cette organisation. Le lien ne peut plus être utilisé.",
+      codeHiddenTitle: "Code masqué",
+      codeHiddenBody:
+        "Votre code n'est plus affiché. Si vous ne l'avez pas noté, obtenez-en un nouveau depuis « Mes profils » : l'ancien ne fonctionnera plus.",
+      goneTitle: "Cette demande n'est plus en attente",
+      goneBody: "Elle a peut-être déjà été confirmée, rejetée, ou a expiré. Consultez « Mes profils » pour connaître votre situation.",
     },
     decline: "Refuser l'invitation",
     declineTitle: "Refuser cette invitation ?",
@@ -1206,6 +1212,10 @@ const fr = {
         title: "Vérifiez d'abord votre numéro",
         body: "Pour rejoindre une organisation, votre numéro de téléphone de connexion doit être vérifié. Votre invitation reste valable : revenez ensuite sur ce lien.",
         action: "Vérifier mon numéro",
+      },
+      acceptLost: {
+        title: "Connexion perdue pendant l'acceptation",
+        body: "Nous ne savons pas si votre acceptation a été prise en compte. Consultez « Mes profils » : si l'organisation y figure, vous l'avez rejointe ; si une demande en attente de confirmation y figure, vous pourrez y obtenir un nouveau code.",
       },
       review: {
         title: "Examen du compte nécessaire",

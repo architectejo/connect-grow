@@ -3,7 +3,7 @@ import { AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CONFIRMATION_CODE_LENGTH, normalizeCode } from "@/lib/confirmation-code";
+import { normalizeCode } from "@/lib/confirmation-code";
 
 interface ConfirmationCodeInputProps {
   id: string;
@@ -41,13 +41,18 @@ export const ConfirmationCodeInput = forwardRef<HTMLInputElement, ConfirmationCo
         spellCheck={false}
         autoCorrect="off"
         autoCapitalize="off"
-        // 6 chiffres et une espace éventuelle à la frappe ; la valeur gardée n'a que des chiffres
-        maxLength={CONFIRMATION_CODE_LENGTH + 1}
+        // Pas de `maxLength` : il tronquerait un collage (« 482-913 », « Code : 482 913 ») avant la normalisation.
+        // La valeur gardée n'a jamais plus de 6 chiffres (normalizeCode).
         disabled={disabled}
         className="h-12 min-h-11 w-full rounded-xl bg-card font-mono text-lg tracking-widest sm:w-40"
         aria-invalid={!!error || undefined}
         aria-describedby={error ? `${errorId} ${helpId}` : helpId}
         onChange={(event) => onChange(normalizeCode(event.target.value))}
+        onPaste={(event) => {
+          // Collage normalisé en entier : chiffres seulement, 6 au plus
+          event.preventDefault();
+          onChange(normalizeCode(event.clipboardData.getData("text")));
+        }}
       />
       <p id={helpId} className="text-xs text-muted-foreground">
         {t("team.confirmInvite.codeHelp")}

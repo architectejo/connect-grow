@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -36,6 +36,7 @@ export function WithdrawAwaitingDialog({ invitationId, organizationName, online,
   const [formError, setFormError] = useState<string>();
   const [blocked, block] = useRateBlock();
   const pending = mutation.isPending;
+  const offlineId = useId();
 
   const withdraw = async () => {
     if (pending || blocked || !online) return;
@@ -63,12 +64,23 @@ export function WithdrawAwaitingDialog({ invitationId, organizationName, online,
           <AlertDialogDescription>{t("profiles.awaiting.withdrawBody")}</AlertDialogDescription>
         </AlertDialogHeader>
         <FormAlert message={formError} />
-        {!online && <p className="text-xs text-muted-foreground">{t("common.offlineAction")}</p>}
+        {!online && (
+          <p id={offlineId} className="text-xs text-muted-foreground">
+            {t("common.offlineAction")}
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel className="min-h-11" disabled={pending}>
             {t("profiles.awaiting.keep")}
           </AlertDialogCancel>
-          <Button type="button" variant="destructive" className="min-h-11" disabled={pending || blocked || !online} onClick={() => void withdraw()}>
+          <Button
+            type="button"
+            variant="destructive"
+            className="min-h-11"
+            disabled={pending || blocked || !online}
+            aria-describedby={!online ? offlineId : undefined}
+            onClick={() => void withdraw()}
+          >
             {pending && <Loader2 className="animate-spin" aria-hidden />}
             {t("profiles.awaiting.withdraw")}
           </Button>

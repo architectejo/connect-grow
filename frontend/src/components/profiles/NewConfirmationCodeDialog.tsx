@@ -30,7 +30,8 @@ interface ShownCode {
 
 /**
  * E17 « Obtenir un nouveau code » (spec D2 §11.3), en deux étapes : avertissement (l'ancien code ne fonctionnera plus), puis code
- * affiché, non fermable par clic extérieur. Aucune relance automatique : un second appel invaliderait le code affiché.
+ * affiché, non fermable par clic extérieur. Aucune relance automatique : un second appel invaliderait le code affiché (seule
+ * exception : l'intercepteur d'API rejoue une fois après un 401 suivi d'un rafraîchissement du jeton, requête alors non traitée).
  */
 export function NewConfirmationCodeDialog({ invitation, online, onClose, onGone, onAnnounce }: NewConfirmationCodeDialogProps) {
   const { t } = useTranslation();
@@ -41,6 +42,7 @@ export function NewConfirmationCodeDialog({ invitation, online, onClose, onGone,
   const [blocked, block] = useRateBlock();
   const codeHeadingRef = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
+  const offlineId = useId();
   const pending = mutation.isPending;
 
   useEffect(() => () => reset(), [reset]);
@@ -95,12 +97,16 @@ export function NewConfirmationCodeDialog({ invitation, online, onClose, onGone,
       <div className="space-y-4">
         <p className="text-sm">{t("profiles.awaiting.newCodeBody", { name: invitation.organization_name })}</p>
         <FormAlert message={formError} />
-        {!online && <p className="text-xs text-muted-foreground">{t("common.offlineAction")}</p>}
+        {!online && (
+          <p id={offlineId} className="text-xs text-muted-foreground">
+            {t("common.offlineAction")}
+          </p>
+        )}
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button type="button" variant="outline" className="min-h-11" autoFocus disabled={pending} onClick={close}>
             {t("profiles.awaiting.newCodeKeep")}
           </Button>
-          <Button type="button" className="min-h-11" disabled={pending || blocked || !online} onClick={() => void request()}>
+          <Button type="button" className="min-h-11" disabled={pending || blocked || !online} aria-describedby={!online ? offlineId : undefined} onClick={() => void request()}>
             {pending && <Loader2 className="animate-spin" aria-hidden />}
             {t("profiles.awaiting.newCodeSubmit")}
           </Button>

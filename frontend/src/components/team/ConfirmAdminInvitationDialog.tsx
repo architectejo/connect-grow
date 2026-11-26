@@ -10,12 +10,12 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useConfirmInvitation } from "@/hooks/use-organization-team";
 import { isCompleteCode } from "@/lib/confirmation-code";
-import { classifyConfirmInvitationError } from "@/lib/invitations";
+import { classifyConfirmInvitationError, isDenyResponse } from "@/lib/invitations";
 import { isSensitiveConfirmComplete, scopeLabel, type SensitiveConfirmValue } from "@/lib/team";
 import { InviterNoAuthorityWarning } from "./AwaitingInvitationCard";
 import { ConfirmationCodeInput } from "./ConfirmationCodeInput";
 import { PhoneHint } from "./PhoneHint";
-import { SensitiveConfirmFields } from "./SensitiveConfirmFields";
+import { LoginUsernameField, SensitiveConfirmFields } from "./SensitiveConfirmFields";
 import { useRateBlock } from "./use-rate-block";
 
 interface ConfirmAdminInvitationDialogProps {
@@ -36,7 +36,9 @@ const EMPTY: SensitiveConfirmValue = { confirmed: false, password: "" };
  * E6g : confirmer l'accès d'un administrateur invité avec le code de rattachement (spec D2 §8.3, contrat §7.4.6).
  * Code et mot de passe ne vivent que dans l'état de ce composant : vidés après les échecs prévus par la spec et effacés à la
  * fermeture (démontage + `mutation.reset()`). Le code n'est jamais annoncé, ni mis dans un toast, un titre ou un journal.
- * Aucune relance automatique : un nouvel essai décompterait un essai de code.
+ * Aucune relance automatique : un nouvel essai décompterait un essai de code. Seule exception, hors de ce composant :
+ * l'intercepteur d'API rejoue une fois la requête après un 401 suivi d'un rafraîchissement du jeton ; le serveur n'a alors
+ * compté aucun essai (l'authentification précède tout contrôle du code).
  */
 export function ConfirmAdminInvitationDialog({ orgId, orgName, invitation, online, onClose, onDone, onAnnounce }: ConfirmAdminInvitationDialogProps) {
   const { t } = useTranslation();
@@ -95,6 +97,8 @@ export function ConfirmAdminInvitationDialog({ orgId, orgName, invitation, onlin
       const failure = classifyConfirmInvitationError(error);
       // Le code et le mot de passe envoyés ne restent pas dans `variables` de la mutation après un échec
       reset();
+      // Toute réponse DENY_* : code et mot de passe effacés, quelle que soit l'issue affichée
+      if (isDenyResponse(error)) clearSecrets();
       switch (failure.kind) {
         case "gone":
         case "alreadyMember":
@@ -148,6 +152,8 @@ export function ConfirmAdminInvitationDialog({ orgId, orgName, invitation, onlin
   return (
     <ResponsiveDialog open onOpenChange={(next) => !next && !pending && onClose()} title={t("team.confirmInvite.title", { name })}>
       <form onSubmit={(event) => void submit(event)} className="space-y-4" noValidate>
+        {/* Identifiant du compte pour le gestionnaire de mots de passe : le champ code n'est jamais pris pour un identifiant */}
+        <LoginUsernameField />
         {invitation.inviter_has_authority === false && <InviterNoAuthorityWarning />}
         <Alert>
           <Phone className="h-4 w-4" aria-hidden />
@@ -206,6 +212,7 @@ export function ConfirmAdminInvitationDialog({ orgId, orgName, invitation, onlin
           error={passwordError}
           disabled={pending}
           passwordRef={passwordRef}
+          withUsername={false}
         />
 
         <FormAlert message={formError} />

@@ -112,6 +112,7 @@ describe("E17 : demandes en attente de confirmation (spec D2 §11)", () => {
   });
 
   it("nouveau code : avertissement (focus « Garder mon code actuel »), puis code affiché, non fermable par clic extérieur ; annonce sans code", async () => {
+    const consoleSpies = (["log", "info", "warn", "error", "debug"] as const).map((level) => vi.spyOn(console, level));
     const { onAnnounce } = renderSection();
     const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: { invitation_id: INV1, confirmation_code: SENTINEL, confirmation_expires_at: "2026-11-28T13:05:00Z" } });
     const trigger = await screen.findByRole("button", { name: "Obtenir un nouveau code pour Boutique Lumière" });
@@ -128,15 +129,23 @@ describe("E17 : demandes en attente de confirmation (spec D2 §11)", () => {
     await waitFor(() => expect(within(shown).getByRole("heading", { name: "Votre code de confirmation" })).toHaveFocus());
     expect(onAnnounce).toHaveBeenCalledWith("Nouveau code affiché à l'écran.");
     expect(within(shown).queryByRole("button", { name: /Copier|Partager/ })).not.toBeInTheDocument();
-    // Le code ne vit que dans l'état du dialogue : ni cache, ni stockage, ni toast, ni annonce
-    const leaks = [
-      JSON.stringify(client.getMutationCache().getAll().map((m) => [m.state.variables, m.state.data])),
-      JSON.stringify(client.getQueryCache().getAll().map((q) => q.state.data)),
-      JSON.stringify({ ...sessionStorage, ...localStorage }),
-      JSON.stringify(onAnnounce.mock.calls),
-      JSON.stringify([vi.mocked(toast.success).mock.calls, vi.mocked(toast.info).mock.calls, vi.mocked(toast.error).mock.calls]),
-    ];
-    for (const channel of leaks) expect(channel).not.toContain(SENTINEL);
+    // Le code ne vit que dans l'état du dialogue (même liste de canaux que AdminInvitations.test.tsx)
+    const channels: Record<string, string> = {
+      mutationCache: JSON.stringify(client.getMutationCache().getAll().map((m) => [m.state.variables, m.state.data])),
+      queryCache: JSON.stringify(client.getQueryCache().getAll().map((q) => [q.queryKey, q.state.data])),
+      storage: JSON.stringify({ ...sessionStorage, ...localStorage }),
+      announce: JSON.stringify(onAnnounce.mock.calls),
+      toasts: JSON.stringify([vi.mocked(toast.success).mock.calls, vi.mocked(toast.info).mock.calls, vi.mocked(toast.error).mock.calls]),
+      liveRegions: Array.from(document.querySelectorAll("[aria-live], [role=status], [role=alert]"))
+        .map((node) => node.textContent)
+        .join("|"),
+      attributes: Array.from(document.querySelectorAll("*"))
+        .flatMap((node) => Array.from(node.attributes).map((a) => a.value))
+        .join("|"),
+      console: JSON.stringify(consoleSpies.map((spy) => spy.mock.calls)),
+      url: window.location.href,
+    };
+    expect(Object.entries(channels).filter(([, value]) => value.includes(SENTINEL)).map(([name]) => name)).toEqual([]);
     fireEvent.click(within(shown).getByRole("button", { name: "J'ai noté le code" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(document.body.innerHTML).not.toContain("482 913");
@@ -190,6 +199,29 @@ describe("E17 : demandes en attente de confirmation (spec D2 §11)", () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Demande retirée."));
     expect(onAnnounce).toHaveBeenCalledWith("Demande retirée.");
     await waitFor(() => expect(onFocusFallback).toHaveBeenCalled());
+  });
+
+  it("dialogues hors ligne : bouton d'action désactivé, relié à la mention hors ligne", async () => {
+    const { WithdrawAwaitingDialog } = await import("./WithdrawAwaitingDialog");
+    const { NewConfirmationCodeDialog } = await import("./NewConfirmationCodeDialog");
+    client = new QueryClient();
+    const { unmount } = render(
+      <QueryClientProvider client={client}>
+        <WithdrawAwaitingDialog invitationId={INV1} organizationName="Boutique Lumière" online={false} onClose={vi.fn()} onWithdrawn={vi.fn()} onGone={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    const withdraw = within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Retirer ma demande" });
+    expect(withdraw).toBeDisabled();
+    expect(withdraw).toHaveAccessibleDescription("Reconnectez-vous pour effectuer cette action.");
+    unmount();
+    render(
+      <QueryClientProvider client={client}>
+        <NewConfirmationCodeDialog invitation={item(INV1)} online={false} onClose={vi.fn()} onGone={vi.fn()} onAnnounce={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    const request = within(await screen.findByRole("dialog")).getByRole("button", { name: "Obtenir un nouveau code" });
+    expect(request).toBeDisabled();
+    expect(request).toHaveAccessibleDescription("Reconnectez-vous pour effectuer cette action.");
   });
 
   it("retrait, 404 invitation_not_found : toast « n'est plus en attente »", async () => {

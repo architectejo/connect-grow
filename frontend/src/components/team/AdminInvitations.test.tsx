@@ -7,7 +7,7 @@ import apiClient from "@/api/client";
 import type { AwaitingConfirmationInvitation } from "@/api/types";
 import { TeamPendingActions } from "./TeamPendingActions";
 
-vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ isAuthenticated: true }) }));
+vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ isAuthenticated: true, user: { id: "compte-A", phone: "+243810000047", email: null } }) }));
 const online = vi.hoisted(() => ({ value: true }));
 vi.mock("@/hooks/use-online-status", () => ({ useOnlineStatus: () => online.value }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
@@ -217,7 +217,20 @@ describe("E6g : confirmer l'accès avec le code de rattachement (spec D2 §8.3)"
     await waitFor(() => expect(code).toHaveFocus());
     expect(code).toHaveAttribute("autocomplete", "off");
     expect(code).toHaveAttribute("inputmode", "numeric");
-    expect(code).toHaveAttribute("maxlength", "7");
+    // Pas de maxLength (il tronquerait un collage avant normalisation) ; collage normalisé
+    expect(code).not.toHaveAttribute("maxlength");
+    fireEvent.paste(code, { clipboardData: { getData: () => "Code : 482-913 merci" } });
+    expect(code).toHaveValue(SENTINEL);
+    fireEvent.change(code, { target: { value: "" } });
+    // Gestionnaire de mots de passe : identifiant du compte caché, en lecture seule, en tête du formulaire, une seule fois
+    const usernames = dialog.querySelectorAll('input[name="username"]');
+    expect(usernames).toHaveLength(1);
+    const username = usernames[0] as HTMLInputElement;
+    expect(username).toHaveAttribute("autocomplete", "username");
+    expect(username).toHaveAttribute("readonly");
+    expect(username.hidden).toBe(true);
+    expect(username.value).toBe("+243810000047");
+    expect(username.compareDocumentPosition(code) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(code).toHaveAccessibleDescription(/par exemple 482 913/);
     expect(within(dialog).getByRole("checkbox", { name: /J'ai obtenu ce code en appelant Marie K./ })).toBeInTheDocument();
     expect(submitButton(dialog)).toBeDisabled();
@@ -308,6 +321,31 @@ describe("E6g : confirmer l'accès avec le code de rattachement (spec D2 §8.3)"
     fireEvent.click(submitButton(dialog));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(toast[level as "info" | "error"]).toHaveBeenCalledWith(text);
+  });
+
+  it("403 DENY_RELATION : fermeture et information (comme classifyTeamError), code et mot de passe effacés", async () => {
+    renderSection();
+    vi.spyOn(apiClient, "post").mockRejectedValue(apiError(403, "DENY_RELATION"));
+    const dialog = await openConfirm();
+    fillAll(dialog);
+    fireEvent.click(submitButton(dialog));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(toast.error).toHaveBeenCalledWith("Vous n'avez pas accès à cet élément.");
+    const again = await openConfirm();
+    expect(codeField(again)).toHaveValue("");
+    expect(passwordField(again)).toHaveValue("");
+  });
+
+  it.each(["DENY_SECURITY", "DENY_OBJECT_STATE"])("403 %s : alerte dans le dialogue, code ET mot de passe effacés", async (code) => {
+    renderSection();
+    vi.spyOn(apiClient, "post").mockRejectedValue(apiError(403, code));
+    const dialog = await openConfirm();
+    fillAll(dialog);
+    fireEvent.click(submitButton(dialog));
+    await waitFor(() => expect(within(dialog).getByRole("alert")).toBeInTheDocument());
+    expect(codeField(dialog)).toHaveValue("");
+    expect(passwordField(dialog)).toHaveValue("");
+    expect(within(dialog).getByRole("checkbox")).not.toBeChecked();
   });
 
   it("400 user_unavailable : alerte, code et mot de passe vidés, dialogue ouvert", async () => {
@@ -427,6 +465,28 @@ describe("E6h : rejeter une demande (spec D2 §8.4)", () => {
     renderSection([awaiting(INV1, { inviter_has_authority: false })]);
     const dialog = await openReject();
     expect(within(dialog).getByText("La personne qui a créé cette invitation ne peut plus donner ce rôle.")).toBeInTheDocument();
+  });
+
+  it("403 DENY_RELATION : fermeture et information", async () => {
+    renderSection();
+    vi.spyOn(apiClient, "post").mockRejectedValue(apiError(403, "DENY_RELATION"));
+    const dialog = await openReject();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rejeter" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(toast.error).toHaveBeenCalledWith("Vous n'avez pas accès à cet élément.");
+  });
+
+  it("hors ligne : « Rejeter » désactivé, relié à la mention hors ligne", async () => {
+    const { RejectAdminInvitationDialog } = await import("./RejectAdminInvitationDialog");
+    client = new QueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <RejectAdminInvitationDialog orgId={ORG} invitation={awaiting(INV1)} online={false} onClose={vi.fn()} onDone={vi.fn()} onAnnounce={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    const reject = within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Rejeter" });
+    expect(reject).toBeDisabled();
+    expect(reject).toHaveAccessibleDescription("Reconnectez-vous pour effectuer cette action.");
   });
 
   it("réseau : « Connexion perdue », dialogue ouvert", async () => {

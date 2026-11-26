@@ -150,6 +150,8 @@ Source : `docs/specs/impact-reponses-client-Q1-Q36.md` §5 et `docs/adr/0010-gou
 | QC-7 | Quel délai de recours par défaut contre une restriction ? | Réglable, sans valeur | |
 | QC-8 | Une organisation sans activité depuis longtemps : préférez-vous le libellé « Inactive » (choix de l'équipe) ou « Dormante » ? | « Inactive » | |
 | QC-9 | Fermeture pour cause de fusion : le texte dit que rien n'est transféré automatiquement vers l'autre organisation (avis, abonnés, historique). Le confirmez-vous ? | Rien n'est transféré (Q35 : jamais de transfert par simple renommage) | |
+| QG-1bis | Anti-abus de création (Q22) : la mise en revue se fonde aujourd'hui sur le nombre de créations (5e sur 30 jours), un seuil observable. Faut-il ajouter d'autres signaux (ancienneté du compte, numéro déjà vu, adresse IP ou appareil, historique de suspension, nom proche d'une organisation existante, revue aléatoire) ? Si oui, quelles données et quelle durée de conservation (LEG-PRV) ? | Rang seul, valeurs réglables | |
+| QG-1ter | Le message « Votre compte doit être examiné par l'équipe Connecte+ » annonce un examen humain : quel délai de traitement et quelle voie de recours faut-il indiquer ? | Aucun délai promis ; recours par l'Aide et Support quand il existera | |
 | QG-8 | Liste initiale des catégories et organisations à vérification renforcée (banques, Mobile Money, télécoms, ministères…). | Liste vide, configurable en back-office | |
 
 ## 5. Autres blocages externes déjà notés au backlog

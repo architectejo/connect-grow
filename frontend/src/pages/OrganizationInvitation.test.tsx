@@ -430,10 +430,11 @@ describe("erreurs (4.5) : neutres, jamais le nom de l'organisation", () => {
     expect(readInvitationToken()).toBe(TOKEN);
   });
 
-  it("409 organization_limit_reached : « Voir mes profils », jeton conservé, texte propre à l'acceptation", async () => {
-    await failOnAccept(apiError(409, "organization_limit_reached"));
-    expect(await screen.findByRole("heading", { level: 1, name: "Vous avez atteint la limite d'organisations" })).toBeInTheDocument();
-    expect(screen.queryByText(/pour en créer une nouvelle/)).not.toBeInTheDocument();
+  it("409 account_review_required : « Voir mes profils », jeton conservé, aucun chiffre de plafond", async () => {
+    await failOnAccept(apiError(409, "account_review_required"));
+    expect(await screen.findByRole("heading", { level: 1, name: "Examen du compte nécessaire" })).toBeInTheDocument();
+    expect(screen.getByText(/doit être examiné par l'équipe Connecte\+ avant de rejoindre/)).toBeInTheDocument();
+    expect(screen.getByRole("main").textContent).not.toMatch(/\d/);
     expect(screen.getByRole("link", { name: "Voir mes profils" })).toHaveAttribute("href", "/profiles");
     expect(readInvitationToken()).toBe(TOKEN);
   });
@@ -684,5 +685,138 @@ describe("focus", () => {
     fireEvent.click(screen.getByRole("button", { name: "Réessayer" }));
     const second = await screen.findByRole("heading", { level: 1, name: "Cette invitation n'est plus valable" });
     await waitFor(() => expect(second).toHaveFocus());
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// L1-01-F2bis : aperçu enrichi, invitation Administrateur (202 + code de rattachement), retrait de la demande
+describe("invitations v2 (spec D2 §9)", () => {
+  const SENTINEL = "482913";
+  const INVITATION_ID = "44444444-4444-4444-8444-444444444441";
+  const ADMIN_PREVIEW = {
+    ...PREVIEW,
+    role: "ADMIN",
+    scope: { type: "ORGANIZATION", id: null },
+    capabilities: ["contact.manage_channels", "message.reply", "org.leave", "org.manage_members", "org.view_internal", "stats.view", "zz.unknown"],
+    requires_confirmation: true,
+  };
+  const AWAITING_202 = {
+    status: "AWAITING_CONFIRMATION",
+    invitation_id: INVITATION_ID,
+    organization_name: "Boutique Lumière",
+    role: "ADMIN",
+    confirmation_expires_at: "2026-11-28T13:05:00Z",
+    confirmation_code: SENTINEL,
+  };
+
+  const acceptAdmin = async () => {
+    const post = mockApi({ preview: ADMIN_PREVIEW, accept: AWAITING_202 });
+    const view = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Accepter l'invitation" }));
+    await screen.findByRole("heading", { level: 1, name: "Demande envoyée à « Boutique Lumière »" });
+    return { post, ...view };
+  };
+  const failOnAcceptV2 = async (error: unknown) => {
+    mockApi({ preview: ADMIN_PREVIEW, accept: error });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Accepter l'invitation" }));
+  };
+
+  it("aperçu Administrateur : émetteur, rôle, périmètre, accès regroupés, limites, avertissement AVANT le bouton « Accepter l'invitation »", async () => {
+    mockApi({ preview: ADMIN_PREVIEW });
+    renderPage();
+    const button = await screen.findByRole("button", { name: "Accepter l'invitation" });
+    expect(screen.getByText("Paul M.")).toBeInTheDocument();
+    expect(screen.getByText("Périmètre")).toBeInTheDocument();
+    expect(screen.getByText("Toute l'organisation")).toBeInTheDocument();
+    expect(screen.getByText("Accès")).toBeInTheDocument();
+    for (const group of ["Organisation", "Équipe", "Contact", "Messages", "Statistiques"]) expect(screen.getByRole("heading", { level: 3, name: group })).toBeInTheDocument();
+    expect(screen.getByText("Inviter et retirer des membres")).toBeInTheDocument();
+    expect(screen.getByText("et 1 autre accès")).toBeInTheDocument();
+    expect(screen.getByText(/ne permet ni de nommer un administrateur principal, ni d'archiver/)).toBeInTheDocument();
+    const alertTitle = screen.getByText("Confirmation nécessaire");
+    expect(screen.getByText(/Elle verra votre nom abrégé et les deux derniers chiffres de votre numéro de téléphone/)).toBeInTheDocument();
+    expect(screen.getByText(/vous recevrez un code à 6 chiffres. Vous le donnerez de vive voix/)).toBeInTheDocument();
+    expect(alertTitle.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(button).toHaveAccessibleDescription(/Confirmation nécessaire/);
+    expect(screen.getByText(/Après confirmation, vous pourrez quitter l'organisation à tout moment/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Rejoindre l'organisation" })).not.toBeInTheDocument();
+  });
+
+  it("aperçu Éditeur v2 : accès listés, ni avertissement de confirmation ni limites d'administrateur", async () => {
+    mockApi({ preview: { ...PREVIEW, scope: { type: "ORGANIZATION", id: null }, capabilities: ["offer.publish", "review.reply"], requires_confirmation: false } });
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Rejoindre l'organisation" })).toBeEnabled();
+    expect(screen.getByText("Publier des offres")).toBeInTheDocument();
+    expect(screen.getByText("Répondre aux avis")).toBeInTheDocument();
+    expect(screen.queryByText("Confirmation nécessaire")).not.toBeInTheDocument();
+    expect(screen.queryByText(/ne permet ni de nommer/)).not.toBeInTheDocument();
+  });
+
+  it("202 : écran « Demande envoyée », code en grand (groupes masqués, lecture chiffre par chiffre), focus sur le titre, aucune bascule de profil", async () => {
+    await acceptAdmin();
+    const title = screen.getByRole("heading", { level: 1, name: "Demande envoyée à « Boutique Lumière »" });
+    await waitFor(() => expect(title).toHaveFocus());
+    expect(screen.getByText(/Vous avez accepté le rôle Administrateur/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Votre code de confirmation" })).toBeInTheDocument();
+    expect(screen.getByText("482 913")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByText("4 8 2 9 1 3")).toHaveClass("sr-only");
+    expect(screen.getByText(/Donnez ce code de vive voix/)).toBeInTheDocument();
+    expect(screen.getByText(/ne l'envoyez pas par message/)).toBeInTheDocument();
+    expect(screen.getByText(/Ce code ne sera plus affiché quand vous quitterez cette page/)).toBeInTheDocument();
+    expect(screen.getByText(/^Confirmation attendue avant le/)).toBeInTheDocument();
+    expect(screen.getByText(/Vous n'avez encore aucun accès à l'organisation/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Voir mes profils" })).toHaveAttribute("href", "/profiles");
+    expect(screen.getByRole("button", { name: "Retirer ma demande" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /Copier|Partager/ })).not.toBeInTheDocument();
+    expect(active.setActive).not.toHaveBeenCalled();
+    expect(readInvitationToken()).toBeNull();
+  });
+
+  it("SENTINELLE 202 : le code n'est ni annoncé, ni en toast, ni stocké, ni en cache de requêtes ou de mutations, ni dans l'URL, un attribut ou la console", async () => {
+    const consoleSpies = (["log", "info", "warn", "error", "debug"] as const).map((level) => vi.spyOn(console, level));
+    await acceptAdmin();
+    const live = screen.getByRole("status");
+    await waitFor(() => expect(live).toHaveTextContent("Demande envoyée. Votre code de confirmation est affiché à l'écran."));
+    const channels = {
+      live: Array.from(document.querySelectorAll("[aria-live], [role=status], [role=alert]")).map((n) => n.textContent).join("|"),
+      toasts: JSON.stringify([vi.mocked(toast.success).mock.calls, vi.mocked(toast.error).mock.calls, vi.mocked(toast.info).mock.calls]),
+      session: JSON.stringify({ ...sessionStorage }),
+      local: JSON.stringify({ ...localStorage }),
+      queries: JSON.stringify(client.getQueryCache().getAll().map((q) => [q.queryKey, q.state.data])),
+      mutations: JSON.stringify(client.getMutationCache().getAll().map((m) => [m.state.variables, m.state.data])),
+      url: window.location.href + JSON.stringify(routerLocations),
+      attributes: Array.from(document.querySelectorAll("*")).flatMap((n) => Array.from(n.attributes).map((a) => a.value)).join("|"),
+      console: JSON.stringify(consoleSpies.map((spy) => spy.mock.calls)),
+    };
+    expect(Object.entries(channels).filter(([, value]) => value.includes(SENTINEL)).map(([name]) => name)).toEqual([]);
+  });
+
+  it("le code disparaît au démontage de la page", async () => {
+    const { unmount } = await acceptAdmin();
+    expect(document.body.textContent).toContain("482 913");
+    unmount();
+    expect(document.body.innerHTML).not.toContain("482 913");
+    expect(JSON.stringify(client.getMutationCache().getAll().map((m) => m.state.data))).not.toContain(SENTINEL);
+  });
+
+  it("« Retirer ma demande » : focus sur « Garder la demande », POST withdraw/, écran « Demande retirée », code effacé", async () => {
+    const { post } = await acceptAdmin();
+    fireEvent.click(screen.getByRole("button", { name: "Retirer ma demande" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Retirer votre demande pour « Boutique Lumière » ?" });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Garder la demande" })).toHaveFocus());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retirer ma demande" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Demande retirée" })).toBeInTheDocument();
+    expect(post).toHaveBeenCalledWith(`accounts/organization-invitations/${INVITATION_ID}/withdraw/`);
+    expect(screen.getByText("Vous ne rejoindrez pas cette organisation. Le lien ne peut plus être utilisé.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("482 913");
+  });
+
+  it("409 already_awaiting_confirmation : « Une demande est déjà en attente », « Voir mes profils », jeton conservé", async () => {
+    await failOnAcceptV2(apiError(409, "already_awaiting_confirmation"));
+    expect(await screen.findByRole("heading", { level: 1, name: "Une demande est déjà en attente" })).toBeInTheDocument();
+    expect(screen.getByText(/retirez cette demande depuis « Mes profils »/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Voir mes profils" })).toBeInTheDocument();
+    expect(readInvitationToken()).toBe(TOKEN);
   });
 });

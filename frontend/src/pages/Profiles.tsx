@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Briefcase, Building2, Loader2, Plus, UserRound } from "lucide-react";
@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AccountShell } from "@/components/layout/AccountShell";
 import { EmptyState, ErrorState, PageHeader, RoleBadge, SellerTypeBadge, UserAvatar } from "@/components/common";
+import { AwaitingMembershipsSection } from "@/components/profiles/AwaitingMembershipsSection";
 import { LegacyOrgNotice } from "@/components/profiles/LegacyOrgNotice";
 import { UnavailableOrganizationsSection } from "@/components/profiles/UnavailableOrganizationsSection";
 import { ProviderDialog } from "@/components/profiles/ProviderDialog";
@@ -214,6 +215,11 @@ const Profiles = () => {
   const createOffline = !online;
   const orgsTitleId = useId();
   const personalTitleId = useId();
+  const orgsTitleRef = useRef<HTMLHeadingElement>(null);
+  const personalTitleRef = useRef<HTMLHeadingElement>(null);
+  // Région d'annonce unique de la page (E17) : jamais un code ni un indice de téléphone
+  const [announcement, setAnnouncement] = useState("");
+  const focusOrganizations = useCallback(() => (orgsTitleRef.current ?? personalTitleRef.current)?.focus(), []);
 
   return (
     <AccountShell>
@@ -241,6 +247,10 @@ const Profiles = () => {
         </p>
       )}
 
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+
       <LegacyOrgNotice />
 
       {isLoading && contexts.length === 0 ? (
@@ -254,7 +264,7 @@ const Profiles = () => {
       ) : (
         <div className="space-y-6">
           <section aria-labelledby={personalTitleId} className="rounded-2xl border bg-card p-5 shadow-soft">
-            <h2 id={personalTitleId} className="flex items-center gap-2 font-display text-lg font-bold">
+            <h2 id={personalTitleId} ref={personalTitleRef} tabIndex={-1} className="flex items-center gap-2 font-display text-lg font-bold outline-none">
               <UserRound className="h-5 w-5 text-primary" aria-hidden /> {t("profiles.personal.title")}
             </h2>
             <div className="mt-2 flex items-center gap-3">
@@ -277,7 +287,7 @@ const Profiles = () => {
           {/* Sans organisation active mais avec des organisations indisponibles, l'état vide serait contradictoire : on masque la section */}
           {(organizations.length > 0 || unavailable.length === 0) && (
           <section aria-labelledby={orgsTitleId} className="space-y-3">
-            <h2 id={orgsTitleId} className="flex items-center gap-2 font-display text-lg font-bold">
+            <h2 id={orgsTitleId} ref={orgsTitleRef} tabIndex={-1} className="flex items-center gap-2 font-display text-lg font-bold outline-none">
               <Building2 className="h-5 w-5 text-primary" aria-hidden /> {t("profiles.orgs.title")}
             </h2>
             {organizations.length === 0 ? (
@@ -330,6 +340,8 @@ const Profiles = () => {
             )}
           </section>
           )}
+
+          <AwaitingMembershipsSection onAnnounce={setAnnouncement} onFocusFallback={focusOrganizations} />
 
           <UnavailableOrganizationsSection />
         </div>

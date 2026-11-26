@@ -1,10 +1,13 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, MailOpen, XCircle } from "lucide-react";
+import { Suspense, lazy, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle, CheckCircle2, Hourglass, Info, Loader2, MailOpen, UserCheck, XCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { InvitationAccepted, InvitationPreview } from "@/api/types";
+import type { InvitableRole, InvitationJoined, InvitationPreview, Uuid } from "@/api/types";
 import { RoleBadge, SellerTypeBadge, UserAvatar } from "@/components/common";
+import { RoleAccessList } from "@/components/invitations/RoleAccessList";
+import { ConfirmationCodeDisplay } from "@/components/team/ConfirmationCodeDisplay";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,17 +18,40 @@ import { invalidateContexts } from "@/hooks/use-contexts";
 import { INVITATION_PREVIEW_KEY, useAcceptInvitation, useDeclineInvitation, useInvitationPreview } from "@/hooks/use-organization-team";
 import { useRateBlock } from "@/components/team/use-rate-block";
 import { loginPath } from "@/lib/auth-paths";
-import { formatLongDate } from "@/lib/format";
+import { formatDateTime, formatLongDate } from "@/lib/format";
 import { INVITATION_PATH, clearInvitationToken, hasTokenParam, ingestInvitationToken, readInvitationToken } from "@/lib/invitation-token";
 import { classifyInvitationError, clearsTokenOnFailure, type InvitationFailure } from "@/lib/invitations";
+import { scopeLabel } from "@/lib/team";
 
 // Le dialogue de refus est chargé à son ouverture (réseau faible)
 const DeclineDialog = lazy(() => import("@/components/team/DeclineInvitationDialog").then((m) => ({ default: m.DeclineInvitationDialog })));
+const WithdrawDialog = lazy(() => import("@/components/profiles/WithdrawAwaitingDialog").then((m) => ({ default: m.WithdrawAwaitingDialog })));
 
-type Outcome = { kind: "joined"; data: InvitationAccepted } | { kind: "declined" } | { kind: "error"; failure: InvitationFailure };
+/**
+ * Réponse 202 telle que l'écran la garde : le code de rattachement n'existe QUE dans cet état local (effacé au démontage,
+ * au retrait de la demande) ; la mutation qui l'a reçu est remise à zéro aussitôt.
+ */
+interface AwaitingOutcome {
+  invitationId: Uuid;
+  organizationName: string;
+  role: InvitableRole;
+  confirmationExpiresAt: string;
+  code: string;
+}
 
-/** Écran affiché ; les écrans « joined » et « preview » portent leurs données, ce qui évite tout cast. */
-type View = { name: "joined"; data: InvitationAccepted } | { name: "preview"; data: InvitationPreview } | { name: "declined" | "missing" | "guest" | "loading" | "error" };
+type Outcome =
+  | { kind: "joined"; data: InvitationJoined }
+  | { kind: "awaiting"; data: AwaitingOutcome }
+  | { kind: "withdrawn" }
+  | { kind: "declined" }
+  | { kind: "error"; failure: InvitationFailure };
+
+/** Écran affiché ; les écrans « joined », « awaiting » et « preview » portent leurs données, ce qui évite tout cast. */
+type View =
+  | { name: "joined"; data: InvitationJoined }
+  | { name: "awaiting"; data: AwaitingOutcome }
+  | { name: "preview"; data: InvitationPreview }
+  | { name: "declined" | "withdrawn" | "missing" | "guest" | "loading" | "error" };
 
 const cardClass = "rounded-2xl border bg-card p-6 shadow-soft";
 
@@ -46,6 +72,9 @@ function useNoReferrer() {
  * Le jeton est lu dans le fragment, rangé en `sessionStorage`, et la barre d'adresse est nettoyée avant tout appel. Il ne voyage
  * que dans le corps d'un POST (il est relu dans le stockage au moment de l'appel : jamais une clé de requête, une variable de
  * mutation, un toast, une région `aria-live` ni un journal). Un visiteur non connecté ne voit ni nom d'organisation ni rôle.
+ *
+ * Rôle Administrateur (F2-bis) : l'acceptation répond 202 avec un code de rattachement à 6 chiffres, affiché une seule fois
+ * (écran « Demande envoyée ») et gardé seulement dans l'état local de la page : jamais annoncé, ni en toast, ni stocké, ni en cache.
  */
 const OrganizationInvitation = () => {
   const { t } = useTranslation();
@@ -63,6 +92,10 @@ const OrganizationInvitation = () => {
   const [hasToken, setHasToken] = useState(() => ingestInvitationToken() !== null || readInvitationToken() !== null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [declineOpen, setDeclineOpen] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const withdrawButton = useRef<HTMLButtonElement>(null);
+  const codeHeadingId = useId();
+  const confirmNoteId = useId();
   const [announcement, setAnnouncement] = useState("");
   const [rateBlocked, blockRate] = useRateBlock();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -137,6 +170,8 @@ const OrganizationInvitation = () => {
 
   let view: View;
   if (outcome?.kind === "joined") view = { name: "joined", data: outcome.data };
+  else if (outcome?.kind === "awaiting") view = { name: "awaiting", data: outcome.data };
+  else if (outcome?.kind === "withdrawn") view = { name: "withdrawn" };
   else if (outcome?.kind === "declined") view = { name: "declined" };
   else if (failure && !asGuest) view = { name: "error" };
   else if (!tokenUsable) view = { name: "missing" };
@@ -154,6 +189,8 @@ const OrganizationInvitation = () => {
   }, [focusKey]);
   useEffect(() => {
     if (viewName === "joined") setAnnouncement(t("invitation.joined.announce"));
+    // Jamais le code dans l'annonce : seulement « code affiché à l'écran »
+    if (viewName === "awaiting") setAnnouncement(t("invitation.awaiting.announce"));
   }, [viewName, t]);
 
   const busy = accept.isPending || decline.isPending;
@@ -163,7 +200,20 @@ const OrganizationInvitation = () => {
     try {
       const data = await accept.mutateAsync();
       setHasToken(false);
-      setOutcome({ kind: "joined", data });
+      if (data.status === "AWAITING_CONFIRMATION") {
+        // Le code passe dans l'état local de l'écran ; la mutation (et son résultat) quitte aussitôt le cache
+        setOutcome({
+          kind: "awaiting",
+          data: {
+            invitationId: data.invitation_id,
+            organizationName: data.organization_name,
+            role: data.role,
+            confirmationExpiresAt: data.confirmation_expires_at,
+            code: data.confirmation_code,
+          },
+        });
+      } else setOutcome({ kind: "joined", data });
+      accept.reset();
     } catch (error) {
       setOutcome({ kind: "error", failure: classifyInvitationError(error) });
     }
@@ -299,6 +349,40 @@ const OrganizationInvitation = () => {
       );
       break;
     }
+    case "awaiting": {
+      const { data } = view;
+      content = (
+        <section className={cardClass}>
+          {heading(t("invitation.awaiting.title", { name: data.organizationName }), <Hourglass className="h-10 w-10 text-primary" aria-hidden />)}
+          <p className="mt-3 text-center text-sm text-muted-foreground">{t("invitation.awaiting.body", { role: t(`role.${data.role}`) })}</p>
+          <div className="mt-5">
+            <ConfirmationCodeDisplay code={data.code} headingId={codeHeadingId} />
+          </div>
+          <p className="mt-4 text-center text-sm font-semibold">{t("invitation.awaiting.deadline", { date: formatDateTime(data.confirmationExpiresAt) })}</p>
+          <Alert className="mt-4">
+            <Info className="h-4 w-4" aria-hidden />
+            <AlertDescription>{t("invitation.awaiting.noAccess")}</AlertDescription>
+          </Alert>
+          {!online && <p className="mt-3 text-xs text-muted-foreground">{t("common.offlineAction")}</p>}
+          <div className="mt-6 flex flex-col gap-2">
+            {profilesButton}
+            <Button ref={withdrawButton} type="button" variant="ghost" className="min-h-12 w-full text-destructive hover:text-destructive" disabled={!online} onClick={() => setWithdrawOpen(true)}>
+              {t("invitation.awaiting.withdraw")}
+            </Button>
+          </div>
+        </section>
+      );
+      break;
+    }
+    case "withdrawn":
+      content = (
+        <section className={cardClass}>
+          {heading(t("invitation.awaiting.withdrawnTitle"), <XCircle className="h-10 w-10 text-muted-foreground" aria-hidden />)}
+          <p className="mt-3 text-center text-sm text-muted-foreground">{t("invitation.awaiting.withdrawnBody")}</p>
+          <div className="mt-6 flex flex-col gap-2">{homeButton}</div>
+        </section>
+      );
+      break;
     case "declined":
       content = (
         <section className={cardClass}>
@@ -310,6 +394,8 @@ const OrganizationInvitation = () => {
       break;
     case "preview": {
       const { data } = view;
+      // Rôle Administrateur : aucun accès avant la confirmation par code (contrat §7.4.4)
+      const pendingConfirmation = data.requires_confirmation === true;
       content = (
         <section className={cardClass}>
           <h1 ref={headingRef} tabIndex={-1} className="text-balance text-center text-xl font-extrabold outline-none">
@@ -336,17 +422,48 @@ const OrganizationInvitation = () => {
               </div>
               <p className="text-xs text-muted-foreground">{t(`role.${data.role}_desc`)}</p>
             </div>
+            {data.scope && (
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-muted-foreground">{t("invitation.preview.scope")}</dt>
+                <dd className="font-semibold">{scopeLabel(data.scope, t)}</dd>
+              </div>
+            )}
             <div className="flex items-baseline justify-between gap-3">
               <dt className="text-muted-foreground">{t("invitation.preview.validUntil")}</dt>
               <dd className="font-semibold">{formatLongDate(data.expires_at)}</dd>
             </div>
+            {data.capabilities && data.capabilities.length > 0 && (
+              <div className="space-y-2">
+                <dt className="text-muted-foreground">{t("invitation.preview.access")}</dt>
+                <dd>
+                  <RoleAccessList capabilities={data.capabilities} />
+                </dd>
+              </div>
+            )}
           </dl>
-          <p className="mt-5 text-sm text-muted-foreground">{t("invitation.preview.body")}</p>
+          {data.role === "ADMIN" && <p className="mt-3 text-sm text-muted-foreground">{t("invitation.preview.adminLimits")}</p>}
+          <p className="mt-5 text-sm text-muted-foreground">{t(pendingConfirmation ? "invitation.preview.bodyPending" : "invitation.preview.body")}</p>
+          {pendingConfirmation && (
+            <Alert id={confirmNoteId} className="mt-4">
+              <UserCheck className="h-4 w-4" aria-hidden />
+              <AlertTitle>{t("invitation.preview.confirmTitle")}</AlertTitle>
+              <AlertDescription>
+                <p>{t("invitation.preview.confirmBody")}</p>
+                <p className="mt-2">{t("invitation.preview.codeNote")}</p>
+              </AlertDescription>
+            </Alert>
+          )}
           {!online && <p className="mt-3 text-xs text-muted-foreground">{t("common.offlineAction")}</p>}
           <div className="mt-5 flex flex-col gap-2">
-            <Button type="button" className="min-h-12 w-full" disabled={busy || !online} onClick={() => void onAccept()}>
+            <Button
+              type="button"
+              className="min-h-12 w-full"
+              disabled={busy || !online}
+              aria-describedby={pendingConfirmation ? confirmNoteId : undefined}
+              onClick={() => void onAccept()}
+            >
               {accept.isPending && <Loader2 className="animate-spin" aria-hidden />}
-              {t("invitation.accept")}
+              {t(pendingConfirmation ? "invitation.acceptPending" : "invitation.accept")}
             </Button>
             <Button type="button" variant="outline" className="min-h-12 w-full" disabled={busy || !online} onClick={() => setDeclineOpen(true)}>
               {t("invitation.decline")}
@@ -374,8 +491,11 @@ const OrganizationInvitation = () => {
             </Button>,
           );
           break;
-        case "limit":
-          content = errorCard(t("invitation.err.limit.title"), t("invitation.err.limit.body"), profilesButton);
+        case "review":
+          content = errorCard(t("invitation.err.review.title"), t("invitation.err.review.body"), profilesButton);
+          break;
+        case "awaiting":
+          content = errorCard(t("invitation.err.awaiting.title"), t("invitation.err.awaiting.body"), profilesButton);
           break;
         case "member":
           content = errorCard(t("invitation.err.member.title"), t("invitation.err.member.body"), profilesButton);
@@ -424,6 +544,23 @@ const OrganizationInvitation = () => {
       </div>
       <Suspense fallback={null}>
         {declineOpen && <DeclineDialog pending={decline.isPending} onKeep={() => setDeclineOpen(false)} onDecline={() => void onDecline()} />}
+        {withdrawOpen && outcome?.kind === "awaiting" && (
+          <WithdrawDialog
+            invitationId={outcome.data.invitationId}
+            organizationName={outcome.data.organizationName}
+            online={online}
+            onClose={() => {
+              setWithdrawOpen(false);
+              requestAnimationFrame(() => withdrawButton.current?.focus());
+            }}
+            onWithdrawn={() => {
+              setWithdrawOpen(false);
+              // Le code quitte l'état avec l'écran « Demande envoyée »
+              setOutcome({ kind: "withdrawn" });
+            }}
+            onGone={() => setWithdrawOpen(false)}
+          />
+        )}
       </Suspense>
     </AppShell>
   );

@@ -25,6 +25,7 @@ venv/
 *.sqlite3-journal
 *.sqlite3-wal
 *.sqlite3-shm
+*.sqlite3.bak*
 .env
 !.env.example
 backend/private_media/

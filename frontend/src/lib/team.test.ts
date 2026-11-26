@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import "@/i18n";
 import fr from "@/i18n/locales/fr";
 import { describeApiError } from "./api-errors";
-import { ORGANIZATION_ROLES, assignableRoles, classifyTeamError, isOwnersOnlyRow, memberActions, needsReauthentication, scopeLabel } from "./team";
+import { ORGANIZATION_ROLES, assignableRoles, classifyTeamError, invitableRoles, isOwnersOnlyRow, memberActions, needsReauthentication, roleRequiresConfirmation, scopeLabel } from "./team";
 
 const failure = (status: number, data: unknown = {}, headers: Record<string, string> = {}) =>
   new AxiosError(`HTTP ${status}`, String(status), undefined, null, { status, data, headers } as unknown as AxiosResponse);
@@ -142,5 +142,22 @@ describe("classifyTeamError", () => {
   it("DENY_SECURITY et DENY_OBJECT_STATE : textes existants, fenêtre conservée", () => {
     expect(classifyTeamError(coded(403, "DENY_SECURITY"))).toEqual({ kind: "form", message: fr.errors.deny.SECURITY.action });
     expect(classifyTeamError(coded(403, "DENY_OBJECT_STATE"))).toEqual({ kind: "form", message: fr.errors.deny.OBJECT_STATE.action });
+  });
+});
+
+describe("invitableRoles (spec D2 §7.1, L1-01-F2bis)", () => {
+  it("administrateur principal et administrateur : Membre, Analyste, Éditeur, Administrateur ; jamais Administrateur principal", () => {
+    expect(invitableRoles("OWNER")).toEqual(["MEMBER", "ANALYST", "EDITOR", "ADMIN"]);
+    expect(invitableRoles("ADMIN")).toEqual(["MEMBER", "ANALYST", "EDITOR", "ADMIN"]);
+    for (const role of ORGANIZATION_ROLES) expect(invitableRoles(role)).not.toContain("OWNER");
+  });
+  it("éditeur, analyste, membre : aucun rôle (bouton Inviter absent)", () => {
+    expect(invitableRoles("EDITOR")).toEqual([]);
+    expect(invitableRoles("ANALYST")).toEqual([]);
+    expect(invitableRoles("MEMBER")).toEqual([]);
+  });
+  it("seul Administrateur demande une confirmation par code", () => {
+    expect(roleRequiresConfirmation("ADMIN")).toBe(true);
+    for (const role of ["EDITOR", "ANALYST", "MEMBER"] as const) expect(roleRequiresConfirmation(role)).toBe(false);
   });
 });

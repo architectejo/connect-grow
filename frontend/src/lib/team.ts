@@ -1,4 +1,4 @@
-import type { MembershipScope, OrganizationMember, OrganizationRole } from "@/api/types";
+import type { InvitableRole, MembershipScope, OrganizationMember, OrganizationRole } from "@/api/types";
 import i18n from "@/i18n";
 import { describeApiError, getApiErrorCode, isNetworkError } from "@/lib/api-errors";
 import { apiErrorMessage, httpStatus, isRateLimited, retryAfterSeconds } from "@/lib/errors";
@@ -44,6 +44,18 @@ export const isOwnersOnlyRow = (actor: Actor, target: Pick<OrganizationMember, "
 /** Rôles que l'acteur peut attribuer (un administrateur n'attribue jamais OWNER). */
 export const assignableRoles = (actorRole: OrganizationRole): OrganizationRole[] =>
   actorRole === "OWNER" ? [...ORGANIZATION_ROLES] : ORGANIZATION_ROLES.filter((role) => role !== "OWNER");
+
+/**
+ * Rôles proposés à l'invitation (spec D2 §7.1), du moins au plus privilégié : ce que l'émetteur peut déléguer.
+ * Administrateur principal et administrateur : Membre, Analyste, Éditeur, Administrateur (ce dernier avec confirmation requise).
+ * Jamais Administrateur principal (nomination seulement). Autres rôles : aucun (bouton Inviter absent). Le serveur reste l'arbitre
+ * (`400 invitation_role_not_allowed`).
+ */
+export const invitableRoles = (actorRole: OrganizationRole): InvitableRole[] =>
+  actorRole === "OWNER" || actorRole === "ADMIN" ? ["MEMBER", "ANALYST", "EDITOR", "ADMIN"] : [];
+
+/** Une invitation à ce rôle demande une confirmation par code après l'acceptation (contrat §7.4 : `requires_confirmation` pour ADMIN). */
+export const roleRequiresConfirmation = (role: InvitableRole) => role === "ADMIN";
 
 /** Mot de passe et confirmation exigés : promotion vers OWNER ou rétrogradation d'un OWNER (contrat §1.2). */
 export const needsReauthentication = (currentRole: OrganizationRole, newRole: OrganizationRole) =>

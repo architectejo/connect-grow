@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from "react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Info, Loader2, UserCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import type { InvitableRole, Uuid } from "@/api/types";
+import type { InvitableRole, OrganizationRole, Uuid } from "@/api/types";
 import { Field, FormAlert, errorProps, fieldInputClass } from "@/components/auth/FormFields";
 import { ResponsiveDialog } from "@/components/common/ResponsiveDialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,16 +16,16 @@ import { useOrganizationLimits } from "@/hooks/use-organizations";
 import { formatLongDate } from "@/lib/format";
 import { INVITATION_LABEL_MAX, classifyCreateInvitationError } from "@/lib/invitations";
 import { buildInvitationLink } from "@/lib/invitation-token";
+import { invitableRoles, roleRequiresConfirmation, scopeLabel } from "@/lib/team";
 import { cn } from "@/lib/utils";
 import { CopyLinkField } from "./CopyLinkField";
 import { useRateBlock } from "./use-rate-block";
 
-/** Seuls Éditeur et Analyste s'obtiennent par invitation (contrat §2.1) ; aucun n'est présélectionné. */
-const INVITABLE_ROLES: InvitableRole[] = ["EDITOR", "ANALYST"];
-
 interface InviteDialogProps {
   orgId: Uuid;
   orgName: string;
+  /** Rôle de l'émetteur : les rôles proposés sont ceux qu'il peut déléguer (le serveur reste l'arbitre). */
+  actorRole: OrganizationRole;
   online: boolean;
   /** `created` : un lien a été créé (l'écran passe sur l'onglet Invitations). */
   onClose: (created: boolean) => void;
@@ -35,14 +36,17 @@ interface CreatedLink {
   url: string;
   role: InvitableRole;
   expiresAt: string;
+  /** Invitation Administrateur : la personne devra donner son code à l'émetteur ou à un administrateur principal. */
+  requiresConfirmation: boolean;
 }
 
 /**
- * E6a : inviter une personne. Étape 1 : rôle et étiquette facultative. Étape 2 : le lien, affiché UNE SEULE FOIS.
+ * E6a : inviter une personne (spec D2 §7). Étape 1 : rôle (ce que l'émetteur peut déléguer ; Administrateur avec « Confirmation
+ * requise », jamais Administrateur principal), périmètre affiché (jamais choisi ni envoyé en V1) et étiquette facultative. Étape 2 : le lien, affiché UNE SEULE FOIS.
  * Le jeton ne vit que dans l'état local de ce composant (supprimé à la fermeture) : ni cache de requêtes, ni stockage,
  * ni toast, ni `aria-live`, ni journal. Aucun champ téléphone, e-mail ni identifiant : aucune recherche de compte.
  */
-export function InviteDialog({ orgId, orgName, online, onClose, onAnnounce }: InviteDialogProps) {
+export function InviteDialog({ orgId, orgName, actorRole, online, onClose, onAnnounce }: InviteDialogProps) {
   const { t } = useTranslation();
   const mutation = useCreateInvitation(orgId);
   const limits = useOrganizationLimits();
@@ -56,6 +60,7 @@ export function InviteDialog({ orgId, orgName, online, onClose, onAnnounce }: In
   const [blocked, block] = useRateBlock();
   const pending = mutation.isPending;
   const ttlDays = limits.data?.invitation_ttl_days;
+  const roles = invitableRoles(actorRole);
 
   const finish = () => {
     // Le jeton quitte l'état local et le cache de mutations
@@ -73,7 +78,12 @@ export function InviteDialog({ orgId, orgName, online, onClose, onAnnounce }: In
     const trimmed = label.trim();
     try {
       const created = await mutation.mutateAsync({ role, ...(trimmed ? { label: trimmed } : {}) });
-      setLink({ url: buildInvitationLink(window.location.origin, created.link_token), role: created.role, expiresAt: created.expires_at });
+      setLink({
+        url: buildInvitationLink(window.location.origin, created.link_token),
+        role: created.role,
+        expiresAt: created.expires_at,
+        requiresConfirmation: created.requires_confirmation ?? roleRequiresConfirmation(created.role),
+      });
       // Le jeton ne reste pas dans le cache de mutations : l'état local suffit à l'afficher
       mutation.reset();
     } catch (error) {
@@ -106,7 +116,7 @@ export function InviteDialog({ orgId, orgName, online, onClose, onAnnounce }: In
         <div className="space-y-4">
           <Alert role="alert">
             <AlertTriangle className="h-4 w-4" aria-hidden />
-            <AlertDescription>{t("team.invite.linkWarning", { role: roleName })}</AlertDescription>
+            <AlertDescription>{link.requiresConfirmation ? t("team.invite.linkWarningAdmin") : t("team.invite.linkWarning", { role: roleName })}</AlertDescription>
           </Alert>
           <CopyLinkField
             value={link.url}
@@ -150,14 +160,24 @@ export function InviteDialog({ orgId, orgName, online, onClose, onAnnounce }: In
             aria-describedby={roleError ? "invite-role-error" : undefined}
             aria-invalid={!!roleError || undefined}
           >
-            {INVITABLE_ROLES.map((option, index) => {
+            {roles.map((option, index) => {
               const id = `invite-role-${option}`;
+              const confirmation = roleRequiresConfirmation(option);
               return (
                 <div key={option} className={cn("flex min-h-11 items-start gap-3 rounded-xl border p-3", option === role && "border-primary bg-primary/5")}>
                   <RadioGroupItem id={id} value={option} autoFocus={index === 0} className="mt-0.5" />
                   <Label htmlFor={id} className="flex-1 cursor-pointer space-y-0.5 text-sm">
-                    <span className="block font-semibold">{t(`role.${option}`)}</span>
+                    <span className="flex flex-wrap items-center gap-2 font-semibold">
+                      {t(`role.${option}`)}
+                      {confirmation && (
+                        <Badge variant="outline" className="gap-1 font-medium">
+                          <UserCheck className="h-3.5 w-3.5" aria-hidden />
+                          {t("team.invite.confirmBadge")}
+                        </Badge>
+                      )}
+                    </span>
                     <span className="block font-normal text-muted-foreground">{t(`role.${option}_desc`)}</span>
+                    {confirmation && <span className="block font-normal text-muted-foreground">{t("team.invite.adminConfirmNote")}</span>}
                   </Label>
                 </div>
               );
@@ -170,8 +190,11 @@ export function InviteDialog({ orgId, orgName, online, onClose, onAnnounce }: In
           )}
         </div>
 
+        <p className="text-sm text-muted-foreground">{t("team.scopeLine", { scope: scopeLabel({ type: "ORGANIZATION" }, t) })}</p>
+
         <Alert>
-          <AlertDescription>{t("team.invite.rolesNote")}</AlertDescription>
+          <Info className="h-4 w-4" aria-hidden />
+          <AlertDescription>{t("team.invite.ownerNote")}</AlertDescription>
         </Alert>
 
         <Field label={t("team.invite.labelLabel")} htmlFor={labelId} error={labelError} hint={t("team.invite.labelHelp")}>

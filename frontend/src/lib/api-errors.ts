@@ -45,6 +45,13 @@ const BUSINESS_CODES = [
   "invitation_not_pending",
   "invitation_role_not_allowed",
   "already_member",
+  // Invitations v2 (L1-01-B7, contrat §7.4 et §7.7)
+  "account_review_required",
+  "invitation_not_awaiting_confirmation",
+  "already_awaiting_confirmation",
+  "confirmation_code_required",
+  "confirmation_code_invalid",
+  "confirmation_code_exhausted",
 ] as const;
 export type BusinessCode = (typeof BUSINESS_CODES)[number];
 

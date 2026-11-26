@@ -1,7 +1,9 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import apiClient from "@/api/client";
 import type {
+  AwaitingConfirmationInvitation,
   ChangeMemberRoleBody,
+  ConfirmInvitationBody,
   CreatedInvitation,
   CreateInvitationBody,
   InvitationAccepted,
@@ -16,7 +18,7 @@ import type {
 import { useAuth } from "@/contexts/AuthContext";
 import { invalidateContexts } from "@/hooks/use-contexts";
 import { organizationKeys } from "@/hooks/use-organizations";
-import { getApiErrorCode } from "@/lib/api-errors";
+import { getApiErrorCode, isNetworkError } from "@/lib/api-errors";
 import { shouldRetryQuery } from "@/lib/errors";
 import { InvitationTokenMissingError, bindInvitationToken, clearInvitationToken, readInvitationToken } from "@/lib/invitation-token";
 
@@ -29,7 +31,12 @@ export const teamKeys = {
   members: (orgId: Uuid) => [...organizationKeys.all, "members", orgId] as const,
   /** Préfixe réservé à l'onglet Invitations (F2) : invalidé aussi après un retrait (ses invitations sont révoquées). */
   invitations: (orgId: Uuid) => [...organizationKeys.all, "invitations", orgId] as const,
+  /** Demandes d'accès à confirmer (`?status=AWAITING_CONFIRMATION`) : sous le préfixe des invitations, invalidées avec lui. */
+  awaiting: (orgId: Uuid) => [...organizationKeys.all, "invitations", orgId, "AWAITING_CONFIRMATION"] as const,
 };
+
+/** Demandes en attente de la personne qui a accepté (E17). La liste ne contient jamais de code. */
+export const MY_AWAITING_INVITATIONS_KEY = ["my-awaiting-invitations"] as const;
 
 const base = (orgId: Uuid) => `accounts/organizations/${orgId}/`;
 export const membersUrl = (orgId: Uuid) => `${base(orgId)}members/`;
@@ -37,6 +44,8 @@ export const memberUrl = (orgId: Uuid, membershipId: Uuid) => `${membersUrl(orgI
 export const transferUrl = (orgId: Uuid) => `${base(orgId)}transfer-ownership/`;
 export const invitationsUrl = (orgId: Uuid) => `${base(orgId)}invitations/`;
 export const invitationUrl = (orgId: Uuid, invitationId: Uuid) => `${invitationsUrl(orgId)}${invitationId}/`;
+export const confirmInvitationUrl = (orgId: Uuid, invitationId: Uuid) => `${invitationUrl(orgId, invitationId)}confirm/`;
+export const rejectInvitationUrl = (orgId: Uuid, invitationId: Uuid) => `${invitationUrl(orgId, invitationId)}reject/`;
 /** Échange du jeton : le jeton voyage dans le corps du POST, jamais dans ces URL. */
 export const invitationExchangeUrl = (action: "preview" | "accept" | "decline") => `accounts/organization-invitations/${action}/`;
 
@@ -70,8 +79,11 @@ function refreshAfterRefusal(queryClient: QueryClient, orgId: Uuid, error: unkno
   const code = getApiErrorCode(error);
   if (code === "member_not_found") {
     void queryClient.invalidateQueries({ queryKey: teamKeys.members(orgId) });
-  } else if (code === "invitation_not_pending" || code === "invitation_not_found") {
+  } else if (code === "invitation_not_pending" || code === "invitation_not_found" || code === "invitation_not_awaiting_confirmation") {
     void queryClient.invalidateQueries({ queryKey: teamKeys.invitations(orgId) });
+  } else if (code === "invitation_role_not_allowed") {
+    // Le rôle de l'émetteur a peut-être changé : `my_role` est relu (rôles proposés)
+    void queryClient.invalidateQueries({ queryKey: organizationKeys.internal(orgId) });
   } else if (code === "DENY_PERMISSION" || code === "DENY_RELATION" || code === "DENY_OBJECT_STATE" || code === "DENY_SECURITY") {
     void queryClient.invalidateQueries({ queryKey: teamKeys.members(orgId) });
     void queryClient.invalidateQueries({ queryKey: organizationKeys.internal(orgId) });
@@ -233,7 +245,9 @@ export function useInvitationPreview(enabled: boolean) {
 
 /**
  * Accepter : le profil actif ne change pas (bouton « Ouvrir l'organisation »). Le jeton est effacé au succès.
- * La liste des profils est rechargée AVANT la résolution : le nouveau profil est sélectionnable dès l'écran de succès.
+ * `200 ACTIVE` : la liste des profils est rechargée AVANT la résolution (le nouveau profil est sélectionnable dès l'écran de succès).
+ * `202 AWAITING_CONFIRMATION` (rôle Administrateur) : aucune appartenance ni contexte ; seule la liste E17 est invalidée. La réponse
+ * porte le code de rattachement : `gcTime: 0`, et l'écran copie le code dans son état local puis appelle `reset()` (aucun cache).
  */
 export function useAcceptInvitation() {
   const queryClient = useQueryClient();
@@ -243,8 +257,12 @@ export function useAcceptInvitation() {
     mutationFn: async () => (await apiClient.post<InvitationAccepted>(invitationExchangeUrl("accept"), tokenBody(accountId))).data,
     gcTime: 0,
     retry: false,
-    onSuccess: () => {
+    onSuccess: (data) => {
       clearInvitationToken();
+      if (data.status === "AWAITING_CONFIRMATION") {
+        void queryClient.invalidateQueries({ queryKey: MY_AWAITING_INVITATIONS_KEY });
+        return;
+      }
       return invalidateContexts(queryClient);
     },
   });
@@ -261,5 +279,97 @@ export function useDeclineInvitation() {
     gcTime: 0,
     retry: false,
     onSuccess: () => clearInvitationToken(),
+  });
+}
+
+// --- Demandes d'accès à confirmer (invitation Administrateur, contrat §7.4.6, spec D2 §4.4, §8) ---
+
+/**
+ * Demandes `AWAITING_CONFIRMATION` de l'organisation (section « À traiter », 20 par page). `enabled` seulement avec
+ * `org.manage_members`. Filtrées côté client sur ce statut (une ligne échue présentée `EXPIRED` n'est pas rendue), triées :
+ * `can_confirm` d'abord, puis l'échéance la plus proche. Jamais de code dans ces objets.
+ */
+export function useAwaitingConfirmations(orgId: Uuid | undefined, enabled = true) {
+  const { isAuthenticated } = useAuth();
+  return useInfiniteQuery({
+    queryKey: teamKeys.awaiting(orgId ?? ""),
+    queryFn: async ({ pageParam }) =>
+      (
+        await apiClient.get<Paginated<AwaitingConfirmationInvitation>>(invitationsUrl(orgId as Uuid), {
+          params: { status: "AWAITING_CONFIRMATION", ...(pageParam > 1 ? { page: pageParam } : {}) },
+        })
+      ).data,
+    initialPageParam: 1,
+    getNextPageParam: (last, pages) => (last.next ? pages.length + 1 : undefined),
+    enabled: enabled && isAuthenticated && !!orgId,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    retry: shouldRetryQuery,
+    select: (data) => {
+      const seen = new Set<Uuid>();
+      const invitations = data.pages
+        .flatMap((page) => page.results)
+        .filter((i) => i.status === "AWAITING_CONFIRMATION" && !seen.has(i.invitation_id) && !!seen.add(i.invitation_id));
+      return { invitations: sortAwaiting(invitations) };
+    },
+  });
+}
+
+/** `can_confirm` d'abord ; à égalité, `confirmation_expires_at` croissante (la plus urgente en haut). */
+export function sortAwaiting<T extends Pick<AwaitingConfirmationInvitation, "can_confirm" | "confirmation_expires_at">>(items: T[]): T[] {
+  const time = (value: string | null) => (value ? Date.parse(value) || Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+  return [...items].sort((a, b) => Number(b.can_confirm) - Number(a.can_confirm) || time(a.confirmation_expires_at) - time(b.confirmation_expires_at));
+}
+
+/** Après une confirmation, un rejet ou un refus : la liste d'attente, les invitations et les membres se réalignent. */
+function refreshAwaiting(queryClient: QueryClient, orgId: Uuid) {
+  void queryClient.invalidateQueries({ queryKey: teamKeys.invitations(orgId) });
+  void queryClient.invalidateQueries({ queryKey: teamKeys.members(orgId) });
+}
+
+/**
+ * Confirmer l'accès d'un administrateur invité : `{confirm, password, code}`. `gcTime: 0` (mot de passe et code quittent le
+ * cache de mutations dès le démontage du dialogue). **Jamais de relance automatique** : un nouvel essai décompterait un essai de code.
+ */
+export function useConfirmInvitation(orgId: Uuid) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ invitationId, body }: { invitationId: Uuid; body: ConfirmInvitationBody }) =>
+      (await apiClient.post<OrganizationMember>(confirmInvitationUrl(orgId, invitationId), body)).data,
+    gcTime: 0,
+    retry: false,
+    onSuccess: () => refreshAwaiting(queryClient, orgId),
+    onError: (error) => {
+      const code = getApiErrorCode(error);
+      if (isNetworkError(error)) {
+        // L'accès a peut-être été confirmé : la liste se réaligne au retour du réseau (aucune relance de la mutation)
+        window.addEventListener("online", () => refreshAwaiting(queryClient, orgId), { once: true });
+      } else if (code === "confirmation_code_exhausted" || code === "already_member") refreshAwaiting(queryClient, orgId);
+      else if (code === "DENY_PERMISSION") {
+        void queryClient.invalidateQueries({ queryKey: teamKeys.invitations(orgId) });
+        void queryClient.invalidateQueries({ queryKey: organizationKeys.internal(orgId) });
+      } else refreshAfterRefusal(queryClient, orgId, error);
+    },
+  });
+}
+
+/** Rejeter une demande d'accès (204, pas de corps). */
+export function useRejectInvitation(orgId: Uuid) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (invitationId: Uuid) => {
+      await apiClient.post(rejectInvitationUrl(orgId, invitationId));
+    },
+    gcTime: 0,
+    retry: false,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: teamKeys.invitations(orgId) });
+    },
+    onError: (error) => {
+      if (getApiErrorCode(error) === "DENY_PERMISSION") {
+        void queryClient.invalidateQueries({ queryKey: teamKeys.invitations(orgId) });
+        void queryClient.invalidateQueries({ queryKey: organizationKeys.internal(orgId) });
+      } else refreshAfterRefusal(queryClient, orgId, error);
+    },
   });
 }

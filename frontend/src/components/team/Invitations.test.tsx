@@ -84,23 +84,28 @@ describe("InviteDialog (E6a)", () => {
     vi.spyOn(apiClient, "get").mockResolvedValue({ data: limits });
     const onClose = vi.fn();
     const onAnnounce = vi.fn();
-    wrap(<InviteDialog orgId={ORG} orgName="Boutique Lumière" online onClose={onClose} onAnnounce={onAnnounce} />);
+    wrap(<InviteDialog orgId={ORG} orgName="Boutique Lumière" actorRole="ADMIN" online onClose={onClose} onAnnounce={onAnnounce} />);
     return { onClose, onAnnounce };
   };
   const choose = (name: RegExp) => fireEvent.click(within(screen.getByRole("dialog")).getByRole("radio", { name }));
   const submit = () => fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Créer le lien" }));
   const createdBody = { invitation_id: INV1, role: "EDITOR", status: "PENDING", label: "", created_at: "x", expires_at: "2026-11-16T08:00:00Z", link_token: TOKEN };
 
-  it("étape 1 : Éditeur et Analyste seulement, aucun rôle présélectionné, bouton désactivé, aucun champ de coordonnées", async () => {
+  it("étape 1 : Membre, Analyste, Éditeur, Administrateur (dans cet ordre), jamais Administrateur principal, aucun présélectionné", async () => {
     renderDialog();
     const dialog = await screen.findByRole("dialog", { name: "Inviter une personne" });
     const radios = within(dialog).getAllByRole("radio");
-    expect(radios).toHaveLength(2);
-    expect(within(dialog).getByRole("radio", { name: /Éditeur/ })).not.toBeChecked();
-    expect(within(dialog).getByRole("radio", { name: /Analyste/ })).not.toBeChecked();
-    expect(within(dialog).queryByRole("radio", { name: /Administrateur/ })).not.toBeInTheDocument();
+    expect(radios).toHaveLength(4);
+    expect(radios.map((radio) => radio.getAttribute("value"))).toEqual(["MEMBER", "ANALYST", "EDITOR", "ADMIN"]);
+    for (const radio of radios) expect(radio).not.toBeChecked();
+    expect(within(dialog).queryByRole("radio", { name: /Administrateur principal/ })).not.toBeInTheDocument();
+    // Administrateur : « Confirmation requise » et la phrase d'appel
+    const admin = within(dialog).getByRole("radio", { name: /^Administrateur/ });
+    expect(admin.closest("div")?.textContent).toMatch(/Confirmation requise/);
+    expect(within(dialog).getByText(/devrez appeler la personne pour obtenir son code de confirmation/)).toBeInTheDocument();
+    expect(within(dialog).getByText("Périmètre : Toute l'organisation")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Créer le lien" })).toBeDisabled();
-    expect(within(dialog).getByText(/Pour donner le rôle Administrateur ou Administrateur principal/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/ne peut pas être donné par invitation/)).toBeInTheDocument();
     // Aucune recherche de compte : ni téléphone, ni e-mail, ni identifiant
     expect(within(dialog).queryByLabelText(/téléphone|e-mail|identifiant/i)).not.toBeInTheDocument();
     expect(within(dialog).getAllByRole("textbox")).toHaveLength(1);
@@ -264,7 +269,7 @@ describe("InviteDialog (E6a)", () => {
 
     it("409 invitation_limit_reached", async () => {
       const { dialog } = await attempt(apiError(409, "invitation_limit_reached"));
-      expect(await within(dialog).findByText(/nombre maximal d'invitations en attente est atteint/)).toBeInTheDocument();
+      expect(await within(dialog).findByText(/nombre maximal d'invitations ouvertes est atteint/)).toBeInTheDocument();
       expect(within(dialog).getByRole("radio", { name: /Analyste/ })).toBeChecked();
       expect(within(dialog).getByLabelText("Étiquette (facultatif)")).toHaveValue("Awa");
     });
@@ -285,7 +290,7 @@ describe("InviteDialog (E6a)", () => {
 
     it("400 {role} et invitation_role_not_allowed : message sous les rôles", async () => {
       const { dialog } = await attempt(apiError(400, "invitation_role_not_allowed"));
-      expect(await within(dialog).findByText("Ce rôle ne peut pas être donné par invitation.")).toBeInTheDocument();
+      expect(await within(dialog).findByText("Vous ne pouvez pas donner ce rôle par invitation.")).toBeInTheDocument();
     });
 
     it("403 DENY_PERMISSION : fermeture avec le texte de refus", async () => {
@@ -309,7 +314,7 @@ describe("InviteDialog (E6a)", () => {
 
   it("hors ligne : « Créer le lien » désactivé avec la raison", async () => {
     vi.spyOn(apiClient, "get").mockResolvedValue({ data: {} });
-    wrap(<InviteDialog orgId={ORG} orgName="Boutique Lumière" online={false} onClose={vi.fn()} onAnnounce={vi.fn()} />);
+    wrap(<InviteDialog orgId={ORG} orgName="Boutique Lumière" actorRole="ADMIN" online={false} onClose={vi.fn()} onAnnounce={vi.fn()} />);
     const dialog = await screen.findByRole("dialog");
     choose(/Éditeur/);
     expect(within(dialog).getByRole("button", { name: "Créer le lien" })).toBeDisabled();
@@ -502,5 +507,36 @@ describe("InvitationsPanel (onglet Invitations)", () => {
       expect(del).not.toHaveBeenCalled();
       await waitFor(() => expect(screen.getByRole("button", { name: /^Annuler l'invitation : Jean, comptable, Éditeur, expire le 16 novembre 2099$/ })).toHaveFocus());
     });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+describe("InviteDialog : invitation Administrateur (L1-01-F2bis, spec D2 §7.3)", () => {
+  it("rôle Administrateur : corps {role: ADMIN} sans scope ; avertissement du lien avec la consigne d'appel et le code", async () => {
+    vi.spyOn(apiClient, "get").mockResolvedValue({ data: { invitation_ttl_days: 7 } });
+    const post = vi.spyOn(apiClient, "post").mockResolvedValue({
+      data: { invitation_id: INV1, role: "ADMIN", status: "PENDING", label: "", created_at: "x", expires_at: "2026-11-16T08:00:00Z", link_token: TOKEN, scope: { type: "ORGANIZATION", id: null }, requires_confirmation: true },
+    });
+    wrap(<InviteDialog orgId={ORG} orgName="Boutique Lumière" actorRole="OWNER" online onClose={vi.fn()} onAnnounce={vi.fn()} />);
+    const dialog = await screen.findByRole("dialog", { name: "Inviter une personne" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Administrateur/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Créer le lien" }));
+    expect(await screen.findByLabelText("Lien d'invitation")).toHaveValue(LINK);
+    expect(post).toHaveBeenCalledWith(`accounts/organizations/${ORG}/invitations/`, { role: "ADMIN" });
+    expect(screen.getByText(/n'aura aucun accès avant que vous ou un administrateur principal confirmiez son identité/)).toBeInTheDocument();
+    expect(screen.getByText(/appeler la personne au numéro que vous connaissez et lui demander le code à 6 chiffres/)).toBeInTheDocument();
+    expect(screen.queryByText(/Quiconque le possède peut rejoindre l'équipe avec le rôle/)).not.toBeInTheDocument();
+  });
+
+  it("rôle Membre : avertissement habituel du lien", async () => {
+    vi.spyOn(apiClient, "get").mockResolvedValue({ data: { invitation_ttl_days: 7 } });
+    vi.spyOn(apiClient, "post").mockResolvedValue({
+      data: { invitation_id: INV1, role: "MEMBER", status: "PENDING", label: "", created_at: "x", expires_at: "2026-11-16T08:00:00Z", link_token: TOKEN, requires_confirmation: false },
+    });
+    wrap(<InviteDialog orgId={ORG} orgName="Boutique Lumière" actorRole="ADMIN" online onClose={vi.fn()} onAnnounce={vi.fn()} />);
+    const dialog = await screen.findByRole("dialog", { name: "Inviter une personne" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Membre/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Créer le lien" }));
+    expect(await screen.findByText(/Quiconque le possède peut rejoindre l'équipe avec le rôle Membre/)).toBeInTheDocument();
   });
 });

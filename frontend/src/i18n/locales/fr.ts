@@ -406,11 +406,20 @@ const fr = {
       password_required: "Saisissez votre mot de passe pour continuer.",
       invitation_invalid: "Cette invitation n'est plus valable.",
       invitation_limit_reached:
-        "Le nombre maximal d'invitations en attente est atteint. Annulez une invitation inutilisée pour en créer une nouvelle.",
+        "Le nombre maximal d'invitations ouvertes est atteint (liens en attente et demandes à confirmer). Annulez une invitation inutilisée ou traitez une demande à confirmer pour en créer une nouvelle.",
       invitation_not_found: "Cette invitation n'est plus en attente.",
       invitation_not_pending: "Cette invitation n'est plus en attente.",
       invitation_role_not_allowed: "Ce rôle ne peut pas être donné par invitation.",
       already_member: "Vous faites déjà partie de cette organisation.",
+      account_review_required:
+        "Votre compte doit être examiné par l'équipe Connecte+ avant de créer ou de rejoindre d'autres organisations.",
+      invitation_not_awaiting_confirmation: "Cette demande n'est plus en attente : elle a été traitée, retirée, rejetée ou a expiré.",
+      already_awaiting_confirmation:
+        "Vous avez déjà accepté une invitation comme Administrateur pour cette organisation. Attendez sa confirmation, ou retirez cette demande depuis « Mes profils » pour utiliser ce lien.",
+      confirmation_code_required: "Saisissez les 6 chiffres du code.",
+      confirmation_code_invalid: "Ce code est incorrect. Après plusieurs codes incorrects, la demande est rejetée automatiquement.",
+      confirmation_code_exhausted:
+        "Trop de codes incorrects : la demande a été rejetée automatiquement. Si cette personne doit rejoindre l'équipe, créez une nouvelle invitation.",
     },
     lost: {
       title: "Votre profil actif a changé",
@@ -728,6 +737,35 @@ const fr = {
         "Créez une organisation pour publier au nom de votre entreprise, boutique, ONG ou structure d'événements, et travailler avec une équipe.",
       open: "Ouvrir {{name}}",
     },
+    awaiting: {
+      title: "Demandes en attente de confirmation",
+      intro:
+        "Vous avez accepté ces invitations. Vous n'aurez accès à l'organisation qu'après la confirmation de votre identité par la personne qui vous a invité(e). Elle vous appellera pour vous demander votre code.",
+      acceptedAt: "Acceptée le {{date}}",
+      deadline: "Confirmation attendue avant le {{date}}",
+      codeHint: "Votre code n'est pas réaffiché ici. Si vous ne l'avez plus, obtenez-en un nouveau.",
+      newCode: "Obtenir un nouveau code",
+      newCodeAria: "Obtenir un nouveau code pour {{name}}",
+      newCodeTitle: "Obtenir un nouveau code ?",
+      newCodeBody:
+        "Un nouveau code sera créé pour « {{name}} ». L'ancien ne fonctionnera plus : si vous l'avez déjà donné, donnez le nouveau à la personne qui vous a invité(e).",
+      newCodeKeep: "Garder mon code actuel",
+      newCodeSubmit: "Obtenir un nouveau code",
+      newCodeShown: "Votre nouveau code",
+      newCodeDone: "J'ai noté le code",
+      newCodeAnnounce: "Nouveau code affiché à l'écran.",
+      newCodeNetwork:
+        "Connexion perdue. Un nouveau code a peut-être été créé et l'ancien ne fonctionne peut-être plus : réessayez pour en obtenir un.",
+      expired: "Non confirmée à temps",
+      expiredHint: "Demandez une nouvelle invitation si vous souhaitez toujours rejoindre cette organisation.",
+      withdraw: "Retirer ma demande",
+      withdrawAria: "Retirer ma demande pour {{name}}",
+      withdrawTitle: "Retirer votre demande pour « {{name}} » ?",
+      withdrawBody: "Vous ne rejoindrez pas cette organisation. Le lien ne pourra plus être utilisé ; il faudra une nouvelle invitation.",
+      keep: "Garder la demande",
+      withdrawn: "Demande retirée.",
+      loadMore: "Voir plus de demandes",
+    },
   },
   provider: {
     dialogTitleActivate: "Activer mon profil prestataire",
@@ -901,8 +939,11 @@ const fr = {
       intro:
         "Vous obtenez un lien à envoyer vous-même à la personne (par exemple sur WhatsApp). Elle l'ouvre, se connecte et accepte. Le lien ne fonctionne qu'une seule fois.",
       roleLabel: "Rôle",
-      rolesNote:
-        "Pour donner le rôle Administrateur ou Administrateur principal, invitez d'abord la personne, puis changez son rôle une fois qu'elle a rejoint l'équipe.",
+      ownerNote:
+        "Le rôle Administrateur principal ne peut pas être donné par invitation. Une fois la personne dans l'équipe, un administrateur principal peut la proposer.",
+      confirmBadge: "Confirmation requise",
+      adminConfirmNote:
+        "Après l'acceptation, vous ou un administrateur principal devrez appeler la personne pour obtenir son code de confirmation. Aucun accès n'est ouvert avant.",
       labelLabel: "Étiquette (facultatif)",
       labelHelp:
         "Un repère pour retrouver cette invitation, par exemple « Jean, comptable ». Visible par les administrateurs principaux et les administrateurs de l'organisation, supprimée dès que l'invitation est utilisée ou annulée. Ne mettez ni téléphone ni adresse.",
@@ -912,6 +953,8 @@ const fr = {
       linkTitle: "Votre lien d'invitation",
       linkWarning:
         "Ce lien ne sera plus affichable après la fermeture de cette fenêtre. Quiconque le possède peut rejoindre l'équipe avec le rôle {{role}} : envoyez-le seulement à la personne concernée.",
+      linkWarningAdmin:
+        "Ce lien ne sera plus affichable après la fermeture de cette fenêtre. Envoyez-le seulement à la personne concernée. Quiconque l'ouvre pourra demander à rejoindre l'équipe comme Administrateur, mais n'aura aucun accès avant que vous ou un administrateur principal confirmiez son identité : il faudra appeler la personne au numéro que vous connaissez et lui demander le code à 6 chiffres qu'elle aura reçu.",
       linkField: "Lien d'invitation",
       copy: "Copier le lien",
       copied: "Lien copié",
@@ -923,10 +966,11 @@ const fr = {
       summary: "Rôle : {{role}}. Expire le {{date}}.",
       notCopied: "Vous n'avez pas encore copié le lien.",
       done: "Terminer",
-      errLimit: "Le nombre maximal d'invitations en attente est atteint. Annulez une invitation inutilisée pour en créer une nouvelle.",
+      errLimit:
+        "Le nombre maximal d'invitations ouvertes est atteint (liens en attente et demandes à confirmer). Annulez une invitation inutilisée ou traitez une demande à confirmer pour en créer une nouvelle.",
       errRate: "Vous avez créé beaucoup d'invitations. Réessayez plus tard.",
       errRateIn: "Vous avez créé beaucoup d'invitations. Réessayez dans {{minutes}} min.",
-      errRole: "Ce rôle ne peut pas être donné par invitation.",
+      errRole: "Vous ne pouvez pas donner ce rôle par invitation.",
       errLabel: "Cette étiquette est invalide (60 caractères au plus).",
       errLabelTooLong: "Cette étiquette est trop longue.",
       errNetwork: "Connexion perdue. Vérifiez l'onglet Invitations avant de réessayer.",
@@ -956,6 +1000,69 @@ const fr = {
       keep: "Garder l'invitation",
       revoked: "Invitation annulée.",
       notPending: "Cette invitation n'est plus en attente.",
+    },
+    pending: {
+      title: "À traiter",
+      toConfirm: "Demandes d'accès à confirmer",
+      loadError: "Impossible de vérifier les demandes en attente.",
+      loadMore: "Voir plus",
+    },
+    awaiting: {
+      title: "{{name}} a accepté l'invitation",
+      titleAnonymous: "Une personne a accepté une invitation comme Administrateur",
+      phoneHint: "Téléphone se terminant par {{hint}}",
+      phoneHintAria: "Téléphone se terminant par {{digits}}",
+      acceptedAt: "Acceptée le {{date}}",
+      deadline: "À confirmer avant le {{date}}",
+      inviterNoAuthority:
+        "La personne qui a créé cette invitation ne peut plus donner ce rôle (elle a changé de rôle ou quitté l'équipe). Seul un administrateur principal peut encore confirmer ou rejeter cette demande. Assurez-vous que cette arrivée est toujours souhaitée.",
+      callHint:
+        "Pour confirmer, appelez la personne au numéro que vous connaissez et demandez-lui le code à 6 chiffres affiché sur son écran. Ne demandez pas le code par message. Si vous ne la reconnaissez pas, rejetez la demande.",
+      notYours: "Seuls la personne qui a créé l'invitation et les administrateurs principaux peuvent confirmer ou rejeter cette demande.",
+      confirm: "Confirmer l'accès",
+      confirmAria: "Confirmer l'accès de {{name}}",
+      reject: "Rejeter",
+      rejectAria: "Rejeter la demande de {{name}}",
+      gone: "Cette demande n'est plus en attente : elle a été traitée, retirée, rejetée ou a expiré.",
+    },
+    confirmInvite: {
+      title: "Confirmer l'accès de {{name}}",
+      callTitle: "Appelez d'abord la personne",
+      callBody:
+        "Appelez {{name}} au numéro que vous connaissez déjà, pas à un numéro reçu avec la demande, et demandez-lui le code à 6 chiffres affiché sur son écran. Ne demandez pas le code par message. Si la personne que vous appelez n'a pas de code, rejetez la demande.",
+      person: "Personne",
+      phone: "Téléphone",
+      phoneCheck: "Vérifiez que ces chiffres correspondent au numéro que vous appelez.",
+      role: "Rôle",
+      scope: "Périmètre",
+      body:
+        "En confirmant, {{name}} devient Administrateur de « {{org}} » immédiatement : cette personne pourra gérer le profil, la vérification, l'équipe (sauf les administrateurs principaux), les contacts et les messages. Les administrateurs principaux en sont informés.",
+      codeLabel: "Code à 6 chiffres",
+      codeHelp: "Le code que la personne lit sur son écran, par exemple 482 913.",
+      codeIncomplete: "Saisissez les 6 chiffres du code.",
+      codeInvalid:
+        "Ce code est incorrect. Vérifiez-le avec {{name}} au téléphone. Après plusieurs codes incorrects, la demande est rejetée automatiquement.",
+      exhausted:
+        "Trop de codes incorrects : la demande a été rejetée automatiquement. Si cette personne doit rejoindre l'équipe, créez une nouvelle invitation.",
+      badPassword: "Mot de passe incorrect. Aucun essai de code n'a été compté.",
+      check: "J'ai obtenu ce code en appelant {{name}}, et c'est bien la personne que j'ai voulu inviter",
+      submit: "Confirmer l'accès",
+      done: "{{name}} a rejoint l'équipe comme Administrateur.",
+      unavailable:
+        "Cette personne ne peut pas rejoindre l'organisation pour le moment. La demande reste en attente jusqu'à son échéance ; vous pouvez aussi la rejeter.",
+      alreadyMember: "Cette personne fait déjà partie de l'équipe.",
+      denied: "Vous ne pouvez plus confirmer cette demande. Un administrateur principal peut le faire.",
+      network: "Connexion perdue. L'accès a peut-être été confirmé : vérifiez la liste avant de réessayer.",
+    },
+    rejectInvite: {
+      title: "Rejeter la demande de {{name}} ?",
+      titleAnonymous: "Rejeter cette demande ?",
+      body: "Cette personne n'aura aucun accès à l'organisation et le lien ne pourra plus être utilisé. Elle sera prévenue, sans voir votre nom.",
+      inviterNoAuthority: "La personne qui a créé cette invitation ne peut plus donner ce rôle.",
+      when: "Rejetez si la personne que vous avez appelée n'a pas de code, ou si vous ne savez pas qui a accepté.",
+      keep: "Garder la demande",
+      submit: "Rejeter",
+      done: "Demande rejetée.",
     },
     loadError: "Impossible de charger l'équipe.",
     empty: "Aucun membre à afficher.",
@@ -1038,9 +1145,37 @@ const fr = {
       invitedBy: "Invitation de",
       role: "Rôle proposé",
       validUntil: "Valable jusqu'au",
+      scope: "Périmètre",
+      access: "Accès",
+      accessToggle: "Voir les {{count}} accès",
+      adminLimits: "Ce rôle ne permet ni de nommer un administrateur principal, ni d'archiver l'organisation.",
+      confirmTitle: "Confirmation nécessaire",
+      confirmBody:
+        "Pour ce rôle, la personne qui vous a invité(e) devra confirmer votre identité. Elle verra votre nom abrégé et les deux derniers chiffres de votre numéro de téléphone. Aucun accès ne vous sera ouvert avant cette confirmation.",
+      codeNote: "Après avoir accepté, vous recevrez un code à 6 chiffres. Vous le donnerez de vive voix à cette personne quand elle vous appellera.",
+      bodyPending:
+        "Votre profil personnel et vos offres personnelles ne changent pas. Après confirmation, vous pourrez quitter l'organisation à tout moment.",
       body: "En acceptant, vous agirez au nom de cette organisation avec ce rôle. Votre profil personnel et vos offres personnelles ne changent pas. Vous pourrez quitter l'organisation à tout moment.",
     },
     accept: "Rejoindre l'organisation",
+    acceptPending: "Accepter l'invitation",
+    awaiting: {
+      title: "Demande envoyée à « {{name}} »",
+      body:
+        "Vous avez accepté le rôle {{role}}. La personne qui vous a invité(e) ou un administrateur principal doit maintenant confirmer votre identité.",
+      codeTitle: "Votre code de confirmation",
+      codeInstruction:
+        "Donnez ce code de vive voix à la personne qui vous a invité(e), quand elle vous appelle ou en personne. Elle en a besoin pour vous ouvrir l'accès. Ne le communiquez à personne d'autre et ne l'envoyez pas par message, même si on vous le demande.",
+      codeOnce:
+        "Ce code ne sera plus affiché quand vous quitterez cette page. Si vous l'oubliez, obtenez-en un nouveau depuis « Mes profils » : l'ancien ne fonctionnera plus.",
+      deadline: "Confirmation attendue avant le {{date}}.",
+      noAccess:
+        "Vous n'avez encore aucun accès à l'organisation. Vous serez prévenu(e) par une notification. Sans confirmation avant cette date, la demande expire et il faudra une nouvelle invitation.",
+      withdraw: "Retirer ma demande",
+      announce: "Demande envoyée. Votre code de confirmation est affiché à l'écran.",
+      withdrawnTitle: "Demande retirée",
+      withdrawnBody: "Vous ne rejoindrez pas cette organisation. Le lien ne peut plus être utilisé.",
+    },
     decline: "Refuser l'invitation",
     declineTitle: "Refuser cette invitation ?",
     declineBody: "Le lien ne pourra plus être utilisé. Vous pourrez demander une nouvelle invitation.",
@@ -1072,9 +1207,13 @@ const fr = {
         body: "Pour rejoindre une organisation, votre numéro de téléphone de connexion doit être vérifié. Votre invitation reste valable : revenez ensuite sur ce lien.",
         action: "Vérifier mon numéro",
       },
-      limit: {
-        title: "Vous avez atteint la limite d'organisations",
-        body: "Un compte ne peut pas faire partie d'un nombre illimité d'organisations. Quittez une organisation dont vous ne faites plus usage, puis revenez sur ce lien tant qu'il est valable.",
+      review: {
+        title: "Examen du compte nécessaire",
+        body: "Votre compte doit être examiné par l'équipe Connecte+ avant de rejoindre d'autres organisations. Votre invitation reste valable jusqu'à son échéance.",
+      },
+      awaiting: {
+        title: "Une demande est déjà en attente",
+        body: "Vous avez déjà accepté une invitation comme Administrateur pour cette organisation. Attendez sa confirmation, ou retirez cette demande depuis « Mes profils » pour utiliser ce lien.",
       },
       member: {
         title: "Vous faites déjà partie de cette organisation",
@@ -1202,6 +1341,40 @@ const fr = {
     unavailableOrgs: "Certaines de vos organisations ne sont plus disponibles pour le moment.",
     unavailableOrgsLink: "Voir mes organisations",
     changeProfile: "Changer de profil",
+  },
+  access: {
+    group: {
+      organization: "Organisation",
+      team: "Équipe",
+      offers: "Offres",
+      reviews: "Avis",
+      contact: "Contact",
+      messages: "Messages",
+      stats: "Statistiques",
+      billing: "Facturation",
+    },
+    cap: {
+      org_view_internal: "Voir l'espace interne de l'organisation",
+      org_edit_profile: "Modifier le profil de l'organisation",
+      org_verification_submit: "Envoyer les pièces de vérification",
+      org_archive: "Archiver l'organisation",
+      org_leave: "Quitter l'organisation",
+      org_manage_members: "Inviter et retirer des membres",
+      org_manage_roles: "Changer les rôles",
+      offer_view_internal: "Voir les offres, y compris les brouillons",
+      offer_publish: "Publier des offres",
+      offer_edit: "Modifier les offres",
+      offer_delete: "Supprimer des offres",
+      review_reply: "Répondre aux avis",
+      contact_view_requesters: "Voir qui a demandé à contacter l'organisation",
+      contact_manage_channels: "Gérer les moyens de contact",
+      message_reply: "Répondre aux messages",
+      stats_view: "Consulter les statistiques",
+      billing_view: "Voir les achats de visibilité de l'organisation",
+      billing_purchase: "Acheter de la visibilité pour l'organisation",
+    },
+    others_one: "et {{count}} autre accès",
+    others_other: "et {{count}} autres accès",
   },
   scope: {
     offersOf: "Offres et statistiques de : {{name}}",

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useRef, useState } from "react";
 import { UserPlus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { PageHeader, RoleBadge } from "@/components/common";
@@ -6,6 +6,7 @@ import { LeaveOrganizationCard } from "@/components/organizations/OrganizationAc
 import { OrganizationPage } from "@/components/organizations/OrganizationPage";
 import { InvitationsPanel, type InvitationsPanelHandle } from "@/components/team/InvitationsPanel";
 import { MembersPanel } from "@/components/team/MembersPanel";
+import { TeamPendingActions } from "@/components/team/TeamPendingActions";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,7 +20,7 @@ const InviteDialog = lazy(() => import("@/components/team/InviteDialog").then((m
 type TeamTab = "members" | "invitations";
 
 /**
- * Équipe d'une organisation (L1-01, E6) : membres, changement de rôle, retrait, transfert d'administration principale.
+ * Équipe d'une organisation (L1-01, E6) : section « À traiter » (demandes d'accès à confirmer, F2-bis), membres, changement de rôle, retrait, transfert d'administration principale.
  * Pour les rôles qui gèrent les membres (`org.manage_members`) : bouton « Inviter une personne » et onglet « Invitations »
  * (requête à l'ouverture de l'onglet seulement). Une seule région `aria-live` annonce le résultat des actions.
  */
@@ -40,6 +41,12 @@ const OrganizationTeam = () => {
     setInviteOpen(true);
   };
   const invitations = useRef<InvitationsPanelHandle>(null);
+  const membersHeading = useRef<HTMLHeadingElement>(null);
+  // Section « À traiter » disparue après une action : titre de la liste des membres (onglet Membres affiché d'abord)
+  const focusMembers = useCallback(() => {
+    setTab("members");
+    requestAnimationFrame(() => requestAnimationFrame(() => (membersHeading.current ?? inviteButton.current)?.focus()));
+  }, []);
 
   const closeInvite = (created: boolean) => {
     setInviteOpen(false);
@@ -75,6 +82,8 @@ const OrganizationTeam = () => {
               {announcement}
             </div>
 
+            <TeamPendingActions org={org} onAnnounce={setAnnouncement} onFocusFallback={focusMembers} />
+
             {canInvite ? (
               <Tabs value={tab} onValueChange={(next) => setTab(next as TeamTab)}>
                 <TabsList className="mb-4 h-auto w-full sm:w-auto" aria-label={t("team.tabs.label")}>
@@ -86,18 +95,18 @@ const OrganizationTeam = () => {
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="members">
-                  <MembersPanel org={org} onAnnounce={setAnnouncement} />
+                  <MembersPanel org={org} onAnnounce={setAnnouncement} headingRef={membersHeading} />
                 </TabsContent>
                 <TabsContent value="invitations">
                   <InvitationsPanel ref={invitations} org={org} onAnnounce={setAnnouncement} onInvite={openInvite} />
                 </TabsContent>
               </Tabs>
             ) : (
-              <MembersPanel org={org} onAnnounce={setAnnouncement} />
+              <MembersPanel org={org} onAnnounce={setAnnouncement} headingRef={membersHeading} />
             )}
 
             <Suspense fallback={null}>
-              {inviteOpen && canInvite && <InviteDialog orgId={org.id} orgName={org.name} online={online} onClose={closeInvite} onAnnounce={setAnnouncement} />}
+              {inviteOpen && canInvite && <InviteDialog orgId={org.id} orgName={org.name} actorRole={org.my_role} online={online} onClose={closeInvite} onAnnounce={setAnnouncement} />}
             </Suspense>
 
             <div className="mt-6 grid gap-4 lg:grid-cols-2">

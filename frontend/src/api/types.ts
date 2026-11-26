@@ -490,13 +490,20 @@ export interface OrganizationLimits {
     invitation_ttl_days?: number;
 }
 
-/** Statut effectif d'une invitation : une `PENDING` échue est présentée `EXPIRED` (contrat §0). */
-export type InvitationStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "REVOKED" | "EXPIRED";
+/**
+ * Statut effectif d'une invitation (contrat §0 et §7.4) : une `PENDING` ou une `AWAITING_CONFIRMATION` échue est présentée `EXPIRED`.
+ * `AWAITING_CONFIRMATION` : invitation Administrateur acceptée, en attente de confirmation par l'émetteur ou un administrateur principal.
+ */
+export type InvitationStatus = "PENDING" | "AWAITING_CONFIRMATION" | "ACCEPTED" | "DECLINED" | "REVOKED" | "REJECTED" | "EXPIRED";
 
-/** Rôles qu'une invitation peut donner (jamais OWNER ni ADMIN, contrat §2.1). */
-export type InvitableRole = "EDITOR" | "ANALYST";
+/** Rôles qu'une invitation peut donner (contrat §7.4.1), dans la limite de ce que l'émetteur peut déléguer. Jamais OWNER. */
+export type InvitableRole = "ADMIN" | "EDITOR" | "ANALYST" | "MEMBER";
 
-/** Invitation en liste (`organizations/<id>/invitations/`, `org.manage_members`). Jamais le jeton ni son empreinte. */
+/**
+ * Invitation en liste (`organizations/<id>/invitations/`, `org.manage_members`). Jamais le jeton ni son empreinte, jamais le code
+ * de rattachement. `accepted_by_display_name` et `accepted_by_phone_hint` ne sont renseignés que si `can_confirm` et
+ * `AWAITING_CONFIRMATION` (règle 10 : indice affiché seulement au confirmateur, jamais copié ailleurs).
+ */
 export interface OrganizationInvitation {
     invitation_id: Uuid;
     role: InvitableRole;
@@ -506,8 +513,28 @@ export interface OrganizationInvitation {
     expires_at: string;
     created_by_display_name: string;
     is_mine: boolean;
+    /** Champs de l'invitation v2 (B7). Absents d'un serveur antérieur : traités comme une invitation sans confirmation. */
+    scope?: MembershipScope;
+    requires_confirmation?: boolean;
+    accepted_at?: string | null;
+    confirmation_expires_at?: string | null;
+    accepted_by_display_name?: string | null;
+    accepted_by_phone_hint?: string | null;
+    can_confirm?: boolean;
+    inviter_has_authority?: boolean;
 }
 
+/** Demande d'accès à confirmer (liste `?status=AWAITING_CONFIRMATION`) : les champs d'attente sont toujours présents. */
+export interface AwaitingConfirmationInvitation extends OrganizationInvitation {
+    accepted_at: string | null;
+    confirmation_expires_at: string | null;
+    accepted_by_display_name: string | null;
+    accepted_by_phone_hint: string | null;
+    can_confirm: boolean;
+    inviter_has_authority: boolean;
+}
+
+/** Corps de création : `scope` n'est jamais envoyé en V1 (défaut serveur). */
 export interface CreateInvitationBody {
     role: InvitableRole;
     label?: string;
@@ -525,14 +552,61 @@ export interface InvitationPreview {
     role: InvitableRole;
     expires_at: string;
     invited_by_display_name: string;
+    /** Champs v2 (B7). Absents d'un serveur antérieur : rien n'est affiché pour eux. */
+    scope?: MembershipScope;
+    capabilities?: string[];
+    requires_confirmation?: boolean;
 }
 
-/** `organization-invitations/accept/` : `membership_id` n'est pas affiché. */
-export interface InvitationAccepted {
+/** `accept/` en 200 : appartenance active. `membership_id` n'est pas affiché. */
+export interface InvitationJoined {
+    /** Absent d'un serveur antérieur : traité comme `ACTIVE`. */
+    status?: "ACTIVE";
     organization_id: Uuid;
     organization_name: string;
     role: InvitableRole;
     membership_id: Uuid;
+}
+
+/**
+ * `accept/` en 202 (rôle Administrateur) : aucune appartenance, aucun contexte. `confirmation_code` est un secret à usage unique :
+ * copié dans l'état local de l'écran qui l'affiche, puis la mutation est remise à zéro (jamais dans un cache ni un stockage).
+ */
+export interface InvitationAwaitingConfirmation {
+    status: "AWAITING_CONFIRMATION";
+    invitation_id: Uuid;
+    organization_name: string;
+    role: InvitableRole;
+    confirmation_expires_at: string;
+    confirmation_code: string;
+}
+
+export type InvitationAccepted = InvitationJoined | InvitationAwaitingConfirmation;
+
+/** Corps de `confirm/` : `code` = exactement 6 chiffres en chaîne (espaces retirés par le front). */
+export interface ConfirmInvitationBody {
+    confirm: true;
+    password: string;
+    code: string;
+}
+
+/** Élément de `organization-invitations/awaiting/` (personne qui a accepté). Jamais de code. */
+export interface MyAwaitingInvitation {
+    invitation_id: Uuid;
+    organization_name: string;
+    org_type: OrganizationType;
+    role: InvitableRole;
+    scope?: MembershipScope;
+    accepted_at: string;
+    confirmation_expires_at: string;
+    status: "AWAITING_CONFIRMATION" | "EXPIRED";
+}
+
+/** `organization-invitations/<id>/confirmation-code/` : nouveau code (l'ancien cesse de valoir). Affiché une fois, jamais conservé. */
+export interface NewConfirmationCode {
+    invitation_id: Uuid;
+    confirmation_code: string;
+    confirmation_expires_at: string;
 }
 
 /**

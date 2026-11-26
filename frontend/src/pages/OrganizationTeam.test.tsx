@@ -113,11 +113,15 @@ describe("écran Équipe", () => {
     expect(document.body.textContent).not.toMatch(/propriétaire/i);
   });
 
-  it("la requête des invitations part à l'ouverture de l'onglet, pas au chargement de la page", async () => {
+  it("la requête des invitations en attente part à l'ouverture de l'onglet ; les demandes à confirmer, avec la page", async () => {
     renderPage(owner);
     await screen.findByText("Marie K.");
-    const urls = () => vi.mocked(apiClient.get).mock.calls.map((c) => String(c[0]));
+    const calls = (status: string) =>
+      vi.mocked(apiClient.get).mock.calls.filter((c) => String(c[0]).endsWith("/invitations/") && (c[1] as { params?: { status?: string } })?.params?.status === status);
+    const urls = () => calls("PENDING").map((c) => String(c[0]));
     expect(urls().some((u) => u.endsWith("/invitations/"))).toBe(false);
+    // Section « À traiter » (spec D2 §4.4) : demandes AWAITING_CONFIRMATION chargées avec la page (org.manage_members)
+    await waitFor(() => expect(calls("AWAITING_CONFIRMATION")).toHaveLength(1));
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Invitations" }), { button: 0 });
     fireEvent.click(screen.getByRole("tab", { name: "Invitations" }));
     expect(await screen.findByText("Aucune invitation en attente.")).toBeInTheDocument();

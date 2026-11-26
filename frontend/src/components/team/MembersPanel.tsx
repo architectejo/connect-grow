@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useId, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useId, useRef, useState, type RefObject } from "react";
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { OrganizationInternal, OrganizationMember, Uuid } from "@/api/types";
@@ -21,6 +21,8 @@ interface MembersPanelProps {
   org: Pick<OrganizationInternal, "id" | "my_role" | "capabilities">;
   /** Texte annoncé par la région `aria-live` de la page. */
   onAnnounce: (message: string) => void;
+  /** Titre de la liste, fourni par la page pour y placer le focus après une action de la section « À traiter ». */
+  headingRef?: RefObject<HTMLHeadingElement>;
 }
 
 type OpenDialog = { action: TeamAction; member: OrganizationMember } | null;
@@ -29,14 +31,15 @@ type OpenDialog = { action: TeamAction; member: OrganizationMember } | null;
  * Liste paginée des membres (20 par page, « Voir plus ») et fenêtres d'action. Cartes sur mobile, tableau sur ordinateur.
  * Hors ligne : la liste déjà chargée reste affichée, les actions sont désactivées avec la raison.
  */
-export function MembersPanel({ org, onAnnounce }: MembersPanelProps) {
+export function MembersPanel({ org, onAnnounce, headingRef: externalHeadingRef }: MembersPanelProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const online = useOnlineStatus();
   const query = useMembers(org.id);
   const [dialog, setDialog] = useState<OpenDialog>(null);
   const triggers = useRef(new Map<Uuid, HTMLButtonElement | null>());
-  const headingRef = useRef<HTMLHeadingElement>(null);
+  const internalHeadingRef = useRef<HTMLHeadingElement>(null);
+  const headingRef = externalHeadingRef ?? internalHeadingRef;
   const headingId = useId();
   const offlineId = useId();
   const actor = { role: org.my_role, capabilities: org.capabilities };
@@ -52,7 +55,7 @@ export function MembersPanel({ org, onAnnounce }: MembersPanelProps) {
   const closeAfterRemoval = useCallback(() => {
     setDialog(null);
     requestAnimationFrame(() => headingRef.current?.focus());
-  }, []);
+  }, [headingRef]);
 
   const members = query.data?.members ?? [];
   let body;

@@ -49,7 +49,7 @@ from .models import (
 from .organizations import (
     ACCOUNT_REVIEW_HARD_LIMIT, INVITATION_CHANGE_REJECTED, OrganizationError, _activate_membership, _audit_invitation,
     _authorize_member, _effective_owner_ids, _ensure_under_hard_limit, _get_organization, _lock_organization,
-    _require_reauthentication, account_review_required_error, is_under_creation_review, record_account_review_refusal,
+    _require_reauthentication, is_under_creation_review, record_account_review_refusal,
     _unavailable_user_error, _validate_scope, get_identity_settings, membership_scope, publish_invitation_change,
 )
 from .throttles import FailureLimiter
@@ -219,9 +219,13 @@ def create_invitation(actor, organization_id, role, label='', scope=None, after_
         actor_membership = _authorize_member(actor, organization, 'org.manage_members')
         if is_under_creation_review(organization):
             # Organisation retenue en revue de création (ADR 0010 D8, correction S5) : pas d'invitation tant que le
-            # personnel n'a pas levé la revue. Refus neutre, après l'autorisation (aucun oracle pour un non-membre),
-            # avant le quota par organisation (qui n'est pas consommé).
-            raise account_review_required_error(reason=None)
+            # personnel n'a pas levé la revue. Après l'autorisation (un non-membre reçoit DENY_RELATION : aucun
+            # oracle ; le membre connaît déjà `governance.under_review`), avant le quota par organisation.
+            raise OrganizationError(
+                "Cette organisation est en cours d'examen par l'équipe Connecte+ ; les invitations seront possibles "
+                "ensuite.",
+                'organization_under_review',
+            )
         if after_authorization is not None:
             after_authorization()
         if not isinstance(role, str) or role not in capabilities.ROLES:

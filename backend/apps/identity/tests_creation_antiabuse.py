@@ -371,8 +371,14 @@ class InvitationsDuringReviewTests(Base):
         held = self.create_held()
         response = self.client.post(f'{ORGS}{held.pk}/invitations/', {'role': ANALYST}, format='json')
         self.assertEqual(response.status_code, 409, response.content)
-        self.assertEqual((response.json()['code'], response.json()['detail']), ('account_review_required', NEUTRAL_DETAIL))
+        self.assertEqual((response.json()['code'], response.json()['detail']), (
+            'organization_under_review',
+            "Cette organisation est en cours d'examen par l'équipe Connecte+ ; les invitations seront possibles "
+            "ensuite.",
+        ))
+        self.assertIsNone(re.search(r'\d', response.json()['detail']))
         self.assertFalse(OrganizationInvitation.objects.filter(organization=held).exists())
+        self.assertFalse(AuditLog.objects.filter(action__startswith='ORG_CREATION_REFUSED').exists())
         # Un non-membre reçoit toujours le refus d'appartenance : aucun oracle sur la revue.
         outsider = login(make_user('dehors'))
         self.assertEqual(

@@ -483,6 +483,25 @@ describe("erreurs (4.5) : neutres, jamais le nom de l'organisation", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["contexts"] });
     await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
     expect(postsTo("/accept/")).toHaveLength(1);
+    // « Réessayer » relance l'APERÇU (jeton encore présent), jamais l'acceptation
+    const previews = postsTo("/preview/").length;
+    fireEvent.click(screen.getByRole("button", { name: "Réessayer" }));
+    expect(await screen.findByRole("heading", { level: 2, name: "Boutique Lumière" })).toBeInTheDocument();
+    expect(postsTo("/preview/").length).toBeGreaterThan(previews);
+    expect(postsTo("/accept/")).toHaveLength(1);
+  });
+
+  it("acceptation coupée sans jeton utilisable : pas de « Réessayer »", async () => {
+    mockApi({ accept: NETWORK });
+    renderPage();
+    await screen.findByRole("button", { name: "Rejoindre l'organisation" });
+    vi.mocked(apiClient.post).mockImplementation(async () => {
+      clearInvitationToken();
+      throw NETWORK;
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rejoindre l'organisation" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Connexion perdue pendant l'acceptation" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Réessayer" })).not.toBeInTheDocument();
   });
 
   it("réseau coupé dès l'aperçu : même écran, jeton conservé", async () => {
@@ -821,13 +840,13 @@ describe("invitations v2 (spec D2 §9)", () => {
   it("bfcache : à `pagehide`, le code est effacé ; l'écran dit « Code masqué » et renvoie vers « Mes profils »", async () => {
     await acceptAdmin();
     expect(document.body.textContent).toContain("482 913");
-    act(() => {
-      window.dispatchEvent(new Event("pagehide"));
-    });
-    expect(await screen.findByText("Code masqué")).toBeInTheDocument();
-    expect(screen.getByText(/obtenez-en un nouveau depuis « Mes profils »/)).toBeInTheDocument();
+    // SANS act() : le DOM doit être effacé de façon synchrone, dans l'écouteur, avant que le navigateur ne fige la page
+    window.dispatchEvent(new Event("pagehide"));
     expect(document.body.innerHTML).not.toContain("482 913");
     expect(document.body.innerHTML).not.toContain(SENTINEL);
+    expect(document.body.innerHTML).not.toContain("4 8 2 9 1 3");
+    expect(screen.getByText("Code masqué")).toBeInTheDocument();
+    expect(screen.getByText(/obtenez-en un nouveau depuis « Mes profils »/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Demande envoyée à « Boutique Lumière »" })).toBeInTheDocument();
   });
 

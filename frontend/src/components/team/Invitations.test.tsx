@@ -403,6 +403,13 @@ describe("InvitationsPanel (onglet Invitations)", () => {
     expect(onInvite).toHaveBeenCalled();
   });
 
+  it("vide, aucun rôle délégable (canInvite faux) : message sans bouton d'invitation", async () => {
+    vi.spyOn(apiClient, "get").mockResolvedValue(page([]));
+    wrap(<InvitationsPanel org={{ id: ORG, capabilities: MANAGE }} onAnnounce={vi.fn()} onInvite={vi.fn()} canInvite={false} />);
+    expect(await screen.findByText("Aucune invitation en attente.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Inviter une personne" })).not.toBeInTheDocument();
+  });
+
   it("erreur : message et « Réessayer » qui recharge", async () => {
     const get = vi.spyOn(apiClient, "get").mockRejectedValueOnce(apiError(429)).mockResolvedValue(page([inv(INV1)]));
     renderPanel();

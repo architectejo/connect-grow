@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Hourglass, Info, KeyRound, Loader2, MailOpen, UserCheck, XCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { flushSync } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { InvitableRole, InvitationJoined, InvitationPreview, Uuid } from "@/api/types";
@@ -238,7 +239,9 @@ const OrganizationInvitation = () => {
   const codeShown = outcome?.kind === "awaiting" && outcome.data.code !== null;
   useEffect(() => {
     if (!codeShown) return;
-    const hide = () => setOutcome((current) => (current?.kind === "awaiting" ? { kind: "awaiting", data: { ...current.data, code: null } } : current));
+    // flushSync : le DOM est mis à jour DANS l'écouteur, avant que le navigateur ne fige la page (React 18 différerait sinon le rendu)
+    const hide = () =>
+      flushSync(() => setOutcome((current) => (current?.kind === "awaiting" ? { kind: "awaiting", data: { ...current.data, code: null } } : current)));
     window.addEventListener("pagehide", hide);
     return () => window.removeEventListener("pagehide", hide);
   }, [codeShown]);
@@ -566,7 +569,19 @@ const OrganizationInvitation = () => {
           );
           break;
         case "acceptLost":
-          content = errorCard(t("invitation.err.acceptLost.title"), t("invitation.err.acceptLost.body"), profilesButton);
+          content = errorCard(
+            t("invitation.err.acceptLost.title"),
+            t("invitation.err.acceptLost.body"),
+            <>
+              {profilesButton}
+              {/* Le jeton est encore là : « Réessayer » relance l'APERÇU (jamais l'acceptation), qui dira si l'invitation vit encore */}
+              {tokenUsable && (
+                <Button type="button" variant="outline" className="min-h-12 w-full" onClick={retry}>
+                  {t("invitation.retry")}
+                </Button>
+              )}
+            </>,
+          );
           break;
         case "network":
           content = errorCard(

@@ -100,7 +100,7 @@ const OrganizationTeam = () => {
                   <MembersPanel org={org} onAnnounce={setAnnouncement} headingRef={membersHeading} />
                 </TabsContent>
                 <TabsContent value="invitations">
-                  <InvitationsPanel ref={invitations} org={org} onAnnounce={setAnnouncement} onInvite={openInvite} />
+                  <InvitationsPanel ref={invitations} org={org} onAnnounce={setAnnouncement} onInvite={openInvite} canInvite={canInvite} />
                 </TabsContent>
               </Tabs>
             ) : (

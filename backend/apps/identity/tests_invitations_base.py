@@ -114,6 +114,7 @@ class InvitationSettingsTests(TestCase):
             'admin_invitation_confirmation_hours': row.admin_invitation_confirmation_hours,
             'org_creation_review_window_days': row.org_creation_review_window_days,
             'org_creation_review_threshold': row.org_creation_review_threshold,
+            'org_creation_review_max_pending': row.org_creation_review_max_pending,
         }
         data.update(extra)
         return data

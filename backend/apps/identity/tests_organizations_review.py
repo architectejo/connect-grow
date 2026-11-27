@@ -190,7 +190,8 @@ class ActorAndTargetTests(TeamTestBase):
         self.assertBusiness('user_unavailable', services.change_member_role, self.owner, self.org.pk, self.analyst.pk, EDITOR)
         self.assertEqual(self.role_of(self.owner), OWNER)
 
-    def test_quota_counts_only_active_organizations(self):
+    def test_hard_limit_counts_memberships_of_archived_organizations_until_the_member_leaves(self):
+        """Correction S5 (ADR 0010 D8) : archiver ne libère pas de place ; quitter l'organisation archivée, si."""
         row = IdentitySettings.get_solo()
         row.max_memberships_hard_limit = 1
         row.save()
@@ -198,6 +199,8 @@ class ActorAndTargetTests(TeamTestBase):
         first = services.create_organization(user, 'Une', 'ONG')
         self.assertBusiness('account_review_required', services.create_organization, user, 'Deux', 'ONG')
         services.archive_organization(user, first.pk)
+        self.assertBusiness('account_review_required', services.create_organization, user, 'Deux', 'ONG')
+        services.leave_organization(user, first.pk)
         self.assertEqual(services.create_organization(user, 'Deux', 'ONG').name, 'Deux')
 
     def test_last_owner_can_transfer_then_leave_an_archived_organization(self):

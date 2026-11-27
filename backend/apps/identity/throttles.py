@@ -187,12 +187,44 @@ ORG_CREATE_BURST_FALLBACK_RATE = '2/hour'
 
 class OrganizationCreateBurstThrottle(UserWriteThrottle):
     """Création d'organisation en rafale : 2/heure par compte, en plus de `org_create` (ADR 0010 D8, §9.3). Le 429
-    porte `Retry-After` et un message générique, sans valeur de quota (Q22)."""
+    porte `Retry-After` et un message générique, sans valeur de quota (Q22).
+
+    Ne compte que les créations EFFECTIVES (correction de relecture B8) : `allow_request` vérifie le quota sans rien
+    enregistrer ; la vue appelle `record` après une création réussie (ni un refus, ni une double soumission
+    idempotente ne consomment le quota). `org_create` (5/jour), lui, compte toutes les tentatives : sonder le plafond
+    reste coûteux. Limite : deux créations strictement simultanées peuvent passer la vérification ensemble (une de
+    plus au pire)."""
 
     scope = 'org_create_burst'
 
     def get_rate(self):
         return self.THROTTLE_RATES.get(self.scope, ORG_CREATE_BURST_FALLBACK_RATE)
+
+    def _live_history(self):
+        self.now = self.timer()
+        return [stamp for stamp in self.cache.get(self.key, []) if stamp > self.now - self.duration]
+
+    def allow_request(self, request, view):
+        if request.method in ('GET', 'HEAD', 'OPTIONS') or self.rate is None:
+            return True
+        self.key = self.get_cache_key(request, view)
+        if self.key is None:
+            return True
+        self.history = self._live_history()
+        if len(self.history) >= self.num_requests:
+            return self.throttle_failure()
+        return True
+
+    def record(self, request, view):
+        """Enregistre une création réussie (appelée par la vue après le service)."""
+        if self.rate is None:
+            return
+        self.key = self.get_cache_key(request, view)
+        if self.key is None:
+            return
+        self.history = self._live_history()
+        self.history.insert(0, self.now)
+        self.cache.set(self.key, self.history, self.duration)
 
 
 class OrganizationListThrottle(IpThrottle):

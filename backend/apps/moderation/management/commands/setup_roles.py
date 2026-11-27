@@ -28,8 +28,7 @@ ADMINISTRATOR_EXTRA_PERMISSIONS = {
     'catalog.forbiddenitem': ['add', 'change', 'delete'],
     # ADR 0006, 11.4 : organisations en lecture et suspension/réactivation (dont celles converties en SUSPENDED),
     # exigences de pièces et réglages modifiables ; appartenances en lecture seule (ni téléphone ni e-mail).
-    # ADR 0010 D8 (L1-01-B8) : levée de la revue de création (`review_organization_creation`, codename complet).
-    'identity.organization': ['view', 'suspend', '=review_organization_creation'],
+    'identity.organization': ['view', 'suspend'],
     'identity.membership': ['view'],
     'identity.organizationdocumentrequirement': ['view', 'add', 'change', 'delete'],
     'identity.identitysettings': ['view', 'change'],
@@ -42,6 +41,13 @@ ADMINISTRATOR_EXTRA_PERMISSIONS = {
     'moderation.auditlog': ['view'],  # journal en lecture seule : jamais modifiable
     'reviews.reviewsettings': ['view', 'change'],
     'moderation.moderationsettings': ['view', 'change'],
+}
+
+
+# Séparation des fonctions (ADR 0010 §9.1) : les décisions de vérification (levée de la revue de création ; plus tard
+# nominations et niveau d'assurance, B9) relèvent du seul groupe « Vérification », distinct de l'Administrateur.
+VERIFICATION_PERMISSIONS = {
+    'identity.organization': ['view', '=review_organization_creation'],
 }
 
 
@@ -60,7 +66,7 @@ def _permissions_for(spec):
 
 
 class Command(BaseCommand):
-    help = "Crée/actualise les groupes Modérateur et Administrateur (CDC 3.11)."
+    help = "Crée/actualise les groupes Modérateur, Administrateur et Vérification (CDC 3.11, ADR 0010 §9.1)."
 
     def handle(self, *args, **options):
         moderator_perms = _permissions_for(MODERATOR_PERMISSIONS)
@@ -71,8 +77,13 @@ class Command(BaseCommand):
         admin_group, _ = Group.objects.get_or_create(name='Administrateur')
         admin_group.permissions.set(admin_perms)
 
+        verification_perms = _permissions_for(VERIFICATION_PERMISSIONS)
+        verification_group, _ = Group.objects.get_or_create(name='Vérification')
+        verification_group.permissions.set(verification_perms)
+
         if options['verbosity'] > 0:
             self.stdout.write(self.style.SUCCESS(
                 f"Rôles à jour : Modérateur ({len(moderator_perms)} permissions), "
-                f"Administrateur ({len(admin_perms)} permissions)."
+                f"Administrateur ({len(admin_perms)} permissions), "
+                f"Vérification ({len(verification_perms)} permissions)."
             ))

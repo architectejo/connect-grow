@@ -103,6 +103,14 @@ class Base(TestCase):
     def create_many(self, count, user=None, prefix='Orga'):
         return [self.create(f'{prefix} {i}', user) for i in range(count)]
 
+    def create_held(self, name='Retenue', user=None):
+        """Seuil réglé à 2 (sa borne basse) : une création ordinaire, puis `name`, retenue en revue."""
+        set_settings(org_creation_review_threshold=2)
+        self.create(f'Avant {name}', user)
+        held = self.create(name, user)
+        assert held.creation_review_status == PENDING
+        return held
+
 
 # --- Revue de création : seuil, fenêtre, comptage -------------------------------------------------------------
 
@@ -167,6 +175,30 @@ class CreationReviewThresholdTests(Base):
         self.assertEqual(organization.creation_review_status, NONE)
 
 
+class PendingReviewsCapTests(Base):
+    def test_beyond_the_pending_cap_creation_is_refused_neutrally_and_journaled(self):
+        self.assertEqual(IdentitySettings.get_solo().org_creation_review_max_pending, 3)
+        set_settings(org_creation_review_threshold=2)
+        organizations = self.create_many(4)
+        self.assertEqual([o.creation_review_status for o in organizations], [NONE, PENDING, PENDING, PENDING])
+        refused = self.client.post(ORGS, {'name': 'Cinquieme', 'org_type': 'ONG'}, format='json')
+        self.assertEqual((refused.status_code, refused.json()['code']), (409, 'account_review_required'))
+        self.assertEqual(refused.json()['detail'], NEUTRAL_DETAIL)
+        entry = AuditLog.objects.get(action='ORG_CREATION_REFUSED_PENDING_REVIEWS')
+        self.assertEqual((entry.actor_id, entry.details), (self.creator.pk, 'pending_reviews=true'))
+        self.assertFalse(Organization.objects.filter(name='Cinquieme').exists())
+        # Une levée libère une place ; la suivante est de nouveau retenue.
+        services.clear_organization_creation_review(staff_with('review_organization_creation'), organizations[1].pk)
+        self.assertEqual(self.create('Cinquieme').creation_review_status, PENDING)
+
+    def test_the_cap_is_a_bounded_internal_setting(self):
+        row = IdentitySettings.get_solo()
+        for value in (0, 51):
+            row.org_creation_review_max_pending = value
+            with self.assertRaises(Exception):
+                row.full_clean()
+
+
 # --- Plafond technique caché : refus neutre -------------------------------------------------------------------
 
 class HardLimitTests(Base):
@@ -184,14 +216,44 @@ class HardLimitTests(Base):
         self.assertNeutral(self.client.post(ORGS, {'name': 'Trois', 'org_type': 'ONG'}, format='json'))
         self.assertEqual(Organization.objects.filter(created_by=self.creator).count(), 2)
 
-    def test_the_hard_limit_counts_active_memberships_in_active_organizations_only(self):
+    def test_the_hard_limit_counts_every_active_membership_whatever_the_organization_status(self):
+        """Créer puis archiver ne contourne pas le plafond (correction S5) ; seul un départ libère une place."""
+        set_settings(max_memberships_hard_limit=2)
+        first, second = self.create_many(2)
+        services.archive_organization(self.creator, first.pk)
+        services.suspend_organization(staff_with('suspend_organization'), second.pk, 'moderation')
+        with self.assertRaises(services.OrganizationError) as caught:
+            self.create('Troisieme')
+        self.assertEqual(caught.exception.get_codes(), 'account_review_required')
+        services.leave_organization(self.creator, first.pk)  # départ d'une organisation archivée : permis
+        self.assertEqual(self.create('Troisieme').status, Organization.STATUS_ACTIVE)
+        body = self.client.get(CONTEXTS).json()  # `unavailable` est borné par le même plafond
+        self.assertEqual(len(body['results']) - 1 + len(body['unavailable']), 2)
+
+    def test_hard_limit_refusals_feed_the_staff_queue_once_per_account_and_window(self):
+        set_settings(max_memberships_hard_limit=1)
+        self.create('Une')
+        for name in ('Deux', 'Trois'):
+            refused = self.client.post(ORGS, {'name': name, 'org_type': 'ONG'}, format='json')
+            self.assertNeutral(refused)
+        entry = AuditLog.objects.get(action='ORG_CREATION_REFUSED_ACCOUNT_REVIEW')
+        self.assertEqual(
+            (entry.actor_id, entry.target_id, entry.details), (self.creator.pk, self.creator.pk, 'hard_limit=true'),
+        )
+        # Une fenêtre plus tard, un nouveau refus est de nouveau journalisé.
+        AuditLog.objects.filter(pk=entry.pk).update(created_at=timezone.now() - timedelta(days=31))
+        self.assertNeutral(self.client.post(ORGS, {'name': 'Quatre', 'org_type': 'ONG'}, format='json'))
+        self.assertEqual(AuditLog.objects.filter(action='ORG_CREATION_REFUSED_ACCOUNT_REVIEW').count(), 2)
+        # La file est lisible dans l'admin du journal (filtre par action).
+        from apps.moderation.admin import AuditLogAdmin
+
+        self.assertIn('action', AuditLogAdmin.list_filter)
+
+    def test_a_double_submission_at_the_hard_limit_stays_idempotent(self):
         set_settings(max_memberships_hard_limit=1)
         first = self.create('Une')
-        with self.assertRaises(services.OrganizationError) as caught:
-            self.create('Deux')
-        self.assertEqual(caught.exception.get_codes(), 'account_review_required')
-        services.archive_organization(self.creator, first.pk)
-        self.assertEqual(self.create('Deux').status, Organization.STATUS_ACTIVE)
+        self.assertEqual(self.create('Une').pk, first.pk)  # verrou du compte, puis doublon, puis plafond
+        self.assertFalse(AuditLog.objects.filter(action='ORG_CREATION_REFUSED_ACCOUNT_REVIEW').exists())
 
     def test_acceptance_beyond_the_hard_limit_is_refused_neutrally_and_the_invitation_stays_pending(self):
         owner = make_user('proprio-invite')
@@ -202,7 +264,9 @@ class HardLimitTests(Base):
         self.assertNeutral(self.client.post(ACCEPT, {'token': token}, format='json'))
         self.assertEqual(OrganizationInvitation.objects.get(pk=invitation.pk).status, 'PENDING')
         refusal = AuditLog.objects.filter(action='INVITATION_REFUSED').latest('created_at')
-        self.assertTrue(refusal.details.endswith('reason=account_review'))
+        self.assertTrue(refusal.details.endswith('reason=hard_limit'))
+        queued = AuditLog.objects.get(action='ORG_CREATION_REFUSED_ACCOUNT_REVIEW')
+        self.assertEqual((queued.actor_id, queued.details), (self.creator.pk, 'hard_limit=true'))
 
     def test_add_member_beyond_the_hard_limit_keeps_its_single_neutral_answer(self):
         owner = make_user('proprio-ajout')
@@ -287,15 +351,50 @@ class CreationApiTests(Base):
         self.assertEqual(len(body['unavailable'][0]), 9)  # `unavailable` garde exactement ses 9 clés
         self.assertNotIn('governance', body['unavailable'][0])
 
-    def test_a_held_organization_stays_operational_for_its_team(self):
-        """La revue de création n'est pas une restriction (ADR 0011 D11) : édition, invitations, offres internes."""
-        set_settings(org_creation_review_threshold=1)
-        held = self.create('Retenue')
-        self.assertEqual(held.creation_review_status, PENDING)
+    def test_a_held_organization_stays_editable_by_its_team(self):
+        """La revue de création n'est pas une restriction (ADR 0011 D11) : l'équipe complète son organisation."""
+        held = self.create_held()
         response = self.client.patch(f'{ORGS}{held.pk}/', {'description': 'Complétée'}, format='json')
         self.assertEqual(response.status_code, 200, response.content)
-        invitation, _ = services.create_invitation(self.creator, held.pk, ANALYST)
-        self.assertEqual(invitation.status, 'PENDING')
+        self.assertEqual(self.client.get(f'{ORGS}{held.pk}/internal/').status_code, 200)
+
+
+class InvitationsDuringReviewTests(Base):
+    PREVIEW = '/api/v1/accounts/organization-invitations/preview/'
+
+    def setUp(self):
+        super().setUp()
+        self.invitee = make_user('invitee')
+        self.invitee_client = login(self.invitee)
+
+    def test_a_held_organization_cannot_invite(self):
+        held = self.create_held()
+        response = self.client.post(f'{ORGS}{held.pk}/invitations/', {'role': ANALYST}, format='json')
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual((response.json()['code'], response.json()['detail']), ('account_review_required', NEUTRAL_DETAIL))
+        self.assertFalse(OrganizationInvitation.objects.filter(organization=held).exists())
+        # Un non-membre reçoit toujours le refus d'appartenance : aucun oracle sur la revue.
+        outsider = login(make_user('dehors'))
+        self.assertEqual(
+            outsider.post(f'{ORGS}{held.pk}/invitations/', {'role': ANALYST}, format='json').json()['code'],
+            'DENY_RELATION',
+        )
+
+    def test_invitations_created_before_the_review_are_not_redeemable_until_it_is_cleared(self):
+        organization = self.create('Normale')
+        invitation, token = services.create_invitation(self.creator, organization.pk, ANALYST)
+        Organization.objects.filter(pk=organization.pk).update(creation_review_status=PENDING)
+        for response in (
+            self.invitee_client.post(self.PREVIEW, {'token': token}, format='json'),
+            self.invitee_client.post(ACCEPT, {'token': token}, format='json'),
+        ):
+            self.assertEqual((response.status_code, response.json()['code']), (404, 'invitation_invalid'))
+        self.assertEqual(OrganizationInvitation.objects.get(pk=invitation.pk).status, 'PENDING')
+        self.assertTrue(AuditLog.objects.filter(
+            action='INVITATION_REFUSED', details__endswith='reason=org_under_review').exists())
+        services.clear_organization_creation_review(staff_with('review_organization_creation'), organization.pk)
+        accepted = self.invitee_client.post(ACCEPT, {'token': token}, format='json')
+        self.assertEqual(accepted.status_code, 200, accepted.content)
 
 
 # --- Invisibilité publique et levée ----------------------------------------------------------------------------
@@ -361,8 +460,7 @@ class PublicVisibilityTests(Base):
 class ClearReviewPermissionTests(Base):
     def setUp(self):
         super().setUp()
-        set_settings(org_creation_review_threshold=1)
-        self.held = self.create('Retenue')
+        self.held = self.create_held()
 
     def test_permission_is_required_and_is_staff_or_suspension_right_is_not_enough(self):
         for actor in (self.creator, make_user('simple', is_staff=True), staff_with('suspend_organization')):
@@ -384,6 +482,18 @@ class ClearReviewPermissionTests(Base):
         self.assertEqual(AuditLog.objects.get(action='ORG_CREATION_REVIEW_DENIED').details, 'reason=interest_conflict')
         self.assertEqual(Organization.objects.get(pk=self.held.pk).creation_review_status, PENDING)
 
+    def test_a_person_awaiting_confirmation_on_the_organization_cannot_clear_its_review(self):
+        set_settings(org_creation_review_threshold=100)
+        organization = self.create('Normale')
+        _, token = services.create_invitation(self.creator, organization.pk, capabilities.ROLE_ADMIN)
+        reviewer = staff_with('review_organization_creation', label='en-attente')
+        self.assertEqual(services.accept_invitation(reviewer, token).status, services.ACCEPTANCE_AWAITING_CONFIRMATION)
+        Organization.objects.filter(pk=organization.pk).update(creation_review_status=PENDING)
+        with self.assertRaises(services.OrganizationError) as caught:
+            services.clear_organization_creation_review(reviewer, organization.pk)
+        self.assertEqual(caught.exception.get_codes(), 'interest_conflict')
+        self.assertEqual(Organization.objects.get(pk=organization.pk).creation_review_status, PENDING)
+
     def test_only_a_pending_review_can_be_cleared(self):
         reviewer = staff_with('review_organization_creation', label='revue2')
         services.clear_organization_creation_review(reviewer, self.held.pk)
@@ -398,8 +508,7 @@ class ClearReviewPermissionTests(Base):
 class AdminQueueTests(Base):
     def setUp(self):
         super().setUp()
-        set_settings(org_creation_review_threshold=1)
-        self.held = self.create('Retenue')
+        self.held = self.create_held()
         self.model_admin = OrganizationAdmin(Organization, admin.site)
 
     def request_for(self, user):
@@ -423,19 +532,31 @@ class AdminQueueTests(Base):
         self.assertEqual(Organization.objects.get(pk=self.held.pk).creation_review_status, CLEARED)
         self.assertTrue(AuditLog.objects.filter(action='ORG_CREATION_REVIEW_CLEARED', actor=allowed).exists())
 
-    def test_setup_roles_grants_the_review_to_administrators_only(self):
+    def test_setup_roles_grants_the_review_to_the_verification_group_only(self):
+        """Séparation des fonctions (ADR 0010 §9.1) : ni l'Administrateur ni le Modérateur ne lèvent une revue."""
         call_command('setup_roles', verbosity=0)
+        call_command('setup_roles', verbosity=0)  # idempotent
         codename = 'review_organization_creation'
-        self.assertTrue(Group.objects.get(name='Administrateur').permissions.filter(codename=codename).exists())
-        self.assertFalse(Group.objects.get(name='Modérateur').permissions.filter(codename=codename).exists())
+        verification = Group.objects.get(name='Vérification')
+        self.assertEqual(
+            set(verification.permissions.values_list('codename', flat=True)),
+            {'view_organization', codename},
+        )
+        for name in ('Administrateur', 'Modérateur'):
+            self.assertFalse(Group.objects.get(name=name).permissions.filter(codename=codename).exists(), name)
+        member = make_user('verif', is_staff=True)
+        member.groups.add(verification)
+        member = User.objects.get(pk=member.pk)
+        self.assertTrue(member.has_perm(services.REVIEW_CREATION_PERMISSION))
+        services.clear_organization_creation_review(member, self.held.pk)
+        self.assertEqual(Organization.objects.get(pk=self.held.pk).creation_review_status, CLEARED)
 
 
 # --- Notifications neutres -----------------------------------------------------------------------------------
 
 class NotificationTests(Base):
     def test_creator_is_told_the_organization_is_under_review_without_any_number(self):
-        set_settings(org_creation_review_threshold=1)
-        held = self.create('Retenue')
+        held = self.create_held()
         dispatch_outbox_now()
         notification = Notification.objects.get(user=self.creator, title="Organisation en cours d'examen")
         self.assertEqual(notification.content, (
@@ -445,8 +566,7 @@ class NotificationTests(Base):
         self.assertIsNone(re.search(r'\d', notification.title + notification.content))
 
     def test_clearance_is_announced_to_the_team_but_not_to_the_staff_member(self):
-        set_settings(org_creation_review_threshold=1)
-        held = self.create('Retenue')
+        held = self.create_held()
         analyst = make_user('analyste')
         Membership.objects.create(organization=held, user=analyst, role=ANALYST)
         reviewer = staff_with('review_organization_creation', label='revue-notif')
@@ -478,9 +598,33 @@ class BurstThrottleTests(Base):
         refused = codes[2]
         self.assertTrue(refused.has_header('Retry-After'))
         self.assertEqual(refused.json()['code'], 'throttled')
-        self.assertNotIn('2', refused.json()['detail'].split('dans')[0])  # le quota n'est jamais cité
+        # Le quota n'est jamais cité : hors du délai d'attente (« N seconde(s) »), aucun chiffre.
+        self.assertIsNone(re.search(r'\d', re.sub(r'\d+ secondes?', '', refused.json()['detail'])))
         # Les lectures ne sont pas comptées.
         self.assertEqual(self.client.get(ORGS).status_code, 200)
+
+    def test_only_effective_creations_count_towards_the_burst(self):
+        """Ni une double soumission idempotente ni un refus ne consomment le quota en rafale (`org_create`, lui,
+        compte toutes les tentatives)."""
+        set_settings(max_memberships_hard_limit=1)
+
+        def post(name):
+            return self.client.post(ORGS, {'name': name, 'org_type': 'ONG'}, format='json')
+
+        with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'org_create': '50/day'}):
+            first = post('Une')
+            self.assertEqual(post('Une').json()['id'], first.json()['id'])  # double clic : 201, non compté
+            self.assertEqual(post('Deux').status_code, 409)  # refus : non compté
+            set_settings(max_memberships_hard_limit=200)
+            self.assertEqual(post('Deux').status_code, 201)  # 2e création effective
+            self.assertEqual(post('Trois').status_code, 429)
+        with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'org_create': '4/day'}):
+            cache.clear()
+            codes = [post(f'Essai {i}').status_code for i in range(1)]
+            set_settings(max_memberships_hard_limit=1)
+            codes += [post(f'Refus {i}').status_code for i in range(3)]
+            codes.append(post('Encore').status_code)
+        self.assertEqual(codes, [201, 409, 409, 409, 429])  # `org_create` compte les tentatives refusées
 
     def test_rate_falls_back_to_the_proposed_value_and_a_setting_wins(self):
         rates = dict(SimpleRateThrottle.THROTTLE_RATES)

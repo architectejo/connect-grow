@@ -721,7 +721,7 @@ class AcceptInvitationTests(InvBase):
         self.assertFalse(Membership.objects.filter(organization=self.org, user=self.invitee).exists())
         self.assertFalse(self.audit('INVITATION_ACCEPTED').exists())
         refusal = self.audit('INVITATION_REFUSED').get()
-        self.assertTrue(refusal.details.endswith('reason=account_review'))
+        self.assertTrue(refusal.details.endswith('reason=hard_limit'))
         self.assertFalse(OutboxEvent.objects.filter(payload__change='accepted').exists())
         Membership.objects.filter(organization=elsewhere, user=self.invitee).update(status='REVOKED')
         self.assertEqual(self.accept(token).status_code, 200)

@@ -47,8 +47,9 @@ from .models import (
     CONFIRMATION_REQUIRED_ROLES, INVITABLE_ROLES, Membership, Organization, OrganizationInvitation, User,
 )
 from .organizations import (
-    INVITATION_CHANGE_REJECTED, OrganizationError, _activate_membership, _audit_invitation, _authorize_member,
-    _effective_owner_ids, _ensure_under_hard_limit, _get_organization, _lock_organization, _require_reauthentication,
+    ACCOUNT_REVIEW_HARD_LIMIT, INVITATION_CHANGE_REJECTED, OrganizationError, _activate_membership, _audit_invitation,
+    _authorize_member, _effective_owner_ids, _ensure_under_hard_limit, _get_organization, _lock_organization,
+    _require_reauthentication, account_review_required_error, is_under_creation_review, record_account_review_refusal,
     _unavailable_user_error, _validate_scope, get_identity_settings, membership_scope, publish_invitation_change,
 )
 from .throttles import FailureLimiter
@@ -216,6 +217,11 @@ def create_invitation(actor, organization_id, role, label='', scope=None, after_
     with transaction.atomic():
         organization = _lock_organization(organization_id)
         actor_membership = _authorize_member(actor, organization, 'org.manage_members')
+        if is_under_creation_review(organization):
+            # Organisation retenue en revue de création (ADR 0010 D8, correction S5) : pas d'invitation tant que le
+            # personnel n'a pas levé la revue. Refus neutre, après l'autorisation (aucun oracle pour un non-membre),
+            # avant le quota par organisation (qui n'est pas consommé).
+            raise account_review_required_error(reason=None)
         if after_authorization is not None:
             after_authorization()
         if not isinstance(role, str) or role not in capabilities.ROLES:
@@ -465,6 +471,7 @@ def preview_invitation(user, token) -> dict:
     if (
         invitation.status != OrganizationInvitation.STATUS_PENDING or invitation.expires_at <= now
         or organization is None or organization.status != Organization.STATUS_ACTIVE
+        or is_under_creation_review(organization)
         or invitation.role not in INVITABLE_ROLES or not _inviter_has_authority(invitation, organization)
     ):
         raise invitation_invalid_error()
@@ -544,6 +551,8 @@ def _accept_locked(user, invitation) -> InvitationAcceptance:
         raise _Refusal(_dead_reason(invitation.pk, now), invitation_invalid_error())
     if organization.status != Organization.STATUS_ACTIVE:
         raise _Refusal('org_inactive', invitation_invalid_error())
+    if is_under_creation_review(organization):  # invitation antérieure à la mise en revue : non prise (S5)
+        raise _Refusal('org_under_review', invitation_invalid_error())
     if not _inviter_has_authority(invitation, organization):
         raise _Refusal('authority_lost', invitation_invalid_error())
     if invitation.role not in INVITABLE_ROLES:  # la base n'interdit que OWNER
@@ -562,7 +571,7 @@ def _accept_locked(user, invitation) -> InvitationAcceptance:
     try:
         _ensure_under_hard_limit(user.pk)
     except OrganizationError as error:
-        raise _Refusal('account_review', error)
+        raise _Refusal(ACCOUNT_REVIEW_HARD_LIMIT, error)
     if Membership.objects.filter(organization=organization, user=user, status=Membership.STATUS_ACTIVE).exists():
         raise _Refusal('already_member', _already_member_error())
     # Une seule attente de confirmation par personne et par organisation (ADR 0010 §6.2), garantie sous le verrou de
@@ -618,6 +627,8 @@ def accept_invitation(user, token) -> InvitationAcceptance:
                 f"organization={invitation.organization_id}; reason={refusal.reason}"
             ), context=(CONTEXT_ORGANIZATION, invitation.organization_id),
         )
+        if refusal.reason == ACCOUNT_REVIEW_HARD_LIMIT:
+            record_account_review_refusal(user, ACCOUNT_REVIEW_HARD_LIMIT)  # file du personnel (S5)
         raise refusal.error
     INVITATION_FAILURES.success(_failure_key(user))
     return result

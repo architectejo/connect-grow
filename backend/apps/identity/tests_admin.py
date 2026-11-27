@@ -132,6 +132,7 @@ class IdentitySettingsAuditTests(TestCase):
             'admin_invitation_confirmation_hours': settings_row.admin_invitation_confirmation_hours,
             'org_creation_review_window_days': settings_row.org_creation_review_window_days,
             'org_creation_review_threshold': settings_row.org_creation_review_threshold,
+            'org_creation_review_max_pending': settings_row.org_creation_review_max_pending,
         }
         if settings_row.org_phone_channels_enabled:
             data['org_phone_channels_enabled'] = 'on'

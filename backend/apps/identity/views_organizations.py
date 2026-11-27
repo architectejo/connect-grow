@@ -25,7 +25,7 @@ from apps.common.utils import parse_uuid
 
 from . import capabilities
 from .services import (
-    archive_organization, change_role, create_organization, get_active_role, get_category_ids_by_organization,
+    archive_organization, change_role, create_organization_ex, get_active_role, get_category_ids_by_organization,
     get_internal_verification, get_organization_for_member, get_organization_governance, get_organization_limits,
     get_verification_data,
     leave_organization, list_members, public_display_name, public_organizations_queryset, remove_member,
@@ -175,7 +175,9 @@ class OrganizationViewSet(viewsets.ViewSet):
     def create(self, request):
         # Un champ absent vaut `None` : le service le refuse par un 400 (jamais une erreur 500 sur un corps vide).
         values = {'name': None, 'org_type': None, **_extract(request, CREATE_FIELDS)}
-        organization = create_organization(request.user, **values)
+        organization, created = create_organization_ex(request.user, **values)
+        if created:
+            OrganizationCreateBurstThrottle().record(request, self)  # quota en rafale : créations effectives seules
         return _private(Response(
             serialize_internal(request, organization, capabilities.ROLE_OWNER), status=status.HTTP_201_CREATED,
         ))

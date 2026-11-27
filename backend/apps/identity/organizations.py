@@ -154,11 +154,11 @@ def count_effective_owners(organization_id) -> int:
 
 
 def count_active_memberships(user_id) -> int:
-    """Appartenances actives du compte dans des organisations ACTIVE (base du plafond : une organisation
-    archivée ou suspendue ne consomme pas de place)."""
-    return Membership.objects.filter(
-        user_id=user_id, status=Membership.STATUS_ACTIVE, organization__status=Organization.STATUS_ACTIVE,
-    ).count()
+    """Appartenances ACTIVE du compte, QUEL QUE SOIT le statut de l'organisation (base du plafond technique, ADR 0010
+    D8, correction S5) : créer puis archiver ne le contourne pas, et la liste `unavailable` de `contexts/`
+    (organisations suspendues ou archivées dont le compte reste membre) est bornée elle aussi. Seul un départ libère
+    une place."""
+    return Membership.objects.filter(user_id=user_id, status=Membership.STATUS_ACTIVE).count()
 
 
 def get_active_role(user_id, organization_id):
@@ -334,10 +334,43 @@ ACCOUNT_REVIEW_REQUIRED_MESSAGE = (
 )
 
 
-def account_review_required_error():
-    """Refus NEUTRE du plafond technique caché (ADR 0010 D8, Q22) : ni chiffre, ni mot « limite », ni conseil de
-    quitter une organisation (ce serait révéler un seuil). Contrat §7.5."""
-    return OrganizationError(ACCOUNT_REVIEW_REQUIRED_MESSAGE, 'account_review_required')
+# Motifs internes d'un refus `account_review_required` (audit seulement, jamais renvoyés).
+ACCOUNT_REVIEW_HARD_LIMIT = 'hard_limit'
+ACCOUNT_REVIEW_PENDING_REVIEWS = 'pending_reviews'
+# Actions d'audit des refus : file du personnel (admin du journal, filtre « action »), une ligne par compte et par
+# fenêtre de revue (ADR 0010 D8, correction S5).
+ACCOUNT_REVIEW_AUDIT_ACTIONS = {
+    ACCOUNT_REVIEW_HARD_LIMIT: 'ORG_CREATION_REFUSED_ACCOUNT_REVIEW',
+    ACCOUNT_REVIEW_PENDING_REVIEWS: 'ORG_CREATION_REFUSED_PENDING_REVIEWS',
+}
+
+
+def account_review_required_error(reason=ACCOUNT_REVIEW_HARD_LIMIT):
+    """Refus NEUTRE (ADR 0010 D8, Q22) : ni chiffre, ni mot « limite », ni conseil de quitter une organisation (ce
+    serait révéler un seuil). Contrat §7.5. `reason` (interne) sert à la seule journalisation : la réponse est
+    identique quel que soit le motif."""
+    error = OrganizationError(ACCOUNT_REVIEW_REQUIRED_MESSAGE, 'account_review_required')
+    error.account_review_reason = reason
+    return error
+
+
+def record_account_review_refusal(user, reason):
+    """Journalise un refus `account_review_required` HORS de la transaction refusée (sinon la trace serait annulée
+    avec elle) : action par motif, acteur et cible = le compte, `details` sans chiffre. Une seule ligne par compte et
+    par fenêtre de revue (`org_creation_review_window_days`) : le journal reste une file lisible, pas un compteur
+    qu'un compte remplirait en insistant."""
+    action = ACCOUNT_REVIEW_AUDIT_ACTIONS.get(reason)
+    if action is None or user is None:
+        return
+    since = timezone.now() - timedelta(days=get_identity_settings().org_creation_review_window_days)
+    if moderation_services.has_audit_since(user.pk, action, user.pk, since):
+        return
+    record_audit(user, action, target=user, details=f"{reason}=true")
+
+
+def _lock_account(user_id):
+    """Verrou de ligne du compte (effectif sous MySQL ; SQLite sérialise déjà les écrivains)."""
+    User.objects.select_for_update().filter(pk=user_id).first()
 
 
 def _ensure_under_hard_limit(user_id):
@@ -345,9 +378,19 @@ def _ensure_under_hard_limit(user_id):
     sûreté des listes non paginées (`contexts/`), jamais présentée comme une limite. Le compte est verrouillé pour que
     deux créations ou acceptations simultanées ne le dépassent pas ; ce verrou couvre aussi le comptage de la revue
     de création (ADR 0010 §11)."""
-    User.objects.select_for_update().filter(pk=user_id).first()
+    _lock_account(user_id)
     if count_active_memberships(user_id) >= get_identity_settings().max_memberships_hard_limit:
         raise account_review_required_error()
+
+
+def _ensure_pending_reviews_below_cap(creator_id):
+    """Au plus `org_creation_review_max_pending` organisations EN REVUE (créées par ce compte, tous statuts) : au-delà,
+    refus neutre `account_review_required` (décision du chef de projet, revue S5). Sous le verrou du compte."""
+    pending = Organization.objects.filter(
+        created_by_id=creator_id, creation_review_status=Organization.CREATION_REVIEW_PENDING,
+    ).count()
+    if pending >= get_identity_settings().org_creation_review_max_pending:
+        raise account_review_required_error(ACCOUNT_REVIEW_PENDING_REVIEWS)
 
 
 def _creation_needs_review(creator_id, now) -> bool:
@@ -534,13 +577,26 @@ def _recent_duplicate(creator, name, org_type):
 def create_organization(
     creator, name, org_type, description='', nif='', category_ids=(), city_id=None, commune_id=None, logo=None,
 ) -> Organization:
+    """Voir `create_organization_ex` ; renvoie l'organisation seule."""
+    return create_organization_ex(
+        creator, name, org_type, description=description, nif=nif, category_ids=category_ids, city_id=city_id,
+        commune_id=commune_id, logo=logo,
+    )[0]
+
+
+def create_organization_ex(
+    creator, name, org_type, description='', nif='', category_ids=(), city_id=None, commune_id=None, logo=None,
+):
     """Crée une organisation dont `creator` devient propriétaire, en une seule transaction (R1 de la
     spec : si l'appartenance échoue, aucune organisation n'existe). Conditions : compte actif, téléphone
     de connexion vérifié, absence de restriction, plafond technique caché non atteint (409 `account_review_required`,
     neutre). Anti-abus (ADR 0010 D8) : au-delà du seuil interne de créations sur la fenêtre, l'organisation est créée
     (201 normal) mais retenue en revue (`creation_review_status = PENDING`) : utilisable par son équipe, absente de
-    l'annuaire et des pages publiques jusqu'à la levée par le personnel. Une double soumission idempotente ne crée rien
-    et ne compte pas."""
+    l'annuaire et des pages publiques jusqu'à la levée par le personnel ; au-delà de `org_creation_review_max_pending`
+    organisations déjà en revue, refus neutre. Une double soumission idempotente ne crée rien et ne compte pas.
+    Les refus `account_review_required` sont journalisés hors transaction (`record_account_review_refusal`).
+    Renvoie `(organisation, créée)` : `créée` est faux pour une double soumission (le quota en rafale de la vue ne
+    compte que les créations effectives)."""
     if not creator.is_active:
         raise ContextDenied(DENY_SECURITY, "Votre compte est désactivé.")
     if not creator.phone_verified:
@@ -557,11 +613,16 @@ def create_organization(
     organization = None
     try:
         with transaction.atomic():
+            # Verrou du compte AVANT la recherche de doublon (correction S5) : deux soumissions simultanées du même
+            # formulaire sont sérialisées, la seconde voit la première.
+            _lock_account(creator.pk)
             duplicate = _recent_duplicate(creator, name, org_type)
             if duplicate is not None:
-                return duplicate  # double soumission : réponse idempotente, rien n'est recréé
+                return duplicate, False  # double soumission : réponse idempotente, rien n'est recréé
             _ensure_under_hard_limit(creator.pk)
             held = _creation_needs_review(creator.pk, timezone.now())
+            if held:
+                _ensure_pending_reviews_below_cap(creator.pk)
             organization = Organization(
                 name=name, org_type=org_type, description=description, nif=nif,
                 city_id=city_id, commune_id=commune_id, status=Organization.STATUS_ACTIVE, created_by=creator,
@@ -591,12 +652,15 @@ def create_organization(
                     context=(CONTEXT_ORGANIZATION, organization.pk),
                 )
                 _publish_governance_change(organization, GOVERNANCE_CREATION_REVIEW, creator)
-    except BaseException:
+    except BaseException as exc:
         # Le fichier est écrit par `save()` avant la validation de la transaction : pas d'orphelin si elle
         # est annulée (limite : une transaction englobante annulée plus tard n'est pas détectable ici).
         _discard_logo(organization)
+        reason = getattr(exc, 'account_review_reason', None)
+        if reason is not None:
+            record_account_review_refusal(creator, reason)
         raise
-    return organization
+    return organization, True
 
 
 def _save_with_logo_check(organization, **kwargs):
@@ -848,13 +912,20 @@ def clear_organization_creation_review(actor, organization_id) -> Organization:
     `ORG_CREATION_REVIEW_CLEARED`, événements de gouvernance (`creation_review_cleared`) et de visibilité (les offres de
     l'organisation redeviennent publiques si elle l'est). Le refus d'une organisation douteuse passe par la suspension
     (`suspend_organization`, motif `moderation`). Conflit d'intérêts : un acteur qui est ou a été membre de
-    l'organisation, ou qui l'a créée, ne lève pas sa revue (refus journalisé). Organisation sans revue en cours :
+    l'organisation, qui l'a créée, ou qui attend la confirmation d'une invitation Administrateur sur elle, ne lève pas
+    sa revue (refus journalisé). Organisation sans revue en cours :
     409 `invalid_status`."""
     _ensure_creation_review_permission(actor)
     parsed = parse_uuid(organization_id)
     known = Organization.objects.filter(pk=parsed).first() if parsed is not None else None
     if known is not None and (
-        known.created_by_id == actor.pk or Membership.objects.filter(organization=known, user_id=actor.pk).exists()
+        known.created_by_id == actor.pk
+        or Membership.objects.filter(organization=known, user_id=actor.pk).exists()
+        # Personne entrée par une invitation Administrateur en attente de confirmation (correction S5).
+        or OrganizationInvitation.objects.filter(
+            organization=known, accepted_by_id=actor.pk,
+            status=OrganizationInvitation.STATUS_AWAITING_CONFIRMATION,
+        ).exists()
     ):
         record_audit(
             actor, 'ORG_CREATION_REVIEW_DENIED', target=known, details="reason=interest_conflict",
@@ -880,6 +951,10 @@ def clear_organization_creation_review(actor, organization_id) -> Organization:
         _publish_governance_change(organization, GOVERNANCE_CREATION_REVIEW_CLEARED, actor)
         _publish_status_change(organization, STATUS_REASON_CREATION_REVIEW_CLEARED, actor)
     return organization
+
+
+def is_under_creation_review(organization) -> bool:
+    return organization.creation_review_status == Organization.CREATION_REVIEW_PENDING
 
 
 def _publish_governance_change(organization, change, actor):

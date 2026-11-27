@@ -399,6 +399,11 @@ class IdentitySettings(SingletonSettingsModel):
         help_text="Seuil de sécurité interne : ne jamais le communiquer comme une limite. Rang de création dans la "
                   "fenêtre à partir duquel une nouvelle organisation est retenue en revue par l'équipe (2 à 100).",
     )
+    org_creation_review_max_pending = models.PositiveSmallIntegerField(
+        default=3, validators=[MinValueValidator(1), MaxValueValidator(50)],
+        help_text="Seuil de sécurité interne : ne jamais le communiquer comme une limite. Nombre d'organisations "
+                  "d'un même créateur pouvant être en revue en même temps (1 à 50) ; au-delà, refus neutre.",
+    )
     max_categories_per_context = models.PositiveSmallIntegerField(
         default=5, validators=[MinValueValidator(1), MaxValueValidator(20)],
         help_text="Nombre maximal de catégories d'une organisation ou d'un prestataire (1 à 20).",

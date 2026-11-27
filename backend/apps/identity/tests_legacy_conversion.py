@@ -154,6 +154,48 @@ class Builder:
             self.doc(profile, doc_type)
         return profile
 
+    def contact_data(self, user):
+        """Numéro vérifié et consentements Appel / WhatsApp du compte (jamais copiés sur l'organisation)."""
+        ContactPoint, Consent = (self.apps.get_model('identity', n) for n in ('ContactPoint', 'ContactConsent'))
+        ContactPoint.objects.create(user=user, phone=SECRET_PHONE, is_verified=True)
+        for channel in ('CALL', 'WHATSAPP'):
+            Consent.objects.create(user=user, channel=channel, is_granted=True, granted_at=timezone.now(),
+                                   text_version='2026-10-v1', phone_last4=SECRET_PHONE[-4:])
+
+    def verification_profiles(self):
+        """(deux pièces validées, une refusée, drapeau manuel sans pièce) : règle 3."""
+        two = self.profile('Deux pieces', is_verified=False)
+        for doc_type in ('RCCM', 'ID_NATIONALE'):
+            self.doc(two, doc_type)
+        refused = self.profile('Refusee', is_verified=False)
+        self.doc(refused, 'RCCM', status='REFUSE', rejection_reason='Illisible')
+        self.doc(refused, 'ID_NATIONALE', status='EN_ATTENTE')
+        return two, refused, self.profile('Drapeau manuel', is_verified=True)
+
+    def sanctioned_profiles(self):
+        """Un profil par cas de sanction (M1), clé -> profil."""
+        now = timezone.now()
+        scenarios = {
+            'ban': ('BANNISSEMENT', True, None),
+            'timed': ('SUSPENSION_TEMPORAIRE', True, now + timedelta(days=5)),
+            'expired': ('SUSPENSION_TEMPORAIRE', True, now - timedelta(days=5)),
+            'lifted': ('BANNISSEMENT', False, None),
+            'warning': ('AVERTISSEMENT', True, None),
+        }
+        profiles = {}
+        for key, (kind, active, ends) in scenarios.items():
+            profiles[key] = self.profile(f'Sanction {key}')
+            self.sanction(profiles[key].user, kind, active, ends)
+        return profiles
+
+    def conflict_profiles(self):
+        """(propriétaire membre du personnel, futur ancien propriétaire), chacun avec une pièce en attente."""
+        staff_owner = self.profile('Chez le personnel', user=self.user(is_staff=True))
+        revoked_owner = self.profile('Ancien proprietaire')
+        for p in (staff_owner, revoked_owner):
+            self.doc(p, 'RCCM', status='EN_ATTENTE')
+        return staff_owner, revoked_owner
+
 
 def hist(name, app='identity'):
     """Modèle HISTORIQUE à l'état converti (`NEW`, identity 0011). Les assertions sur les données converties ne lisent
@@ -215,20 +257,9 @@ class ConvertedWorldTests(SharedStateTestCase):
         w.biz_offers = [b.offer(w.full.user, 'Offre A'), b.offer(w.full.user, 'Offre B')]
         w.biz_counters = [b.counter(o) for o in w.biz_offers]
         w.biz_reviews = [b.review(o) for o in w.biz_offers]
-        ContactPoint, Consent = (b.apps.get_model('identity', n) for n in ('ContactPoint', 'ContactConsent'))
-        ContactPoint.objects.create(user=w.full.user, phone=SECRET_PHONE, is_verified=True)
-        for channel in ('CALL', 'WHATSAPP'):
-            Consent.objects.create(user=w.full.user, channel=channel, is_granted=True, granted_at=timezone.now(),
-                                   text_version='2026-10-v1', phone_last4=SECRET_PHONE[-4:])
+        b.contact_data(w.full.user)
         w.public_offer = w.biz_offers[0]
-        # Vérification (règle 3)
-        w.two = b.profile('Deux pieces', is_verified=False)
-        for doc_type in ('RCCM', 'ID_NATIONALE'):
-            b.doc(w.two, doc_type)
-        w.refused = b.profile('Refusee', is_verified=False)
-        b.doc(w.refused, 'RCCM', status='REFUSE', rejection_reason='Illisible')
-        b.doc(w.refused, 'ID_NATIONALE', status='EN_ATTENTE')
-        w.manual = b.profile('Drapeau manuel', is_verified=True)
+        w.two, w.refused, w.manual = b.verification_profiles()  # règle 3
         # Critère de conversion
         w.particulier = b.profile('Chez un particulier', user=b.user('PARTICULIER'))
         w.no_profile = b.user('ENTREPRISE')
@@ -239,22 +270,10 @@ class ConvertedWorldTests(SharedStateTestCase):
         w.staff_plain = b.user('PARTICULIER', is_staff=True, is_superuser=True)
         w.no_offer = b.profile('Sans offre')
         # Propriétaires désactivés ou sanctionnés (M1)
-        now = timezone.now()
         w.inactive = b.profile('Desactive', user=b.user(is_active=False))
         w.inactive_offer = b.offer(w.inactive.user, public=False)
-        scenarios = {
-            'ban': ('BANNISSEMENT', True, None),
-            'timed': ('SUSPENSION_TEMPORAIRE', True, now + timedelta(days=5)),
-            'expired': ('SUSPENSION_TEMPORAIRE', True, now - timedelta(days=5)),
-            'lifted': ('BANNISSEMENT', False, None),
-            'warning': ('AVERTISSEMENT', True, None),
-        }
-        w.sanctioned, w.sanction_offers = {}, {}
-        for key, (kind, active, ends) in scenarios.items():
-            p = b.profile(f'Sanction {key}')
-            b.sanction(p.user, kind, active, ends)
-            w.sanctioned[key] = p
-            w.sanction_offers[key] = b.offer(p.user, f'offre {key}', public=True)
+        w.sanctioned = b.sanctioned_profiles()
+        w.sanction_offers = {key: b.offer(p.user, f'offre {key}', public=True) for key, p in w.sanctioned.items()}
         w.pre_private = b.profile('Deja prive')
         w.pre_private_offer = b.offer(w.pre_private.user, public=False)
         # Noms et tailles
@@ -264,11 +283,7 @@ class ConvertedWorldTests(SharedStateTestCase):
         w.twin_1, w.twin_2 = b.profile('Café Zorglub'), b.profile('cafe  zorglub')
         w.mixed = b.profile('Bаnque')
         w.big = b.profile('Gros profil', categories=7, bio='x' * 2500)
-        # Pièces et conflit d'intérêts
-        w.staff_owner = b.profile('Chez le personnel', user=b.user(is_staff=True))
-        w.revoked_owner = b.profile('Ancien proprietaire')
-        for p in (w.staff_owner, w.revoked_owner):
-            b.doc(p, 'RCCM', status='EN_ATTENTE')
+        w.staff_owner, w.revoked_owner = b.conflict_profiles()  # pièces et conflit d'intérêts
         w.other_org = b.apps.get_model('identity', 'Organization').objects.create(name='Preexistante', org_type='ONG')
         w.mixed_doc = b.doc(b.profile('Incoherent'), 'RCCM')
         b.Doc.objects.filter(pk=w.mixed_doc.pk).update(organization=w.other_org)
@@ -443,46 +458,22 @@ class ConvertedWorldOnCurrentSchemaTests(SharedStateTestCase):
         w.full = b.complete_profile()
         w.owner_id = w.full.user_id
         w.public_offer = b.offer(w.full.user, 'Offre A')
-        ContactPoint, Consent = (b.apps.get_model('identity', n) for n in ('ContactPoint', 'ContactConsent'))
-        ContactPoint.objects.create(user=w.full.user, phone=SECRET_PHONE, is_verified=True)
-        for channel in ('CALL', 'WHATSAPP'):
-            Consent.objects.create(user=w.full.user, channel=channel, is_granted=True, granted_at=timezone.now(),
-                                   text_version='2026-10-v1', phone_last4=SECRET_PHONE[-4:])
-        w.two = b.profile('Deux pieces', is_verified=False)
-        for doc_type in ('RCCM', 'ID_NATIONALE'):
-            b.doc(w.two, doc_type)
-        w.refused = b.profile('Refusee', is_verified=False)
-        b.doc(w.refused, 'RCCM', status='REFUSE', rejection_reason='Illisible')
-        b.doc(w.refused, 'ID_NATIONALE', status='EN_ATTENTE')
-        w.manual = b.profile('Drapeau manuel', is_verified=True)
-        now = timezone.now()
-        scenarios = {
-            'ban': ('BANNISSEMENT', True, None),
-            'timed': ('SUSPENSION_TEMPORAIRE', True, now + timedelta(days=5)),
-            'expired': ('SUSPENSION_TEMPORAIRE', True, now - timedelta(days=5)),
-            'lifted': ('BANNISSEMENT', False, None),
-            'warning': ('AVERTISSEMENT', True, None),
-        }
-        w.sanctioned = {}
-        for key, (kind, active, ends) in scenarios.items():
-            p = b.profile(f'Sanction {key}')
-            b.sanction(p.user, kind, active, ends)
-            w.sanctioned[key] = p
-        w.staff_owner = b.profile('Chez le personnel', user=b.user(is_staff=True))
-        w.revoked_owner = b.profile('Ancien proprietaire')
-        for p in (w.staff_owner, w.revoked_owner):
-            b.doc(p, 'RCCM', status='EN_ATTENTE')
+        b.contact_data(w.full.user)
+        w.two, w.refused, w.manual = b.verification_profiles()
+        w.sanctioned = b.sanctioned_profiles()
+        w.staff_owner, w.revoked_owner = b.conflict_profiles()
         forward()
         call_command('migrate', verbosity=0)  # identity 0012 et suivantes : dernier schéma
 
     @staticmethod
-    def org_of(profile):
+    def current_org_of(profile):
+        """Organisation convertie, lue par le modèle COURANT (dernier schéma)."""
         return current_models.Organization.objects.get(legacy_business_profile_id=profile.pk)
 
     def test_converted_organizations_take_the_defaults_of_later_columns(self):
         """Les colonnes ajoutées après la conversion prennent leur valeur par défaut : une organisation convertie reste
         publique (aucune revue de création rétroactive, ADR 0010 §10) et ses appartenances couvrent l'organisation."""
-        org = self.org_of(self.w.full)
+        org = self.current_org_of(self.w.full)
         self.assertEqual(org.creation_review_status, current_models.Organization.CREATION_REVIEW_NONE)
         self.assertEqual(
             set(current_models.Membership.objects.filter(organization=org).values_list('scope_type', 'scope_id')),
@@ -510,24 +501,24 @@ class ConvertedWorldOnCurrentSchemaTests(SharedStateTestCase):
     def test_derived_verification_matches_the_old_flag(self):
         w = self.w
         profiles = (w.full, w.two, w.refused, w.manual)
-        summaries = get_verification_summaries([self.org_of(p).pk for p in profiles])
-        complete = {p.business_name: summaries[self.org_of(p).pk]['summary']['complete'] for p in profiles}
+        summaries = get_verification_summaries([self.current_org_of(p).pk for p in profiles])
+        complete = {p.business_name: summaries[self.current_org_of(p).pk]['summary']['complete'] for p in profiles}
         self.assertEqual(complete, {'Atelier Zorglub': True, 'Deux pieces': False, 'Refusee': False,
                                     'Drapeau manuel': False})
         self.assertEqual({p.business_name: p.is_verified for p in profiles},
                          {'Atelier Zorglub': True, 'Deux pieces': False, 'Refusee': False, 'Drapeau manuel': True})
-        self.assertEqual([c['code'] for c in summaries[self.org_of(w.full).pk]['verified_claims']],
+        self.assertEqual([c['code'] for c in summaries[self.current_org_of(w.full).pk]['verified_claims']],
                          ['RCCM_VERIFIED', 'NATIONAL_ID_VERIFIED', 'REPRESENTATIVE_VERIFIED'])
-        self.assertEqual(len(summaries[self.org_of(w.two).pk]['verified_claims']), 2)
-        self.assertEqual(summaries[self.org_of(w.refused).pk]['verified_claims'], [])
-        self.assertEqual(summaries[self.org_of(w.manual).pk]['verified_claims'], [])
-        refused = current_models.KycDocument.objects.get(organization=self.org_of(w.refused), document_type='RCCM')
+        self.assertEqual(len(summaries[self.current_org_of(w.two).pk]['verified_claims']), 2)
+        self.assertEqual(summaries[self.current_org_of(w.refused).pk]['verified_claims'], [])
+        self.assertEqual(summaries[self.current_org_of(w.manual).pk]['verified_claims'], [])
+        refused = current_models.KycDocument.objects.get(organization=self.current_org_of(w.refused), document_type='RCCM')
         self.assertEqual((refused.status, refused.rejection_reason), ('REFUSE', 'Illisible'))
 
     def test_converted_owner_cannot_decide_their_own_pieces(self):
         User = get_user_model()
         for profile in (self.w.staff_owner, self.w.revoked_owner):
-            doc = current_models.KycDocument.objects.get(organization=self.org_of(profile))
+            doc = current_models.KycDocument.objects.get(organization=self.current_org_of(profile))
             with self.assertRaises(identity_services.KycError) as ctx:
                 identity_services.decide_kyc_document(doc.pk, User.objects.get(pk=profile.user_id), 'VALIDE')
             self.assertEqual(ctx.exception.status_code, 403)
@@ -537,10 +528,10 @@ class ConvertedWorldOnCurrentSchemaTests(SharedStateTestCase):
         User = get_user_model()
         profile = self.w.revoked_owner
         Membership = current_models.Membership
-        membership = Membership.objects.filter(organization=self.org_of(profile))
+        membership = Membership.objects.filter(organization=self.current_org_of(profile))
         membership.update(status=Membership.STATUS_REVOKED)
         try:
-            doc = current_models.KycDocument.objects.get(organization=self.org_of(profile))
+            doc = current_models.KycDocument.objects.get(organization=self.current_org_of(profile))
             reviewer = User.objects.get(pk=profile.user_id)
             with self.assertRaises(identity_services.KycError) as ctx:
                 identity_services.decide_kyc_document(doc.pk, reviewer, 'VALIDE')
@@ -555,7 +546,7 @@ class ConvertedWorldOnCurrentSchemaTests(SharedStateTestCase):
             self.assertEqual(client.post('/api/v1/accounts/kyc/documents/', {}, format='json').status_code, 404)
             self.assertEqual(client.delete(f'/api/v1/accounts/kyc/documents/{doc.pk}/').status_code, 404)
             # La route d'organisation refuse aussi un ancien membre (code d'autorisation courant, sans contournement).
-            organization_id = self.org_of(profile).pk
+            organization_id = self.current_org_of(profile).pk
             refused = client.get(f'/api/v1/accounts/organizations/{organization_id}/kyc/documents/')
             self.assertEqual(refused.status_code, 403)
         finally:
@@ -571,7 +562,7 @@ class ConvertedWorldOnCurrentSchemaTests(SharedStateTestCase):
 
     def test_no_contact_data_is_copied_and_the_public_api_leaks_nothing(self):
         w = self.w
-        org = self.org_of(w.full)
+        org = self.current_org_of(w.full)
         self.assertFalse(current_models.ContactPoint.objects.filter(organization__isnull=False).exists())
         self.assertFalse(current_models.ContactConsent.objects.filter(organization__isnull=False).exists())
         self.assertEqual(current_models.ContactConsent.objects.filter(user_id=w.owner_id).count(), 2)
